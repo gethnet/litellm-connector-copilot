@@ -34,6 +34,7 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     libx11-xcb1 \
     libgtk-3-0t64 \
     xvfb \
+    xauth \
     && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 
 # Set the default shell to bash
