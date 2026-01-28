@@ -1,0 +1,13 @@
+name: Feature Request
+description: Template for requesting new features / enhancements
+title: '[Feature]:'
+labels:
+  - status:new
+  - type:feat-req
+body:
+  - type: textarea
+    id: FeatureInfo
+    attributes:
+      label: Feature / Enhancement Suggestion
+    validations:
+      required: true

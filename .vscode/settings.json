@@ -1,0 +1,17 @@
+{
+    "search.exclude": {
+        "out": true
+    },
+    "coverage-gutters.coverageFileNames": [
+        "coverage/lcov.info"
+    ],
+    "git.branchProtection": [
+        "main"
+    ],
+    "files.trimTrailingWhitespace": true,
+    "chat.tools.terminal.autoApprove": {
+        "/^npm .*$/": true,
+        "xvfb-run": true,
+        "npx vscode-test": true
+    }
+}

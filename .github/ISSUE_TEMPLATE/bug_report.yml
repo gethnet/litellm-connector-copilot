@@ -1,0 +1,81 @@
+name: Bug report
+description: Report a bug to help us improve litellm-vscode-chat
+title: '[Bug]: '
+labels:
+  - status:new
+body:
+  - type: markdown
+    attributes:
+      value: |-
+        ## Thank you for reporting a bug!
+        Please provide as much detail as possible to help us reproduce and fix the issue.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of what the bug is.
+      placeholder: I encountered an error when...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How did you encounter this bug?
+      placeholder: |-
+        1. Open VS Code
+        2. Start a chat with LiteLLM
+        3. Type '...'
+        4. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+      placeholder: The chat should have responded with...
+  - type: markdown
+    attributes:
+      value: '## Environment & LLM Details'
+  - type: dropdown
+    id: AILLM_PROVIDER
+    attributes:
+      label: AI/LLM Provider
+      description: Which provider were you using?
+      options:
+        - OpenAI
+        - Anthropic/Claude
+        - LM Studio
+        - Azure OpenAI
+        - Google Vertex
+        - AWS Bedrock
+        - Venice.ai
+        - OpenRouter
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: AILLM_PROVIDER_OTHER
+    attributes:
+      label: AI/LLM Provider (Other)
+      description: If you selected 'Other', please specify here.
+  - type: input
+    id: AILLM_MODEL
+    attributes:
+      label: AI/LLM Model
+      description: The specific model name used.
+      placeholder: gpt-4o, claude-3-5-sonnet, etc.
+  - type: textarea
+    id: ERROR_LOG
+    attributes:
+      label: Error Output/Log
+      description: Please paste any error messages or logs from the LiteLLM output channel or VS Code developer tools.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Any other context or screenshots about the problem.

@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'rel/v*'
+  release:
+    types: [published]
+
+jobs:
+  ci:
+    # Trigger on either a tag push or a release publication
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/rel/v')) ||
+      (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'rel/v'))
+    uses: ./.github/workflows/ci.yml
+
+  create-draft-release:
+    needs: ci
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Verify Version Match
+        run: |
+          PACKAGE_VERSION=${{ needs.ci.outputs.version }}
+          TAG_VERSION=${GITHUB_REF#refs/tags/rel/v}
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "Error: Tag version $TAG_VERSION does not match package.json version $PACKAGE_VERSION"
+            exit 1
+          fi
+
+      - name: Download VSIX
+        uses: actions/download-artifact@v7
+        with:
+          name: vsix
+
+      - name: Create Draft Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.vsix"
+          draft: true
+          prerelease: ${{ contains(needs.ci.outputs.version, '-') }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-marketplace:
+    needs: ci
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Verify Version Match
+        run: |
+          PACKAGE_VERSION=${{ needs.ci.outputs.version }}
+          TAG_VERSION=${{ github.event.release.tag_name }}
+          TAG_VERSION=${TAG_VERSION#rel/v}
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "Error: Release tag $TAG_VERSION does not match package.json version $PACKAGE_VERSION"
+            exit 1
+          fi
+
+      - name: Download VSIX
+        uses: actions/download-artifact@v7
+        with:
+          name: vsix
+
+      - name: Publish to VS Code Marketplace
+        if: |
+          !contains(needs.ci.outputs.version, 'dev') &&
+          !contains(needs.ci.outputs.version, 'test')
+        run: npx vsce publish --packagePath litellm-connector-copilot-${{ needs.ci.outputs.version }}.vsix -p ${{ secrets.VS_MARKETPLACE_PUB_TOKEN }}

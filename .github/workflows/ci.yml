@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - geth-dev
+  pull_request:
+    branches:
+      - geth-dev
+      - main
+  workflow_call:
+    outputs:
+      version:
+        description: "The version of the extension"
+        value: ${{ jobs.build-and-test.outputs.version }}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/devcontainers/typescript-node:22-trixie
+
+    outputs:
+      version: ${{ steps.package_info.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install Dependencies
+        run: npm install --include dev
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libasound2 libgbm1 libgtk-3-0 libnss3 libxss1
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check Formatting
+        run: npm run format
+
+      - name: Compile
+        run: npm run compile
+
+      - name: Run Tests with Coverage
+        run: npm run test:coverage
+
+      - name: Get Package Info
+        id: package_info
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Package Extension
+        run: npx vsce package
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v6
+        with:
+          name: vsix
+          path: litellm-connector-copilot-${{ steps.package_info.outputs.version }}.vsix
+          retention-days: 7
+
+      - name: Upload Coverage Results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-results
+          path: |
+            ${{ github.workspace }}/test-results
+            .vscode-test/user-data/logs
+          retention-days: 7
