@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - geth-dev
+      - main
   pull_request:
     branches:
       - geth-dev
