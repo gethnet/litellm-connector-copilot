@@ -5,28 +5,21 @@
 		},
 	],
 	"settings": {
-		"mochaExplorer.files": [
-			"out/test/**/*.js",
-			"out/test/*.js"
-		],
+		"mochaExplorer.files": ["out/test/**/*.js", "out/test/*.js"],
 		"mochaExplorer.mochaPath": "node_modules/mocha",
 		"coverage-gutters.showLineCoverage": true,
 		"coverage-gutters.showGutterCoverage": true,
 		"coverage-gutters.showCustomEditorCoverage": true,
 		"search.exclude": {
-			"out": true
+			"out": true,
 		},
-		"coverage-gutters.coverageFileNames": [
-			"coverage/lcov.info"
-		],
-		"git.branchProtection": [
-			"main"
-		],
+		"coverage-gutters.coverageFileNames": ["coverage/lcov.info"],
+		"git.branchProtection": ["main"],
 		"files.trimTrailingWhitespace": true,
 		"chat.tools.terminal.autoApprove": {
 			"/^npm .*$/": true,
 			"xvfb-run": true,
-			"npx vscode-test": true
-		}
+			"npx vscode-test": true,
+		},
 	},
 }

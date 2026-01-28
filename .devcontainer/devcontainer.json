@@ -1,11 +1,6 @@
 {
 	"name": "LiteLLM VSCode Chat Development",
-	"image": "mcr.microsoft.com/devcontainers/typescript-node:22-trixie",
-	"features": {
-		"ghcr.io/devcontainers/features/git:1": {},
-		"ghcr.io/devcontainers/features/github-cli:1": {},
-		"ghcr.io/devcontainers/features/common-utils:2": {}
-	},
+	"image": "ghcr.io/gethnet/litellm-connector-copilot-build-container:latest",
 	"containerEnv": {
 		"GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}",
 		"GITHUB_AUTH_TOKEN": "${localEnv:GITHUB_TOKEN}",

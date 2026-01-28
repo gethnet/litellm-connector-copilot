@@ -20,9 +20,6 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
       - name: Verify Version Match
         run: |
           PACKAGE_VERSION=${{ needs.ci.outputs.version }}
@@ -36,11 +33,12 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: vsix
+          path: .
 
       - name: Create Draft Release
         uses: softprops/action-gh-release@v2
         with:
-          files: "*.vsix"
+          files: "litellm-connector-copilot-${{ needs.ci.outputs.version }}.vsix"
           draft: true
           prerelease: ${{ contains(needs.ci.outputs.version, '-') }}
           generate_release_notes: true
@@ -52,14 +50,6 @@ jobs:
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-
       - name: Verify Version Match
         run: |
           PACKAGE_VERSION=${{ needs.ci.outputs.version }}
@@ -74,9 +64,10 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: vsix
+          path: .
 
       - name: Publish to VS Code Marketplace
         if: |
           !contains(needs.ci.outputs.version, 'dev') &&
           !contains(needs.ci.outputs.version, 'test')
-        run: npx vsce publish --packagePath *.vsix -p ${{ secrets.VS_MARKETPLACE_PUB_TOKEN }} --no-dependencies
+        run: npx vsce publish --packagePath litellm-connector-copilot-${{ needs.ci.outputs.version }}.vsix -p ${{ secrets.VS_MARKETPLACE_PUB_TOKEN }} --no-dependencies

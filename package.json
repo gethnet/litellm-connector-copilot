@@ -12,10 +12,10 @@
 	"icon": "assets/logo.png",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/gethnet/litellm-connnector-copilot"
+		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "1.1.0",
-	"preview": true,
+	"version": "1.1.1",
+	"preview": false,
 	"engines": {
 		"vscode": "^1.107.0"
 	},
@@ -31,14 +31,14 @@
 	},
 	"badges": [
 		{
-			"url": "https://img.shields.io/github/stars/gethnet/litellm-connnector-copilot?style=social",
-			"description": "Star litellm-connnector-copilot on Github",
-			"href": "https://github.com/gethnet/litellm-connnector-copilot"
+			"url": "https://img.shields.io/github/stars/gethnet/litellm-connector-copilot?style=social",
+			"description": "Star litellm-connector-copilot on Github",
+			"href": "https://github.com/gethnet/litellm-connector-copilot"
 		}
 	],
-	"homepage": "https://github.com/gethnet/litellm-connnector-copilot",
+	"homepage": "https://github.com/gethnet/litellm-connector-copilot",
 	"bugs": {
-		"url": "https://github.com/gethnet/litellm-connnector-copilot/issues"
+		"url": "https://github.com/gethnet/litellm-connector-copilot/issues"
 	},
 	"license": "Apache-2.0",
 	"activationEvents": [
