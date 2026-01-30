@@ -34,6 +34,23 @@ suite("LiteLLM Provider Unit Tests", () => {
 			new vscode.CancellationTokenSource().token
 		);
 		assert.ok(Array.isArray(infos));
+		assert.strictEqual(infos.length, 0);
+	});
+
+	test("provideLanguageModelChatInformation handles missing URL", async () => {
+		const emptySecrets = {
+			get: async () => undefined,
+			store: async () => {},
+			delete: async () => {},
+			onDidChange: (_listener: unknown) => ({ dispose() {} }),
+		} as unknown as vscode.SecretStorage;
+
+		const provider = new LiteLLMChatModelProvider(emptySecrets, userAgent);
+		const infos = await provider.provideLanguageModelChatInformation(
+			{ silent: false },
+			new vscode.CancellationTokenSource().token
+		);
+		assert.strictEqual(infos.length, 0, "Should return 0 models when URL is missing");
 	});
 
 	test("buildCapabilities maps model_info flags correctly", () => {
