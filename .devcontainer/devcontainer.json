@@ -50,8 +50,5 @@
 		"bash",
 		"/workspaces/litellm-connector-copilot/scripts/post-create.sh"
 	],
-	"remoteUser": "node",
-	"mounts": [
-		"type=bind,source=${localEnv:HOME}/.ssh,target=/home/node/.ssh,readonly"
-	]
+	"remoteUser": "node"
 }

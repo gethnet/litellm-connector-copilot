@@ -64,16 +64,26 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
 		_options: { silent: boolean },
 		_token: CancellationToken
 	): Promise<LanguageModelChatInformation[]> {
+		console.log("[LiteLLM Model Provider] provideLanguageModelChatInformation called");
 		try {
 			const config = await this._configManager.getConfig();
+			console.log(`[LiteLLM Model Provider] Config URL: ${config.url ? "set" : "not set"}`);
 			if (!config.url) {
+				console.log("[LiteLLM Model Provider] No base URL configured, returning empty model list.");
 				return [];
 			}
 
 			const client = new LiteLLMClient(config, this.userAgent);
+			console.log("[LiteLLM Model Provider] Fetching model info from LiteLLM...");
 			const { data } = await client.getModelInfo();
 
-			const infos: LanguageModelChatInformation[] = (data || []).map(
+			if (!data || !Array.isArray(data)) {
+				console.warn("[LiteLLM Model Provider] Received invalid data format from /model/info", data);
+				return [];
+			}
+
+			console.log(`[LiteLLM Model Provider] Found ${data.length} models`);
+			const infos: LanguageModelChatInformation[] = data.map(
 				(entry: { model_info?: LiteLLMModelInfo; model_name?: string }, index: number) => {
 					const modelId = entry.model_info?.key ?? entry.model_name ?? `model-${index}`;
 					const modelInfo = entry.model_info;
