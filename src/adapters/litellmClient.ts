@@ -4,10 +4,8 @@ import {
 	LiteLLMModelInfoResponse,
 	OpenAIChatCompletionRequest,
 	LiteLLMResponsesRequest,
-	LiteLLMResponseInputItem,
-	LiteLLMResponseTool,
-	OpenAIChatMessageContentItem,
 } from "../types";
+import { transformToResponsesFormat } from "./responsesAdapter";
 
 export class LiteLLMClient {
 	constructor(
@@ -46,7 +44,7 @@ export class LiteLLMClient {
 		let body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest = request;
 
 		if (endpoint === "/responses") {
-			body = this.transformToResponsesFormat(request);
+			body = transformToResponsesFormat(request);
 		}
 
 		const response = await this.fetchWithRateLimit(
@@ -206,121 +204,5 @@ export class LiteLLMClient {
 			}
 		}
 		return undefined;
-	}
-
-	/**
-	 * Transform a chat/completions request body to the responses API format.
-	 * The responses API uses "input" (array format) instead of "messages".
-	 * Tools use the SAME standard OpenAI format as chat/completions.
-	 * @param requestBody The original chat/completions request body
-	 * @returns Transformed request body for the responses endpoint
-	 */
-	transformToResponsesFormat(requestBody: OpenAIChatCompletionRequest): LiteLLMResponsesRequest {
-		const messages = requestBody.messages;
-		const inputArray: (OpenAIChatMessageContentItem | LiteLLMResponseInputItem)[] = [];
-		let instructions: string | undefined;
-
-		const toolCallIdMap = new Map<string, string>();
-		const toolCallsToAdd = new Set<string>(); // Track which tool calls we will add to inputArray
-
-		// First pass: normalize and map all tool call IDs from assistant messages
-		for (const msg of messages) {
-			if (msg.role === "assistant" && msg.tool_calls) {
-				for (const tc of msg.tool_calls) {
-					let normalizedId = tc.id;
-					if (normalizedId && !normalizedId.startsWith("fc_")) {
-						normalizedId = `fc_${normalizedId}`;
-					}
-					toolCallIdMap.set(tc.id, normalizedId);
-				}
-			}
-		}
-
-		// Second pass: process messages and add tool calls
-		for (const msg of messages) {
-			if (msg.role === "system") {
-				instructions = typeof msg.content === "string" ? msg.content : undefined;
-				continue;
-			}
-
-			if (msg.role === "user") {
-				if (typeof msg.content === "string") {
-					inputArray.push({ type: "message", role: "user", content: msg.content });
-				} else if (Array.isArray(msg.content)) {
-					for (const item of msg.content) {
-						if (item.type === "text" && item.text) {
-							inputArray.push({ type: "message", role: "user", content: item.text });
-						}
-					}
-				}
-			} else if (msg.role === "assistant") {
-				if (typeof msg.content === "string") {
-					inputArray.push({ type: "message", role: "assistant", content: msg.content });
-				}
-				if (msg.tool_calls) {
-					for (const tc of msg.tool_calls) {
-						const normalizedId = toolCallIdMap.get(tc.id) || tc.id;
-						toolCallsToAdd.add(normalizedId);
-						inputArray.push({
-							type: "function_call",
-							id: normalizedId,
-							name: tc.function.name,
-							arguments: tc.function.arguments,
-						});
-					}
-				}
-			} else if (msg.role === "tool") {
-				const toolCallId = msg.tool_call_id;
-				if (toolCallId) {
-					const normalizedId =
-						toolCallIdMap.get(toolCallId) || (toolCallId.startsWith("fc_") ? toolCallId : `fc_${toolCallId}`);
-					const toolContent = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
-					// Only add tool output if we've seen the corresponding tool call ID
-					if (toolCallsToAdd.has(normalizedId)) {
-						inputArray.push({
-							type: "function_call_output",
-							call_id: normalizedId,
-							output: toolContent,
-						});
-					}
-				}
-			}
-		}
-
-		const responsesBody: LiteLLMResponsesRequest = {
-			model: requestBody.model,
-			input: inputArray,
-			stream: requestBody.stream,
-			instructions,
-			max_tokens: requestBody.max_tokens,
-			temperature: requestBody.temperature,
-			top_p: requestBody.top_p,
-			frequency_penalty: requestBody.frequency_penalty,
-			presence_penalty: requestBody.presence_penalty,
-			stop: requestBody.stop,
-		};
-
-		if (requestBody.tools) {
-			responsesBody.tools = requestBody.tools
-				.map((tool) => {
-					const func = tool.function;
-					if (!func.name || !func.description || !func.parameters) {
-						return null;
-					}
-					return {
-						type: "function" as const,
-						name: func.name,
-						description: func.description,
-						parameters: func.parameters,
-					};
-				})
-				.filter((t): t is LiteLLMResponseTool => t !== null);
-		}
-
-		if (requestBody.tool_choice && responsesBody.tools) {
-			responsesBody.tool_choice = requestBody.tool_choice;
-		}
-
-		return responsesBody;
 	}
 }

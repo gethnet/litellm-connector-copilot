@@ -14,7 +14,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "1.1.2",
+	"version": "1.1.8-dev",
 	"preview": false,
 	"engines": {
 		"vscode": "^1.107.0"
@@ -72,9 +72,9 @@
 		"lint": "eslint --fix",
 		"format": "prettier --write .",
 		"watch": "tsc -watch -p ./",
-		"test": "tsc -p ./ && xvfb-run vscode-test",
+		"test": "tsc -p ./ && xvfb-run vscode-test --args=\"--no-sandbox\"",
 		"test:report": "export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && npm run test",
-		"test:coverage": "tsc -p ./ && node -e \"const fs = require('fs'); const path = require('path'); const coveragePath = path.join(process.cwd(), 'coverage'); if (fs.existsSync(coveragePath)) fs.rmSync(coveragePath, { recursive: true, force: true });\" && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && xvfb-run vscode-test --coverage --coverage-output coverage --coverage-reporter lcovonly --coverage-reporter html --coverage-reporter text-summary",
+		"test:coverage": "tsc -p ./ && node -e \"const fs = require('fs'); const path = require('path'); const coveragePath = path.join(process.cwd(), 'coverage'); if (fs.existsSync(coveragePath)) fs.rmSync(coveragePath, { recursive: true, force: true });\" && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && xvfb-run vscode-test --args=\"--no-sandbox\" --coverage --coverage-output coverage --coverage-reporter lcovonly --coverage-reporter html --coverage-reporter text-summary",
 		"bump-version": "node scripts/bump-version.js"
 	},
 	"devDependencies": {

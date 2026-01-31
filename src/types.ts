@@ -146,8 +146,8 @@ export interface LiteLLMResponsesRequest {
  */
 export type LiteLLMResponseInputItem =
 	| { type: "message"; role: string; content: string }
-	| { type: "function_call"; id: string; name: string; arguments: string }
-	| { type: "function_call_output"; call_id: string; output: string };
+	| { type: "function_call"; id: string; call_id?: string; name: string; arguments: string }
+	| { type: "function_call_output"; id?: string; call_id: string; output: string };
 
 /**
  * Tool definition for LiteLLM /responses endpoint.

@@ -42,10 +42,8 @@ jobs:
             latest
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+        uses: devcontainers/ci@main
         with:
-          context: .
-          file: docker/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          imageName: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          cacheFrom: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          push: always

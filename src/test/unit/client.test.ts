@@ -1,14 +1,15 @@
 import * as assert from "assert";
-import { LiteLLMClient } from "../../adapters/litellmClient";
+//import { LiteLLMClient } from "../../adapters/litellmClient";
+import { transformToResponsesFormat } from "../../adapters/responsesAdapter";
 import type { OpenAIChatMessage } from "../../types";
 
 suite("LiteLLM Client Unit Tests", () => {
-	const config = { url: "http://localhost:4000", key: "test-key" };
-	const userAgent = "test-ua";
-	const client = new LiteLLMClient(config, userAgent);
+	//const config = { url: "http://localhost:4000", key: "test-key" };
+	//const userAgent = "test-ua";
+	//const client = new LiteLLMClient(config, userAgent);
 
 	test("transformToResponsesFormat normalizes tool call IDs", () => {
-		const body = client.transformToResponsesFormat({
+		const body = transformToResponsesFormat({
 			model: "m",
 			messages: [
 				{
@@ -27,37 +28,43 @@ suite("LiteLLM Client Unit Tests", () => {
 		assert.strictEqual(functionOutput?.call_id, "fc_call1");
 	});
 
-	test("transformToResponsesFormat skips tool outputs with no matching function call", () => {
-		const body = client.transformToResponsesFormat({
+	test("transformToResponsesFormat synthesizes function_call for orphaned outputs", () => {
+		const body = transformToResponsesFormat({
 			model: "m",
 			messages: [
 				{ role: "user", content: "hello" },
-				{ role: "tool", tool_call_id: "fc_missing", content: "result" },
+				{ role: "tool", tool_call_id: "orphaned_id", content: "result" },
 			],
 		});
 
 		const input = body.input as Record<string, unknown>[];
-		const functionOutputs = input.filter((item) => item.type === "function_call_output");
-		assert.strictEqual(functionOutputs.length, 0);
+		const functionCall = input.find((i) => i.type === "function_call");
+		const functionOutput = input.find((i) => i.type === "function_call_output");
+
+		assert.ok(functionCall, "Should have synthesized a function_call");
+		assert.strictEqual(functionCall?.id, "fc_orphaned_id");
+		assert.strictEqual(functionOutput?.call_id, "fc_orphaned_id");
 	});
 
-	test("transformToResponsesFormat uses 'content' with 'role' for messages", () => {
-		const body = client.transformToResponsesFormat({
+	test("transformToResponsesFormat skips empty messages", () => {
+		const body = transformToResponsesFormat({
 			model: "m",
-			messages: [{ role: "user", content: "hello world" }],
+			messages: [
+				{ role: "user", content: "" },
+				{ role: "assistant", content: "  " },
+				{ role: "user", content: "hello" },
+			],
 		});
 
 		const input = body.input as Record<string, unknown>[];
-		assert.strictEqual(input[0].type, "message");
-		assert.strictEqual(input[0].role, "user");
-		assert.strictEqual(input[0].content, "hello world");
-		assert.strictEqual((input[0] as Record<string, unknown>).message, undefined);
+		assert.strictEqual(input.length, 1);
+		assert.strictEqual(input[0].content, "hello");
 	});
 
 	test("transformToResponsesFormat handles conversation history when switching models", () => {
 		// Simulate switching models mid-conversation: the conversation has tool calls and results
 		// from the previous model, and we're now sending it to a new model via /responses endpoint
-		const body = client.transformToResponsesFormat({
+		const body = transformToResponsesFormat({
 			model: "new-model",
 			messages: [
 				{ role: "user", content: "Use the tool" },
@@ -104,7 +111,7 @@ suite("LiteLLM Client Unit Tests", () => {
 			{ role: "assistant", content: "2+2 equals 4." },
 		];
 
-		const body = client.transformToResponsesFormat({
+		const body = transformToResponsesFormat({
 			model: "responses-model",
 			messages: conversation,
 		});
@@ -160,7 +167,7 @@ suite("LiteLLM Client Unit Tests", () => {
 			{ role: "assistant", content: "San Francisco is cloudy with a temperature of 65°F." },
 		];
 
-		const body = client.transformToResponsesFormat({
+		const body = transformToResponsesFormat({
 			model: "responses-weather-model",
 			messages: conversation,
 		});
@@ -246,7 +253,7 @@ suite("LiteLLM Client Unit Tests", () => {
 			{ role: "tool", tool_call_id: "fc_call_2", content: "result_2" },
 		];
 
-		const body = client.transformToResponsesFormat({
+		const body = transformToResponsesFormat({
 			model: "test-model",
 			messages: conversation,
 		});
@@ -290,7 +297,7 @@ suite("LiteLLM Client Unit Tests", () => {
 			{ role: "assistant", content: "Analysis complete!" },
 		];
 
-		const body = client.transformToResponsesFormat({
+		const body = transformToResponsesFormat({
 			model: "analytics-model",
 			messages: conversation,
 		});
