@@ -4,6 +4,8 @@ import { LiteLLMConfig } from "../types";
 export class ConfigManager {
 	private static readonly BASE_URL_KEY = "litellm-connector.baseUrl";
 	private static readonly API_KEY_KEY = "litellm-connector.apiKey";
+	private static readonly INACTIVITY_TIMEOUT_KEY = "litellm-connector.inactivityTimeout";
+	private static readonly DISABLE_CACHING_KEY = "litellm-connector.disableCaching";
 
 	constructor(private readonly secrets: vscode.SecretStorage) {}
 
@@ -13,9 +15,14 @@ export class ConfigManager {
 	async getConfig(): Promise<LiteLLMConfig> {
 		const url = await this.secrets.get(ConfigManager.BASE_URL_KEY);
 		const key = await this.secrets.get(ConfigManager.API_KEY_KEY);
+		const inactivityTimeout = vscode.workspace.getConfiguration().get<number>(ConfigManager.INACTIVITY_TIMEOUT_KEY, 60);
+		const disableCaching = vscode.workspace.getConfiguration().get<boolean>(ConfigManager.DISABLE_CACHING_KEY, true);
+
 		return {
 			url: url || "",
 			key: key || undefined,
+			inactivityTimeout,
+			disableCaching,
 		};
 	}
 

@@ -93,4 +93,40 @@ suite("TokenUtils Unit Tests", () => {
 		const trimmed = trimMessagesToFitBudget([msg], undefined, modelInfo);
 		assert.strictEqual(trimmed.length, 1);
 	});
+
+	test("trimMessagesToFitBudget protects assistant message on 'continue'", () => {
+		const systemMsg = {
+			role: 3 as unknown as vscode.LanguageModelChatMessageRole,
+			content: [new vscode.LanguageModelTextPart("System")],
+		} as unknown as vscode.LanguageModelChatRequestMessage;
+
+		const assistantMsg = {
+			role: vscode.LanguageModelChatMessageRole.Assistant,
+			content: [new vscode.LanguageModelTextPart("Truncated response...")],
+		} as unknown as vscode.LanguageModelChatRequestMessage;
+
+		const continueMsg = {
+			role: vscode.LanguageModelChatMessageRole.User,
+			content: [new vscode.LanguageModelTextPart("continue")],
+		} as unknown as vscode.LanguageModelChatRequestMessage;
+
+		const modelInfo = {
+			id: "test",
+			maxInputTokens: 5, // Very small budget
+		} as vscode.LanguageModelChatInformation;
+
+		// System: 6 chars -> 2 tokens
+		// Assistant: 21 chars -> 6 tokens
+		// Continue: 8 chars -> 2 tokens
+		// Total: 2 + 6 + 2 = 10 (exceeds budget of 5)
+		// Without protection, it might drop the assistant message.
+		// With protection, it should keep system, assistant, and continue.
+
+		const trimmed = trimMessagesToFitBudget([systemMsg, assistantMsg, continueMsg], undefined, modelInfo);
+
+		assert.strictEqual(trimmed.length, 3);
+		assert.strictEqual(trimmed[0], systemMsg);
+		assert.strictEqual(trimmed[1], assistantMsg);
+		assert.strictEqual(trimmed[2], continueMsg);
+	});
 });

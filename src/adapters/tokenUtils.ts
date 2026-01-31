@@ -90,6 +90,15 @@ export function trimMessagesToFitBudget(
 
 	const selected: vscode.LanguageModelChatRequestMessage[] = [];
 	let used = 0;
+
+	// Detect continuation request
+	const lastMessage = remaining.length > 0 ? remaining[remaining.length - 1] : undefined;
+	const isContinuation =
+		lastMessage?.role === (vscode.LanguageModelChatMessageRole.User as unknown as number) &&
+		lastMessage.content.length === 1 &&
+		lastMessage.content[0] instanceof vscode.LanguageModelTextPart &&
+		lastMessage.content[0].value.trim().toLowerCase() === "continue";
+
 	if (systemMessage) {
 		const sysTokens = estimateSingleMessageTokens(systemMessage);
 		if (sysTokens > budget) {
@@ -102,7 +111,15 @@ export function trimMessagesToFitBudget(
 	for (let i = remaining.length - 1; i >= 0; i--) {
 		const msg = remaining[i];
 		const msgTokens = estimateSingleMessageTokens(msg);
-		if (used + msgTokens <= budget || selected.length === (systemMessage ? 1 : 0)) {
+
+		// If it's a continuation, we MUST include the immediately preceding assistant message
+		// to provide context for where to resume.
+		const isProtectedAssistantMessage =
+			isContinuation &&
+			i === remaining.length - 2 &&
+			msg.role === (vscode.LanguageModelChatMessageRole.Assistant as unknown as number);
+
+		if (used + msgTokens <= budget || selected.length === (systemMessage ? 1 : 0) || isProtectedAssistantMessage) {
 			selected.splice(systemMessage ? 1 : 0, 0, msg);
 			used += msgTokens;
 		} else {

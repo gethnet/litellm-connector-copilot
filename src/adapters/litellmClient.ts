@@ -6,6 +6,7 @@ import {
 	LiteLLMResponsesRequest,
 } from "../types";
 import { transformToResponsesFormat } from "./responsesAdapter";
+import { Logger } from "../utils/logger";
 
 export class LiteLLMClient {
 	constructor(
@@ -22,11 +23,13 @@ export class LiteLLMClient {
 			token.onCancellationRequested(() => controller.abort());
 		}
 
+		Logger.trace(`Fetching model info from ${this.config.url}/model/info`);
 		const resp = await fetch(`${this.config.url}/model/info`, {
 			headers: this.getHeaders(),
 			signal: controller.signal,
 		});
 		if (!resp.ok) {
+			Logger.error(`Failed to fetch model info: ${resp.status} ${resp.statusText}`);
 			throw new Error(`Failed to fetch model info: ${resp.status} ${resp.statusText}`);
 		}
 		return resp.json() as Promise<LiteLLMModelInfoResponse>;
@@ -43,10 +46,15 @@ export class LiteLLMClient {
 		const endpoint = this.getEndpoint(mode);
 		let body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest = request;
 
+		if (this.config.disableCaching) {
+			body.no_cache = true;
+		}
+
 		if (endpoint === "/responses") {
 			body = transformToResponsesFormat(request);
 		}
 
+		Logger.trace(`Sending chat request to ${endpoint}`, { model: request.model });
 		const response = await this.fetchWithRateLimit(
 			`${this.config.url}${endpoint}`,
 			{
@@ -59,10 +67,12 @@ export class LiteLLMClient {
 
 		if (!response.ok) {
 			const errorText = await response.text();
+			Logger.error(`LiteLLM API error: ${response.status} ${response.statusText}`, errorText);
 			throw new Error(`LiteLLM API error: ${response.status} ${response.statusText}\n${errorText}`);
 		}
 
 		if (!response.body) {
+			Logger.error("No response body from LiteLLM API");
 			throw new Error("No response body from LiteLLM API");
 		}
 
@@ -77,6 +87,9 @@ export class LiteLLMClient {
 		if (this.config.key) {
 			headers.Authorization = `Bearer ${this.config.key}`;
 			headers["X-API-Key"] = this.config.key;
+		}
+		if (this.config.disableCaching) {
+			headers["Cache-Control"] = "no-cache";
 		}
 		return headers;
 	}

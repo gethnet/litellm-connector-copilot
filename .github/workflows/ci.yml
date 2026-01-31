@@ -53,7 +53,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Package Extension
-        run: npx vsce package
+        run: npm run package:marketplace
 
       - name: Upload VSIX
         uses: actions/upload-artifact@v6

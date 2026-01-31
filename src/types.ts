@@ -56,6 +56,8 @@ export interface LiteLLMParams {
 export interface LiteLLMConfig {
 	url: string;
 	key?: string;
+	inactivityTimeout?: number;
+	disableCaching?: boolean;
 }
 
 /**
@@ -121,6 +123,7 @@ export interface OpenAIChatCompletionRequest {
 	stop?: string | string[];
 	tools?: OpenAIFunctionToolDef[];
 	tool_choice?: string | object;
+	no_cache?: boolean;
 }
 
 /**
@@ -139,6 +142,7 @@ export interface LiteLLMResponsesRequest {
 	stop?: string | string[];
 	tools?: LiteLLMResponseTool[];
 	tool_choice?: string | object;
+	no_cache?: boolean;
 }
 
 /**
