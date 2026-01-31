@@ -54,6 +54,7 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
 	private _emittedTextToolCallIds = new Set<string>();
 	private _lastEmittedText = "";
 	private _repeatCount = 0;
+	private _lastFinishReason: string | undefined = undefined;
 
 	constructor(
 		private readonly secrets: vscode.SecretStorage,
@@ -320,6 +321,7 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
 		this._partialAssistantText = "";
 		this._lastEmittedText = "";
 		this._repeatCount = 0;
+		this._lastFinishReason = undefined;
 	}
 
 	private isParameterSupported(param: string, modelInfo: LiteLLMModelInfo | undefined, modelId?: string): boolean {
@@ -360,17 +362,35 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
 		const decoder = new TextDecoder();
 		let buffer = "";
 
+		const config = await this._configManager.getConfig();
+		const timeoutMs = (config.inactivityTimeout ?? 60) * 1000;
+		let watchdog: NodeJS.Timeout | undefined;
+
+		const resetWatchdog = () => {
+			if (watchdog) {
+				clearTimeout(watchdog);
+			}
+			watchdog = setTimeout(() => {
+				console.warn(`[LiteLLM Model Provider] Inactivity timeout after ${timeoutMs}ms`);
+				reader.cancel("Inactivity timeout");
+			}, timeoutMs);
+		};
+
 		token.onCancellationRequested(() => {
+			if (watchdog) {
+				clearTimeout(watchdog);
+			}
 			reader.cancel("User cancelled");
 		});
 
 		try {
+			resetWatchdog();
 			while (!token.isCancellationRequested) {
 				const { done, value } = await reader.read();
+				resetWatchdog();
 				if (done) {
 					break;
 				}
-				// ...existing code...
 
 				buffer += decoder.decode(value, { stream: true });
 				const lines = buffer.split("\n");
@@ -395,7 +415,16 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
 					}
 				}
 			}
+
+			if (this._lastFinishReason === "length") {
+				progress.report(
+					new vscode.LanguageModelTextPart("\n\n---\n_[Response truncated. Reply 'continue' to resume.]_")
+				);
+			}
 		} finally {
+			if (watchdog) {
+				clearTimeout(watchdog);
+			}
 			reader.releaseLock();
 		}
 	}
@@ -510,7 +539,10 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
 			}
 		}
 
-		const finish = choice.finish_reason;
+		const finish = choice.finish_reason as string | undefined;
+		if (finish) {
+			this._lastFinishReason = finish;
+		}
 		if (finish === "tool_calls" || finish === "stop") {
 			await this.flushToolCallBuffers(progress, true);
 		}

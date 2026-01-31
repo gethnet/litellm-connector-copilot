@@ -56,6 +56,7 @@ export interface LiteLLMParams {
 export interface LiteLLMConfig {
 	url: string;
 	key?: string;
+	inactivityTimeout?: number;
 }
 
 /**
