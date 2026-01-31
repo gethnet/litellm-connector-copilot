@@ -14,7 +14,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "1.1.13-dev",
+	"version": "1.2.0",
 	"preview": false,
 	"engines": {
 		"vscode": "^1.107.0"
@@ -79,10 +79,10 @@
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
 		"vscode:pack": "npx vsce package",
+		"package:marketplace": "cp README.md README.github.md && cp README.marketplace.md README.md && npx vsce package && mv README.github.md README.md",
 		"download-api": "dts dev",
 		"postdownload-api": "yes n | dts main && node -e \"const fs = require('fs'); if (fs.existsSync('vscode.d.ts')) { fs.renameSync('vscode.d.ts', 'src/vscode.d.ts'); console.log('Moved vscode.d.ts to src/'); }\"",
 		"postinstall": "npm run download-api",
-		"prepare": "husky install",
 		"compile": "tsc -p ./",
 		"lint": "eslint --fix",
 		"format": "prettier --write .",
@@ -105,8 +105,6 @@
 		"@vscode/vsce": "^3.7.0",
 		"all-contributors-cli": "^6.26.1",
 		"eslint": "^9.13.0",
-		"husky": "^9.1.7",
-		"lint-staged": "^16.2.7",
 		"mocha-junit-reporter": "^2.2.1",
 		"mocha-multi-reporters": "^1.5.0",
 		"prettier": "^3.1.0",
@@ -117,11 +115,5 @@
 	},
 	"extensionDependencies": [
 		"github.copilot-chat"
-	],
-	"lint-staged": {
-		"*.{ts,js,json,md}": [
-			"npm run format",
-			"npm run lint"
-		]
-	}
+	]
 }

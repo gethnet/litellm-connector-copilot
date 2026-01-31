@@ -57,6 +57,7 @@ If you want to contribute or build from source:
 * `npm run test`: Run unit tests.
 * `npm run test:coverage`: Run tests and generate coverage reports.
 * `npm run bump-version`: Update version in `package.json`.
+* `npm run package:marketplace`: Package the extension using `README.marketplace.md` for the VS Code Marketplace while preserving the GitHub README.
 
 ## 📚 Learn More
 
