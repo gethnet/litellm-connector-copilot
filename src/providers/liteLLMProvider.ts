@@ -16,6 +16,8 @@ import { LiteLLMClient } from "../adapters/litellmClient";
 import { ResponsesClient } from "../adapters/responsesClient";
 import { transformToResponsesFormat } from "../adapters/responsesAdapter";
 import { DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_CONTEXT_LENGTH, trimMessagesToFitBudget } from "../adapters/tokenUtils";
+import { Logger } from "../utils/logger";
+import { LiteLLMTelemetry } from "../utils/telemetry";
 
 const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
 	"claude-3-5-sonnet": new Set(["temperature"]),
@@ -67,25 +69,25 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
 		_options: { silent: boolean },
 		_token: CancellationToken
 	): Promise<LanguageModelChatInformation[]> {
-		console.log("[LiteLLM Model Provider] provideLanguageModelChatInformation called");
+		Logger.debug("provideLanguageModelChatInformation called");
 		try {
 			const config = await this._configManager.getConfig();
-			console.log(`[LiteLLM Model Provider] Config URL: ${config.url ? "set" : "not set"}`);
+			Logger.debug(`Config URL: ${config.url ? "set" : "not set"}`);
 			if (!config.url) {
-				console.log("[LiteLLM Model Provider] No base URL configured, returning empty model list.");
+				Logger.info("No base URL configured, returning empty model list.");
 				return [];
 			}
 
 			const client = new LiteLLMClient(config, this.userAgent);
-			console.log("[LiteLLM Model Provider] Fetching model info from LiteLLM...");
+			Logger.debug("Fetching model info from LiteLLM...");
 			const { data } = await client.getModelInfo();
 
 			if (!data || !Array.isArray(data)) {
-				console.warn("[LiteLLM Model Provider] Received invalid data format from /model/info", data);
+				Logger.warn("Received invalid data format from /model/info", data);
 				return [];
 			}
 
-			console.log(`[LiteLLM Model Provider] Found ${data.length} models`);
+			Logger.info(`Found ${data.length} models`);
 			const infos: LanguageModelChatInformation[] = data.map(
 				(entry: { model_info?: LiteLLMModelInfo; model_name?: string }, index: number) => {
 					const modelId = entry.model_info?.key ?? entry.model_name ?? `model-${index}`;
@@ -117,7 +119,7 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
 
 			return infos;
 		} catch (err) {
-			console.error("[LiteLLM Model Provider] Failed to fetch models", err);
+			Logger.error("Failed to fetch models", err);
 			return [];
 		}
 	}
@@ -130,6 +132,8 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
 		token: CancellationToken
 	): Promise<void> {
 		this.resetStreamingState();
+		const startTime = LiteLLMTelemetry.startTimer();
+		const requestId = Math.random().toString(36).substring(7);
 
 		const trackingProgress: Progress<LanguageModelResponsePart> = {
 			report: (part) => {
@@ -219,9 +223,15 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
 					const responsesClient = new ResponsesClient(config, this.userAgent);
 					const responsesRequest = transformToResponsesFormat(requestBody);
 					await responsesClient.sendResponsesRequest(responsesRequest, trackingProgress, token);
+					LiteLLMTelemetry.reportMetric({
+						requestId,
+						model: model.id,
+						durationMs: LiteLLMTelemetry.endTimer(startTime),
+						status: "success",
+					});
 					return;
 				} catch (err) {
-					console.warn(`[LiteLLM Model Provider] /responses failed, falling back to /chat/completions: ${err}`);
+					Logger.warn(`/responses failed, falling back to /chat/completions: ${err}`);
 					// Fall through to standard chat/completions
 				}
 			}
@@ -241,9 +251,7 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
 						parsedMessage.toLowerCase().includes("unsupported parameter") ||
 						parsedMessage.toLowerCase().includes("not supported")
 					) {
-						console.warn(
-							`[LiteLLM Model Provider] Retrying request without optional parameters due to: ${parsedMessage}`
-						);
+						Logger.warn(`Retrying request without optional parameters due to: ${parsedMessage}`);
 						// Strip common optional parameters that might cause issues
 						delete requestBody.temperature;
 						delete requestBody.top_p;

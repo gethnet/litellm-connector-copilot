@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { LiteLLMConfig, LiteLLMResponsesRequest } from "../types";
 import { tryParseJSONObject } from "../utils";
+import { Logger } from "../utils/logger";
 
 export interface ResponsesEvent {
 	type: string;
@@ -95,7 +96,7 @@ export class ResponsesClient {
 						const event = JSON.parse(data) as ResponsesEvent;
 						await this.handleEvent(event, progress);
 					} catch (e) {
-						console.error("[ResponsesClient] Failed to parse SSE data", e, data);
+						Logger.error("Failed to parse SSE data", e, data);
 					}
 				}
 			}
