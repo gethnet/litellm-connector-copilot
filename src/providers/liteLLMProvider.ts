@@ -13,6 +13,8 @@ import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, OpenAIFunctionToolD
 import { convertTools, convertMessages, tryParseJSONObject, validateRequest } from "../utils";
 import { ConfigManager } from "../config/configManager";
 import { LiteLLMClient } from "../adapters/litellmClient";
+import { ResponsesClient } from "../adapters/responsesClient";
+import { transformToResponsesFormat } from "../adapters/responsesAdapter";
 import { DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_CONTEXT_LENGTH, trimMessagesToFitBudget } from "../adapters/tokenUtils";
 
 const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
@@ -209,9 +211,23 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
 			);
 
 			const client = new LiteLLMClient(config, this.userAgent);
+
+			// Try /responses endpoint first if mode is 'responses'
+			if (modelInfo?.mode === "responses") {
+				try {
+					const responsesClient = new ResponsesClient(config, this.userAgent);
+					const responsesRequest = transformToResponsesFormat(requestBody);
+					await responsesClient.sendResponsesRequest(responsesRequest, trackingProgress, token);
+					return;
+				} catch (err) {
+					console.warn(`[LiteLLM Model Provider] /responses failed, falling back to /chat/completions: ${err}`);
+					// Fall through to standard chat/completions
+				}
+			}
+
 			let stream: ReadableStream<Uint8Array>;
 			try {
-				stream = await client.chat(requestBody, modelInfo?.mode, token);
+				stream = await client.chat(requestBody, "chat", token);
 			} catch (err: unknown) {
 				if (token.isCancellationRequested) {
 					throw new Error("Operation cancelled by user");

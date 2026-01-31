@@ -61,6 +61,12 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
 			// If it ALSO has text content, we add that as a message.
 			if (typeof msg.content === "string" && msg.content.trim()) {
 				inputArray.push({ type: "message", role: "assistant", content: msg.content });
+			} else if (Array.isArray(msg.content)) {
+				for (const item of msg.content) {
+					if (item.type === "text" && item.text && item.text.trim()) {
+						inputArray.push({ type: "message", role: "assistant", content: item.text });
+					}
+				}
 			}
 			if (msg.tool_calls) {
 				for (const tc of msg.tool_calls) {
