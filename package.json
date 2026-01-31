@@ -14,7 +14,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "1.1.11-dev",
+	"version": "1.1.13-dev",
 	"preview": false,
 	"engines": {
 		"vscode": "^1.107.0"
@@ -58,6 +58,21 @@
 				"title": "Manage LiteLLM Provider"
 			}
 		],
+		"configuration": {
+			"title": "LiteLLM Connector",
+			"properties": {
+				"litellm-connector.inactivityTimeout": {
+					"type": "number",
+					"default": 60,
+					"description": "Timeout in seconds of inactivity before the LiteLLM proxy connection is considered idle."
+				},
+				"litellm-connector.disableCaching": {
+					"type": "boolean",
+					"default": true,
+					"description": "When enabled, LiteLLM caching will be bypassed by sending 'no-cache: true' and 'Cache-Control: no-cache' headers."
+				}
+			}
+		},
 		"keybindings": []
 	},
 	"main": "./out/extension.js",

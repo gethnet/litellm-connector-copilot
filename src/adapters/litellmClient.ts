@@ -46,6 +46,10 @@ export class LiteLLMClient {
 		const endpoint = this.getEndpoint(mode);
 		let body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest = request;
 
+		if (this.config.disableCaching) {
+			body.no_cache = true;
+		}
+
 		if (endpoint === "/responses") {
 			body = transformToResponsesFormat(request);
 		}
@@ -83,6 +87,9 @@ export class LiteLLMClient {
 		if (this.config.key) {
 			headers.Authorization = `Bearer ${this.config.key}`;
 			headers["X-API-Key"] = this.config.key;
+		}
+		if (this.config.disableCaching) {
+			headers["Cache-Control"] = "no-cache";
 		}
 		return headers;
 	}
