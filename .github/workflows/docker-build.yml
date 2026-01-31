@@ -42,7 +42,7 @@ jobs:
             latest
 
       - name: Build and push Docker image
-        uses: devcontainers/ci@main
+        uses: devcontainers/ci@v0.3
         with:
           imageName: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           cacheFrom: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
