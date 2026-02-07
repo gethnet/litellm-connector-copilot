@@ -147,4 +147,67 @@ suite("LiteLLM Provider Unit Tests", () => {
 		assert.strictEqual(requestBody.presence_penalty, undefined);
 		assert.strictEqual(requestBody.max_tokens, 1000);
 	});
+
+	test("detectQuotaToolRedaction removes failing tool when enabled", () => {
+		const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+		const detect = (
+			provider as unknown as {
+				detectQuotaToolRedaction: (
+					messages: readonly vscode.LanguageModelChatRequestMessage[],
+					tools: readonly vscode.LanguageModelChatTool[],
+					requestId: string,
+					modelId: string,
+					disableRedaction: boolean
+				) => { tools: readonly vscode.LanguageModelChatTool[] };
+			}
+		).detectQuotaToolRedaction.bind(provider);
+
+		const messages: vscode.LanguageModelChatRequestMessage[] = [
+			{
+				role: vscode.LanguageModelChatMessageRole.Assistant,
+				name: undefined,
+				content: [new vscode.LanguageModelTextPart("Free tier quota exceeded for insert_edit_into_file")],
+			},
+		];
+		const tools: vscode.LanguageModelChatTool[] = [
+			{ name: "insert_edit_into_file", description: "", inputSchema: {} },
+			{ name: "replace_string_in_file", description: "", inputSchema: {} },
+		];
+
+		const result = detect(messages, tools, "req-1", "model-1", false);
+		assert.strictEqual(result.tools.length, 1);
+		assert.strictEqual(result.tools[0].name, "replace_string_in_file");
+	});
+
+	test("detectQuotaToolRedaction does not remove tool when disabled", () => {
+		const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+		const detect = (
+			provider as unknown as {
+				detectQuotaToolRedaction: (
+					messages: readonly vscode.LanguageModelChatRequestMessage[],
+					tools: readonly vscode.LanguageModelChatTool[],
+					requestId: string,
+					modelId: string,
+					disableRedaction: boolean
+				) => { tools: readonly vscode.LanguageModelChatTool[] };
+			}
+		).detectQuotaToolRedaction.bind(provider);
+
+		const messages: vscode.LanguageModelChatRequestMessage[] = [
+			{
+				role: vscode.LanguageModelChatMessageRole.Assistant,
+				name: undefined,
+				content: [new vscode.LanguageModelTextPart("Free tier quota exceeded for insert_edit_into_file")],
+			},
+		];
+		const tools: vscode.LanguageModelChatTool[] = [
+			{ name: "insert_edit_into_file", description: "", inputSchema: {} },
+			{ name: "replace_string_in_file", description: "", inputSchema: {} },
+		];
+
+		const result = detect(messages, tools, "req-2", "model-1", true);
+		assert.strictEqual(result.tools.length, 2);
+		assert.strictEqual(result.tools[0].name, "insert_edit_into_file");
+		assert.strictEqual(result.tools[1].name, "replace_string_in_file");
+	});
 });

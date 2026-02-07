@@ -61,6 +61,11 @@
 		"configuration": {
 			"title": "LiteLLM Connector",
 			"properties": {
+				"litellm-connector.disableQuotaToolRedaction": {
+					"type": "boolean",
+					"default": false,
+					"description": "Disable per-turn tool redaction when a quota error is detected in chat history. Leave off to keep redaction enabled."
+				},
 				"litellm-connector.inactivityTimeout": {
 					"type": "number",
 					"default": 60,
@@ -98,7 +103,7 @@
 		"@types/mocha": "^10.0.6",
 		"@types/node": "^22",
 		"@types/sinon": "^21.0.0",
-		"@types/vscode": "^1.104.0",
+		"@types/vscode": "^1.107.0",
 		"@vscode/dts": "^0.4.1",
 		"@vscode/test-cli": "^0.0.12",
 		"@vscode/test-electron": "^2.5.2",

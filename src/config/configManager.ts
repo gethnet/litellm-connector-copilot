@@ -6,6 +6,7 @@ export class ConfigManager {
 	private static readonly API_KEY_KEY = "litellm-connector.apiKey";
 	private static readonly INACTIVITY_TIMEOUT_KEY = "litellm-connector.inactivityTimeout";
 	private static readonly DISABLE_CACHING_KEY = "litellm-connector.disableCaching";
+	private static readonly DISABLE_QUOTA_TOOL_REDACTION_KEY = "litellm-connector.disableQuotaToolRedaction";
 
 	constructor(private readonly secrets: vscode.SecretStorage) {}
 
@@ -17,12 +18,16 @@ export class ConfigManager {
 		const key = await this.secrets.get(ConfigManager.API_KEY_KEY);
 		const inactivityTimeout = vscode.workspace.getConfiguration().get<number>(ConfigManager.INACTIVITY_TIMEOUT_KEY, 60);
 		const disableCaching = vscode.workspace.getConfiguration().get<boolean>(ConfigManager.DISABLE_CACHING_KEY, true);
+		const disableQuotaToolRedaction = vscode.workspace
+			.getConfiguration()
+			.get<boolean>(ConfigManager.DISABLE_QUOTA_TOOL_REDACTION_KEY, false);
 
 		return {
 			url: url || "",
 			key: key || undefined,
 			inactivityTimeout,
 			disableCaching,
+			disableQuotaToolRedaction,
 		};
 	}
 

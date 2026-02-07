@@ -151,7 +151,14 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
 			}
 
 			const modelInfo = this._modelInfoCache.get(model.id);
-			const toolConfig = convertTools(options);
+			const toolRedaction = this.detectQuotaToolRedaction(
+				messages,
+				options.tools ?? [],
+				requestId,
+				model.id,
+				config.disableQuotaToolRedaction === true
+			);
+			const toolConfig = convertTools({ ...options, tools: toolRedaction.tools });
 			const messagesToUse = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo);
 			const openaiMessages = convertMessages(messagesToUse);
 			validateRequest(messagesToUse);
@@ -759,6 +766,92 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
 		return text
 			.replace(/<\|[a-zA-Z0-9_-]+_section_(?:begin|end)\|>/g, "")
 			.replace(/<\|tool_call_(?:argument_)?(?:begin|end)\|>/g, "");
+	}
+
+	private detectQuotaToolRedaction(
+		messages: readonly LanguageModelChatRequestMessage[],
+		tools: readonly vscode.LanguageModelChatTool[],
+		requestId: string,
+		modelId: string,
+		disableRedaction: boolean
+	): { tools: readonly vscode.LanguageModelChatTool[] } {
+		if (disableRedaction || !tools.length || !messages.length) {
+			return { tools };
+		}
+
+		const quotaMatch = this.findQuotaErrorInMessages(messages);
+		if (!quotaMatch) {
+			return { tools };
+		}
+
+		const { toolName, errorText, turnIndex } = quotaMatch;
+		const toolNames = new Set(tools.map((tool) => tool.name));
+		if (!toolNames.has(toolName)) {
+			Logger.debug("Quota error detected, but tool not present", { toolName, requestId, modelId, turnIndex });
+			return { tools };
+		}
+
+		const filteredTools = tools.filter((tool) => tool.name !== toolName);
+		Logger.warn("Quota error detected; redacting tool for current turn", {
+			toolName,
+			errorText,
+			modelId,
+			requestId,
+			turnIndex,
+		});
+		LiteLLMTelemetry.reportMetric({
+			requestId,
+			model: modelId,
+			status: "failure",
+			error: `quota_exceeded:${toolName}`,
+		});
+
+		return { tools: filteredTools };
+	}
+
+	private findQuotaErrorInMessages(
+		messages: readonly LanguageModelChatRequestMessage[]
+	): { toolName: string; errorText: string; turnIndex: number } | undefined {
+		const quotaRegex = /(free\s*tier\s*quota\s*exceeded|quota\s*exceeded)/i;
+		const toolRegex = /(insert_edit_into_file|replace_string_in_file)/i;
+
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const message = messages[i];
+			const text = this.collectMessageText(message);
+			if (!text) {
+				continue;
+			}
+
+			if (!quotaRegex.test(text)) {
+				continue;
+			}
+
+			const toolMatch = text.match(toolRegex);
+			if (!toolMatch) {
+				continue;
+			}
+
+			return {
+				toolName: toolMatch[1],
+				errorText: text.slice(0, 500),
+				turnIndex: i,
+			};
+		}
+
+		return undefined;
+	}
+
+	private collectMessageText(message: LanguageModelChatRequestMessage): string {
+		const parts = message.content ?? [];
+		let text = "";
+		for (const part of parts) {
+			if (part instanceof vscode.LanguageModelTextPart) {
+				text += part.value;
+			} else if (typeof part === "string") {
+				text += part;
+			}
+		}
+		return text.trim();
 	}
 
 	/**
