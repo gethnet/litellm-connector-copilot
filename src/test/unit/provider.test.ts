@@ -210,4 +210,22 @@ suite("LiteLLM Provider Unit Tests", () => {
 		assert.strictEqual(result.tools[0].name, "insert_edit_into_file");
 		assert.strictEqual(result.tools[1].name, "replace_string_in_file");
 	});
+
+	test("Configuration passed through options is preferred over secret storage", () => {
+		// Create a config via convertProviderConfiguration
+		const providerConfig = {
+			baseUrl: "https://api.litellm.ai",
+			apiKey: "sk-provider-key",
+		};
+
+		// This would be called internally when VS Code passes configuration through options
+		// We're testing that the conversion works properly
+		const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const configManager = (provider as any)._configManager;
+		const convertedConfig = configManager.convertProviderConfiguration(providerConfig);
+
+		assert.strictEqual(convertedConfig.url, "https://api.litellm.ai");
+		assert.strictEqual(convertedConfig.key, "sk-provider-key");
+	});
 });

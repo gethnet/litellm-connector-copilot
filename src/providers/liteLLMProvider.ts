@@ -127,7 +127,7 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
 	async provideLanguageModelChatResponse(
 		model: LanguageModelChatInformation,
 		messages: readonly LanguageModelChatRequestMessage[],
-		options: ProvideLanguageModelChatResponseOptions,
+		options: ProvideLanguageModelChatResponseOptions & { configuration?: Record<string, unknown> },
 		progress: Progress<LanguageModelResponsePart>,
 		token: CancellationToken
 	): Promise<void> {
@@ -145,9 +145,13 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
 		};
 
 		try {
-			const config = await this._configManager.getConfig();
+			// Try to get configuration from the new v1.109+ API first
+			const config = options.configuration
+				? this._configManager.convertProviderConfiguration(options.configuration)
+				: await this._configManager.getConfig();
+
 			if (!config.url) {
-				throw new Error("LiteLLM configuration not found.");
+				throw new Error("LiteLLM configuration not found. Please configure the LiteLLM base URL.");
 			}
 
 			const modelInfo = this._modelInfoCache.get(model.id);

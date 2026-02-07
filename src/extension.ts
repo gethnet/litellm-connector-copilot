@@ -4,6 +4,9 @@ import { ConfigManager } from "./config/configManager";
 import { registerManageConfigCommand } from "./commands/manageConfig";
 import { Logger } from "./utils/logger";
 
+// Store the config manager for cleanup on deactivation
+let configManagerInstance: ConfigManager | undefined;
+
 export function activate(context: vscode.ExtensionContext) {
 	Logger.initialize(context);
 	Logger.info("Activating extension...");
@@ -23,8 +26,24 @@ export function activate(context: vscode.ExtensionContext) {
 
 	Logger.info(`UA: ${ua}`);
 
-	const configManager = new ConfigManager(context.secrets);
+	configManagerInstance = new ConfigManager(context.secrets);
+	const configManager = configManagerInstance;
 	const provider = new LiteLLMChatModelProvider(context.secrets, ua);
+
+	// Attempt to migrate configuration from legacy secret storage to new v1.109+ provider configuration
+	configManager
+		.migrateToProviderConfiguration()
+		.then((migrated) => {
+			if (migrated) {
+				Logger.info("Successfully migrated configuration to v1.109+ provider settings.");
+				vscode.window.showInformationMessage(
+					"LiteLLM Connector has been updated. Your configuration has been automatically migrated to the new settings format."
+				);
+			}
+		})
+		.catch((err) => {
+			Logger.error("Error during configuration migration", err);
+		});
 
 	// Register the LiteLLM provider under the vendor id used in package.json
 	try {
@@ -48,27 +67,40 @@ export function activate(context: vscode.ExtensionContext) {
 		Logger.error("Failed to register commands", cmdErr);
 	}
 
+	// Note: Configuration is now primarily handled through VS Code's Language Model provider settings UI (v1.109+).
+	// The legacy management command is retained for backward compatibility.
 	// Proactively check configuration and prompt user if missing
 	configManager
 		.isConfigured()
 		.then((configured) => {
 			if (!configured) {
-				console.log("[LiteLLM Connector] Extension not configured. Prompting user...");
+				Logger.info("Extension not configured. Prompting user...");
 				vscode.window
 					.showInformationMessage(
-						"LiteLLM Connector is not configured. Please set your Base URL to enable LiteLLM models in Copilot.",
-						"Configure Now"
+						"LiteLLM Connector is not configured. Please configure your Base URL and API Key in the LiteLLM Chat Provider settings.",
+						"Open Settings"
 					)
 					.then((selection) => {
-						if (selection === "Configure Now") {
-							vscode.commands.executeCommand("litellm-connector.manage");
+						if (selection === "Open Settings") {
+							vscode.commands.executeCommand("workbench.action.openSettings", "@provider:litellm-connector");
 						}
 					});
 			}
 		})
 		.catch((err) => {
-			console.error("[LiteLLM Connector] Error checking configuration status", err);
+			Logger.error("Error checking configuration status", err);
 		});
 }
 
-export function deactivate() {}
+export async function deactivate() {
+	// Clean up configuration data when extension is deactivated or uninstalled
+	if (configManagerInstance) {
+		try {
+			Logger.info("Cleaning up LiteLLM configuration...");
+			await configManagerInstance.cleanupAllConfiguration();
+			Logger.info("Configuration cleanup completed.");
+		} catch (err) {
+			Logger.error("Error during deactivation cleanup", err);
+		}
+	}
+}

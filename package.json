@@ -17,7 +17,7 @@
 	"version": "1.2.0",
 	"preview": false,
 	"engines": {
-		"vscode": "^1.107.0"
+		"vscode": "^1.109.0"
 	},
 	"categories": [
 		"AI",
@@ -49,7 +49,24 @@
 			{
 				"vendor": "litellm-connector",
 				"displayName": "LiteLLM",
-				"managementCommand": "litellm-connector.manage"
+				"configuration": {
+					"title": "LiteLLM Connector",
+					"properties": {
+						"baseUrl": {
+							"type": "string",
+							"description": "Base URL for the LiteLLM proxy server",
+							"title": "Base URL",
+							"placeholder": "http://localhost:4000"
+						},
+						"apiKey": {
+							"type": "string",
+							"secret": true,
+							"description": "API key for LiteLLM proxy authentication",
+							"title": "API Key"
+						}
+					},
+					"required": ["baseUrl"]
+				}
 			}
 		],
 		"commands": [
