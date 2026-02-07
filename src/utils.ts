@@ -1,145 +1,145 @@
 import * as vscode from "vscode";
 import type {
-	OpenAIChatMessage,
-	OpenAIChatRole,
-	OpenAIFunctionToolDef,
-	OpenAIToolCall,
-	OpenAIChatMessageContentItem,
+    OpenAIChatMessage,
+    OpenAIChatRole,
+    OpenAIFunctionToolDef,
+    OpenAIToolCall,
+    OpenAIChatMessageContentItem,
 } from "./types";
 import { Logger } from "./utils/logger";
 
 // Tool calling sanitization helpers
 
 function isIntegerLikePropertyName(propertyName: string | undefined): boolean {
-	if (!propertyName) {
-		return false;
-	}
-	const lowered = propertyName.toLowerCase();
-	const integerMarkers = [
-		"id",
-		"limit",
-		"count",
-		"index",
-		"size",
-		"offset",
-		"length",
-		"results_limit",
-		"maxresults",
-		"debugsessionid",
-		"cellid",
-	];
-	return integerMarkers.some((m) => lowered.includes(m)) || lowered.endsWith("_id");
+    if (!propertyName) {
+        return false;
+    }
+    const lowered = propertyName.toLowerCase();
+    const integerMarkers = [
+        "id",
+        "limit",
+        "count",
+        "index",
+        "size",
+        "offset",
+        "length",
+        "results_limit",
+        "maxresults",
+        "debugsessionid",
+        "cellid",
+    ];
+    return integerMarkers.some((m) => lowered.includes(m)) || lowered.endsWith("_id");
 }
 
 function sanitizeFunctionName(name: unknown): string {
-	if (typeof name !== "string" || !name) {
-		return "tool";
-	}
-	let sanitized = name.replace(/[^a-zA-Z0-9_-]/g, "_");
-	if (!/^[a-zA-Z]/.test(sanitized)) {
-		sanitized = `tool_${sanitized}`;
-	}
-	sanitized = sanitized.replace(/_+/g, "_");
-	return sanitized.slice(0, 64);
+    if (typeof name !== "string" || !name) {
+        return "tool";
+    }
+    let sanitized = name.replace(/[^a-zA-Z0-9_-]/g, "_");
+    if (!/^[a-zA-Z]/.test(sanitized)) {
+        sanitized = `tool_${sanitized}`;
+    }
+    sanitized = sanitized.replace(/_+/g, "_");
+    return sanitized.slice(0, 64);
 }
 
 function pruneUnknownSchemaKeywords(schema: unknown): Record<string, unknown> {
-	if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
-		return {};
-	}
-	const allow = new Set([
-		"type",
-		"properties",
-		"required",
-		"additionalProperties",
-		"description",
-		"enum",
-		"default",
-		"items",
-		"minLength",
-		"maxLength",
-		"minimum",
-		"maximum",
-		"pattern",
-		"format",
-	]);
-	const out: Record<string, unknown> = {};
-	for (const [k, v] of Object.entries(schema as Record<string, unknown>)) {
-		if (allow.has(k)) {
-			out[k] = v as unknown;
-		}
-	}
-	return out;
+    if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+        return {};
+    }
+    const allow = new Set([
+        "type",
+        "properties",
+        "required",
+        "additionalProperties",
+        "description",
+        "enum",
+        "default",
+        "items",
+        "minLength",
+        "maxLength",
+        "minimum",
+        "maximum",
+        "pattern",
+        "format",
+    ]);
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(schema as Record<string, unknown>)) {
+        if (allow.has(k)) {
+            out[k] = v as unknown;
+        }
+    }
+    return out;
 }
 
 function sanitizeSchema(input: unknown, propName?: string): Record<string, unknown> {
-	if (!input || typeof input !== "object" || Array.isArray(input)) {
-		return { type: "object", properties: {} } as Record<string, unknown>;
-	}
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+        return { type: "object", properties: {} } as Record<string, unknown>;
+    }
 
-	let schema = input as Record<string, unknown>;
+    let schema = input as Record<string, unknown>;
 
-	for (const composite of ["anyOf", "oneOf", "allOf"]) {
-		const branch = (schema as Record<string, unknown>)[composite] as unknown;
-		if (Array.isArray(branch) && branch.length > 0) {
-			let preferred: Record<string, unknown> | undefined;
-			for (const b of branch) {
-				if (b && typeof b === "object" && (b as Record<string, unknown>).type === "string") {
-					preferred = b as Record<string, unknown>;
-					break;
-				}
-			}
-			schema = { ...(preferred ?? (branch[0] as Record<string, unknown>)) };
-			break;
-		}
-	}
+    for (const composite of ["anyOf", "oneOf", "allOf"]) {
+        const branch = (schema as Record<string, unknown>)[composite] as unknown;
+        if (Array.isArray(branch) && branch.length > 0) {
+            let preferred: Record<string, unknown> | undefined;
+            for (const b of branch) {
+                if (b && typeof b === "object" && (b as Record<string, unknown>).type === "string") {
+                    preferred = b as Record<string, unknown>;
+                    break;
+                }
+            }
+            schema = { ...(preferred ?? (branch[0] as Record<string, unknown>)) };
+            break;
+        }
+    }
 
-	schema = pruneUnknownSchemaKeywords(schema);
+    schema = pruneUnknownSchemaKeywords(schema);
 
-	let t = schema.type as string | undefined;
-	if (t == null) {
-		t = "object";
-		schema.type = t;
-	}
+    let t = schema.type as string | undefined;
+    if (t == null) {
+        t = "object";
+        schema.type = t;
+    }
 
-	if (t === "number" && propName && isIntegerLikePropertyName(propName)) {
-		schema.type = "integer";
-		t = "integer";
-	}
+    if (t === "number" && propName && isIntegerLikePropertyName(propName)) {
+        schema.type = "integer";
+        t = "integer";
+    }
 
-	if (t === "object") {
-		const props = (schema.properties as Record<string, unknown> | undefined) ?? {};
-		const newProps: Record<string, unknown> = {};
-		if (props && typeof props === "object") {
-			for (const [k, v] of Object.entries(props)) {
-				newProps[k] = sanitizeSchema(v, k);
-			}
-		}
-		schema.properties = newProps;
+    if (t === "object") {
+        const props = (schema.properties as Record<string, unknown> | undefined) ?? {};
+        const newProps: Record<string, unknown> = {};
+        if (props && typeof props === "object") {
+            for (const [k, v] of Object.entries(props)) {
+                newProps[k] = sanitizeSchema(v, k);
+            }
+        }
+        schema.properties = newProps;
 
-		const req = schema.required as unknown;
-		if (Array.isArray(req)) {
-			schema.required = req.filter((r) => typeof r === "string");
-		} else if (req !== undefined) {
-			schema.required = [];
-		}
+        const req = schema.required as unknown;
+        if (Array.isArray(req)) {
+            schema.required = req.filter((r) => typeof r === "string");
+        } else if (req !== undefined) {
+            schema.required = [];
+        }
 
-		const ap = schema.additionalProperties as unknown;
-		if (ap !== undefined && typeof ap !== "boolean") {
-			delete schema.additionalProperties;
-		}
-	} else if (t === "array") {
-		const items = schema.items as unknown;
-		if (Array.isArray(items) && items.length > 0) {
-			schema.items = sanitizeSchema(items[0]);
-		} else if (items && typeof items === "object") {
-			schema.items = sanitizeSchema(items);
-		} else {
-			schema.items = { type: "string" } as Record<string, unknown>;
-		}
-	}
+        const ap = schema.additionalProperties as unknown;
+        if (ap !== undefined && typeof ap !== "boolean") {
+            delete schema.additionalProperties;
+        }
+    } else if (t === "array") {
+        const items = schema.items as unknown;
+        if (Array.isArray(items) && items.length > 0) {
+            schema.items = sanitizeSchema(items[0]);
+        } else if (items && typeof items === "object") {
+            schema.items = sanitizeSchema(items);
+        } else {
+            schema.items = { type: "string" } as Record<string, unknown>;
+        }
+    }
 
-	return schema;
+    return schema;
 }
 
 /**
@@ -148,76 +148,76 @@ function sanitizeSchema(input: unknown, propName?: string): Record<string, unkno
  * @returns OpenAI-compatible messages array.
  */
 export function convertMessages(messages: readonly vscode.LanguageModelChatRequestMessage[]): OpenAIChatMessage[] {
-	const out: OpenAIChatMessage[] = [];
-	for (const m of messages) {
-		const role = mapRole(m);
-		const textParts: string[] = [];
-		const contentItems: OpenAIChatMessageContentItem[] = [];
-		const toolCalls: OpenAIToolCall[] = [];
-		const toolResults: { callId: string; content: string }[] = [];
+    const out: OpenAIChatMessage[] = [];
+    for (const m of messages) {
+        const role = mapRole(m);
+        const textParts: string[] = [];
+        const contentItems: OpenAIChatMessageContentItem[] = [];
+        const toolCalls: OpenAIToolCall[] = [];
+        const toolResults: { callId: string; content: string }[] = [];
 
-		for (const part of m.content ?? []) {
-			if (part instanceof vscode.LanguageModelTextPart) {
-				textParts.push(part.value);
-			} else if (part instanceof vscode.LanguageModelDataPart) {
-				// Handle image and other data parts
-				if (part.mimeType.startsWith("image/")) {
-					// Convert image data to base64 for OpenAI vision API
-					// Properly handle Uint8Array to ensure cross-platform compatibility
-					let base64Data: string;
-					if (part.data instanceof Uint8Array) {
-						base64Data = Buffer.from(part.data).toString("base64");
-					} else if (typeof part.data === "string") {
-						base64Data = Buffer.from(part.data, "utf-8").toString("base64");
-					} else {
-						base64Data = Buffer.from(part.data as unknown as ArrayBuffer).toString("base64");
-					}
-					contentItems.push({
-						type: "image_url",
-						image_url: {
-							url: `data:${part.mimeType};base64,${base64Data}`,
-						},
-					});
-				}
-				// Other data types (json, etc.) can be handled here if needed in the future
-			} else if (part instanceof vscode.LanguageModelToolCallPart) {
-				const id = part.callId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-				let args = "{}";
-				try {
-					args = JSON.stringify(part.input ?? {});
-				} catch {
-					args = "{}";
-				}
-				toolCalls.push({ id, type: "function", function: { name: part.name, arguments: args } });
-			} else if (isToolResultPart(part)) {
-				const callId = (part as { callId?: string }).callId ?? "";
-				const content = collectToolResultText(part as { content?: ReadonlyArray<unknown> });
-				toolResults.push({ callId, content });
-			}
-		}
+        for (const part of m.content ?? []) {
+            if (part instanceof vscode.LanguageModelTextPart) {
+                textParts.push(part.value);
+            } else if (part instanceof vscode.LanguageModelDataPart) {
+                // Handle image and other data parts
+                if (part.mimeType.startsWith("image/")) {
+                    // Convert image data to base64 for OpenAI vision API
+                    // Properly handle Uint8Array to ensure cross-platform compatibility
+                    let base64Data: string;
+                    if (part.data instanceof Uint8Array) {
+                        base64Data = Buffer.from(part.data).toString("base64");
+                    } else if (typeof part.data === "string") {
+                        base64Data = Buffer.from(part.data, "utf-8").toString("base64");
+                    } else {
+                        base64Data = Buffer.from(part.data as unknown as ArrayBuffer).toString("base64");
+                    }
+                    contentItems.push({
+                        type: "image_url",
+                        image_url: {
+                            url: `data:${part.mimeType};base64,${base64Data}`,
+                        },
+                    });
+                }
+                // Other data types (json, etc.) can be handled here if needed in the future
+            } else if (part instanceof vscode.LanguageModelToolCallPart) {
+                const id = part.callId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                let args = "{}";
+                try {
+                    args = JSON.stringify(part.input ?? {});
+                } catch {
+                    args = "{}";
+                }
+                toolCalls.push({ id, type: "function", function: { name: part.name, arguments: args } });
+            } else if (isToolResultPart(part)) {
+                const callId = (part as { callId?: string }).callId ?? "";
+                const content = collectToolResultText(part as { content?: ReadonlyArray<unknown> });
+                toolResults.push({ callId, content });
+            }
+        }
 
-		let emittedAssistantToolCall = false;
-		if (toolCalls.length > 0) {
-			const messageContent = buildMessageContent(textParts, contentItems);
-			out.push({ role: "assistant", content: messageContent || undefined, tool_calls: toolCalls });
-			emittedAssistantToolCall = true;
-		}
+        let emittedAssistantToolCall = false;
+        if (toolCalls.length > 0) {
+            const messageContent = buildMessageContent(textParts, contentItems);
+            out.push({ role: "assistant", content: messageContent || undefined, tool_calls: toolCalls });
+            emittedAssistantToolCall = true;
+        }
 
-		for (const tr of toolResults) {
-			out.push({ role: "tool", tool_call_id: tr.callId, content: tr.content || "Success" });
-		}
+        for (const tr of toolResults) {
+            out.push({ role: "tool", tool_call_id: tr.callId, content: tr.content || "Success" });
+        }
 
-		const text = textParts.join("");
-		if (text || contentItems.length > 0) {
-			if (role === "system" || role === "user" || (role === "assistant" && !emittedAssistantToolCall)) {
-				const messageContent = buildMessageContent(textParts, contentItems);
-				if (messageContent) {
-					out.push({ role: role || "user", content: messageContent });
-				}
-			}
-		}
-	}
-	return out;
+        const text = textParts.join("");
+        if (text || contentItems.length > 0) {
+            if (role === "system" || role === "user" || (role === "assistant" && !emittedAssistantToolCall)) {
+                const messageContent = buildMessageContent(textParts, contentItems);
+                if (messageContent) {
+                    out.push({ role: role || "user", content: messageContent });
+                }
+            }
+        }
+    }
+    return out;
 }
 
 /**
@@ -226,23 +226,23 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
  * Otherwise, return a simple string.
  */
 function buildMessageContent(
-	textParts: string[],
-	contentItems: OpenAIChatMessageContentItem[]
+    textParts: string[],
+    contentItems: OpenAIChatMessageContentItem[]
 ): string | OpenAIChatMessageContentItem[] | undefined {
-	const text = textParts.join("");
+    const text = textParts.join("");
 
-	if (contentItems.length === 0) {
-		return text || undefined;
-	}
+    if (contentItems.length === 0) {
+        return text || undefined;
+    }
 
-	// If we have content items (images), create an array with both text and images
-	const items: OpenAIChatMessageContentItem[] = [];
-	if (text) {
-		items.push({ type: "text", text });
-	}
-	items.push(...contentItems);
+    // If we have content items (images), create an array with both text and images
+    const items: OpenAIChatMessageContentItem[] = [];
+    if (text) {
+        items.push({ type: "text", text });
+    }
+    items.push(...contentItems);
 
-	return items.length > 0 ? items : undefined;
+    return items.length > 0 ? items : undefined;
 }
 
 /**
@@ -250,40 +250,40 @@ function buildMessageContent(
  * @param options Request options containing tools and toolMode.
  */
 export function convertTools(options: vscode.ProvideLanguageModelChatResponseOptions): {
-	tools?: OpenAIFunctionToolDef[];
-	tool_choice?: "auto" | { type: "function"; function: { name: string } };
+    tools?: OpenAIFunctionToolDef[];
+    tool_choice?: "auto" | { type: "function"; function: { name: string } };
 } {
-	const tools = options.tools ?? [];
-	if (!tools || tools.length === 0) {
-		return {};
-	}
+    const tools = options.tools ?? [];
+    if (!tools || tools.length === 0) {
+        return {};
+    }
 
-	const toolDefs: OpenAIFunctionToolDef[] = tools
-		.filter((t): t is vscode.LanguageModelChatTool => t && typeof t === "object")
-		.map((t: vscode.LanguageModelChatTool) => {
-			const name = sanitizeFunctionName(t.name);
-			const description = typeof t.description === "string" ? t.description : "";
-			const params = sanitizeSchema(t.inputSchema ?? { type: "object", properties: {} });
-			return {
-				type: "function" as const,
-				function: {
-					name,
-					description,
-					parameters: params,
-				},
-			} satisfies OpenAIFunctionToolDef;
-		});
+    const toolDefs: OpenAIFunctionToolDef[] = tools
+        .filter((t): t is vscode.LanguageModelChatTool => t && typeof t === "object")
+        .map((t: vscode.LanguageModelChatTool) => {
+            const name = sanitizeFunctionName(t.name);
+            const description = typeof t.description === "string" ? t.description : "";
+            const params = sanitizeSchema(t.inputSchema ?? { type: "object", properties: {} });
+            return {
+                type: "function" as const,
+                function: {
+                    name,
+                    description,
+                    parameters: params,
+                },
+            } satisfies OpenAIFunctionToolDef;
+        });
 
-	let tool_choice: "auto" | { type: "function"; function: { name: string } } = "auto";
-	if (options.toolMode === vscode.LanguageModelChatToolMode.Required) {
-		if (tools.length !== 1) {
-			Logger.error("ToolMode.Required but multiple tools:", tools.length);
-			throw new Error("LanguageModelChatToolMode.Required is not supported with more than one tool");
-		}
-		tool_choice = { type: "function", function: { name: sanitizeFunctionName(tools[0].name) } };
-	}
+    let tool_choice: "auto" | { type: "function"; function: { name: string } } = "auto";
+    if (options.toolMode === vscode.LanguageModelChatToolMode.Required) {
+        if (tools.length !== 1) {
+            Logger.error("ToolMode.Required but multiple tools:", tools.length);
+            throw new Error("LanguageModelChatToolMode.Required is not supported with more than one tool");
+        }
+        tool_choice = { type: "function", function: { name: sanitizeFunctionName(tools[0].name) } };
+    }
 
-	return { tools: toolDefs, tool_choice };
+    return { tools: toolDefs, tool_choice };
 }
 
 /**
@@ -291,14 +291,14 @@ export function convertTools(options: vscode.ProvideLanguageModelChatResponseOpt
  * @param tools Tools to validate.
  */
 export function validateTools(tools: readonly vscode.LanguageModelChatTool[]): void {
-	for (const tool of tools) {
-		if (!tool.name.match(/^[\w-]+$/)) {
-			Logger.error("Invalid tool name detected:", tool.name);
-			throw new Error(
-				`Invalid tool name "${tool.name}": only alphanumeric characters, hyphens, and underscores are allowed.`
-			);
-		}
-	}
+    for (const tool of tools) {
+        if (!tool.name.match(/^[\w-]+$/)) {
+            Logger.error("Invalid tool name detected:", tool.name);
+            throw new Error(
+                `Invalid tool name "${tool.name}": only alphanumeric characters, hyphens, and underscores are allowed.`
+            );
+        }
+    }
 }
 
 /**
@@ -306,47 +306,47 @@ export function validateTools(tools: readonly vscode.LanguageModelChatTool[]): v
  * @param messages The full request message list.
  */
 export function validateRequest(messages: readonly vscode.LanguageModelChatRequestMessage[]): void {
-	const lastMessage = messages[messages.length - 1];
-	if (!lastMessage) {
-		Logger.error("No messages in request");
-		throw new Error("Invalid request: no messages.");
-	}
+    const lastMessage = messages[messages.length - 1];
+    if (!lastMessage) {
+        Logger.error("No messages in request");
+        throw new Error("Invalid request: no messages.");
+    }
 
-	messages.forEach((message, i) => {
-		if (message.role === vscode.LanguageModelChatMessageRole.Assistant) {
-			const toolCallIds = new Set(
-				message.content
-					.filter((part) => part instanceof vscode.LanguageModelToolCallPart)
-					.map((part) => (part as unknown as vscode.LanguageModelToolCallPart).callId)
-			);
-			if (toolCallIds.size === 0) {
-				return;
-			}
+    messages.forEach((message, i) => {
+        if (message.role === vscode.LanguageModelChatMessageRole.Assistant) {
+            const toolCallIds = new Set(
+                message.content
+                    .filter((part) => part instanceof vscode.LanguageModelToolCallPart)
+                    .map((part) => (part as unknown as vscode.LanguageModelToolCallPart).callId)
+            );
+            if (toolCallIds.size === 0) {
+                return;
+            }
 
-			let nextMessageIdx = i + 1;
-			const errMsg =
-				"Invalid request: Tool call part must be followed by a User message with a LanguageModelToolResultPart with a matching callId.";
-			while (toolCallIds.size > 0) {
-				const nextMessage = messages[nextMessageIdx++];
-				if (!nextMessage || nextMessage.role !== vscode.LanguageModelChatMessageRole.User) {
-					Logger.error("Validation failed: missing tool result for call IDs:", Array.from(toolCallIds));
-					throw new Error(errMsg);
-				}
+            let nextMessageIdx = i + 1;
+            const errMsg =
+                "Invalid request: Tool call part must be followed by a User message with a LanguageModelToolResultPart with a matching callId.";
+            while (toolCallIds.size > 0) {
+                const nextMessage = messages[nextMessageIdx++];
+                if (!nextMessage || nextMessage.role !== vscode.LanguageModelChatMessageRole.User) {
+                    Logger.error("Validation failed: missing tool result for call IDs:", Array.from(toolCallIds));
+                    throw new Error(errMsg);
+                }
 
-				nextMessage.content.forEach((part) => {
-					if (!isToolResultPart(part)) {
-						const ctorName =
-							(Object.getPrototypeOf(part as object) as { constructor?: { name?: string } } | undefined)?.constructor
-								?.name ?? typeof part;
-						Logger.error("Validation failed: expected tool result part, got:", ctorName);
-						throw new Error(errMsg);
-					}
-					const callId = (part as { callId: string }).callId;
-					toolCallIds.delete(callId);
-				});
-			}
-		}
-	});
+                nextMessage.content.forEach((part) => {
+                    if (!isToolResultPart(part)) {
+                        const ctorName =
+                            (Object.getPrototypeOf(part as object) as { constructor?: { name?: string } } | undefined)
+                                ?.constructor?.name ?? typeof part;
+                        Logger.error("Validation failed: expected tool result part, got:", ctorName);
+                        throw new Error(errMsg);
+                    }
+                    const callId = (part as { callId: string }).callId;
+                    toolCallIds.delete(callId);
+                });
+            }
+        }
+    });
 }
 
 /**
@@ -354,13 +354,13 @@ export function validateRequest(messages: readonly vscode.LanguageModelChatReque
  * @param value Unknown value to test.
  */
 export function isToolResultPart(value: unknown): value is { callId: string; content?: ReadonlyArray<unknown> } {
-	if (!value || typeof value !== "object") {
-		return false;
-	}
-	const obj = value as Record<string, unknown>;
-	const hasCallId = typeof obj.callId === "string";
-	const hasContent = "content" in obj;
-	return hasCallId && hasContent;
+    if (!value || typeof value !== "object") {
+        return false;
+    }
+    const obj = value as Record<string, unknown>;
+    const hasCallId = typeof obj.callId === "string";
+    const hasContent = "content" in obj;
+    return hasCallId && hasContent;
 }
 
 /**
@@ -368,18 +368,18 @@ export function isToolResultPart(value: unknown): value is { callId: string; con
  * @param message The message whose role is mapped.
  */
 function mapRole(message: vscode.LanguageModelChatRequestMessage): Exclude<OpenAIChatRole, "tool"> {
-	const role = message.role;
+    const role = message.role;
 
-	// Use string comparison if possible, or fall back to numeric comparison
-	if (role === vscode.LanguageModelChatMessageRole.User) {
-		return "user";
-	}
-	if (role === vscode.LanguageModelChatMessageRole.Assistant) {
-		return "assistant";
-	}
+    // Use string comparison if possible, or fall back to numeric comparison
+    if (role === vscode.LanguageModelChatMessageRole.User) {
+        return "user";
+    }
+    if (role === vscode.LanguageModelChatMessageRole.Assistant) {
+        return "assistant";
+    }
 
-	// Default to system for everything else (including System role)
-	return "system";
+    // Default to system for everything else (including System role)
+    return "system";
 }
 
 /**
@@ -387,21 +387,21 @@ function mapRole(message: vscode.LanguageModelChatRequestMessage): Exclude<OpenA
  * @param pr Tool result-like object with content array.
  */
 function collectToolResultText(pr: { content?: ReadonlyArray<unknown> }): string {
-	let text = "";
-	for (const c of pr.content ?? []) {
-		if (c instanceof vscode.LanguageModelTextPart) {
-			text += c.value;
-		} else if (typeof c === "string") {
-			text += c;
-		} else {
-			try {
-				text += JSON.stringify(c);
-			} catch {
-				/* ignore */
-			}
-		}
-	}
-	return text;
+    let text = "";
+    for (const c of pr.content ?? []) {
+        if (c instanceof vscode.LanguageModelTextPart) {
+            text += c.value;
+        } else if (typeof c === "string") {
+            text += c;
+        } else {
+            try {
+                text += JSON.stringify(c);
+            } catch {
+                /* ignore */
+            }
+        }
+    }
+    return text;
 }
 
 /**
@@ -410,16 +410,16 @@ function collectToolResultText(pr: { content?: ReadonlyArray<unknown> }): string
  * @returns Parsed object or ok:false.
  */
 export function tryParseJSONObject(text: string): { ok: true; value: Record<string, unknown> } | { ok: false } {
-	try {
-		if (!text || !/[{]/.test(text)) {
-			return { ok: false };
-		}
-		const value = JSON.parse(text);
-		if (value && typeof value === "object" && !Array.isArray(value)) {
-			return { ok: true, value };
-		}
-		return { ok: false };
-	} catch {
-		return { ok: false };
-	}
+    try {
+        if (!text || !/[{]/.test(text)) {
+            return { ok: false };
+        }
+        const value = JSON.parse(text);
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+            return { ok: true, value };
+        }
+        return { ok: false };
+    } catch {
+        return { ok: false };
+    }
 }
