@@ -6,7 +6,7 @@ export interface IMetrics {
 	durationMs?: number;
 	tokensIn?: number;
 	tokensOut?: number;
-	status: "success" | "failure";
+	status: "success" | "failure" | "caching_bypassed";
 	error?: string;
 }
 

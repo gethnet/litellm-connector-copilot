@@ -233,7 +233,7 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
 				try {
 					const responsesClient = new ResponsesClient(config, this.userAgent);
 					const responsesRequest = transformToResponsesFormat(requestBody);
-					await responsesClient.sendResponsesRequest(responsesRequest, trackingProgress, token);
+					await responsesClient.sendResponsesRequest(responsesRequest, trackingProgress, token, modelInfo);
 					LiteLLMTelemetry.reportMetric({
 						requestId,
 						model: model.id,

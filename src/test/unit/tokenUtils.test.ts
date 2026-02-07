@@ -1,9 +1,10 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
+import { isAnthropicModel } from "../../utils/modelUtils";
 import {
+	estimateMessagesTokens,
 	estimateSingleMessageTokens,
 	estimateToolTokens,
-	isAnthropicModel,
 	trimMessagesToFitBudget,
 } from "../../adapters/tokenUtils";
 

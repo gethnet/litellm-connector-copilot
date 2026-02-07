@@ -4,9 +4,12 @@ import {
 	LiteLLMModelInfoResponse,
 	OpenAIChatCompletionRequest,
 	LiteLLMResponsesRequest,
+	LiteLLMModelInfo,
 } from "../types";
 import { transformToResponsesFormat } from "./responsesAdapter";
 import { Logger } from "../utils/logger";
+import { isAnthropicModel } from "../utils/modelUtils";
+import { LiteLLMTelemetry } from "../utils/telemetry";
 
 export class LiteLLMClient {
 	constructor(
@@ -41,19 +44,31 @@ export class LiteLLMClient {
 	async chat(
 		request: OpenAIChatCompletionRequest,
 		mode?: string,
-		token?: vscode.CancellationToken
+		token?: vscode.CancellationToken,
+		modelInfo?: LiteLLMModelInfo
 	): Promise<ReadableStream<Uint8Array>> {
 		const endpoint = this.getEndpoint(mode);
 		let body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest = request;
 
+		const isAnthropic = isAnthropicModel(request.model, modelInfo);
+
 		if (this.config.disableCaching) {
-			body.no_cache = true;
-			body["no-cache"] = true;
+			if (isAnthropic) {
+				Logger.info(`Bypassing 'disable caching' for Anthropic/Claude model: ${request.model}`);
+				LiteLLMTelemetry.reportMetric({
+					requestId: `bypass-${Math.random().toString(36).substring(7)}`,
+					model: request.model,
+					status: "caching_bypassed",
+				});
+			} else {
+				body.no_cache = true;
+				body["no-cache"] = true;
+			}
 		}
 
 		if (endpoint === "/responses") {
 			body = transformToResponsesFormat(request);
-			if (this.config.disableCaching) {
+			if (this.config.disableCaching && !isAnthropic) {
 				body.no_cache = true;
 				body["no-cache"] = true;
 			}
@@ -64,7 +79,7 @@ export class LiteLLMClient {
 			`${this.config.url}${endpoint}`,
 			{
 				method: "POST",
-				headers: this.getHeaders(),
+				headers: this.getHeaders(request.model, modelInfo),
 				body: JSON.stringify(body),
 			},
 			{ token }
@@ -84,7 +99,7 @@ export class LiteLLMClient {
 				Logger.warn(`Detected unsupported parameters for ${request.model}, attempting to strip and retry.`);
 
 				const strippedBody = JSON.parse(JSON.stringify(body));
-				const headers = this.getHeaders();
+				const headers = this.getHeaders(request.model, modelInfo);
 
 				// 1. Handle explicit mentions of parameters in the error message
 				// Common patterns: "unsupported parameter: 'temperature'", "unexpected keyword argument 'top_p'"
@@ -132,7 +147,7 @@ export class LiteLLMClient {
 		return response.body as ReadableStream<Uint8Array>;
 	}
 
-	private getHeaders(): Record<string, string> {
+	private getHeaders(modelId?: string, modelInfo?: LiteLLMModelInfo): Record<string, string> {
 		const headers: Record<string, string> = {
 			"Content-Type": "application/json",
 			"User-Agent": this.userAgent,
@@ -142,7 +157,10 @@ export class LiteLLMClient {
 			headers["X-API-Key"] = this.config.key;
 		}
 		if (this.config.disableCaching) {
-			headers["Cache-Control"] = "no-cache";
+			const isAnthropic = modelId ? isAnthropicModel(modelId, modelInfo) : false;
+			if (!isAnthropic) {
+				headers["Cache-Control"] = "no-cache";
+			}
 		}
 		return headers;
 	}

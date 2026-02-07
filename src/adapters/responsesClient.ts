@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
-import { LiteLLMConfig, LiteLLMResponsesRequest } from "../types";
+import { LiteLLMConfig, LiteLLMResponsesRequest, LiteLLMModelInfo } from "../types";
 import { tryParseJSONObject } from "../utils";
 import { Logger } from "../utils/logger";
+import { isAnthropicModel } from "../utils/modelUtils";
 
 export interface ResponsesEvent {
 	type: string;
@@ -29,11 +30,12 @@ export class ResponsesClient {
 	async sendResponsesRequest(
 		request: LiteLLMResponsesRequest,
 		progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-		token: vscode.CancellationToken
+		token: vscode.CancellationToken,
+		modelInfo?: LiteLLMModelInfo
 	): Promise<void> {
 		const response = await fetch(`${this.config.url}/responses`, {
 			method: "POST",
-			headers: this.getHeaders(),
+			headers: this.getHeaders(request.model, modelInfo),
 			body: JSON.stringify(request),
 		});
 
@@ -49,7 +51,7 @@ export class ResponsesClient {
 		await this.parseSSEStream(response.body, progress, token);
 	}
 
-	private getHeaders(): Record<string, string> {
+	private getHeaders(modelId?: string, modelInfo?: LiteLLMModelInfo): Record<string, string> {
 		const headers: Record<string, string> = {
 			"Content-Type": "application/json",
 			"User-Agent": this.userAgent,
@@ -57,6 +59,12 @@ export class ResponsesClient {
 		if (this.config.key) {
 			headers.Authorization = `Bearer ${this.config.key}`;
 			headers["X-API-Key"] = this.config.key;
+		}
+		if (this.config.disableCaching) {
+			const isAnthropic = modelId ? isAnthropicModel(modelId, modelInfo) : false;
+			if (!isAnthropic) {
+				headers["Cache-Control"] = "no-cache";
+			}
 		}
 		return headers;
 	}

@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { LiteLLMModelInfo } from "../types";
+import { isAnthropicModel } from "../utils/modelUtils";
 
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16000;
 export const DEFAULT_CONTEXT_LENGTH = 128000;
@@ -48,13 +49,6 @@ export function estimateToolTokens(
 /**
  * Determine whether a model should use stricter Anthropic-style budgeting.
  */
-export function isAnthropicModel(modelId: string, modelInfo?: LiteLLMModelInfo): boolean {
-	if (modelInfo?.litellm_provider && /anthropic/i.test(modelInfo.litellm_provider)) {
-		return true;
-	}
-	return /claude/i.test(modelId) || /anthropic/i.test(modelId);
-}
-
 /**
  * Trim messages to fit within the model's input token budget, preserving the system prompt
  * and as much recent context as possible. Anthropic models get a safety margin to avoid

@@ -27,8 +27,15 @@ suite("LiteLLM Client Unit Tests", () => {
 	test("getHeaders includes Cache-Control: no-cache when disabled", () => {
 		const client = new LiteLLMClient({ ...config, disableCaching: true }, userAgent);
 		// @ts-expect-error - accessing private method for testing
-		const headers = client.getHeaders();
+		const headers = client.getHeaders("gpt-4");
 		assert.strictEqual(headers["Cache-Control"], "no-cache");
+	});
+
+	test("getHeaders bypasses Cache-Control for Claude models", () => {
+		const client = new LiteLLMClient({ ...config, disableCaching: true }, userAgent);
+		// @ts-expect-error - accessing private method for testing
+		const headers = client.getHeaders("claude-3-sonnet");
+		assert.strictEqual(headers["Cache-Control"], undefined);
 	});
 
 	test("chat includes no_cache in body when disabled", async () => {
@@ -38,12 +45,29 @@ suite("LiteLLM Client Unit Tests", () => {
 			body: new ReadableStream(),
 		} as Response);
 
-		await client.chat({ model: "test", messages: [] });
+		await client.chat({ model: "gpt-4", messages: [] });
 
 		const args = fetchStub.getCall(0).args;
 		const body = JSON.parse(args[1]!.body as string);
 		assert.strictEqual(body.no_cache, true);
 		assert.strictEqual(body["no-cache"], true);
+	});
+
+	test("chat bypasses no_cache for Claude models", async () => {
+		const client = new LiteLLMClient({ ...config, disableCaching: true }, userAgent);
+		const fetchStub = sandbox.stub(global, "fetch").resolves({
+			ok: true,
+			body: new ReadableStream(),
+		} as Response);
+
+		await client.chat({ model: "claude-3-opus", messages: [] });
+
+		const args = fetchStub.getCall(0).args;
+		const body = JSON.parse(args[1]!.body as string);
+		assert.strictEqual(body.no_cache, undefined);
+		assert.strictEqual(body["no-cache"], undefined);
+		const headers = args[1]!.headers as Record<string, string>;
+		assert.strictEqual(headers["Cache-Control"], undefined);
 	});
 
 	test("getEndpoint resolves correctly", () => {
@@ -79,7 +103,7 @@ suite("LiteLLM Client Unit Tests", () => {
 		fetchStub.onCall(0).resolves(errorResponse as unknown as Response);
 		fetchStub.onCall(1).resolves(successResponse as unknown as Response);
 
-		await client.chat({ model: "claude-3", messages: [] });
+		await client.chat({ model: "gpt-4", messages: [] });
 
 		assert.strictEqual(fetchStub.callCount, 2, "Should have retried");
 
