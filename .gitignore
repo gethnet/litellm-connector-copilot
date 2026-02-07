@@ -208,4 +208,5 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
-/.plans/
+.plans/**/*.*
+.plans

@@ -1,7 +1,13 @@
 {
 	"semi": true,
-	"useTabs": true,
-	"tabWidth": 2,
+	"useTabs": false,
+	"tabWidth": 4,
 	"printWidth": 120,
-	"trailingComma": "es5"
+	"trailingComma": "es5",
+	"bracketSpacing": true,
+	"bracketSameLine": false,
+	"endOfLine": "lf",
+	"singleAttributePerLine": true,
+	"singleQuote": false,
+	"objectWrap": "preserve"
 }

@@ -1,12 +1,7 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import { isAnthropicModel } from "../../utils/modelUtils";
-import {
-	estimateMessagesTokens,
-	estimateSingleMessageTokens,
-	estimateToolTokens,
-	trimMessagesToFitBudget,
-} from "../../adapters/tokenUtils";
+import { estimateSingleMessageTokens, estimateToolTokens, trimMessagesToFitBudget } from "../../adapters/tokenUtils";
 
 suite("TokenUtils Unit Tests", () => {
 	test("estimateSingleMessageTokens estimates text parts", () => {
