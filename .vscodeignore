@@ -13,4 +13,13 @@ vsc-extension-quickstart.md
 **/.eslintrc.json
 **/*.map
 **/*.ts
-llm-response.json
+**/llm-response.json
+.devcontainer/**
+.plans/**
+scripts
+test-results/*
+**/.prettierignore
+*.config.mjs
+**.code-workspace
+coverage/**
+**/test/**
