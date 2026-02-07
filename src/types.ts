@@ -125,6 +125,7 @@ export interface OpenAIChatCompletionRequest {
 	tools?: OpenAIFunctionToolDef[];
 	tool_choice?: string | object;
 	no_cache?: boolean;
+	"no-cache"?: boolean;
 }
 
 /**
@@ -144,6 +145,7 @@ export interface LiteLLMResponsesRequest {
 	tools?: LiteLLMResponseTool[];
 	tool_choice?: string | object;
 	no_cache?: boolean;
+	"no-cache"?: boolean;
 }
 
 /**

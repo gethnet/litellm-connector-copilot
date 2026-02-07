@@ -48,10 +48,15 @@ export class LiteLLMClient {
 
 		if (this.config.disableCaching) {
 			body.no_cache = true;
+			body["no-cache"] = true;
 		}
 
 		if (endpoint === "/responses") {
 			body = transformToResponsesFormat(request);
+			if (this.config.disableCaching) {
+				body.no_cache = true;
+				body["no-cache"] = true;
+			}
 		}
 
 		Logger.trace(`Sending chat request to ${endpoint}`, { model: request.model });
@@ -93,6 +98,7 @@ export class LiteLLMClient {
 				// 2. Always strip caching if mentioned or if it was a likely culprit
 				if (errorLower.includes("no-cache") || errorLower.includes("no_cache")) {
 					delete strippedBody.no_cache;
+					delete strippedBody["no-cache"];
 					delete headers["Cache-Control"];
 				}
 

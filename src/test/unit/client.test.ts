@@ -43,6 +43,7 @@ suite("LiteLLM Client Unit Tests", () => {
 		const args = fetchStub.getCall(0).args;
 		const body = JSON.parse(args[1]!.body as string);
 		assert.strictEqual(body.no_cache, true);
+		assert.strictEqual(body["no-cache"], true);
 	});
 
 	test("getEndpoint resolves correctly", () => {
@@ -85,12 +86,14 @@ suite("LiteLLM Client Unit Tests", () => {
 		// First call should have no_cache
 		const firstCallBody = JSON.parse(fetchStub.getCall(0).args[1]!.body as string);
 		assert.strictEqual(firstCallBody.no_cache, true);
+		assert.strictEqual(firstCallBody["no-cache"], true);
 		const firstCallHeaders = fetchStub.getCall(0).args[1]!.headers as Record<string, string>;
 		assert.strictEqual(firstCallHeaders["Cache-Control"], "no-cache");
 
 		// Second call should NOT have no_cache or Cache-Control
 		const secondCallBody = JSON.parse(fetchStub.getCall(1).args[1]!.body as string);
 		assert.strictEqual(secondCallBody.no_cache, undefined);
+		assert.strictEqual(secondCallBody["no-cache"], undefined);
 		const secondCallHeaders = fetchStub.getCall(1).args[1]!.headers as Record<string, string>;
 		assert.strictEqual(secondCallHeaders["Cache-Control"], undefined);
 	});
