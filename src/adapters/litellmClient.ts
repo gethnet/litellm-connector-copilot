@@ -55,7 +55,7 @@ export class LiteLLMClient {
 		}
 
 		Logger.trace(`Sending chat request to ${endpoint}`, { model: request.model });
-		const response = await this.fetchWithRateLimit(
+		let response = await this.fetchWithRateLimit(
 			`${this.config.url}${endpoint}`,
 			{
 				method: "POST",
@@ -64,6 +64,53 @@ export class LiteLLMClient {
 			},
 			{ token }
 		);
+
+		// Handle unsupported parameters by stripping them and retrying once
+		if (response.status === 400) {
+			const errorText = await response.clone().text();
+			const errorLower = errorText.toLowerCase();
+
+			if (
+				errorLower.includes("unsupported parameter") ||
+				errorLower.includes("extra_headers") ||
+				errorLower.includes("no-cache") ||
+				errorLower.includes("unexpected keyword argument")
+			) {
+				Logger.warn(`Detected unsupported parameters for ${request.model}, attempting to strip and retry.`);
+
+				const strippedBody = JSON.parse(JSON.stringify(body));
+				const headers = this.getHeaders();
+
+				// 1. Handle explicit mentions of parameters in the error message
+				// Common patterns: "unsupported parameter: 'temperature'", "unexpected keyword argument 'top_p'"
+				const paramMatch = errorText.match(/(?:parameter|argument|key)\s+['"]?([a-zA-Z0-9_-]+)['"]?/i);
+				if (paramMatch && paramMatch[1]) {
+					const paramName = paramMatch[1];
+					Logger.info(`Stripping specific parameter: ${paramName}`);
+					delete strippedBody[paramName];
+				}
+
+				// 2. Always strip caching if mentioned or if it was a likely culprit
+				if (errorLower.includes("no-cache") || errorLower.includes("no_cache")) {
+					delete strippedBody.no_cache;
+					delete headers["Cache-Control"];
+				}
+
+				// 3. Fallback: if we couldn't identify a specific param but it's a 400,
+				// we might want to strip common problematic ones if they exist,
+				// but for now we rely on the regex match above.
+
+				response = await this.fetchWithRateLimit(
+					`${this.config.url}${endpoint}`,
+					{
+						method: "POST",
+						headers: headers,
+						body: JSON.stringify(strippedBody),
+					},
+					{ token }
+				);
+			}
+		}
 
 		if (!response.ok) {
 			const errorText = await response.text();

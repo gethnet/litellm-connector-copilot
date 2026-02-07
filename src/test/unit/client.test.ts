@@ -54,4 +54,78 @@ suite("LiteLLM Client Unit Tests", () => {
 		// @ts-expect-error - accessing private method for testing
 		assert.strictEqual(client.getEndpoint(undefined), "/chat/completions");
 	});
+
+	test("chat retries without caching if unsupported parameter error occurs", async () => {
+		const client = new LiteLLMClient({ ...config, disableCaching: true }, userAgent);
+
+		const errorResponse = {
+			ok: false,
+			status: 400,
+			statusText: "Bad Request",
+			text: async () => "Unsupported parameter: no_cache",
+			clone: function () {
+				return this;
+			},
+		};
+
+		const successResponse = {
+			ok: true,
+			status: 200,
+			body: new ReadableStream(),
+		};
+
+		const fetchStub = sandbox.stub(global, "fetch");
+		fetchStub.onCall(0).resolves(errorResponse as unknown as Response);
+		fetchStub.onCall(1).resolves(successResponse as unknown as Response);
+
+		await client.chat({ model: "claude-3", messages: [] });
+
+		assert.strictEqual(fetchStub.callCount, 2, "Should have retried");
+
+		// First call should have no_cache
+		const firstCallBody = JSON.parse(fetchStub.getCall(0).args[1]!.body as string);
+		assert.strictEqual(firstCallBody.no_cache, true);
+		const firstCallHeaders = fetchStub.getCall(0).args[1]!.headers as Record<string, string>;
+		assert.strictEqual(firstCallHeaders["Cache-Control"], "no-cache");
+
+		// Second call should NOT have no_cache or Cache-Control
+		const secondCallBody = JSON.parse(fetchStub.getCall(1).args[1]!.body as string);
+		assert.strictEqual(secondCallBody.no_cache, undefined);
+		const secondCallHeaders = fetchStub.getCall(1).args[1]!.headers as Record<string, string>;
+		assert.strictEqual(secondCallHeaders["Cache-Control"], undefined);
+	});
+
+	test("chat retries by stripping specific parameter mentioned in error", async () => {
+		const client = new LiteLLMClient(config, userAgent);
+
+		const errorResponse = {
+			ok: false,
+			status: 400,
+			statusText: "Bad Request",
+			text: async () => "LiteLLM Error: unexpected keyword argument 'temperature'",
+			clone: function () {
+				return this;
+			},
+		};
+
+		const successResponse = {
+			ok: true,
+			status: 200,
+			body: new ReadableStream(),
+		};
+
+		const fetchStub = sandbox.stub(global, "fetch");
+		fetchStub.onCall(0).resolves(errorResponse as unknown as Response);
+		fetchStub.onCall(1).resolves(successResponse as unknown as Response);
+
+		await client.chat({ model: "o1-mini", messages: [], temperature: 1 });
+
+		assert.strictEqual(fetchStub.callCount, 2);
+
+		const secondCallBody = JSON.parse(fetchStub.getCall(0).args[1]!.body as string);
+		assert.strictEqual(secondCallBody.temperature, 1);
+
+		const retryCallBody = JSON.parse(fetchStub.getCall(1).args[1]!.body as string);
+		assert.strictEqual(retryCallBody.temperature, undefined, "Temperature should have been stripped");
+	});
 });
