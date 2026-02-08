@@ -8,3 +8,4 @@ dist/**
 **/*.mjs
 **/*vscode.d.ts
 .build/**
+esbuild.js

@@ -14,10 +14,10 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "1.2.0",
+	"version": "1.3.0",
 	"preview": false,
 	"engines": {
-		"vscode": "^1.107.0"
+		"vscode": "^1.109.0"
 	},
 	"categories": [
 		"AI",
@@ -49,7 +49,26 @@
 			{
 				"vendor": "litellm-connector",
 				"displayName": "LiteLLM",
-				"managementCommand": "litellm-connector.manage"
+				"configuration": {
+					"title": "LiteLLM Connector",
+					"properties": {
+						"baseUrl": {
+							"type": "string",
+							"description": "Base URL for the LiteLLM proxy server",
+							"title": "Base URL",
+							"placeholder": "http://localhost:4000"
+						},
+						"apiKey": {
+							"type": "string",
+							"secret": true,
+							"description": "API key for LiteLLM proxy authentication",
+							"title": "API Key"
+						}
+					},
+					"required": [
+						"baseUrl"
+					]
+				}
 			}
 		],
 		"commands": [
@@ -61,6 +80,11 @@
 		"configuration": {
 			"title": "LiteLLM Connector",
 			"properties": {
+				"litellm-connector.disableQuotaToolRedaction": {
+					"type": "boolean",
+					"default": false,
+					"description": "Disable per-turn tool redaction when a quota error is detected in chat history. Leave off to keep redaction enabled."
+				},
 				"litellm-connector.inactivityTimeout": {
 					"type": "number",
 					"default": 60,
@@ -75,35 +99,43 @@
 		},
 		"keybindings": []
 	},
-	"main": "./out/extension.js",
+	"main": "./dist/extension.js",
+	"browser": "./dist/web/extension.js",
 	"scripts": {
-		"vscode:prepublish": "npm run compile",
-		"vscode:pack": "npx vsce package",
-		"package:marketplace": "cp README.md README.github.md && cp README.marketplace.md README.md && npx vsce package && mv README.github.md README.md",
+		"clean": "rm -rf ./dist ./out ./coverage ./test-results",
+		"clean:build": "rm -rf ./dist ./out",
+		"clean:tests": "rm -rf ./coverage ./test-results",
+		"compile": "tsc -p ./",
+		"vscode:pack:dev": "npm run clean:build && tsc --noEmit && node esbuild.js && npx vsce package",
+		"vscode:pack": "npm run clean:build && tsc --noEmit && node esbuild.js --production && npx vsce package",
+		"package:marketplace": "cp README.md README.github.md && cp README.marketplace.md README.md && npm run vscode:pack && mv README.github.md README.md",
 		"download-api": "dts dev",
 		"postdownload-api": "yes n | dts main && node -e \"const fs = require('fs'); if (fs.existsSync('vscode.d.ts')) { fs.renameSync('vscode.d.ts', 'src/vscode.d.ts'); console.log('Moved vscode.d.ts to src/'); }\"",
 		"postinstall": "npm run download-api",
-		"compile": "tsc -p ./",
 		"lint": "eslint --fix",
+		"lint:check": "eslint",
 		"format": "prettier --write .",
+		"format:check": "prettier --check .",
 		"watch": "tsc -watch -p ./",
-		"test": "tsc -p ./ && xvfb-run vscode-test --args=\"--no-sandbox\"",
+		"pretest": "npm run compile",
+		"test": "xvfb-run vscode-test --args=\"--no-sandbox\"",
 		"test:report": "export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && npm run test",
-		"test:coverage": "tsc -p ./ && node -e \"const fs = require('fs'); const path = require('path'); const coveragePath = path.join(process.cwd(), 'coverage'); if (fs.existsSync(coveragePath)) fs.rmSync(coveragePath, { recursive: true, force: true });\" && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && xvfb-run vscode-test --args=\"--no-sandbox\" --coverage --coverage-output coverage --coverage-reporter lcovonly --coverage-reporter html --coverage-reporter text-summary",
+		"test:coverage": "npm run pretest && node -e \"const fs = require('fs'); const path = require('path'); const coveragePath = path.join(process.cwd(), 'coverage'); if (fs.existsSync(coveragePath)) fs.rmSync(coveragePath, { recursive: true, force: true });\" && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && xvfb-run vscode-test --args=\"--no-sandbox\" --coverage --coverage-output coverage --coverage-reporter lcovonly --coverage-reporter html --coverage-reporter text-summary",
 		"bump-version": "node scripts/bump-version.js"
 	},
 	"devDependencies": {
 		"@eslint/js": "^9.13.0",
 		"@stylistic/eslint-plugin": "^5.7.1",
 		"@types/mocha": "^10.0.6",
-		"@types/node": "^22",
+		"@types/node": "^22.19",
 		"@types/sinon": "^21.0.0",
-		"@types/vscode": "^1.104.0",
+		"@types/vscode": "^1.107.0",
 		"@vscode/dts": "^0.4.1",
 		"@vscode/test-cli": "^0.0.12",
 		"@vscode/test-electron": "^2.5.2",
 		"@vscode/vsce": "^3.7.0",
 		"all-contributors-cli": "^6.26.1",
+		"esbuild": "^0.27.3",
 		"eslint": "^9.13.0",
 		"mocha-junit-reporter": "^2.2.1",
 		"mocha-multi-reporters": "^1.5.0",

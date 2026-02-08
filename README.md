@@ -1,5 +1,12 @@
 # 🚀 LiteLLM Connector for GitHub Copilot Chat
 
+[![CI](https://github.com/gethnet/litellm-connector-copilot/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gethnet/litellm-connector-copilot/actions/workflows/ci.yml)
+[![Codecov](https://codecov.io/gh/gethnet/litellm-connector-copilot/branch/main/graph/badge.svg)](https://codecov.io/gh/gethnet/litellm-connector-copilot)
+[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/gethnet/litellm-connector-copilot?sort=semver)](https://github.com/gethnet/litellm-connector-copilot/releases)
+[![VS Code Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/GethNet.litellm-connector-copilot)](https://marketplace.visualstudio.com/items?itemName=GethNet.litellm-connector-copilot)
+[![VS Code Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/GethNet.litellm-connector-copilot)](https://marketplace.visualstudio.com/items?itemName=GethNet.litellm-connector-copilot)
+[![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
+
 **Unlock the full power of any LLM inside GitHub Copilot.**
 
 Tired of being locked into a single model? The LiteLLM Connector bridges the gap between VS Code's premier chat interface and the vast universe of models supported by LiteLLM. Whether it's Claude 3.5 Sonnet, GPT-4o, DeepSeek, or your own fine-tuned Llama 3 running locally—if LiteLLM can talk to it, Copilot can now use it.
@@ -17,6 +24,9 @@ To use this extension, **YOU MUST** have an active GitHub Copilot plan (the Free
 * **🛠️ Tool Calling**: Full support for function calling, allowing models to interact with your workspace.
 * **👁️ Vision Support**: Use image-capable models to analyze screenshots and diagrams directly in chat.
 * **🧠 Smart Parameter Handling**: Automatically handles provider-specific quirks (like stripping `temperature` for O1) so you don't have to.
+* **🔁 Automatic Retry on Unsupported Params**: If a model rejects a flag, the connector can strip unsupported parameters and retry.
+* **⏱️ Inactivity Watchdog**: Optional timeout to keep long streams from hanging indefinitely.
+* **🚫🧠 Cache Bypass Controls**: Send `no-cache` headers to bypass LiteLLM caching (with provider-aware exceptions).
 * **🔐 Secure by Design**: Your API keys and URLs are stored safely in VS Code's `SecretStorage`.
 
 ## ⚡ Quick Start
@@ -32,6 +42,15 @@ To use this extension, **YOU MUST** have an active GitHub Copilot plan (the Free
    * Open the Copilot Chat view.
    * Click the model picker and look for the **LiteLLM** section.
 5. **Start Chatting!**
+
+---
+
+## 🆕 Recent Highlights
+
+* **🚀 VS Code 1.109+ settings modernization**: configuration now aligns with the Language Model provider settings UI.
+* **🧰 Improved error handling**: better behavior around quota/tooling errors.
+* **📦 Smaller, faster package**: production builds are bundled/minified with **esbuild**.
+* **🌐 Web-ready output**: includes a browser-target bundle for VS Code Web hosts.
 
 ## 🤝 Attribution & Credits
 
@@ -51,12 +70,14 @@ If you want to contribute or build from source:
 3. Press `F5` to launch the "Extension Development Host" window.
 
 ### Common Scripts
-* `npm run compile`: Build the TypeScript source.
+* `npm run compile`: Type-check and emit TypeScript output to `out/`.
 * `npm run watch`: Build and watch for changes.
-* `npm run lint`: Run ESLint.
+* `npm run lint`: Run ESLint (auto-fix where possible).
+* `npm run format:check`: Verify formatting without modifying files.
 * `npm run test`: Run unit tests.
 * `npm run test:coverage`: Run tests and generate coverage reports.
 * `npm run bump-version`: Update version in `package.json`.
+* `npm run vscode:pack`: Build (esbuild) and package a VSIX.
 * `npm run package:marketplace`: Package the extension using `README.marketplace.md` for the VS Code Marketplace while preserving the GitHub README.
 
 ## 📚 Learn More
