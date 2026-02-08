@@ -49,8 +49,9 @@ suite("LiteLLM Client Unit Tests", () => {
 
         const args = fetchStub.getCall(0).args;
         const body = JSON.parse(args[1]!.body as string);
-        assert.strictEqual(body.no_cache, true);
-        assert.strictEqual(body["no-cache"], true);
+        assert.strictEqual(body.no_cache, undefined);
+        assert.strictEqual(body["no-cache"], undefined);
+        assert.strictEqual(body.extra_body?.cache?.["no-cache"], true);
     });
 
     test("chat bypasses no_cache for Claude models", async () => {
@@ -66,6 +67,7 @@ suite("LiteLLM Client Unit Tests", () => {
         const body = JSON.parse(args[1]!.body as string);
         assert.strictEqual(body.no_cache, undefined);
         assert.strictEqual(body["no-cache"], undefined);
+        assert.strictEqual(body.extra_body, undefined);
         const headers = args[1]!.headers as Record<string, string>;
         assert.strictEqual(headers["Cache-Control"], undefined);
     });
@@ -109,8 +111,9 @@ suite("LiteLLM Client Unit Tests", () => {
 
         // First call should have no_cache
         const firstCallBody = JSON.parse(fetchStub.getCall(0).args[1]!.body as string);
-        assert.strictEqual(firstCallBody.no_cache, true);
-        assert.strictEqual(firstCallBody["no-cache"], true);
+        assert.strictEqual(firstCallBody.no_cache, undefined);
+        assert.strictEqual(firstCallBody["no-cache"], undefined);
+        assert.strictEqual(firstCallBody.extra_body?.cache?.["no-cache"], true);
         const firstCallHeaders = fetchStub.getCall(0).args[1]!.headers as Record<string, string>;
         assert.strictEqual(firstCallHeaders["Cache-Control"], "no-cache");
 
@@ -118,6 +121,7 @@ suite("LiteLLM Client Unit Tests", () => {
         const secondCallBody = JSON.parse(fetchStub.getCall(1).args[1]!.body as string);
         assert.strictEqual(secondCallBody.no_cache, undefined);
         assert.strictEqual(secondCallBody["no-cache"], undefined);
+        assert.strictEqual(secondCallBody.extra_body, undefined);
         const secondCallHeaders = fetchStub.getCall(1).args[1]!.headers as Record<string, string>;
         assert.strictEqual(secondCallHeaders["Cache-Control"], undefined);
     });

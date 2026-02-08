@@ -9,6 +9,9 @@ on:
     branches:
       - geth-dev
       - main
+      - bugfix/**
+      - enhance/**
+      - feat/**
   pull_request:
     branches:
       - geth-dev
@@ -47,7 +50,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           files: ./coverage/lcov.info
-          fail_ci_if_error: true
+          fail_ci_if_error: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' }}
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload test results to Codecov
@@ -55,7 +58,7 @@ jobs:
         uses: codecov/test-results-action@v1
         with:
           files: test-results/**/*.xml
-          fail_ci_if_error: true
+          fail_ci_if_error: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' }}
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Get Package Info
