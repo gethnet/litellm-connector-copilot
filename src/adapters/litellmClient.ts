@@ -61,16 +61,14 @@ export class LiteLLMClient {
                     status: "caching_bypassed",
                 });
             } else {
-                body.no_cache = true;
-                body["no-cache"] = true;
+                body = this.withNoCacheExtraBody(body);
             }
         }
 
         if (endpoint === "/responses") {
             body = transformToResponsesFormat(request);
             if (this.config.disableCaching && !isAnthropic) {
-                body.no_cache = true;
-                body["no-cache"] = true;
+                body = this.withNoCacheExtraBody(body);
             }
         }
 
@@ -112,8 +110,30 @@ export class LiteLLMClient {
 
                 // 2. Always strip caching if mentioned or if it was a likely culprit
                 if (errorLower.includes("no-cache") || errorLower.includes("no_cache")) {
+                    // Legacy (older implementation)
                     delete strippedBody.no_cache;
                     delete strippedBody["no-cache"];
+
+                    // Current LiteLLM format: extra_body.cache["no-cache"]
+                    if (strippedBody.extra_body && typeof strippedBody.extra_body === "object") {
+                        const eb = strippedBody.extra_body as Record<string, unknown>;
+                        const cache = eb.cache;
+                        if (cache && typeof cache === "object") {
+                            delete (cache as Record<string, unknown>)["no-cache"];
+                        }
+                        // If cache object is now empty, remove it
+                        if (
+                            cache &&
+                            typeof cache === "object" &&
+                            Object.keys(cache as Record<string, unknown>).length === 0
+                        ) {
+                            delete eb.cache;
+                        }
+                        // If extra_body is now empty, remove it
+                        if (Object.keys(eb).length === 0) {
+                            delete strippedBody.extra_body;
+                        }
+                    }
                     delete headers["Cache-Control"];
                 }
 
@@ -174,6 +194,21 @@ export class LiteLLMClient {
         }
         // Default to chat/completions for backward compatibility
         return "/chat/completions";
+    }
+
+    private withNoCacheExtraBody(
+        body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest
+    ): OpenAIChatCompletionRequest | LiteLLMResponsesRequest {
+        const extraBody = body.extra_body ?? {};
+        const cache = (extraBody.cache ?? {}) as Record<string, unknown>;
+        cache["no-cache"] = true;
+        return {
+            ...body,
+            extra_body: {
+                ...extraBody,
+                cache,
+            },
+        };
     }
 
     private async fetchWithRetry(

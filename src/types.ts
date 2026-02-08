@@ -124,8 +124,19 @@ export interface OpenAIChatCompletionRequest {
     stop?: string | string[];
     tools?: OpenAIFunctionToolDef[];
     tool_choice?: string | object;
-    no_cache?: boolean;
-    "no-cache"?: boolean;
+    /**
+     * LiteLLM passthrough body.
+     * Used for features like caching controls.
+     *
+     * Docs: https://docs.litellm.ai/docs/proxy/caching#no-cache
+     */
+    extra_body?: {
+        cache?: {
+            /** Skip cache check, get fresh response */
+            "no-cache"?: boolean;
+        };
+        [key: string]: unknown;
+    };
 }
 
 /**
@@ -144,8 +155,16 @@ export interface LiteLLMResponsesRequest {
     stop?: string | string[];
     tools?: LiteLLMResponseTool[];
     tool_choice?: string | object;
-    no_cache?: boolean;
-    "no-cache"?: boolean;
+    /**
+     * LiteLLM passthrough body.
+     * Used for features like caching controls.
+     */
+    extra_body?: {
+        cache?: {
+            "no-cache"?: boolean;
+        };
+        [key: string]: unknown;
+    };
 }
 
 /**
