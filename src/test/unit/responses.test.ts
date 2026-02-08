@@ -1,7 +1,7 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import { ResponsesClient } from "../../adapters/responsesClient";
-import { LiteLLMConfig } from "../../types";
+import type { LiteLLMConfig } from "../../types";
 
 suite("Responses Client Unit Tests", () => {
     const config: LiteLLMConfig = { url: "http://localhost:4000", key: "test-key" };

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { LiteLLMConfig } from "../types";
+import type { LiteLLMConfig } from "../types";
 
 export class ConfigManager {
     private static readonly BASE_URL_KEY = "litellm-connector.baseUrl";

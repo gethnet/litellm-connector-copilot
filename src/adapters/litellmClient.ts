@@ -1,5 +1,5 @@
-import * as vscode from "vscode";
-import {
+import type * as vscode from "vscode";
+import type {
     LiteLLMConfig,
     LiteLLMModelInfoResponse,
     OpenAIChatCompletionRequest,

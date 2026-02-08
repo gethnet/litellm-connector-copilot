@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { LiteLLMModelInfo } from "../types";
+import type { LiteLLMModelInfo } from "../types";
 import { isAnthropicModel } from "../utils/modelUtils";
 
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16000;

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import {
+import type {
     CancellationToken,
     LanguageModelChatInformation,
     LanguageModelChatRequestMessage,
@@ -394,7 +394,7 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
             }
             watchdog = setTimeout(() => {
                 console.warn(`[LiteLLM Model Provider] Inactivity timeout after ${timeoutMs}ms`);
-                reader.cancel("Inactivity timeout");
+                void reader.cancel("Inactivity timeout");
             }, timeoutMs);
         };
 
@@ -402,7 +402,7 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
             if (watchdog) {
                 clearTimeout(watchdog);
             }
-            reader.cancel("User cancelled");
+            void reader.cancel("User cancelled");
         });
 
         try {

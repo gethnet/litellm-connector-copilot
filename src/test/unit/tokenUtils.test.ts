@@ -2,6 +2,7 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import { isAnthropicModel } from "../../utils/modelUtils";
 import { estimateSingleMessageTokens, estimateToolTokens, trimMessagesToFitBudget } from "../../adapters/tokenUtils";
+import type { LiteLLMModelInfo } from "../../types";
 
 suite("TokenUtils Unit Tests", () => {
     test("estimateSingleMessageTokens estimates text parts", () => {
@@ -29,7 +30,7 @@ suite("TokenUtils Unit Tests", () => {
         assert.strictEqual(
             isAnthropicModel("some-model", {
                 litellm_provider: "anthropic",
-            } as unknown as import("../../types").LiteLLMModelInfo),
+            } as unknown as LiteLLMModelInfo),
             true
         );
     });

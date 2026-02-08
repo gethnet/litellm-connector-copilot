@@ -2,7 +2,7 @@ import * as assert from "assert";
 import * as sinon from "sinon";
 import * as vscode from "vscode";
 import { ResponsesClient } from "../../adapters/responsesClient";
-import { LiteLLMConfig, LiteLLMResponsesRequest } from "../../types";
+import type { LiteLLMConfig, LiteLLMResponsesRequest } from "../../types";
 import { Logger } from "../../utils/logger";
 
 const encoder = new TextEncoder();

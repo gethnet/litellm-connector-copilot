@@ -1,4 +1,4 @@
-import { LiteLLMModelInfo } from "../types";
+import type { LiteLLMModelInfo } from "../types";
 
 /**
  * Determine whether a model is an Anthropic/Claude model (provider or ID match).

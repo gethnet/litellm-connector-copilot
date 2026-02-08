@@ -97,7 +97,7 @@ function sanitizeSchema(input: unknown, propName?: string): Record<string, unkno
     schema = pruneUnknownSchemaKeywords(schema);
 
     let t = schema.type as string | undefined;
-    if (t == null) {
+    if (t === null) {
         t = "object";
         schema.type = t;
     }

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { LiteLLMConfig, LiteLLMResponsesRequest, LiteLLMModelInfo } from "../types";
+import type { LiteLLMConfig, LiteLLMResponsesRequest, LiteLLMModelInfo } from "../types";
 import { tryParseJSONObject } from "../utils";
 import { Logger } from "../utils/logger";
 import { isAnthropicModel } from "../utils/modelUtils";

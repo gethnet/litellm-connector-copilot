@@ -13,11 +13,25 @@ export default tseslint.config(
 		ignores: [
 			'.vscode-test',
 			'out',
+			'dist',
+			'esbuild.js',
 			'**/*.d.ts'
 		]
 	},
 	{
 		files: ['**/*.{js,mjs,cjs,ts,jsx,tsx}'],
+	},
+	{
+		files: ['**/*.ts', '**/*.tsx'],
+		languageOptions: {
+			parserOptions: {
+				project: ['./tsconfig.json'],
+				tsconfigRootDir: import.meta.dirname
+			}
+		},
+		rules: {
+			'@typescript-eslint/no-floating-promises': 'error'
+		}
 	},
 	js.configs.recommended,
 	...tseslint.configs.recommended,
@@ -27,10 +41,11 @@ export default tseslint.config(
 			'@stylistic': stylistic
 		},
 		rules: {
-			'curly': 'warn',
+			'curly': 'error',
 			'@stylistic/semi': ['warn', 'always'],
 			'@typescript-eslint/no-empty-function': 'off',
 			'@typescript-eslint/array-type': 'off',
+			'eqeqeq': ["error", "always"],
 			'@typescript-eslint/naming-convention': [
 				'warn',
 				{
@@ -41,9 +56,11 @@ export default tseslint.config(
 			'@typescript-eslint/no-unused-vars': [
 				'error',
 				{
-					'argsIgnorePattern': '^_'
+					'argsIgnorePattern': '^_',
+					'ignoreRestSiblings': true
 				}
-			]
+			],
+			'@typescript-eslint/consistent-type-imports': ["warn", { "prefer": "type-imports" }]
 		}
 	}
 );

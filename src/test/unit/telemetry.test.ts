@@ -1,6 +1,7 @@
 import * as assert from "assert";
 import * as sinon from "sinon";
-import { LiteLLMTelemetry, IMetrics } from "../../utils/telemetry";
+import type { IMetrics } from "../../utils/telemetry";
+import { LiteLLMTelemetry } from "../../utils/telemetry";
 import { Logger } from "../../utils/logger";
 
 suite("Telemetry Unit Tests", () => {

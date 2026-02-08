@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { ConfigManager } from "../config/configManager";
+import type { ConfigManager } from "../config/configManager";
 
 function createConfigHandler(configManager: ConfigManager) {
     return async () => {
