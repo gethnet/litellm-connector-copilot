@@ -61,14 +61,15 @@ export class LiteLLMClient {
                     status: "caching_bypassed",
                 });
             } else {
-                // NOTE: Some backends error on unknown top-level/extra params like `cache`.
-                // Prefer the standard HTTP header only; keep request body OpenAI-compatible.
+                body = this.withNoCacheExtraBody(body);
             }
         }
 
         if (endpoint === "/responses") {
             body = transformToResponsesFormat(request);
-            // Intentionally do not add body.extra_body.cache here; rely on Cache-Control header.
+            if (this.config.disableCaching && !isAnthropic) {
+                body = this.withNoCacheExtraBody(body);
+            }
         }
 
         Logger.trace(`Sending chat request to ${endpoint}`, { model: request.model });
@@ -193,6 +194,21 @@ export class LiteLLMClient {
         }
         // Default to chat/completions for backward compatibility
         return "/chat/completions";
+    }
+
+    private withNoCacheExtraBody(
+        body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest
+    ): OpenAIChatCompletionRequest | LiteLLMResponsesRequest {
+        const extraBody = body.extra_body ?? {};
+        const cache = (extraBody.cache ?? {}) as Record<string, unknown>;
+        cache["no-cache"] = true;
+        return {
+            ...body,
+            extra_body: {
+                ...extraBody,
+                cache,
+            },
+        };
     }
 
     private async fetchWithRetry(
