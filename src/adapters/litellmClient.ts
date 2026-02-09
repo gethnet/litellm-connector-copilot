@@ -90,6 +90,7 @@ export class LiteLLMClient {
 
             if (
                 errorLower.includes("unsupported parameter") ||
+                errorLower.includes("unknown parameter") ||
                 errorLower.includes("extra_headers") ||
                 errorLower.includes("no-cache") ||
                 errorLower.includes("unexpected keyword argument")
@@ -108,11 +109,35 @@ export class LiteLLMClient {
                     delete strippedBody[paramName];
                 }
 
+                // Special-case: some providers reject a top-level `cache` object.
+                // LiteLLM proxy caching controls should live under extra_body.cache, but we defensively strip both.
+                if (errorLower.includes("unknown parameter") && errorLower.includes("cache")) {
+                    delete strippedBody.cache;
+                    if (strippedBody.extra_body && typeof strippedBody.extra_body === "object") {
+                        const eb = strippedBody.extra_body as Record<string, unknown>;
+                        if (eb.cache && typeof eb.cache === "object") {
+                            const cache = eb.cache as Record<string, unknown>;
+                            delete cache["no-cache"];
+                            delete cache.no_cache;
+                            if (Object.keys(cache).length === 0) {
+                                delete eb.cache;
+                            }
+                        }
+                        if (Object.keys(eb).length === 0) {
+                            delete strippedBody.extra_body;
+                        }
+                    }
+                    delete headers["Cache-Control"];
+                }
+
                 // 2. Always strip caching if mentioned or if it was a likely culprit
                 if (errorLower.includes("no-cache") || errorLower.includes("no_cache")) {
                     // Legacy (older implementation)
                     delete strippedBody.no_cache;
                     delete strippedBody["no-cache"];
+
+                    // Some backends interpret top-level `cache` as an OpenAI param and reject it
+                    delete strippedBody.cache;
 
                     // Current LiteLLM format: extra_body.cache["no-cache"]
                     if (strippedBody.extra_body && typeof strippedBody.extra_body === "object") {
