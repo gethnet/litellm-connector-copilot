@@ -92,3 +92,11 @@ jobs:
           !contains(github.event.release.tag_name, 'dev') &&
           !contains(github.event.release.tag_name, 'test')
         run: npx vsce publish --packagePath "$VSIX_FILE" -p ${{ secrets.VS_MARKETPLACE_PUB_TOKEN }} --no-dependencies
+
+      - name: Publish to Open VSX Registry
+        if: |
+          !contains(github.event.release.tag_name, 'dev') &&
+          !contains(github.event.release.tag_name, 'test')
+        env:
+          OPENVSX_TOKEN: ${{ secrets.OPENVSX_REGISTRY }}
+        run: npx ovsx publish "$VSIX_FILE" -p "$OPENVSX_TOKEN"

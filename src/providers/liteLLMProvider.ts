@@ -919,10 +919,47 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
         modelInfo: LiteLLMModelInfo | undefined,
         modelId?: string
     ): void {
-        const paramsToCheck = ["temperature", "stop", "frequency_penalty", "presence_penalty", "top_p"];
+        // NOTE: Some LiteLLM backends (and/or upstream providers) reject non-OpenAI parameters.
+        // In particular, LiteLLM proxy caching controls may be expressed as `cache` or `extra_body.cache`.
+        // If a backend doesn't support it, we must not send it.
+        const paramsToCheck = [
+            "temperature",
+            "stop",
+            "frequency_penalty",
+            "presence_penalty",
+            "top_p",
+            // caching controls (proxy-specific)
+            "cache",
+            "no_cache",
+            "no-cache",
+            "extra_body",
+        ];
         for (const p of paramsToCheck) {
             if (!this.isParameterSupported(p, modelInfo, modelId) && p in requestBody) {
                 delete requestBody[p];
+            }
+        }
+
+        // Always ensure we don't accidentally pass a top-level `cache` object.
+        // Some providers error with: "Unknown parameter: 'cache'".
+        if ("cache" in requestBody) {
+            delete requestBody.cache;
+        }
+
+        // If we have extra_body, ensure it doesn't contain cache controls unless the model explicitly supports it.
+        // We don't have a reliable per-model signal for this, so we default to stripping cache directives.
+        if (requestBody.extra_body && typeof requestBody.extra_body === "object") {
+            const eb = requestBody.extra_body as Record<string, unknown>;
+            if (eb.cache && typeof eb.cache === "object") {
+                const cache = eb.cache as Record<string, unknown>;
+                delete cache["no-cache"];
+                delete cache.no_cache;
+                if (Object.keys(cache).length === 0) {
+                    delete eb.cache;
+                }
+            }
+            if (Object.keys(eb).length === 0) {
+                delete requestBody.extra_body;
             }
         }
     }
