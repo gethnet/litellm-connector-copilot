@@ -96,6 +96,7 @@ export interface LiteLLMModelInfo {
     supports_reasoning?: boolean;
     supports_computer_use?: boolean | null;
     supported_openai_params?: string[];
+    tags?: string[];
     [key: string]: unknown; // Allow additional fields for extensibility
 }
 

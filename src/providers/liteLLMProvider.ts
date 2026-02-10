@@ -75,13 +75,25 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
     ): string[] {
         const tags = new Set<string>();
 
-        // Automatically add 'inline-completions' if it's a chat model that supports streaming
+        // Add intelligent defaults based on model characteristics
+        const modelName = modelId.toLowerCase();
+        if (modelName.includes("coder") || modelName.includes("code")) {
+            tags.add("inline-edit");
+        }
+
+        // Add tools tag if it supports function calling or vision (often used for tools)
+        if (modelInfo?.supports_function_calling || modelInfo?.supports_vision) {
+            tags.add("tools");
+        }
+
+        // Standard VS Code tags based on mode/capabilities
         if (modelInfo?.mode === "chat") {
             const supportsStreaming =
                 modelInfo.supports_native_streaming === true || modelInfo.supported_openai_params?.includes("stream");
 
             if (supportsStreaming) {
                 tags.add("inline-completions");
+                tags.add("terminal-chat");
             }
         }
 
@@ -155,6 +167,9 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
                     // Build capabilities based on model_info flags
                     const capabilities = this.buildCapabilities(modelInfo);
 
+                    // Calculate tags for feature registration
+                    const tags = this.getModelTags(modelId, modelInfo, config.modelOverrides);
+
                     const info = {
                         id: modelId,
                         name: entry.model_name ?? modelId,
@@ -164,10 +179,9 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
                         maxInputTokens: Math.max(1, maxInputTokens),
                         maxOutputTokens: Math.max(1, maxOutputTokens),
                         capabilities,
-                    } satisfies LanguageModelChatInformation;
+                        tags,
+                    } as LanguageModelChatInformation & { tags: string[] };
 
-                    // Store tags separately if needed for internal logic, but remove from info object
-                    // as it's not part of the VS Code LanguageModelChatInformation interface
                     return info;
                 }
             );
@@ -192,6 +206,10 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
         this.resetStreamingState();
         const startTime = LiteLLMTelemetry.startTimer();
         const requestId = Math.random().toString(36).substring(7);
+
+        // Extract caller context from model tags for telemetry
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const caller = (model as any).tags?.[0] || undefined;
 
         const trackingProgress: Progress<LanguageModelResponsePart> = {
             report: (part) => {
@@ -244,7 +262,8 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
                 options.tools ?? [],
                 requestId,
                 modelToUse.id,
-                config.disableQuotaToolRedaction === true
+                config.disableQuotaToolRedaction === true,
+                caller
             );
             const toolConfig = convertTools({ ...options, tools: toolRedaction.tools });
             const messagesToUse = trimMessagesToFitBudget(messages, toolConfig.tools, modelToUse, modelInfo);
@@ -323,6 +342,7 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
                         model: model.id,
                         durationMs: LiteLLMTelemetry.endTimer(startTime),
                         status: "success",
+                        caller,
                     });
                     return;
                 } catch (err) {
@@ -367,6 +387,15 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
             }
 
             await this.processStreamingResponse(stream, trackingProgress, token);
+
+            // Report success for streaming responses
+            LiteLLMTelemetry.reportMetric({
+                requestId,
+                model: modelToUse.id,
+                durationMs: LiteLLMTelemetry.endTimer(startTime),
+                status: "success",
+                caller,
+            });
         } catch (err: unknown) {
             let errorMessage = err instanceof Error ? err.message : String(err);
 
@@ -869,7 +898,8 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
         tools: readonly vscode.LanguageModelChatTool[],
         requestId: string,
         modelId: string,
-        disableRedaction: boolean
+        disableRedaction: boolean,
+        caller?: string
     ): { tools: readonly vscode.LanguageModelChatTool[] } {
         if (disableRedaction || !tools.length || !messages.length) {
             return { tools };
@@ -900,6 +930,7 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
             model: modelId,
             status: "failure",
             error: `quota_exceeded:${toolName}`,
+            ...(caller && { caller }),
         });
 
         return { tools: filteredTools };

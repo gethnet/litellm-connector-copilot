@@ -226,38 +226,38 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     test("getModelTags adds inline-completions for streaming chat models", () => {
         const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
-        const getModelTags = (
-            provider as unknown as {
-                getModelTags: (
-                    modelId: string,
-                    modelInfo?: LiteLLMModelInfo,
-                    overrides?: Record<string, string[]>
-                ) => string[];
-            }
-        ).getModelTags.bind(provider);
+
+        interface ProviderForTagTesting {
+            getModelTags: (
+                modelId: string,
+                modelInfo?: LiteLLMModelInfo,
+                overrides?: Record<string, string[]>
+            ) => string[];
+        }
+        const getModelTags = (provider as unknown as ProviderForTagTesting).getModelTags.bind(provider);
 
         const tags = getModelTags("test-model", {
             mode: "chat",
             supports_native_streaming: true,
         });
-        assert.ok(tags.includes("inline-completions"));
+        assert.ok(tags.includes("inline-completions"), "Streaming chat models should have inline-completions tag");
     });
 
     test("getModelTags applies user overrides", () => {
         const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
-        const getModelTags = (
-            provider as unknown as {
-                getModelTags: (
-                    modelId: string,
-                    modelInfo?: LiteLLMModelInfo,
-                    overrides?: Record<string, string[]>
-                ) => string[];
-            }
-        ).getModelTags.bind(provider);
+
+        interface ProviderForTagTesting {
+            getModelTags: (
+                modelId: string,
+                modelInfo?: LiteLLMModelInfo,
+                overrides?: Record<string, string[]>
+            ) => string[];
+        }
+        const getModelTags = (provider as unknown as ProviderForTagTesting).getModelTags.bind(provider);
 
         const overrides = { "test-model": ["custom-tag"] };
         const tags = getModelTags("test-model", undefined, overrides);
-        assert.ok(tags.includes("custom-tag"));
+        assert.ok(tags.includes("custom-tag"), "User-defined override tags should be included in result");
     });
 
     test("stripUnsupportedParametersFromRequest removes known unsupported params", () => {
@@ -393,5 +393,108 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         assert.strictEqual(convertedConfig.url, "https://api.litellm.ai");
         assert.strictEqual(convertedConfig.key, "sk-provider-key");
+    });
+
+    test("provideLanguageModelChatInformation includes tags in model info", async () => {
+        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+
+        const mockData = [
+            {
+                model_name: "gpt-4",
+                model_info: {
+                    id: "gpt-4",
+                    mode: "chat",
+                    supports_native_streaming: true,
+                    supports_function_calling: true,
+                } as LiteLLMModelInfo,
+            },
+            {
+                model_name: "claude-coder",
+                model_info: {
+                    id: "claude-coder",
+                    mode: "chat",
+                    supports_native_streaming: true,
+                } as LiteLLMModelInfo,
+            },
+        ];
+
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({ data: mockData });
+
+        const infos = await provider.provideLanguageModelChatInformation({ silent: true }, {
+            isCancellationRequested: false,
+            onCancellationRequested: () => ({ dispose() {} }),
+        } as vscode.CancellationToken);
+
+        assert.strictEqual(infos.length, 2);
+
+        // Model info with optional tags extension
+        interface ModelInfoWithTags {
+            tags?: string[];
+        }
+
+        // Check first model (gpt-4) has tools and completions tags
+        const gpt4 = infos[0] as ModelInfoWithTags;
+        const gpt4Tags = gpt4.tags || [];
+        assert.ok(gpt4Tags.includes("tools"), "gpt-4 should have tools tag for function-calling capability");
+        assert.ok(gpt4Tags.includes("inline-completions"), "gpt-4 should have inline-completions tag for streaming");
+
+        // Check second model (claude-coder) has inline-edit tag
+        const claude = infos[1] as ModelInfoWithTags;
+        const claudeTags = claude.tags || [];
+        assert.ok(
+            claudeTags.includes("inline-edit"),
+            "claude-coder should have inline-edit tag (name contains 'coder')"
+        );
+        assert.ok(
+            claudeTags.includes("inline-completions"),
+            "claude-coder should have inline-completions tag for streaming"
+        );
+    });
+
+    test("provideLanguageModelChatInformation applies model overrides to tags", async () => {
+        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+
+        const mockData = [
+            {
+                model_name: "gpt-4",
+                model_info: {
+                    id: "gpt-4",
+                    mode: "chat",
+                    supports_native_streaming: true,
+                } as LiteLLMModelInfo,
+            },
+        ];
+
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({ data: mockData });
+
+        // Stub config manager to return model overrides
+        interface ConfigManager {
+            getConfig: () => Promise<{ url: string; modelOverrides: Record<string, string[]> }>;
+        }
+        interface ProviderWithConfigManager {
+            _configManager: ConfigManager;
+        }
+        const providerWithConfig = provider as unknown as ProviderWithConfigManager;
+        sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            modelOverrides: {
+                "gpt-4": ["scm-generator", "custom-tag"],
+            },
+        });
+
+        const infos = await provider.provideLanguageModelChatInformation({ silent: true }, {
+            isCancellationRequested: false,
+            onCancellationRequested: () => ({ dispose() {} }),
+        } as vscode.CancellationToken);
+
+        assert.strictEqual(infos.length, 1);
+
+        interface ModelInfoWithTags {
+            tags?: string[];
+        }
+        const gpt4 = infos[0] as ModelInfoWithTags;
+        const gpt4Tags = gpt4.tags || [];
+        assert.ok(gpt4Tags.includes("scm-generator"), "Should include scm-generator override tag from config");
+        assert.ok(gpt4Tags.includes("custom-tag"), "Should include custom-tag override tag from config");
     });
 });

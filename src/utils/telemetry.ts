@@ -8,6 +8,7 @@ export interface IMetrics {
     tokensOut?: number;
     status: "success" | "failure" | "caching_bypassed";
     error?: string;
+    caller?: string;
 }
 
 export class LiteLLMTelemetry {
