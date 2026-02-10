@@ -1,9 +1,21 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
+import * as sinon from "sinon";
 import { LiteLLMChatModelProvider } from "../../providers/liteLLMProvider";
+import { LiteLLMClient } from "../../adapters/litellmClient";
+import { ResponsesClient } from "../../adapters/responsesClient";
 import type { LiteLLMModelInfo } from "../../types";
 
 suite("LiteLLM Provider Unit Tests", () => {
+    let sandbox: sinon.SinonSandbox;
+
+    setup(() => {
+        sandbox = sinon.createSandbox();
+    });
+
+    teardown(() => {
+        sandbox.restore();
+    });
     const mockSecrets: vscode.SecretStorage = {
         get: async (key: string) => {
             if (key === "litellm-connector.baseUrl") {
@@ -20,6 +32,123 @@ suite("LiteLLM Provider Unit Tests", () => {
     } as unknown as vscode.SecretStorage;
 
     const userAgent = "GitHubCopilotChat/test VSCode/test";
+
+    test("clearModelCache resets model list and caches", () => {
+        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+
+        // Seed caches
+        (provider as unknown as { _modelInfoCache: Map<string, unknown> })._modelInfoCache.set("m1", { mode: "chat" });
+        (provider as unknown as { _parameterProbeCache: Map<string, unknown> })._parameterProbeCache.set(
+            "m1",
+            new Set(["temperature"])
+        );
+        (provider as unknown as { _lastModelList: vscode.LanguageModelChatInformation[] })._lastModelList = [
+            {
+                id: "m1",
+                name: "m1",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1,
+                maxOutputTokens: 1,
+                capabilities: { toolCalling: true, imageInput: false },
+            },
+        ];
+
+        provider.clearModelCache();
+        assert.strictEqual(provider.getLastKnownModels().length, 0);
+        assert.strictEqual((provider as unknown as { _modelInfoCache: Map<string, unknown> })._modelInfoCache.size, 0);
+        assert.strictEqual(
+            (provider as unknown as { _parameterProbeCache: Map<string, unknown> })._parameterProbeCache.size,
+            0
+        );
+    });
+
+    test("provideLanguageModelChatResponse uses modelIdOverride when present in config", async () => {
+        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+
+        // Seed last model list with an override model.
+        (provider as unknown as { _lastModelList: vscode.LanguageModelChatInformation[] })._lastModelList = [
+            {
+                id: "override-model",
+                name: "override-model",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 100,
+                maxOutputTokens: 100,
+                capabilities: { toolCalling: true, imageInput: false },
+            },
+        ];
+
+        // Stub ConfigManager to return a config with modelIdOverride.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const configManager = (provider as any)._configManager as {
+            convertProviderConfiguration: (c: Record<string, unknown>) => unknown;
+        };
+        sandbox.stub(configManager, "convertProviderConfiguration").returns({
+            url: "http://localhost:4000",
+            key: "k",
+            disableQuotaToolRedaction: false,
+            disableCaching: true,
+            inactivityTimeout: 60,
+            modelOverrides: {},
+            modelIdOverride: "override-model",
+        });
+
+        // Prevent network calls: stub the low-level client to return a minimal ReadableStream.
+        // We only need to assert that the request model id is the override.
+        const chatStub = sandbox.stub(LiteLLMClient.prototype, "chat");
+        chatStub.callsFake(async (...args: unknown[]) => {
+            const requestBody = args[0] as { model: string };
+            assert.strictEqual(requestBody.model, "override-model");
+
+            const encoder = new TextEncoder();
+            return new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                    controller.close();
+                },
+            });
+        });
+
+        // Ensure we don't accidentally go down the /responses path in this test.
+        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
+
+        const modelSelected: vscode.LanguageModelChatInformation = {
+            id: "selected-model",
+            name: "selected-model",
+            tooltip: "",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 100,
+            maxOutputTokens: 100,
+            capabilities: { toolCalling: true, imageInput: false },
+        };
+
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("hi")],
+                name: undefined,
+            },
+        ];
+
+        await provider.provideLanguageModelChatResponse(
+            modelSelected,
+            messages,
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                configuration: { baseUrl: "x" },
+            },
+            { report: () => {} },
+            new vscode.CancellationTokenSource().token
+        );
+
+        assert.strictEqual(chatStub.called, true);
+    });
 
     test("provideLanguageModelChatInformation returns array (no key -> empty)", async () => {
         const emptySecrets = {

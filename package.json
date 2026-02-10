@@ -14,7 +14,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "1.3.3",
+	"version": "1.3.4-dev",
 	"preview": false,
 	"engines": {
 		"vscode": "^1.109.0"
@@ -75,11 +75,25 @@
 			{
 				"command": "litellm-connector.manage",
 				"title": "Manage LiteLLM Provider"
+			},
+			{
+				"command": "litellm-connector.showModels",
+				"title": "LiteLLM: Show Available Models"
+			},
+			{
+				"command": "litellm-connector.reloadModels",
+				"title": "LiteLLM: Reload Models"
 			}
 		],
 		"configuration": {
 			"title": "LiteLLM Connector",
 			"properties": {
+				"litellm-connector.modelIdOverride": {
+					"type": "string",
+					"default": "",
+					"description": "Optional: force a specific LiteLLM model id for inline completions. Leave empty to use Copilot's selected model.",
+					"markdownDescription": "Optional: force a specific LiteLLM model id for inline completions. Leave empty to use Copilot's selected model. Use the command **LiteLLM: Show Available Models** to see model ids."
+				},
 				"litellm-connector.disableQuotaToolRedaction": {
 					"type": "boolean",
 					"default": false,

@@ -60,6 +60,11 @@ export interface LiteLLMConfig {
     disableCaching?: boolean;
     disableQuotaToolRedaction?: boolean;
     modelOverrides?: Record<string, string[]>;
+    /**
+     * Optional: force a specific model id (e.g. for inline completions).
+     * When unset, the provider uses the model selected by Copilot/VS Code.
+     */
+    modelIdOverride?: string;
 }
 
 /**

@@ -1,8 +1,13 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import * as sinon from "sinon";
-import { registerManageConfigCommand } from "../../commands/manageConfig";
+import {
+    registerManageConfigCommand,
+    registerReloadModelsCommand,
+    registerShowModelsCommand,
+} from "../../commands/manageConfig";
 import { ConfigManager } from "../../config/configManager";
+import type { LiteLLMChatModelProvider } from "../../providers/liteLLMProvider";
 
 suite("ManageConfig Command Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -193,5 +198,113 @@ suite("ManageConfig Command Unit Tests", () => {
             true
         );
         assert.strictEqual(showInfoStub.calledOnce, true);
+    });
+});
+
+suite("Model Commands Unit Tests", () => {
+    let sandbox: sinon.SinonSandbox;
+
+    setup(() => {
+        sandbox = sinon.createSandbox();
+    });
+
+    teardown(() => {
+        sandbox.restore();
+    });
+
+    test("showModels: prompts to reload when cache is empty", async () => {
+        const provider = {
+            getLastKnownModels: () => [],
+        } as unknown as LiteLLMChatModelProvider;
+
+        const infoStub = sandbox.stub(vscode.window, "showInformationMessage");
+
+        let handler: (() => Promise<void>) | undefined;
+        sandbox.stub(vscode.commands, "registerCommand").callsFake((id, cb) => {
+            if (id === "litellm-connector.showModels") {
+                handler = cb as () => Promise<void>;
+            }
+            return { dispose: () => {} } as vscode.Disposable;
+        });
+
+        registerShowModelsCommand(provider);
+        await handler?.();
+
+        assert.strictEqual(infoStub.calledOnce, true);
+        assert.ok(String(infoStub.firstCall.args[0]).includes("No cached models"));
+    });
+
+    test("showModels: quick pick copies model id", async () => {
+        const provider = {
+            getLastKnownModels: () => [
+                {
+                    id: "gpt-4o",
+                    name: "gpt-4o",
+                    tooltip: "LiteLLM (chat)",
+                    family: "litellm",
+                    version: "1.0.0",
+                    maxInputTokens: 1,
+                    maxOutputTokens: 1,
+                    capabilities: { toolCalling: true, imageInput: false },
+                },
+            ],
+        } as unknown as LiteLLMChatModelProvider;
+
+        const qpStub = sandbox.stub(vscode.window, "showQuickPick").resolves({ label: "gpt-4o" } as never);
+        const clipStub = sandbox.stub();
+        sandbox.stub(vscode.env, "clipboard").value({ writeText: clipStub } as unknown as vscode.Clipboard);
+        const infoStub = sandbox.stub(vscode.window, "showInformationMessage");
+
+        let handler: (() => Promise<void>) | undefined;
+        sandbox.stub(vscode.commands, "registerCommand").callsFake((id, cb) => {
+            if (id === "litellm-connector.showModels") {
+                handler = cb as () => Promise<void>;
+            }
+            return { dispose: () => {} } as vscode.Disposable;
+        });
+
+        registerShowModelsCommand(provider);
+        await handler?.();
+
+        assert.strictEqual(qpStub.calledOnce, true);
+        assert.strictEqual(clipStub.calledWith("gpt-4o"), true);
+        assert.strictEqual(infoStub.calledOnce, true);
+    });
+
+    test("reloadModels: clears cache and refetches", async () => {
+        const clearStub = sandbox.stub();
+        const provideStub = sandbox.stub().resolves([]);
+        const getStub = sandbox.stub().returns([{ id: "m1" }]);
+
+        const provider = {
+            clearModelCache: clearStub,
+            provideLanguageModelChatInformation: provideStub,
+            getLastKnownModels: getStub,
+        } as unknown as LiteLLMChatModelProvider;
+
+        // Avoid actually showing progress UI; run the callback immediately.
+        sandbox.stub(vscode.window, "withProgress").callsFake(async (_opts, task) => {
+            return task(
+                { report: () => {} } as unknown as vscode.Progress<unknown>,
+                new vscode.CancellationTokenSource().token
+            );
+        });
+        const infoStub = sandbox.stub(vscode.window, "showInformationMessage");
+
+        let handler: (() => Promise<void>) | undefined;
+        sandbox.stub(vscode.commands, "registerCommand").callsFake((id, cb) => {
+            if (id === "litellm-connector.reloadModels") {
+                handler = cb as () => Promise<void>;
+            }
+            return { dispose: () => {} } as vscode.Disposable;
+        });
+
+        registerReloadModelsCommand(provider);
+        await handler?.();
+
+        assert.strictEqual(clearStub.calledOnce, true);
+        assert.strictEqual(provideStub.calledOnce, true);
+        assert.strictEqual(infoStub.calledOnce, true);
+        assert.ok(String(infoStub.firstCall.args[0]).includes("Reloaded"));
     });
 });

@@ -43,6 +43,10 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
     >();
     private _configManager: ConfigManager;
 
+    // Model discovery cache (for UI + completions)
+    private _lastModelList: LanguageModelChatInformation[] = [];
+    private _modelListFetchedAtMs = 0;
+
     // Streaming state
     private _toolCallBuffers: Map<number, { id?: string; name?: string; args: string }> = new Map<
         number,
@@ -98,6 +102,24 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
         this._configManager = new ConfigManager(secrets);
     }
 
+    /**
+     * Clears cached model discovery state so the next discovery fetch is fresh.
+     */
+    public clearModelCache(): void {
+        Logger.info("Clearing model discovery cache");
+        this._modelInfoCache.clear();
+        this._parameterProbeCache.clear();
+        this._lastModelList = [];
+        this._modelListFetchedAtMs = 0;
+    }
+
+    /**
+     * Returns the last discovered model list (may be empty if never fetched).
+     */
+    public getLastKnownModels(): LanguageModelChatInformation[] {
+        return this._lastModelList;
+    }
+
     async provideLanguageModelChatInformation(
         _options: { silent: boolean },
         _token: CancellationToken
@@ -142,14 +164,16 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
                         maxInputTokens: Math.max(1, maxInputTokens),
                         maxOutputTokens: Math.max(1, maxOutputTokens),
                         capabilities,
-                        tags: this.getModelTags(modelId, modelInfo, config.modelOverrides),
                     } satisfies LanguageModelChatInformation;
 
-                    // If model has exceptionally high context, ensure we don't overflow VS Code's expectations if any
-                    // but generally we trust model_info
+                    // Store tags separately if needed for internal logic, but remove from info object
+                    // as it's not part of the VS Code LanguageModelChatInformation interface
                     return info;
                 }
             );
+
+            this._lastModelList = infos;
+            this._modelListFetchedAtMs = Date.now();
 
             return infos;
         } catch (err) {
@@ -188,58 +212,84 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
                 throw new Error("LiteLLM configuration not found. Please configure the LiteLLM base URL.");
             }
 
-            const modelInfo = this._modelInfoCache.get(model.id);
+            // Optional model override (primarily for completions). If set, we try to use it.
+            // If the override isn't in cache yet, attempt a best-effort refresh.
+            let modelToUse = model;
+            if (config.modelIdOverride) {
+                const overrideId = config.modelIdOverride;
+                const cachedOverride = this._lastModelList.find((m) => m.id === overrideId);
+                if (cachedOverride) {
+                    modelToUse = cachedOverride;
+                } else {
+                    try {
+                        Logger.info(`modelIdOverride set to '${overrideId}' but not in cache; refreshing model list`);
+                        await this.provideLanguageModelChatInformation({ silent: true }, token);
+                        const refreshed = this._lastModelList.find((m) => m.id === overrideId);
+                        if (refreshed) {
+                            modelToUse = refreshed;
+                        } else {
+                            Logger.warn(
+                                `modelIdOverride '${overrideId}' not found after refresh; using selected model '${model.id}'`
+                            );
+                        }
+                    } catch (refreshErr) {
+                        Logger.warn("Failed to refresh model list for override; using selected model", refreshErr);
+                    }
+                }
+            }
+
+            const modelInfo = this._modelInfoCache.get(modelToUse.id);
             const toolRedaction = this.detectQuotaToolRedaction(
                 messages,
                 options.tools ?? [],
                 requestId,
-                model.id,
+                modelToUse.id,
                 config.disableQuotaToolRedaction === true
             );
             const toolConfig = convertTools({ ...options, tools: toolRedaction.tools });
-            const messagesToUse = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo);
+            const messagesToUse = trimMessagesToFitBudget(messages, toolConfig.tools, modelToUse, modelInfo);
             const openaiMessages = convertMessages(messagesToUse);
             validateRequest(messagesToUse);
 
             const requestBody: OpenAIChatCompletionRequest = {
-                model: model.id,
+                model: modelToUse.id,
                 messages: openaiMessages,
                 stream: true,
                 max_tokens:
                     typeof options.modelOptions?.max_tokens === "number"
-                        ? Math.min(options.modelOptions.max_tokens, model.maxOutputTokens)
-                        : model.maxOutputTokens,
+                        ? Math.min(options.modelOptions.max_tokens, modelToUse.maxOutputTokens)
+                        : modelToUse.maxOutputTokens,
             };
 
-            if (this.isParameterSupported("temperature", modelInfo, model.id)) {
+            if (this.isParameterSupported("temperature", modelInfo, modelToUse.id)) {
                 requestBody.temperature = (options.modelOptions?.temperature as number) ?? 0.7;
             }
 
             // Add frequency_penalty and presence_penalty to help prevent repetitive loops if supported
             // We only apply these as defaults if Copilot (options.modelOptions) hasn't already provided them.
-            if (this.isParameterSupported("frequency_penalty", modelInfo, model.id)) {
+            if (this.isParameterSupported("frequency_penalty", modelInfo, modelToUse.id)) {
                 requestBody.frequency_penalty = (options.modelOptions?.frequency_penalty as number) ?? 0.2;
             }
-            if (this.isParameterSupported("presence_penalty", modelInfo, model.id)) {
+            if (this.isParameterSupported("presence_penalty", modelInfo, modelToUse.id)) {
                 requestBody.presence_penalty = (options.modelOptions?.presence_penalty as number) ?? 0.1;
             }
 
             if (options.modelOptions) {
                 const mo = options.modelOptions as Record<string, unknown>;
-                if (this.isParameterSupported("stop", modelInfo, model.id) && mo.stop) {
+                if (this.isParameterSupported("stop", modelInfo, modelToUse.id) && mo.stop) {
                     requestBody.stop = mo.stop as string | string[];
                 }
-                if (this.isParameterSupported("top_p", modelInfo, model.id) && typeof mo.top_p === "number") {
+                if (this.isParameterSupported("top_p", modelInfo, modelToUse.id) && typeof mo.top_p === "number") {
                     requestBody.top_p = mo.top_p;
                 }
                 if (
-                    this.isParameterSupported("frequency_penalty", modelInfo, model.id) &&
+                    this.isParameterSupported("frequency_penalty", modelInfo, modelToUse.id) &&
                     typeof mo.frequency_penalty === "number"
                 ) {
                     requestBody.frequency_penalty = mo.frequency_penalty;
                 }
                 if (
-                    this.isParameterSupported("presence_penalty", modelInfo, model.id) &&
+                    this.isParameterSupported("presence_penalty", modelInfo, modelToUse.id) &&
                     typeof mo.presence_penalty === "number"
                 ) {
                     requestBody.presence_penalty = mo.presence_penalty;
@@ -257,7 +307,7 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
             this.stripUnsupportedParametersFromRequest(
                 requestBody as unknown as Record<string, unknown>,
                 modelInfo,
-                model.id
+                modelToUse.id
             );
 
             const client = new LiteLLMClient(config, this.userAgent);

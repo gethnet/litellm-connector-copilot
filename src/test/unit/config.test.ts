@@ -1,10 +1,13 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
+import * as sinon from "sinon";
 import { ConfigManager } from "../../config/configManager";
 
 suite("ConfigManager Unit Tests", () => {
     let mockSecrets: vscode.SecretStorage;
     let secretsMap: Map<string, string>;
+    let getConfigurationStub: sinon.SinonStub;
+    let configGetStub: sinon.SinonStub;
 
     setup(() => {
         secretsMap = new Map<string, string>();
@@ -18,6 +21,36 @@ suite("ConfigManager Unit Tests", () => {
             },
             onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
         } as unknown as vscode.SecretStorage;
+
+        // Stub workspace configuration reads so tests are deterministic and don't depend on VS Code defaults.
+        // We return explicit values for the keys ConfigManager reads.
+        configGetStub = sinon.stub();
+        configGetStub.callsFake((key: string, defaultValue?: unknown) => {
+            switch (key) {
+                case "litellm-connector.inactivityTimeout":
+                    return 60;
+                case "litellm-connector.disableCaching":
+                    return true;
+                case "litellm-connector.disableQuotaToolRedaction":
+                    return false;
+                case "litellm-connector.modelOverrides":
+                    return {};
+                case "litellm-connector.modelIdOverride":
+                    return "";
+                default:
+                    return defaultValue;
+            }
+        });
+
+        getConfigurationStub = sinon.stub(vscode.workspace, "getConfiguration").returns({
+            get: configGetStub,
+            update: async () => {},
+            has: () => false,
+        } as unknown as vscode.WorkspaceConfiguration);
+    });
+
+    teardown(() => {
+        getConfigurationStub?.restore();
     });
 
     test("getConfig returns empty values when nothing is stored", async () => {
@@ -25,6 +58,7 @@ suite("ConfigManager Unit Tests", () => {
         const config = await manager.getConfig();
         assert.strictEqual(config.url, "");
         assert.strictEqual(config.key, undefined);
+        assert.strictEqual(config.modelIdOverride, undefined);
     });
 
     test("setConfig and getConfig roundtrip", async () => {
@@ -77,6 +111,56 @@ suite("ConfigManager Unit Tests", () => {
         assert.strictEqual(typeof config.disableCaching, "boolean");
         assert.strictEqual(typeof config.disableQuotaToolRedaction, "boolean");
         assert.notStrictEqual(config.modelOverrides, undefined);
+        assert.strictEqual(config.modelIdOverride, undefined);
+    });
+
+    test("getConfig reads modelIdOverride and trims whitespace", async () => {
+        // Override the stubbed config value for this test.
+        configGetStub.callsFake((key: string, defaultValue?: unknown) => {
+            if (key === "litellm-connector.modelIdOverride") {
+                return "  gpt-4o  ";
+            }
+            switch (key) {
+                case "litellm-connector.inactivityTimeout":
+                    return 60;
+                case "litellm-connector.disableCaching":
+                    return true;
+                case "litellm-connector.disableQuotaToolRedaction":
+                    return false;
+                case "litellm-connector.modelOverrides":
+                    return {};
+                default:
+                    return defaultValue;
+            }
+        });
+
+        const manager = new ConfigManager(mockSecrets);
+        const cfg = await manager.getConfig();
+        assert.strictEqual(cfg.modelIdOverride, "gpt-4o");
+    });
+
+    test("getConfig treats whitespace-only modelIdOverride as unset", async () => {
+        configGetStub.callsFake((key: string, defaultValue?: unknown) => {
+            if (key === "litellm-connector.modelIdOverride") {
+                return "   ";
+            }
+            switch (key) {
+                case "litellm-connector.inactivityTimeout":
+                    return 60;
+                case "litellm-connector.disableCaching":
+                    return true;
+                case "litellm-connector.disableQuotaToolRedaction":
+                    return false;
+                case "litellm-connector.modelOverrides":
+                    return {};
+                default:
+                    return defaultValue;
+            }
+        });
+
+        const manager = new ConfigManager(mockSecrets);
+        const cfg = await manager.getConfig();
+        assert.strictEqual(cfg.modelIdOverride, undefined);
     });
 
     test("convertProviderConfiguration handles missing fields", () => {

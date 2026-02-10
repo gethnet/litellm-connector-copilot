@@ -8,6 +8,7 @@ export class ConfigManager {
     private static readonly DISABLE_CACHING_KEY = "litellm-connector.disableCaching";
     private static readonly DISABLE_QUOTA_TOOL_REDACTION_KEY = "litellm-connector.disableQuotaToolRedaction";
     private static readonly MODEL_OVERRIDES_KEY = "litellm-connector.modelOverrides";
+    private static readonly MODEL_ID_OVERRIDE_KEY = "litellm-connector.modelIdOverride";
     private static readonly MIGRATION_MARKER_KEY = "litellm-connector.migrated-to-v1.109";
 
     constructor(private readonly secrets: vscode.SecretStorage) {}
@@ -30,6 +31,10 @@ export class ConfigManager {
         const modelOverrides = vscode.workspace
             .getConfiguration()
             .get<Record<string, string[]>>(ConfigManager.MODEL_OVERRIDES_KEY, {});
+        const modelIdOverride = vscode.workspace
+            .getConfiguration()
+            .get<string>(ConfigManager.MODEL_ID_OVERRIDE_KEY, "")
+            .trim();
 
         return {
             url: url || "",
@@ -38,6 +43,7 @@ export class ConfigManager {
             disableCaching,
             disableQuotaToolRedaction,
             modelOverrides,
+            modelIdOverride: modelIdOverride.length > 0 ? modelIdOverride : undefined,
         };
     }
 
@@ -87,6 +93,10 @@ export class ConfigManager {
         const modelOverrides = vscode.workspace
             .getConfiguration()
             .get<Record<string, string[]>>(ConfigManager.MODEL_OVERRIDES_KEY, {});
+        const modelIdOverride = vscode.workspace
+            .getConfiguration()
+            .get<string>(ConfigManager.MODEL_ID_OVERRIDE_KEY, "")
+            .trim();
 
         return {
             url: baseUrl,
@@ -95,6 +105,7 @@ export class ConfigManager {
             disableCaching,
             disableQuotaToolRedaction,
             modelOverrides,
+            modelIdOverride: modelIdOverride.length > 0 ? modelIdOverride : undefined,
         };
     }
 

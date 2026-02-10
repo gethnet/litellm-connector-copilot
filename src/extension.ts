@@ -1,7 +1,11 @@
 import * as vscode from "vscode";
 import { LiteLLMChatModelProvider } from "./providers/liteLLMProvider";
 import { ConfigManager } from "./config/configManager";
-import { registerManageConfigCommand } from "./commands/manageConfig";
+import {
+    registerManageConfigCommand,
+    registerReloadModelsCommand,
+    registerShowModelsCommand,
+} from "./commands/manageConfig";
 import { Logger } from "./utils/logger";
 
 // Store the config manager for cleanup on deactivation
@@ -62,6 +66,8 @@ export function activate(context: vscode.ExtensionContext) {
     // Management commands to configure base URL and API key
     try {
         context.subscriptions.push(registerManageConfigCommand(context, configManager));
+        context.subscriptions.push(registerShowModelsCommand(provider));
+        context.subscriptions.push(registerReloadModelsCommand(provider));
         Logger.info("Config command registered.");
     } catch (cmdErr) {
         Logger.error("Failed to register commands", cmdErr);
