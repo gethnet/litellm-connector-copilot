@@ -1,6 +1,6 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
-import { LiteLLMChatModelProvider } from "../../providers/liteLLMProvider";
+import { LiteLLMChatProvider } from "../../providers";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 import * as sinon from "sinon";
 
@@ -32,7 +32,7 @@ suite("LiteLLM Error Handling Unit Tests", () => {
     });
 
     test("provideLanguageModelChatResponse retries without parameters on unsupported parameter error", async () => {
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
         const errorText = JSON.stringify({
             error: {
@@ -96,7 +96,7 @@ suite("LiteLLM Error Handling Unit Tests", () => {
     });
 
     test("provideLanguageModelChatResponse handles unsupported parameter error from LiteLLM (when retry also fails)", async () => {
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
         // Mock LiteLLMClient.chat to throw an error
         const errorText = JSON.stringify({
@@ -147,7 +147,7 @@ suite("LiteLLM Error Handling Unit Tests", () => {
     });
 
     test("provideLanguageModelChatResponse handles generic 400 error", async () => {
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
         const apiError = new Error(`LiteLLM API error: 400 Bad Request\nSomething went wrong`);
         sandbox.stub(LiteLLMClient.prototype, "chat").rejects(apiError);

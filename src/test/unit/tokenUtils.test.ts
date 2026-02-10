@@ -1,10 +1,30 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import { isAnthropicModel } from "../../utils/modelUtils";
-import { estimateSingleMessageTokens, estimateToolTokens, trimMessagesToFitBudget } from "../../adapters/tokenUtils";
+import {
+    estimateMessagesTokens,
+    estimateSingleMessageTokens,
+    estimateToolTokens,
+    trimMessagesToFitBudget,
+} from "../../adapters/tokenUtils";
 import type { LiteLLMModelInfo } from "../../types";
 
 suite("TokenUtils Unit Tests", () => {
+    test("estimateMessagesTokens sums single-message estimates", () => {
+        const a = {
+            role: vscode.LanguageModelChatMessageRole.User,
+            content: [new vscode.LanguageModelTextPart("abcd")], // 1 token
+            name: undefined,
+        } as unknown as vscode.LanguageModelChatRequestMessage;
+        const b = {
+            role: vscode.LanguageModelChatMessageRole.User,
+            content: [new vscode.LanguageModelTextPart("abcdefgh")], // 2 tokens
+            name: undefined,
+        } as unknown as vscode.LanguageModelChatRequestMessage;
+
+        assert.strictEqual(estimateMessagesTokens([a, b]), 3);
+    });
+
     test("estimateSingleMessageTokens estimates text parts", () => {
         const msg = {
             role: vscode.LanguageModelChatMessageRole.User,
@@ -22,6 +42,13 @@ suite("TokenUtils Unit Tests", () => {
         assert.strictEqual(estimateToolTokens(tools), expected);
         assert.strictEqual(estimateToolTokens([]), 0);
         assert.strictEqual(estimateToolTokens(undefined), 0);
+    });
+
+    test("estimateToolTokens returns 0 when JSON serialization fails", () => {
+        const cyclic: unknown[] = [];
+        (cyclic as unknown[]).push(cyclic);
+
+        assert.strictEqual(estimateToolTokens(cyclic as never), 0);
     });
 
     test("isAnthropicModel identifies models correctly", () => {
@@ -125,5 +152,50 @@ suite("TokenUtils Unit Tests", () => {
         assert.strictEqual(trimmed[0], systemMsg);
         assert.strictEqual(trimmed[1], assistantMsg);
         assert.strictEqual(trimmed[2], continueMsg);
+    });
+
+    test("trimMessagesToFitBudget throws when tool tokens consume entire budget", () => {
+        const msg = {
+            role: vscode.LanguageModelChatMessageRole.User,
+            content: [new vscode.LanguageModelTextPart("hi")],
+            name: undefined,
+        } as unknown as vscode.LanguageModelChatRequestMessage;
+
+        const modelInfo = {
+            id: "test",
+            maxInputTokens: 1,
+        } as vscode.LanguageModelChatInformation;
+
+        // Make tools JSON large enough so toolTokenCount >= safetyLimit
+        const tools = [
+            {
+                type: "function",
+                function: {
+                    name: "t",
+                    description: "x".repeat(1000),
+                    parameters: { type: "object", properties: {} },
+                },
+            },
+        ];
+
+        assert.throws(() => trimMessagesToFitBudget([msg], tools, modelInfo), /Message exceeds token limit\./);
+    });
+
+    test("trimMessagesToFitBudget throws when system message alone exceeds budget", () => {
+        const systemMsg = {
+            role: 3 as unknown as vscode.LanguageModelChatMessageRole,
+            content: [new vscode.LanguageModelTextPart("this is too long")],
+            name: undefined,
+        } as unknown as vscode.LanguageModelChatRequestMessage;
+
+        const modelInfo = {
+            id: "test",
+            maxInputTokens: 1,
+        } as vscode.LanguageModelChatInformation;
+
+        assert.throws(
+            () => trimMessagesToFitBudget([systemMsg], undefined, modelInfo),
+            /Message exceeds token limit\./
+        );
     });
 });

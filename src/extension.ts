@@ -1,12 +1,14 @@
 import * as vscode from "vscode";
-import { LiteLLMChatModelProvider } from "./providers/liteLLMProvider";
+import { LiteLLMChatProvider } from "./providers";
 import { ConfigManager } from "./config/configManager";
 import {
     registerManageConfigCommand,
     registerReloadModelsCommand,
     registerShowModelsCommand,
 } from "./commands/manageConfig";
+import { registerSelectInlineCompletionModelCommand } from "./commands/inlineCompletions";
 import { Logger } from "./utils/logger";
+import { InlineCompletionsRegistrar } from "./inlineCompletions/registerInlineCompletions";
 
 // Store the config manager for cleanup on deactivation
 let configManagerInstance: ConfigManager | undefined;
@@ -32,7 +34,12 @@ export function activate(context: vscode.ExtensionContext) {
 
     configManagerInstance = new ConfigManager(context.secrets);
     const configManager = configManagerInstance;
-    const provider = new LiteLLMChatModelProvider(context.secrets, ua);
+    const chatProvider = new LiteLLMChatProvider(context.secrets, ua);
+
+    // Stable inline completions (optional; disabled by default)
+    const inlineRegistrar = new InlineCompletionsRegistrar(context.secrets, ua, context);
+    inlineRegistrar.initialize();
+    context.subscriptions.push(inlineRegistrar);
 
     // Attempt to migrate configuration from legacy secret storage to new v1.109+ provider configuration
     configManager
@@ -52,7 +59,7 @@ export function activate(context: vscode.ExtensionContext) {
     // Register the LiteLLM provider under the vendor id used in package.json
     try {
         Logger.info("Registering LanguageModelChatProvider...");
-        const registration = vscode.lm.registerLanguageModelChatProvider("litellm-connector", provider);
+        const registration = vscode.lm.registerLanguageModelChatProvider("litellm-connector", chatProvider);
         if (registration) {
             context.subscriptions.push(registration);
             Logger.info("Provider registered successfully.");
@@ -63,11 +70,15 @@ export function activate(context: vscode.ExtensionContext) {
         Logger.error("Failed to register provider", err);
     }
 
+    // NOTE: VS Code stable 1.109 typings (and runtime) do not expose a text-completions LM provider API.
+    // Inline completions must be implemented via vscode.languages.registerInlineCompletionItemProvider instead.
+
     // Management commands to configure base URL and API key
     try {
         context.subscriptions.push(registerManageConfigCommand(context, configManager));
-        context.subscriptions.push(registerShowModelsCommand(provider));
-        context.subscriptions.push(registerReloadModelsCommand(provider));
+        context.subscriptions.push(registerShowModelsCommand(chatProvider));
+        context.subscriptions.push(registerReloadModelsCommand(chatProvider));
+        context.subscriptions.push(registerSelectInlineCompletionModelCommand(chatProvider));
         Logger.info("Config command registered.");
     } catch (cmdErr) {
         Logger.error("Failed to register commands", cmdErr);

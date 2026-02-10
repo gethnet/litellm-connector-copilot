@@ -7,7 +7,7 @@ import {
     registerShowModelsCommand,
 } from "../../commands/manageConfig";
 import { ConfigManager } from "../../config/configManager";
-import type { LiteLLMChatModelProvider } from "../../providers/liteLLMProvider";
+import type { LiteLLMChatProvider } from "../../providers";
 
 suite("ManageConfig Command Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -215,7 +215,7 @@ suite("Model Commands Unit Tests", () => {
     test("showModels: prompts to reload when cache is empty", async () => {
         const provider = {
             getLastKnownModels: () => [],
-        } as unknown as LiteLLMChatModelProvider;
+        } as unknown as LiteLLMChatProvider;
 
         const infoStub = sandbox.stub(vscode.window, "showInformationMessage");
 
@@ -248,7 +248,7 @@ suite("Model Commands Unit Tests", () => {
                     capabilities: { toolCalling: true, imageInput: false },
                 },
             ],
-        } as unknown as LiteLLMChatModelProvider;
+        } as unknown as LiteLLMChatProvider;
 
         const qpStub = sandbox.stub(vscode.window, "showQuickPick").resolves({ label: "gpt-4o" } as never);
         const clipStub = sandbox.stub();
@@ -280,7 +280,7 @@ suite("Model Commands Unit Tests", () => {
             clearModelCache: clearStub,
             provideLanguageModelChatInformation: provideStub,
             getLastKnownModels: getStub,
-        } as unknown as LiteLLMChatModelProvider;
+        } as unknown as LiteLLMChatProvider;
 
         // Avoid actually showing progress UI; run the callback immediately.
         sandbox.stub(vscode.window, "withProgress").callsFake(async (_opts, task) => {

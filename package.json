@@ -14,7 +14,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "1.3.6-dev",
+	"version": "1.3.8-dev",
 	"preview": false,
 	"engines": {
 		"vscode": "^1.109.0"
@@ -42,7 +42,8 @@
 	},
 	"license": "Apache-2.0",
 	"activationEvents": [
-		"onLanguageModelChatProvider:litellm-connector"
+		"onLanguageModelChatProvider:litellm-connector",
+		"onStartupFinished"
 	],
 	"contributes": {
 		"languageModelChatProviders": [
@@ -77,6 +78,10 @@
 				"title": "Manage LiteLLM Provider"
 			},
 			{
+				"command": "litellm-connector.inlineCompletions.selectModel",
+				"title": "LiteLLM: Select Inline Completion Model"
+			},
+			{
 				"command": "litellm-connector.showModels",
 				"title": "LiteLLM: Show Available Models"
 			},
@@ -88,11 +93,22 @@
 		"configuration": {
 			"title": "LiteLLM Connector",
 			"properties": {
+				"litellm-connector.inlineCompletions.enabled": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable LiteLLM inline completions via VS Code's stable inline completion provider API. Disable to use Copilot or other inline completion providers."
+				},
+				"litellm-connector.inlineCompletions.modelId": {
+					"type": "string",
+					"default": "",
+					"description": "Model id to use for LiteLLM inline completions. Run 'LiteLLM: Select Inline Completion Model' to choose from discovered models.",
+					"markdownDescription": "Model id to use for LiteLLM inline completions. Run **LiteLLM: Select Inline Completion Model** to choose from discovered models."
+				},
 				"litellm-connector.modelIdOverride": {
 					"type": "string",
 					"default": "",
-					"description": "Optional: force a specific LiteLLM model id for inline completions. Leave empty to use Copilot's selected model.",
-					"markdownDescription": "Optional: force a specific LiteLLM model id for inline completions. Leave empty to use Copilot's selected model. Use the command **LiteLLM: Show Available Models** to see model ids."
+					"markdownDeprecationMessage": "Deprecated: use `litellm-connector.inlineCompletions.modelId` instead.",
+					"description": "(Deprecated) Optional: force a specific LiteLLM model id for inline completions."
 				},
 				"litellm-connector.disableQuotaToolRedaction": {
 					"type": "boolean",
@@ -145,7 +161,7 @@
 		"pretest": "npm run compile",
 		"test": "xvfb-run vscode-test --args=\"--no-sandbox\"",
 		"test:report": "export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && npm run test",
-		"test:coverage": "npm run pretest && node -e \"const fs = require('fs'); const path = require('path'); const coveragePath = path.join(process.cwd(), 'coverage'); if (fs.existsSync(coveragePath)) fs.rmSync(coveragePath, { recursive: true, force: true });\" && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && xvfb-run vscode-test --args=\"--no-sandbox\" --coverage --coverage-output coverage --coverage-reporter lcovonly --coverage-reporter html --coverage-reporter text-summary",
+		"test:coverage": "npm run clean && npm run pretest && node -e \"const fs = require('fs'); const path = require('path'); const coveragePath = path.join(process.cwd(), 'coverage'); if (fs.existsSync(coveragePath)) fs.rmSync(coveragePath, { recursive: true, force: true });\" && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && xvfb-run vscode-test --args=\"--no-sandbox\" --coverage --coverage-output coverage --coverage-reporter lcovonly --coverage-reporter html --coverage-reporter text-summary",
 		"bump-version": "node scripts/bump-version.js"
 	},
 	"devDependencies": {

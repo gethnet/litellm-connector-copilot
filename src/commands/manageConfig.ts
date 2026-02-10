@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import type { ConfigManager } from "../config/configManager";
-import type { LiteLLMChatModelProvider } from "../providers/liteLLMProvider";
+import type { LiteLLMChatProvider } from "../providers";
 
 function createConfigHandler(configManager: ConfigManager) {
     return async () => {
@@ -69,7 +69,7 @@ export function registerManageConfigCommand(context: vscode.ExtensionContext, co
     return vscode.commands.registerCommand("litellm-connector.manage", createConfigHandler(configManager));
 }
 
-export function registerShowModelsCommand(provider: LiteLLMChatModelProvider) {
+export function registerShowModelsCommand(provider: LiteLLMChatProvider) {
     return vscode.commands.registerCommand("litellm-connector.showModels", async () => {
         const models = provider.getLastKnownModels();
         if (!models.length) {
@@ -106,7 +106,7 @@ export function registerShowModelsCommand(provider: LiteLLMChatModelProvider) {
     });
 }
 
-export function registerReloadModelsCommand(provider: LiteLLMChatModelProvider) {
+export function registerReloadModelsCommand(provider: LiteLLMChatProvider) {
     return vscode.commands.registerCommand("litellm-connector.reloadModels", async () => {
         provider.clearModelCache();
         await vscode.window.withProgress(

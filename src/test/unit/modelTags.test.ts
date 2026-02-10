@@ -1,7 +1,7 @@
 import * as assert from "assert";
 import type * as vscode from "vscode";
 import * as sinon from "sinon";
-import { LiteLLMChatModelProvider } from "../../providers/liteLLMProvider";
+import { LiteLLMChatProvider } from "../../providers";
 import type { LiteLLMModelInfo } from "../../types";
 
 /**
@@ -17,7 +17,7 @@ interface ProviderWithGetModelTags {
  * Explains the intent: we're testing a private method that calculates model capability tags.
  */
 function callGetModelTags(
-    provider: LiteLLMChatModelProvider,
+    provider: LiteLLMChatProvider,
     modelId: string,
     modelInfo?: LiteLLMModelInfo,
     overrides?: Record<string, string[]>
@@ -54,7 +54,7 @@ suite("Model Tags Unit Tests", () => {
     const userAgent = "GitHubCopilotChat/test VSCode/test";
 
     test("getModelTags adds inline-completions for chat models with streaming", () => {
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
         const modelInfo: LiteLLMModelInfo = {
             mode: "chat",
@@ -68,7 +68,7 @@ suite("Model Tags Unit Tests", () => {
     });
 
     test("getModelTags adds inline-edit for coder models", () => {
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
         const modelInfo: LiteLLMModelInfo = {
             mode: "chat",
@@ -81,7 +81,7 @@ suite("Model Tags Unit Tests", () => {
     });
 
     test("getModelTags adds tools tag for function-calling models", () => {
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
         const modelInfo: LiteLLMModelInfo = {
             mode: "chat",
@@ -94,7 +94,7 @@ suite("Model Tags Unit Tests", () => {
     });
 
     test("getModelTags adds tools tag for vision-capable models", () => {
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
         const modelInfo: LiteLLMModelInfo = {
             mode: "chat",
@@ -107,7 +107,7 @@ suite("Model Tags Unit Tests", () => {
     });
 
     test("getModelTags applies user overrides", () => {
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
         const modelInfo: LiteLLMModelInfo = {
             mode: "chat",
@@ -126,7 +126,7 @@ suite("Model Tags Unit Tests", () => {
     });
 
     test("getModelTags returns empty for non-streaming models", () => {
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
         const modelInfo: LiteLLMModelInfo = {
             mode: "chat",
@@ -139,7 +139,7 @@ suite("Model Tags Unit Tests", () => {
     });
 
     test("getModelTags handles models with no info", () => {
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
         const tags = callGetModelTags(provider, "unknown-model");
 
@@ -147,7 +147,7 @@ suite("Model Tags Unit Tests", () => {
     });
 
     test("getModelTags combines defaults with overrides", () => {
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
         const modelInfo: LiteLLMModelInfo = {
             mode: "chat",

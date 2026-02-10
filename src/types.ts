@@ -65,6 +65,12 @@ export interface LiteLLMConfig {
      * When unset, the provider uses the model selected by Copilot/VS Code.
      */
     modelIdOverride?: string;
+
+    /** Enable VS Code inline completions backed by LiteLLM (stable API). */
+    inlineCompletionsEnabled?: boolean;
+
+    /** Model id to use for LiteLLM inline completions. */
+    inlineCompletionsModelId?: string;
 }
 
 /**

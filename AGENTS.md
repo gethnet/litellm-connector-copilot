@@ -37,6 +37,8 @@ This document defines **repo-wide, tool-agnostic** expectations for automated co
 - Tests must be **clean and well documented**: prefer clarity in setup/act/assert.
 - Prefer **small, focused unit tests** with deterministic inputs.
 - When fixing bugs, add a **regression test** that fails before the fix.
+- Tests must not use or target `any` as an item or constraint.  `any` leads to confusion
+  and blackbox type code.
 
 ## 3) Repo conventions
 
