@@ -159,4 +159,138 @@ suite("LiteLLM Client Unit Tests", () => {
         const retryCallBody = JSON.parse(fetchStub.getCall(1).args[1]!.body as string);
         assert.strictEqual(retryCallBody.temperature, undefined, "Temperature should have been stripped");
     });
+
+    test("chat strips cache and extra_body.cache when backend rejects unknown parameter cache", async () => {
+        const client = new LiteLLMClient({ ...config, disableCaching: true }, userAgent);
+
+        const errorResponse = {
+            ok: false,
+            status: 400,
+            statusText: "Bad Request",
+            text: async () => "Unknown parameter: cache",
+            clone: function () {
+                return this;
+            },
+        };
+
+        const successResponse = {
+            ok: true,
+            status: 200,
+            body: new ReadableStream(),
+        };
+
+        const fetchStub = sandbox.stub(global, "fetch");
+        fetchStub.onCall(0).resolves(errorResponse as unknown as Response);
+        fetchStub.onCall(1).resolves(successResponse as unknown as Response);
+
+        // Include both top-level cache and extra_body.cache to ensure both are stripped.
+        await client.chat({
+            model: "gpt-4",
+            messages: [],
+            cache: { "no-cache": true },
+            extra_body: { cache: { "no-cache": true, no_cache: true } },
+        } as never);
+
+        assert.strictEqual(fetchStub.callCount, 2);
+
+        const firstCallBody = JSON.parse(fetchStub.getCall(0).args[1]!.body as string);
+        // First call should still contain caching controls due to disableCaching.
+        assert.strictEqual(firstCallBody.extra_body?.cache?.["no-cache"], true);
+
+        const retryCallBody = JSON.parse(fetchStub.getCall(1).args[1]!.body as string);
+        assert.strictEqual(retryCallBody.cache, undefined);
+        assert.strictEqual(retryCallBody.extra_body, undefined);
+
+        const retryHeaders = fetchStub.getCall(1).args[1]!.headers as Record<string, string>;
+        assert.strictEqual(retryHeaders["Cache-Control"], undefined);
+    });
+
+    test("parseRetryAfterDelayMs handles seconds, future date, and invalid values", () => {
+        const client = new LiteLLMClient(config, userAgent);
+
+        const mkResp = (value: string | null): Response =>
+            ({
+                headers: {
+                    get: (k: string) => (k.toLowerCase() === "retry-after" ? value : null),
+                },
+            }) as unknown as Response;
+
+        // @ts-expect-error - accessing private method for testing
+        const parse = client.parseRetryAfterDelayMs.bind(client) as (r: Response) => number | undefined;
+
+        assert.strictEqual(parse(mkResp("2")), 2000);
+
+        const future = new Date(Date.now() + 5_000).toUTCString();
+        const delta = parse(mkResp(future));
+        assert.ok(typeof delta === "number" && delta > 0 && delta <= 5_000);
+
+        assert.strictEqual(parse(mkResp("not-a-date")), undefined);
+        assert.strictEqual(parse(mkResp(null)), undefined);
+    });
+
+    test("getModelInfo returns JSON when response is ok", async () => {
+        const client = new LiteLLMClient(config, userAgent);
+
+        const jsonStub = sandbox.stub().resolves({ data: [] });
+        const fetchStub = sandbox.stub(global, "fetch").resolves({
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: jsonStub,
+        } as unknown as Response);
+
+        const res = await client.getModelInfo();
+        assert.deepStrictEqual(res, { data: [] });
+        assert.strictEqual(fetchStub.calledOnce, true);
+        assert.strictEqual(jsonStub.calledOnce, true);
+    });
+
+    test("getModelInfo throws with status details when response is not ok", async () => {
+        const client = new LiteLLMClient(config, userAgent);
+
+        sandbox.stub(global, "fetch").resolves({
+            ok: false,
+            status: 500,
+            statusText: "Internal Server Error",
+        } as unknown as Response);
+
+        await assert.rejects(
+            () => client.getModelInfo(),
+            (err: unknown) =>
+                err instanceof Error &&
+                err.message.includes("Failed to fetch model info") &&
+                err.message.includes("500") &&
+                err.message.includes("Internal Server Error")
+        );
+    });
+
+    test("getModelInfo aborts fetch when cancellation token fires", async () => {
+        const client = new LiteLLMClient(config, userAgent);
+
+        let abortSignal: AbortSignal | undefined;
+        sandbox.stub(global, "fetch").callsFake(async (_input: string | URL | Request, init?: RequestInit) => {
+            abortSignal = init?.signal as AbortSignal | undefined;
+            // Never resolve; we expect the abort signal to flip.
+            await new Promise(() => {});
+            return {} as Response;
+        });
+
+        let onCancel: (() => void) | undefined;
+        const token = {
+            onCancellationRequested: (cb: () => void) => {
+                onCancel = cb;
+                return { dispose() {} };
+            },
+        } as unknown as { onCancellationRequested: (cb: () => void) => { dispose(): void } };
+
+        void client.getModelInfo(token as never);
+
+        // Wait a tick for fetch to be invoked and signal captured.
+        await Promise.resolve();
+        assert.ok(abortSignal, "Expected fetch to be called with an AbortSignal");
+        assert.strictEqual(abortSignal?.aborted, false);
+
+        onCancel?.();
+        assert.strictEqual(abortSignal?.aborted, true);
+    });
 });

@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import type { ConfigManager } from "../config/configManager";
+import type { LiteLLMChatProvider } from "../providers";
 
 function createConfigHandler(configManager: ConfigManager) {
     return async () => {
@@ -66,4 +67,65 @@ function createConfigHandler(configManager: ConfigManager) {
 
 export function registerManageConfigCommand(context: vscode.ExtensionContext, configManager: ConfigManager) {
     return vscode.commands.registerCommand("litellm-connector.manage", createConfigHandler(configManager));
+}
+
+export function registerShowModelsCommand(provider: LiteLLMChatProvider) {
+    return vscode.commands.registerCommand("litellm-connector.showModels", async () => {
+        const models = provider.getLastKnownModels();
+        if (!models.length) {
+            vscode.window.showInformationMessage(
+                "No cached models yet. Run 'LiteLLM: Reload Models' (or open the provider settings) to fetch models from LiteLLM."
+            );
+            return;
+        }
+
+        // Show a quick pick list with model ids (copy-friendly)
+        const picked = await vscode.window.showQuickPick(
+            models
+                .slice()
+                .sort((a, b) => a.id.localeCompare(b.id))
+                .map((m) => ({
+                    label: m.id,
+                    description: m.name !== m.id ? m.name : undefined,
+                    detail: m.tooltip,
+                })),
+            {
+                title: "LiteLLM: Available Models (cached)",
+                placeHolder: "Select a model id to copy to clipboard",
+                matchOnDescription: true,
+                matchOnDetail: true,
+            }
+        );
+
+        if (!picked) {
+            return;
+        }
+
+        await vscode.env.clipboard.writeText(picked.label);
+        vscode.window.showInformationMessage(`Copied model id: ${picked.label}`);
+    });
+}
+
+export function registerReloadModelsCommand(provider: LiteLLMChatProvider) {
+    return vscode.commands.registerCommand("litellm-connector.reloadModels", async () => {
+        provider.clearModelCache();
+        await vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: "LiteLLM: Reloading models",
+                cancellable: false,
+            },
+            async () => {
+                // Trigger a fresh discovery request. VS Code will call discovery when it needs it,
+                // but we do it proactively so completions pick up new models immediately.
+                await provider.provideLanguageModelChatInformation(
+                    { silent: true },
+                    new vscode.CancellationTokenSource().token
+                );
+            }
+        );
+
+        const count = provider.getLastKnownModels().length;
+        vscode.window.showInformationMessage(`LiteLLM: Reloaded ${count} models.`);
+    });
 }

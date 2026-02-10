@@ -39,4 +39,58 @@ suite("Telemetry Unit Tests", () => {
         assert.strictEqual(typeof duration, "number");
         assert.ok(duration >= 0);
     });
+
+    test("reportMetric includes caller context when provided", () => {
+        const metric: IMetrics = {
+            requestId: "123",
+            model: "gpt-4",
+            durationMs: 100,
+            status: "success",
+            caller: "inline-edit",
+        };
+
+        LiteLLMTelemetry.reportMetric(metric);
+
+        assert.ok(loggerDebugStub.calledOnce);
+        const logMessage = loggerDebugStub.firstCall.args[0];
+        assert.ok(logMessage.includes("[Telemetry]"));
+        assert.ok(logMessage.includes('"caller":"inline-edit"'));
+    });
+
+    test("reportMetric handles metrics without caller", () => {
+        const metric: IMetrics = {
+            requestId: "456",
+            model: "claude-3",
+            status: "failure",
+            error: "timeout",
+        };
+
+        LiteLLMTelemetry.reportMetric(metric);
+
+        assert.ok(loggerDebugStub.calledOnce);
+        const logMessage = loggerDebugStub.firstCall.args[0];
+        assert.ok(logMessage.includes("[Telemetry]"));
+        assert.ok(logMessage.includes('"status":"failure"'));
+    });
+
+    test("reportMetric logs different caller contexts", () => {
+        const callers = ["scm-generator", "terminal-chat", "inline-completions"];
+
+        for (const caller of callers) {
+            loggerDebugStub.resetHistory();
+
+            const metric: IMetrics = {
+                requestId: "test-" + caller,
+                model: "gpt-4",
+                status: "success",
+                caller,
+            };
+
+            LiteLLMTelemetry.reportMetric(metric);
+
+            assert.ok(loggerDebugStub.calledOnce);
+            const logMessage = loggerDebugStub.firstCall.args[0];
+            assert.ok(logMessage.includes(`"caller":"${caller}"`), `Should log caller: ${caller}`);
+        }
+    });
 });

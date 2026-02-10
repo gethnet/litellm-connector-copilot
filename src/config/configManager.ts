@@ -7,6 +7,10 @@ export class ConfigManager {
     private static readonly INACTIVITY_TIMEOUT_KEY = "litellm-connector.inactivityTimeout";
     private static readonly DISABLE_CACHING_KEY = "litellm-connector.disableCaching";
     private static readonly DISABLE_QUOTA_TOOL_REDACTION_KEY = "litellm-connector.disableQuotaToolRedaction";
+    private static readonly MODEL_OVERRIDES_KEY = "litellm-connector.modelOverrides";
+    private static readonly MODEL_ID_OVERRIDE_KEY = "litellm-connector.modelIdOverride";
+    private static readonly INLINE_COMPLETIONS_ENABLED_KEY = "litellm-connector.inlineCompletions.enabled";
+    private static readonly INLINE_COMPLETIONS_MODEL_ID_KEY = "litellm-connector.inlineCompletions.modelId";
     private static readonly MIGRATION_MARKER_KEY = "litellm-connector.migrated-to-v1.109";
 
     constructor(private readonly secrets: vscode.SecretStorage) {}
@@ -26,6 +30,20 @@ export class ConfigManager {
         const disableQuotaToolRedaction = vscode.workspace
             .getConfiguration()
             .get<boolean>(ConfigManager.DISABLE_QUOTA_TOOL_REDACTION_KEY, false);
+        const modelOverrides = vscode.workspace
+            .getConfiguration()
+            .get<Record<string, string[]>>(ConfigManager.MODEL_OVERRIDES_KEY, {});
+        const modelIdOverride = vscode.workspace
+            .getConfiguration()
+            .get<string>(ConfigManager.MODEL_ID_OVERRIDE_KEY, "")
+            .trim();
+        const inlineCompletionsEnabled = vscode.workspace
+            .getConfiguration()
+            .get<boolean>(ConfigManager.INLINE_COMPLETIONS_ENABLED_KEY, false);
+        const inlineCompletionsModelId = vscode.workspace
+            .getConfiguration()
+            .get<string>(ConfigManager.INLINE_COMPLETIONS_MODEL_ID_KEY, "")
+            .trim();
 
         return {
             url: url || "",
@@ -33,6 +51,15 @@ export class ConfigManager {
             inactivityTimeout,
             disableCaching,
             disableQuotaToolRedaction,
+            modelOverrides,
+            modelIdOverride: modelIdOverride.length > 0 ? modelIdOverride : undefined,
+            inlineCompletionsEnabled,
+            inlineCompletionsModelId:
+                inlineCompletionsModelId.length > 0
+                    ? inlineCompletionsModelId
+                    : modelIdOverride.length > 0
+                      ? modelIdOverride
+                      : undefined,
         };
     }
 
@@ -79,6 +106,20 @@ export class ConfigManager {
         const disableQuotaToolRedaction = vscode.workspace
             .getConfiguration()
             .get<boolean>(ConfigManager.DISABLE_QUOTA_TOOL_REDACTION_KEY, false);
+        const modelOverrides = vscode.workspace
+            .getConfiguration()
+            .get<Record<string, string[]>>(ConfigManager.MODEL_OVERRIDES_KEY, {});
+        const modelIdOverride = vscode.workspace
+            .getConfiguration()
+            .get<string>(ConfigManager.MODEL_ID_OVERRIDE_KEY, "")
+            .trim();
+        const inlineCompletionsEnabled = vscode.workspace
+            .getConfiguration()
+            .get<boolean>(ConfigManager.INLINE_COMPLETIONS_ENABLED_KEY, false);
+        const inlineCompletionsModelId = vscode.workspace
+            .getConfiguration()
+            .get<string>(ConfigManager.INLINE_COMPLETIONS_MODEL_ID_KEY, "")
+            .trim();
 
         return {
             url: baseUrl,
@@ -86,6 +127,15 @@ export class ConfigManager {
             inactivityTimeout,
             disableCaching,
             disableQuotaToolRedaction,
+            modelOverrides,
+            modelIdOverride: modelIdOverride.length > 0 ? modelIdOverride : undefined,
+            inlineCompletionsEnabled,
+            inlineCompletionsModelId:
+                inlineCompletionsModelId.length > 0
+                    ? inlineCompletionsModelId
+                    : modelIdOverride.length > 0
+                      ? modelIdOverride
+                      : undefined,
         };
     }
 

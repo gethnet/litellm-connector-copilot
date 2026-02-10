@@ -59,6 +59,18 @@ export interface LiteLLMConfig {
     inactivityTimeout?: number;
     disableCaching?: boolean;
     disableQuotaToolRedaction?: boolean;
+    modelOverrides?: Record<string, string[]>;
+    /**
+     * Optional: force a specific model id (e.g. for inline completions).
+     * When unset, the provider uses the model selected by Copilot/VS Code.
+     */
+    modelIdOverride?: string;
+
+    /** Enable VS Code inline completions backed by LiteLLM (stable API). */
+    inlineCompletionsEnabled?: boolean;
+
+    /** Model id to use for LiteLLM inline completions. */
+    inlineCompletionsModelId?: string;
 }
 
 /**
@@ -90,6 +102,7 @@ export interface LiteLLMModelInfo {
     supports_reasoning?: boolean;
     supports_computer_use?: boolean | null;
     supported_openai_params?: string[];
+    tags?: string[];
     [key: string]: unknown; // Allow additional fields for extensibility
 }
 

@@ -92,6 +92,60 @@ suite("Utility Unit Tests", () => {
         ]);
     });
 
+    test("convertMessages defaults unknown roles to system", () => {
+        const messages: vscode.LanguageModelChatMessage[] = [
+            {
+                // Force an unknown role value to exercise the default branch.
+                role: "weird" as unknown as vscode.LanguageModelChatMessageRole,
+                content: [new vscode.LanguageModelTextPart("sys")],
+                name: undefined,
+            },
+        ];
+        const out = convertMessages(messages) as unknown as Array<{ role: string; content: unknown }>;
+        assert.strictEqual(out[0].role, "system");
+        assert.strictEqual(out[0].content, "sys");
+    });
+
+    test("convertMessages emits assistant tool call even without text", () => {
+        const callId = "call-2";
+        const messages: vscode.LanguageModelChatMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.Assistant,
+                content: [new vscode.LanguageModelToolCallPart(callId, "run", { x: 1 })],
+                name: undefined,
+            },
+        ];
+
+        const out = convertMessages(messages) as Array<{ role: string; tool_calls?: unknown[] }>;
+        assert.strictEqual(out.length, 1);
+        assert.strictEqual(out[0].role, "assistant");
+        assert.ok(Array.isArray(out[0].tool_calls));
+        assert.strictEqual(out[0].tool_calls?.length, 1);
+    });
+
+    test("validateRequest throws when tool call is followed by non-user message", () => {
+        const callId = "abc";
+        const toolCall = new vscode.LanguageModelToolCallPart(callId, "toolA", { q: 1 });
+        const invalid: vscode.LanguageModelChatMessage[] = [
+            { role: vscode.LanguageModelChatMessageRole.Assistant, content: [toolCall], name: undefined },
+            // Next message is assistant (should be user tool result)
+            {
+                role: vscode.LanguageModelChatMessageRole.Assistant,
+                content: [new vscode.LanguageModelTextPart("x")],
+                name: undefined,
+            },
+        ];
+        assert.throws(() => validateRequest(invalid));
+    });
+
+    test("convertTools throws when ToolMode.Required with multiple tools", () => {
+        const tools: vscode.LanguageModelChatTool[] = [
+            { name: "t1", description: "", inputSchema: {} },
+            { name: "t2", description: "", inputSchema: {} },
+        ];
+        assert.throws(() => convertTools({ tools, toolMode: vscode.LanguageModelChatToolMode.Required }));
+    });
+
     test("tryParseJSONObject handles valid and invalid JSON", () => {
         assert.deepEqual(tryParseJSONObject('{"a":1}'), { ok: true, value: { a: 1 } });
         assert.deepEqual(tryParseJSONObject("[1,2,3]"), { ok: false });

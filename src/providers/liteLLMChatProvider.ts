@@ -2,52 +2,27 @@ import * as vscode from "vscode";
 import type {
     CancellationToken,
     LanguageModelChatInformation,
-    LanguageModelChatRequestMessage,
     LanguageModelChatProvider,
+    LanguageModelChatRequestMessage,
     LanguageModelResponsePart,
     Progress,
     ProvideLanguageModelChatResponseOptions,
 } from "vscode";
 
-import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, OpenAIFunctionToolDef } from "../types";
-import { convertTools, convertMessages, tryParseJSONObject, validateRequest } from "../utils";
-import { ConfigManager } from "../config/configManager";
-import { LiteLLMClient } from "../adapters/litellmClient";
-import { ResponsesClient } from "../adapters/responsesClient";
-import { transformToResponsesFormat } from "../adapters/responsesAdapter";
-import { DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_CONTEXT_LENGTH, trimMessagesToFitBudget } from "../adapters/tokenUtils";
+import { tryParseJSONObject } from "../utils";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
+import { LiteLLMProviderBase } from "./liteLLMProviderBase";
 
-const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
-    "claude-3-5-sonnet": new Set(["temperature"]),
-    "claude-3-5-haiku": new Set(["temperature"]),
-    "claude-3-opus": new Set(["temperature"]),
-    "claude-3-sonnet": new Set(["temperature"]),
-    "claude-3-haiku": new Set(["temperature"]),
-    "claude-haiku-4-5": new Set(["temperature"]),
-    "gpt-5.1-codex": new Set(["temperature", "frequency_penalty", "presence_penalty"]),
-    "gpt-5.1-codex-mini": new Set(["temperature", "frequency_penalty", "presence_penalty"]),
-    "gpt-5.1-codex-max": new Set(["temperature", "frequency_penalty", "presence_penalty"]),
-    "codex-mini-latest": new Set(["temperature", "frequency_penalty", "presence_penalty"]),
-    "o1-preview": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
-    "o1-mini": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
-    "o1-": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
-};
-
-export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
-    private _parameterProbeCache: Map<string, Set<string>> = new Map<string, Set<string>>();
-    private _modelInfoCache: Map<string, LiteLLMModelInfo | undefined> = new Map<
-        string,
-        LiteLLMModelInfo | undefined
-    >();
-    private _configManager: ConfigManager;
-
+/**
+ * Chat provider implementation for VS Code's LanguageModelChatProvider.
+ *
+ * All shared orchestration (model discovery, request building, trimming, parameter filtering,
+ * endpoint routing) is implemented in LiteLLMProviderBase.
+ */
+export class LiteLLMChatProvider extends LiteLLMProviderBase implements LanguageModelChatProvider {
     // Streaming state
-    private _toolCallBuffers: Map<number, { id?: string; name?: string; args: string }> = new Map<
-        number,
-        { id?: string; name?: string; args: string }
-    >();
+    private _toolCallBuffers = new Map<number, { id?: string; name?: string; args: string }>();
     private _completedToolCallIndices = new Set<number>();
     private _hasEmittedAssistantText = false;
     private _emittedBeginToolCallsHint = false;
@@ -61,70 +36,11 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
     private _repeatCount = 0;
     private _lastFinishReason: string | undefined = undefined;
 
-    constructor(
-        private readonly secrets: vscode.SecretStorage,
-        private readonly userAgent: string
-    ) {
-        this._configManager = new ConfigManager(secrets);
-    }
-
     async provideLanguageModelChatInformation(
-        _options: { silent: boolean },
-        _token: CancellationToken
+        options: { silent: boolean },
+        token: CancellationToken
     ): Promise<LanguageModelChatInformation[]> {
-        Logger.debug("provideLanguageModelChatInformation called");
-        try {
-            const config = await this._configManager.getConfig();
-            Logger.debug(`Config URL: ${config.url ? "set" : "not set"}`);
-            if (!config.url) {
-                Logger.info("No base URL configured, returning empty model list.");
-                return [];
-            }
-
-            const client = new LiteLLMClient(config, this.userAgent);
-            Logger.debug("Fetching model info from LiteLLM...");
-            const { data } = await client.getModelInfo();
-
-            if (!data || !Array.isArray(data)) {
-                Logger.warn("Received invalid data format from /model/info", data);
-                return [];
-            }
-
-            Logger.info(`Found ${data.length} models`);
-            const infos: LanguageModelChatInformation[] = data.map(
-                (entry: { model_info?: LiteLLMModelInfo; model_name?: string }, index: number) => {
-                    const modelId = entry.model_info?.key ?? entry.model_name ?? `model-${index}`;
-                    const modelInfo = entry.model_info;
-                    this._modelInfoCache.set(modelId, modelInfo);
-
-                    const maxInputTokens = modelInfo?.max_input_tokens ?? DEFAULT_CONTEXT_LENGTH;
-                    const maxOutputTokens = modelInfo?.max_output_tokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
-
-                    // Build capabilities based on model_info flags
-                    const capabilities = this.buildCapabilities(modelInfo);
-
-                    const info = {
-                        id: modelId,
-                        name: entry.model_name ?? modelId,
-                        tooltip: `${modelInfo?.litellm_provider ?? "LiteLLM"} (${modelInfo?.mode ?? "responses"})`,
-                        family: "litellm",
-                        version: "1.0.0",
-                        maxInputTokens: Math.max(1, maxInputTokens),
-                        maxOutputTokens: Math.max(1, maxOutputTokens),
-                        capabilities,
-                    } satisfies LanguageModelChatInformation;
-
-                    // If model has exceptionally high context, ensure we don't overflow VS Code's expectations if any
-                    // but generally we trust model_info
-                    return info;
-                }
-            );
-
-            return infos;
-        } catch (err) {
-            Logger.error("Failed to fetch models", err);
-            return [];
-        }
+        return this.discoverModels(options, token);
     }
 
     async provideLanguageModelChatResponse(
@@ -138,6 +54,9 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
         const startTime = LiteLLMTelemetry.startTimer();
         const requestId = Math.random().toString(36).substring(7);
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const caller = (model as any).tags?.[0] || undefined;
+
         const trackingProgress: Progress<LanguageModelResponsePart> = {
             report: (part) => {
                 if (part instanceof vscode.LanguageModelTextPart) {
@@ -148,7 +67,6 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
         };
 
         try {
-            // Try to get configuration from the new v1.109+ API first
             const config = options.configuration
                 ? this._configManager.convertProviderConfiguration(options.configuration)
                 : await this._configManager.getConfig();
@@ -157,107 +75,45 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
                 throw new Error("LiteLLM configuration not found. Please configure the LiteLLM base URL.");
             }
 
-            const modelInfo = this._modelInfoCache.get(model.id);
-            const toolRedaction = this.detectQuotaToolRedaction(
-                messages,
-                options.tools ?? [],
-                requestId,
-                model.id,
-                config.disableQuotaToolRedaction === true
-            );
-            const toolConfig = convertTools({ ...options, tools: toolRedaction.tools });
-            const messagesToUse = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo);
-            const openaiMessages = convertMessages(messagesToUse);
-            validateRequest(messagesToUse);
-
-            const requestBody: OpenAIChatCompletionRequest = {
-                model: model.id,
-                messages: openaiMessages,
-                stream: true,
-                max_tokens:
-                    typeof options.modelOptions?.max_tokens === "number"
-                        ? Math.min(options.modelOptions.max_tokens, model.maxOutputTokens)
-                        : model.maxOutputTokens,
-            };
-
-            if (this.isParameterSupported("temperature", modelInfo, model.id)) {
-                requestBody.temperature = (options.modelOptions?.temperature as number) ?? 0.7;
-            }
-
-            // Add frequency_penalty and presence_penalty to help prevent repetitive loops if supported
-            // We only apply these as defaults if Copilot (options.modelOptions) hasn't already provided them.
-            if (this.isParameterSupported("frequency_penalty", modelInfo, model.id)) {
-                requestBody.frequency_penalty = (options.modelOptions?.frequency_penalty as number) ?? 0.2;
-            }
-            if (this.isParameterSupported("presence_penalty", modelInfo, model.id)) {
-                requestBody.presence_penalty = (options.modelOptions?.presence_penalty as number) ?? 0.1;
-            }
-
-            if (options.modelOptions) {
-                const mo = options.modelOptions as Record<string, unknown>;
-                if (this.isParameterSupported("stop", modelInfo, model.id) && mo.stop) {
-                    requestBody.stop = mo.stop as string | string[];
-                }
-                if (this.isParameterSupported("top_p", modelInfo, model.id) && typeof mo.top_p === "number") {
-                    requestBody.top_p = mo.top_p;
-                }
-                if (
-                    this.isParameterSupported("frequency_penalty", modelInfo, model.id) &&
-                    typeof mo.frequency_penalty === "number"
-                ) {
-                    requestBody.frequency_penalty = mo.frequency_penalty;
-                }
-                if (
-                    this.isParameterSupported("presence_penalty", modelInfo, model.id) &&
-                    typeof mo.presence_penalty === "number"
-                ) {
-                    requestBody.presence_penalty = mo.presence_penalty;
+            // Optional model override (primarily for completions). If set, we try to use it.
+            // If the override isn't in cache yet, attempt a best-effort refresh.
+            let modelToUse = model;
+            if (config.modelIdOverride) {
+                const overrideId = config.modelIdOverride;
+                const cachedOverride = this._lastModelList.find((m) => m.id === overrideId);
+                if (cachedOverride) {
+                    modelToUse = cachedOverride;
+                } else {
+                    try {
+                        Logger.info(`modelIdOverride set to '${overrideId}' but not in cache; refreshing model list`);
+                        await this.discoverModels({ silent: true }, token);
+                        const refreshed = this._lastModelList.find((m) => m.id === overrideId);
+                        if (refreshed) {
+                            modelToUse = refreshed;
+                        } else {
+                            Logger.warn(
+                                `modelIdOverride '${overrideId}' not found after refresh; using selected model '${model.id}'`
+                            );
+                        }
+                    } catch (refreshErr) {
+                        Logger.warn("Failed to refresh model list for override; using selected model", refreshErr);
+                    }
                 }
             }
 
-            if (toolConfig.tools) {
-                requestBody.tools = toolConfig.tools as unknown as OpenAIFunctionToolDef[];
-            }
-            if (toolConfig.tool_choice) {
-                requestBody.tool_choice = toolConfig.tool_choice;
-            }
-
-            // Final safety: strip any unsupported parameters that slipped through earlier checks
-            this.stripUnsupportedParametersFromRequest(
-                requestBody as unknown as Record<string, unknown>,
-                modelInfo,
-                model.id
-            );
-
-            const client = new LiteLLMClient(config, this.userAgent);
-
-            // Try /responses endpoint first if mode is 'responses'
-            if (modelInfo?.mode === "responses") {
-                try {
-                    const responsesClient = new ResponsesClient(config, this.userAgent);
-                    const responsesRequest = transformToResponsesFormat(requestBody);
-                    await responsesClient.sendResponsesRequest(responsesRequest, trackingProgress, token, modelInfo);
-                    LiteLLMTelemetry.reportMetric({
-                        requestId,
-                        model: model.id,
-                        durationMs: LiteLLMTelemetry.endTimer(startTime),
-                        status: "success",
-                    });
-                    return;
-                } catch (err) {
-                    Logger.warn(`/responses failed, falling back to /chat/completions: ${err}`);
-                    // Fall through to standard chat/completions
-                }
-            }
+            const modelInfo = this._modelInfoCache.get(modelToUse.id);
+            const requestBody = await this.buildOpenAIChatRequest(messages, modelToUse, options, modelInfo, caller);
 
             let stream: ReadableStream<Uint8Array>;
             try {
-                stream = await client.chat(requestBody, "chat", token);
+                // Note: sendRequestToLiteLLM may fully handle /responses by emitting directly to progress.
+                // In that case it returns an already-closed stream.
+                stream = await this.sendRequestToLiteLLM(requestBody, trackingProgress, token, caller, modelInfo);
             } catch (err: unknown) {
                 if (token.isCancellationRequested) {
                     throw new Error("Operation cancelled by user");
                 }
-                // If we get an unsupported parameter error, try one more time without those parameters
+
                 if (err instanceof Error && err.message.includes("LiteLLM API error")) {
                     const errorText = err.message.split("\n").slice(1).join("\n");
                     const parsedMessage = this.parseApiError(400, errorText);
@@ -266,7 +122,6 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
                         parsedMessage.toLowerCase().includes("not supported")
                     ) {
                         Logger.warn(`Retrying request without optional parameters due to: ${parsedMessage}`);
-                        // Strip common optional parameters that might cause issues
                         delete requestBody.temperature;
                         delete requestBody.top_p;
                         delete requestBody.frequency_penalty;
@@ -276,7 +131,13 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
                         if (token.isCancellationRequested) {
                             throw new Error("Operation cancelled by user");
                         }
-                        stream = await client.chat(requestBody, modelInfo?.mode, token);
+                        stream = await this.sendRequestToLiteLLM(
+                            requestBody,
+                            trackingProgress,
+                            token,
+                            caller,
+                            modelInfo
+                        );
                     } else {
                         throw err;
                     }
@@ -286,19 +147,23 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
             }
 
             await this.processStreamingResponse(stream, trackingProgress, token);
+
+            LiteLLMTelemetry.reportMetric({
+                requestId,
+                model: modelToUse.id,
+                durationMs: LiteLLMTelemetry.endTimer(startTime),
+                status: "success",
+                caller,
+            });
         } catch (err: unknown) {
             let errorMessage = err instanceof Error ? err.message : String(err);
-
-            // If it's a LiteLLM API error, try to parse it for more detail
             if (errorMessage.includes("LiteLLM API error")) {
                 const statusMatch = errorMessage.match(/error: (\d+)/);
                 const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : 400;
                 const errorParts = errorMessage.split("\n");
                 const errorText = errorParts.length > 1 ? errorParts.slice(1).join("\n") : "";
-
                 const parsedMessage = this.parseApiError(statusCode, errorText);
                 errorMessage = `LiteLLM Error (${model.id}): ${parsedMessage}`;
-
                 if (
                     parsedMessage.toLowerCase().includes("temperature") ||
                     parsedMessage.toLowerCase().includes("unsupported value")
@@ -307,31 +172,29 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
                         ". This model may not support certain parameters like temperature. Please check your model settings.";
                 }
             }
-
-            console.error("[LiteLLM Model Provider] Chat request failed", err);
+            Logger.error("Chat request failed", err);
             throw new Error(errorMessage);
         }
     }
 
     async provideTokenCount(
-        model: LanguageModelChatInformation,
+        _model: LanguageModelChatInformation,
         text: string | LanguageModelChatRequestMessage,
         _token: CancellationToken
     ): Promise<number> {
         if (typeof text === "string") {
             return Math.ceil(text.length / 4);
-        } else {
-            let totalTokens = 0;
-            for (const part of text.content) {
-                if (part instanceof vscode.LanguageModelTextPart) {
-                    totalTokens += Math.ceil(part.value.length / 4);
-                }
-            }
-            return totalTokens;
         }
+        let totalTokens = 0;
+        for (const part of text.content) {
+            if (part instanceof vscode.LanguageModelTextPart) {
+                totalTokens += Math.ceil(part.value.length / 4);
+            }
+        }
+        return totalTokens;
     }
 
-    private resetStreamingState() {
+    private resetStreamingState(): void {
         this._toolCallBuffers.clear();
         this._completedToolCallIndices.clear();
         this._hasEmittedAssistantText = false;
@@ -344,35 +207,6 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
         this._lastEmittedText = "";
         this._repeatCount = 0;
         this._lastFinishReason = undefined;
-    }
-
-    private isParameterSupported(param: string, modelInfo: LiteLLMModelInfo | undefined, modelId?: string): boolean {
-        if (modelId) {
-            if (KNOWN_PARAMETER_LIMITATIONS[modelId]?.has(param)) {
-                return false;
-            }
-            for (const [knownModel, limitations] of Object.entries(KNOWN_PARAMETER_LIMITATIONS)) {
-                if (modelId.includes(knownModel) && limitations.has(param)) {
-                    return false;
-                }
-            }
-        }
-
-        if (!modelInfo) {
-            return true;
-        }
-
-        if (modelId && this._parameterProbeCache.has(modelId)) {
-            if (this._parameterProbeCache.get(modelId)?.has(param)) {
-                return false;
-            }
-        }
-
-        if (modelInfo?.supported_openai_params) {
-            return modelInfo.supported_openai_params.includes(param);
-        }
-
-        return true;
     }
 
     private async processStreamingResponse(
@@ -393,7 +227,7 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
                 clearTimeout(watchdog);
             }
             watchdog = setTimeout(() => {
-                console.warn(`[LiteLLM Model Provider] Inactivity timeout after ${timeoutMs}ms`);
+                Logger.warn(`Inactivity timeout after ${timeoutMs}ms`);
                 void reader.cancel("Inactivity timeout");
             }, timeoutMs);
         };
@@ -541,20 +375,20 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
             }
 
             for (const tc of toolCalls) {
-                const idx = (tc["index"] as number) ?? 0;
+                const idx = (tc.index as number) ?? 0;
                 if (this._completedToolCallIndices.has(idx)) {
                     continue;
                 }
                 const buf = this._toolCallBuffers.get(idx) ?? { args: "" };
-                if (tc["id"]) {
-                    buf.id = tc["id"] as string;
+                if (tc.id) {
+                    buf.id = tc.id as string;
                 }
-                const func = tc["function"] as Record<string, unknown> | undefined;
-                if (func?.["name"]) {
-                    buf.name = func["name"] as string;
+                const func = tc.function as Record<string, unknown> | undefined;
+                if (func?.name) {
+                    buf.name = func.name as string;
                 }
-                if (func?.["arguments"]) {
-                    buf.args += func["arguments"] as string;
+                if (func?.arguments) {
+                    buf.args += func.arguments as string;
                 }
                 this._toolCallBuffers.set(idx, buf);
                 await this.tryEmitBufferedToolCall(idx, progress);
@@ -604,11 +438,10 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
                         this._textToolParserBuffer = data.slice(data.length - longestPartialPrefix);
                         data = "";
                         break;
-                    } else {
-                        visibleOut += this.stripControlTokens(data);
-                        data = "";
-                        break;
                     }
+                    visibleOut += this.stripControlTokens(data);
+                    data = "";
+                    break;
                 }
                 const pre = data.slice(0, b);
                 if (pre) {
@@ -635,7 +468,7 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
                 const header = data.slice(0, delimIdx).trim();
                 const m = header.match(/^([A-Za-z0-9_\-.]+)(?::(\d+))?/);
                 const name = m?.[1] ?? undefined;
-                const index = m?.[2] ? Number(m?.[2]) : undefined;
+                const index = m?.[2] ? Number(m[2]) : undefined;
                 this._textToolActive = { name, index, argBuffer: "", emitted: false };
                 if (delimKind === "arg") {
                     data = data.slice(delimIdx + ARG_BEGIN.length);
@@ -667,22 +500,20 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
                 }
                 data = "";
                 break;
-            } else {
-                this._textToolActive.argBuffer += data.slice(0, e2);
-                data = data.slice(e2 + END.length);
-                if (!this._textToolActive.emitted) {
-                    const did = this.emitTextToolCallIfValid(
-                        progress,
-                        this._textToolActive,
-                        this._textToolActive.argBuffer
-                    );
-                    if (did) {
-                        emittedAny = true;
-                    }
-                }
-                this._textToolActive = undefined;
-                continue;
             }
+            this._textToolActive.argBuffer += data.slice(0, e2);
+            data = data.slice(e2 + END.length);
+            if (!this._textToolActive.emitted) {
+                const did = this.emitTextToolCallIfValid(
+                    progress,
+                    this._textToolActive,
+                    this._textToolActive.argBuffer
+                );
+                if (did) {
+                    emittedAny = true;
+                }
+            }
+            this._textToolActive = undefined;
         }
 
         if (visibleOut) {
@@ -781,186 +612,5 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
         return text
             .replace(/<\|[a-zA-Z0-9_-]+_section_(?:begin|end)\|>/g, "")
             .replace(/<\|tool_call_(?:argument_)?(?:begin|end)\|>/g, "");
-    }
-
-    private detectQuotaToolRedaction(
-        messages: readonly LanguageModelChatRequestMessage[],
-        tools: readonly vscode.LanguageModelChatTool[],
-        requestId: string,
-        modelId: string,
-        disableRedaction: boolean
-    ): { tools: readonly vscode.LanguageModelChatTool[] } {
-        if (disableRedaction || !tools.length || !messages.length) {
-            return { tools };
-        }
-
-        const quotaMatch = this.findQuotaErrorInMessages(messages);
-        if (!quotaMatch) {
-            return { tools };
-        }
-
-        const { toolName, errorText, turnIndex } = quotaMatch;
-        const toolNames = new Set(tools.map((tool) => tool.name));
-        if (!toolNames.has(toolName)) {
-            Logger.debug("Quota error detected, but tool not present", { toolName, requestId, modelId, turnIndex });
-            return { tools };
-        }
-
-        const filteredTools = tools.filter((tool) => tool.name !== toolName);
-        Logger.warn("Quota error detected; redacting tool for current turn", {
-            toolName,
-            errorText,
-            modelId,
-            requestId,
-            turnIndex,
-        });
-        LiteLLMTelemetry.reportMetric({
-            requestId,
-            model: modelId,
-            status: "failure",
-            error: `quota_exceeded:${toolName}`,
-        });
-
-        return { tools: filteredTools };
-    }
-
-    private findQuotaErrorInMessages(
-        messages: readonly LanguageModelChatRequestMessage[]
-    ): { toolName: string; errorText: string; turnIndex: number } | undefined {
-        const quotaRegex = /(free\s*tier\s*quota\s*exceeded|quota\s*exceeded)/i;
-        const toolRegex = /(insert_edit_into_file|replace_string_in_file)/i;
-
-        for (let i = messages.length - 1; i >= 0; i--) {
-            const message = messages[i];
-            const text = this.collectMessageText(message);
-            if (!text) {
-                continue;
-            }
-
-            if (!quotaRegex.test(text)) {
-                continue;
-            }
-
-            const toolMatch = text.match(toolRegex);
-            if (!toolMatch) {
-                continue;
-            }
-
-            return {
-                toolName: toolMatch[1],
-                errorText: text.slice(0, 500),
-                turnIndex: i,
-            };
-        }
-
-        return undefined;
-    }
-
-    private collectMessageText(message: LanguageModelChatRequestMessage): string {
-        const parts = message.content ?? [];
-        let text = "";
-        for (const part of parts) {
-            if (part instanceof vscode.LanguageModelTextPart) {
-                text += part.value;
-            } else if (typeof part === "string") {
-                text += part;
-            }
-        }
-        return text.trim();
-    }
-
-    /**
-     * Build capabilities object from model_info flags.
-     * Maps LiteLLM model capabilities to VSCode LanguageModelChatCapabilities.
-     */
-    private buildCapabilities(modelInfo: LiteLLMModelInfo | undefined): vscode.LanguageModelChatCapabilities {
-        if (!modelInfo) {
-            // Default capabilities if no model_info available
-            return {
-                toolCalling: true,
-                imageInput: false,
-            };
-        }
-
-        // Map LiteLLM capabilities to VSCode capabilities
-        const capabilities: vscode.LanguageModelChatCapabilities = {
-            // Tool calling is supported if function_calling is supported
-            toolCalling: modelInfo.supports_function_calling !== false,
-            // Image input is supported if vision is supported
-            imageInput: modelInfo.supports_vision === true,
-        };
-
-        return capabilities;
-    }
-
-    /**
-     * Parse error response from LiteLLM API and extract human-readable message.
-     */
-    private parseApiError(statusCode: number, errorText: string): string {
-        try {
-            const parsed = JSON.parse(errorText);
-            if (parsed.error?.message) {
-                return parsed.error.message;
-            }
-        } catch {
-            /* ignore */
-        }
-        if (errorText) {
-            return errorText.slice(0, 200);
-        }
-        return `API request failed with status ${statusCode}`;
-    }
-
-    /**
-     * Remove unsupported parameters from the request body as a final safety net.
-     */
-    private stripUnsupportedParametersFromRequest(
-        requestBody: Record<string, unknown>,
-        modelInfo: LiteLLMModelInfo | undefined,
-        modelId?: string
-    ): void {
-        // NOTE: Some LiteLLM backends (and/or upstream providers) reject non-OpenAI parameters.
-        // In particular, LiteLLM proxy caching controls may be expressed as `cache` or `extra_body.cache`.
-        // If a backend doesn't support it, we must not send it.
-        const paramsToCheck = [
-            "temperature",
-            "stop",
-            "frequency_penalty",
-            "presence_penalty",
-            "top_p",
-            // caching controls (proxy-specific)
-            "cache",
-            "no_cache",
-            "no-cache",
-            "extra_body",
-        ];
-        for (const p of paramsToCheck) {
-            if (!this.isParameterSupported(p, modelInfo, modelId) && p in requestBody) {
-                delete requestBody[p];
-            }
-        }
-
-        // Always ensure we don't accidentally pass a top-level `cache` object.
-        // Some providers error with: "Unknown parameter: 'cache'".
-        if ("cache" in requestBody) {
-            delete requestBody.cache;
-        }
-
-        // If we have extra_body, ensure it doesn't contain cache controls unless the model explicitly supports it.
-        // We don't have a reliable per-model signal for this, so we default to stripping cache directives.
-        if (requestBody.extra_body && typeof requestBody.extra_body === "object") {
-            const eb = requestBody.extra_body as Record<string, unknown>;
-            if (eb.cache && typeof eb.cache === "object") {
-                const cache = eb.cache as Record<string, unknown>;
-                delete cache["no-cache"];
-                delete cache.no_cache;
-                if (Object.keys(cache).length === 0) {
-                    delete eb.cache;
-                }
-            }
-            if (Object.keys(eb).length === 0) {
-                delete requestBody.extra_body;
-            }
-        }
     }
 }

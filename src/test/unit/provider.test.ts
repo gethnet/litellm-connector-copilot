@@ -1,8 +1,21 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
-import { LiteLLMChatModelProvider } from "../../providers/liteLLMProvider";
+import * as sinon from "sinon";
+import { LiteLLMChatProvider } from "../../providers";
+import { LiteLLMClient } from "../../adapters/litellmClient";
+import { ResponsesClient } from "../../adapters/responsesClient";
+import type { LiteLLMModelInfo } from "../../types";
 
 suite("LiteLLM Provider Unit Tests", () => {
+    let sandbox: sinon.SinonSandbox;
+
+    setup(() => {
+        sandbox = sinon.createSandbox();
+    });
+
+    teardown(() => {
+        sandbox.restore();
+    });
     const mockSecrets: vscode.SecretStorage = {
         get: async (key: string) => {
             if (key === "litellm-connector.baseUrl") {
@@ -20,6 +33,123 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     const userAgent = "GitHubCopilotChat/test VSCode/test";
 
+    test("clearModelCache resets model list and caches", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        // Seed caches
+        (provider as unknown as { _modelInfoCache: Map<string, unknown> })._modelInfoCache.set("m1", { mode: "chat" });
+        (provider as unknown as { _parameterProbeCache: Map<string, unknown> })._parameterProbeCache.set(
+            "m1",
+            new Set(["temperature"])
+        );
+        (provider as unknown as { _lastModelList: vscode.LanguageModelChatInformation[] })._lastModelList = [
+            {
+                id: "m1",
+                name: "m1",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1,
+                maxOutputTokens: 1,
+                capabilities: { toolCalling: true, imageInput: false },
+            },
+        ];
+
+        provider.clearModelCache();
+        assert.strictEqual(provider.getLastKnownModels().length, 0);
+        assert.strictEqual((provider as unknown as { _modelInfoCache: Map<string, unknown> })._modelInfoCache.size, 0);
+        assert.strictEqual(
+            (provider as unknown as { _parameterProbeCache: Map<string, unknown> })._parameterProbeCache.size,
+            0
+        );
+    });
+
+    test("provideLanguageModelChatResponse uses modelIdOverride when present in config", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        // Seed last model list with an override model.
+        (provider as unknown as { _lastModelList: vscode.LanguageModelChatInformation[] })._lastModelList = [
+            {
+                id: "override-model",
+                name: "override-model",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 100,
+                maxOutputTokens: 100,
+                capabilities: { toolCalling: true, imageInput: false },
+            },
+        ];
+
+        // Stub ConfigManager to return a config with modelIdOverride.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const configManager = (provider as any)._configManager as {
+            convertProviderConfiguration: (c: Record<string, unknown>) => unknown;
+        };
+        sandbox.stub(configManager, "convertProviderConfiguration").returns({
+            url: "http://localhost:4000",
+            key: "k",
+            disableQuotaToolRedaction: false,
+            disableCaching: true,
+            inactivityTimeout: 60,
+            modelOverrides: {},
+            modelIdOverride: "override-model",
+        });
+
+        // Prevent network calls: stub the low-level client to return a minimal ReadableStream.
+        // We only need to assert that the request model id is the override.
+        const chatStub = sandbox.stub(LiteLLMClient.prototype, "chat");
+        chatStub.callsFake(async (...args: unknown[]) => {
+            const requestBody = args[0] as { model: string };
+            assert.strictEqual(requestBody.model, "override-model");
+
+            const encoder = new TextEncoder();
+            return new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                    controller.close();
+                },
+            });
+        });
+
+        // Ensure we don't accidentally go down the /responses path in this test.
+        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
+
+        const modelSelected: vscode.LanguageModelChatInformation = {
+            id: "selected-model",
+            name: "selected-model",
+            tooltip: "",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 100,
+            maxOutputTokens: 100,
+            capabilities: { toolCalling: true, imageInput: false },
+        };
+
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("hi")],
+                name: undefined,
+            },
+        ];
+
+        await provider.provideLanguageModelChatResponse(
+            modelSelected,
+            messages,
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                configuration: { baseUrl: "x" },
+            },
+            { report: () => {} },
+            new vscode.CancellationTokenSource().token
+        );
+
+        assert.strictEqual(chatStub.called, true);
+    });
+
     test("provideLanguageModelChatInformation returns array (no key -> empty)", async () => {
         const emptySecrets = {
             get: async () => undefined,
@@ -28,7 +158,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             onDidChange: (_listener: unknown) => ({ dispose() {} }),
         } as unknown as vscode.SecretStorage;
 
-        const provider = new LiteLLMChatModelProvider(emptySecrets, userAgent);
+        const provider = new LiteLLMChatProvider(emptySecrets, userAgent);
         const infos = await provider.provideLanguageModelChatInformation(
             { silent: true },
             new vscode.CancellationTokenSource().token
@@ -45,7 +175,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             onDidChange: (_listener: unknown) => ({ dispose() {} }),
         } as unknown as vscode.SecretStorage;
 
-        const provider = new LiteLLMChatModelProvider(emptySecrets, userAgent);
+        const provider = new LiteLLMChatProvider(emptySecrets, userAgent);
         const infos = await provider.provideLanguageModelChatInformation(
             { silent: false },
             new vscode.CancellationTokenSource().token
@@ -54,7 +184,7 @@ suite("LiteLLM Provider Unit Tests", () => {
     });
 
     test("buildCapabilities maps model_info flags correctly", () => {
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const buildCapabilities = (
             provider as unknown as {
                 buildCapabilities: (modelInfo: unknown) => vscode.LanguageModelChatCapabilities;
@@ -78,7 +208,7 @@ suite("LiteLLM Provider Unit Tests", () => {
     });
 
     test("parseApiError extracts meaningful error messages", () => {
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const parseApiError = (
             provider as unknown as {
                 parseApiError: (statusCode: number, errorText: string) => string;
@@ -94,8 +224,44 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(parseApiError(400, ""), "API request failed with status 400");
     });
 
+    test("getModelTags adds inline-completions for streaming chat models", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        interface ProviderForTagTesting {
+            getModelTags: (
+                modelId: string,
+                modelInfo?: LiteLLMModelInfo,
+                overrides?: Record<string, string[]>
+            ) => string[];
+        }
+        const getModelTags = (provider as unknown as ProviderForTagTesting).getModelTags.bind(provider);
+
+        const tags = getModelTags("test-model", {
+            mode: "chat",
+            supports_native_streaming: true,
+        });
+        assert.ok(tags.includes("inline-completions"), "Streaming chat models should have inline-completions tag");
+    });
+
+    test("getModelTags applies user overrides", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        interface ProviderForTagTesting {
+            getModelTags: (
+                modelId: string,
+                modelInfo?: LiteLLMModelInfo,
+                overrides?: Record<string, string[]>
+            ) => string[];
+        }
+        const getModelTags = (provider as unknown as ProviderForTagTesting).getModelTags.bind(provider);
+
+        const overrides = { "test-model": ["custom-tag"] };
+        const tags = getModelTags("test-model", undefined, overrides);
+        assert.ok(tags.includes("custom-tag"), "User-defined override tags should be included in result");
+    });
+
     test("stripUnsupportedParametersFromRequest removes known unsupported params", () => {
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const strip = (
             provider as unknown as {
                 stripUnsupportedParametersFromRequest: (
@@ -121,7 +287,7 @@ suite("LiteLLM Provider Unit Tests", () => {
     });
 
     test("stripUnsupportedParametersFromRequest handles o1 models", () => {
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const strip = (
             provider as unknown as {
                 stripUnsupportedParametersFromRequest: (
@@ -149,7 +315,7 @@ suite("LiteLLM Provider Unit Tests", () => {
     });
 
     test("detectQuotaToolRedaction removes failing tool when enabled", () => {
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const detect = (
             provider as unknown as {
                 detectQuotaToolRedaction: (
@@ -180,7 +346,7 @@ suite("LiteLLM Provider Unit Tests", () => {
     });
 
     test("detectQuotaToolRedaction does not remove tool when disabled", () => {
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const detect = (
             provider as unknown as {
                 detectQuotaToolRedaction: (
@@ -220,12 +386,314 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         // This would be called internally when VS Code passes configuration through options
         // We're testing that the conversion works properly
-        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const configManager = (provider as any)._configManager;
         const convertedConfig = configManager.convertProviderConfiguration(providerConfig);
 
         assert.strictEqual(convertedConfig.url, "https://api.litellm.ai");
         assert.strictEqual(convertedConfig.key, "sk-provider-key");
+    });
+
+    test("provideLanguageModelChatInformation includes tags in model info", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        const mockData = [
+            {
+                model_name: "gpt-4",
+                model_info: {
+                    id: "gpt-4",
+                    mode: "chat",
+                    supports_native_streaming: true,
+                    supports_function_calling: true,
+                } as LiteLLMModelInfo,
+            },
+            {
+                model_name: "claude-coder",
+                model_info: {
+                    id: "claude-coder",
+                    mode: "chat",
+                    supports_native_streaming: true,
+                } as LiteLLMModelInfo,
+            },
+        ];
+
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({ data: mockData });
+
+        const infos = await provider.provideLanguageModelChatInformation({ silent: true }, {
+            isCancellationRequested: false,
+            onCancellationRequested: () => ({ dispose() {} }),
+        } as vscode.CancellationToken);
+
+        assert.strictEqual(infos.length, 2);
+
+        // Model info with optional tags extension
+        interface ModelInfoWithTags {
+            tags?: string[];
+        }
+
+        // Check first model (gpt-4) has tools and completions tags
+        const gpt4 = infos[0] as ModelInfoWithTags;
+        const gpt4Tags = gpt4.tags || [];
+        assert.ok(gpt4Tags.includes("tools"), "gpt-4 should have tools tag for function-calling capability");
+        assert.ok(gpt4Tags.includes("inline-completions"), "gpt-4 should have inline-completions tag for streaming");
+
+        // Check second model (claude-coder) has inline-edit tag
+        const claude = infos[1] as ModelInfoWithTags;
+        const claudeTags = claude.tags || [];
+        assert.ok(
+            claudeTags.includes("inline-edit"),
+            "claude-coder should have inline-edit tag (name contains 'coder')"
+        );
+        assert.ok(
+            claudeTags.includes("inline-completions"),
+            "claude-coder should have inline-completions tag for streaming"
+        );
+    });
+
+    test("provideLanguageModelChatInformation applies model overrides to tags", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        const mockData = [
+            {
+                model_name: "gpt-4",
+                model_info: {
+                    id: "gpt-4",
+                    mode: "chat",
+                    supports_native_streaming: true,
+                } as LiteLLMModelInfo,
+            },
+        ];
+
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({ data: mockData });
+
+        // Stub config manager to return model overrides
+        interface ConfigManager {
+            getConfig: () => Promise<{ url: string; modelOverrides: Record<string, string[]> }>;
+        }
+        interface ProviderWithConfigManager {
+            _configManager: ConfigManager;
+        }
+        const providerWithConfig = provider as unknown as ProviderWithConfigManager;
+        sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            modelOverrides: {
+                "gpt-4": ["scm-generator", "custom-tag"],
+            },
+        });
+
+        const infos = await provider.provideLanguageModelChatInformation({ silent: true }, {
+            isCancellationRequested: false,
+            onCancellationRequested: () => ({ dispose() {} }),
+        } as vscode.CancellationToken);
+
+        assert.strictEqual(infos.length, 1);
+
+        interface ModelInfoWithTags {
+            tags?: string[];
+        }
+        const gpt4 = infos[0] as ModelInfoWithTags;
+        const gpt4Tags = gpt4.tags || [];
+        assert.ok(gpt4Tags.includes("scm-generator"), "Should include scm-generator override tag from config");
+        assert.ok(gpt4Tags.includes("custom-tag"), "Should include custom-tag override tag from config");
+    });
+
+    test("provideLanguageModelChatInformation returns empty when /model/info data is invalid", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({ data: undefined } as never);
+
+        const infos = await provider.provideLanguageModelChatInformation({ silent: true }, {
+            isCancellationRequested: false,
+            onCancellationRequested: () => ({ dispose() {} }),
+        } as vscode.CancellationToken);
+
+        assert.ok(Array.isArray(infos));
+        assert.strictEqual(infos.length, 0);
+    });
+
+    test("provideLanguageModelChatInformation returns empty when /model/info throws", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").rejects(new Error("network"));
+
+        const infos = await provider.provideLanguageModelChatInformation({ silent: true }, {
+            isCancellationRequested: false,
+            onCancellationRequested: () => ({ dispose() {} }),
+        } as vscode.CancellationToken);
+
+        assert.ok(Array.isArray(infos));
+        assert.strictEqual(infos.length, 0);
+    });
+
+    test("detectQuotaToolRedaction does not redact when quota tool is not present", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const detect = (
+            provider as unknown as {
+                detectQuotaToolRedaction: (
+                    messages: readonly vscode.LanguageModelChatRequestMessage[],
+                    tools: readonly vscode.LanguageModelChatTool[],
+                    requestId: string,
+                    modelId: string,
+                    disableRedaction: boolean
+                ) => { tools: readonly vscode.LanguageModelChatTool[] };
+            }
+        ).detectQuotaToolRedaction.bind(provider);
+
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.Assistant,
+                name: undefined,
+                content: [new vscode.LanguageModelTextPart("quota exceeded for insert_edit_into_file")],
+            },
+        ];
+        const tools: vscode.LanguageModelChatTool[] = [
+            { name: "replace_string_in_file", description: "", inputSchema: {} },
+        ];
+
+        const result = detect(messages, tools, "req-3", "model-1", false);
+        assert.strictEqual(result.tools.length, 1);
+        assert.strictEqual(result.tools[0].name, "replace_string_in_file");
+    });
+
+    test("detectQuotaToolRedaction does not redact when message has no text", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const detect = (
+            provider as unknown as {
+                detectQuotaToolRedaction: (
+                    messages: readonly vscode.LanguageModelChatRequestMessage[],
+                    tools: readonly vscode.LanguageModelChatTool[],
+                    requestId: string,
+                    modelId: string,
+                    disableRedaction: boolean
+                ) => { tools: readonly vscode.LanguageModelChatTool[] };
+            }
+        ).detectQuotaToolRedaction.bind(provider);
+
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.Assistant,
+                name: undefined,
+                // Empty content -> collectMessageText returns "" -> branch continues
+                content: [],
+            },
+        ];
+        const tools: vscode.LanguageModelChatTool[] = [
+            { name: "insert_edit_into_file", description: "", inputSchema: {} },
+        ];
+
+        const result = detect(messages, tools, "req-4", "model-1", false);
+        assert.strictEqual(result.tools.length, 1);
+        assert.strictEqual(result.tools[0].name, "insert_edit_into_file");
+    });
+
+    test("detectQuotaToolRedaction does not redact when quota regex does not match", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const detect = (
+            provider as unknown as {
+                detectQuotaToolRedaction: (
+                    messages: readonly vscode.LanguageModelChatRequestMessage[],
+                    tools: readonly vscode.LanguageModelChatTool[],
+                    requestId: string,
+                    modelId: string,
+                    disableRedaction: boolean
+                ) => { tools: readonly vscode.LanguageModelChatTool[] };
+            }
+        ).detectQuotaToolRedaction.bind(provider);
+
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.Assistant,
+                name: undefined,
+                content: [new vscode.LanguageModelTextPart("some other error insert_edit_into_file")],
+            },
+        ];
+        const tools: vscode.LanguageModelChatTool[] = [
+            { name: "insert_edit_into_file", description: "", inputSchema: {} },
+        ];
+
+        const result = detect(messages, tools, "req-5", "model-1", false);
+        assert.strictEqual(result.tools.length, 1);
+        assert.strictEqual(result.tools[0].name, "insert_edit_into_file");
+    });
+
+    test("detectQuotaToolRedaction does not redact when tool regex does not match", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const detect = (
+            provider as unknown as {
+                detectQuotaToolRedaction: (
+                    messages: readonly vscode.LanguageModelChatRequestMessage[],
+                    tools: readonly vscode.LanguageModelChatTool[],
+                    requestId: string,
+                    modelId: string,
+                    disableRedaction: boolean
+                ) => { tools: readonly vscode.LanguageModelChatTool[] };
+            }
+        ).detectQuotaToolRedaction.bind(provider);
+
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.Assistant,
+                name: undefined,
+                content: [new vscode.LanguageModelTextPart("quota exceeded for some_other_tool")],
+            },
+        ];
+        const tools: vscode.LanguageModelChatTool[] = [
+            { name: "insert_edit_into_file", description: "", inputSchema: {} },
+        ];
+
+        const result = detect(messages, tools, "req-6", "model-1", false);
+        assert.strictEqual(result.tools.length, 1);
+        assert.strictEqual(result.tools[0].name, "insert_edit_into_file");
+    });
+
+    test("isParameterSupported returns false when parameter probe cache indicates unsupported", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const isSupported = (
+            provider as unknown as {
+                isParameterSupported: (param: string, modelInfo: unknown, modelId?: string) => boolean;
+            }
+        ).isParameterSupported.bind(provider);
+
+        // Seed cache to indicate 'temperature' is unsupported.
+        (provider as unknown as { _parameterProbeCache: Map<string, Set<string>> })._parameterProbeCache.set(
+            "gpt-5.2",
+            new Set(["temperature"])
+        );
+
+        assert.strictEqual(isSupported("temperature", { supported_openai_params: ["temperature"] }, "gpt-5.2"), false);
+    });
+
+    test("isParameterSupported returns false when modelId matches known model limitations substring", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const isSupported = (
+            provider as unknown as {
+                isParameterSupported: (param: string, modelInfo: unknown, modelId?: string) => boolean;
+            }
+        ).isParameterSupported.bind(provider);
+
+        // Use a model id that should match a known limitations key via substring.
+        assert.strictEqual(isSupported("temperature", undefined, "o1-preview"), false);
+    });
+
+    test("stripUnsupportedParametersFromRequest removes cache keys inside extra_body and deletes empty containers", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const strip = (
+            provider as unknown as {
+                stripUnsupportedParametersFromRequest: (
+                    requestBody: Record<string, unknown>,
+                    modelInfo: unknown,
+                    modelId?: string
+                ) => void;
+            }
+        ).stripUnsupportedParametersFromRequest.bind(provider);
+
+        const requestBody: Record<string, unknown> = {
+            cache: { "no-cache": true },
+            extra_body: { cache: { "no-cache": true, no_cache: true } },
+        };
+
+        strip(requestBody, undefined, "any");
+
+        assert.ok(!("cache" in requestBody));
+        assert.ok(!("extra_body" in requestBody));
     });
 });

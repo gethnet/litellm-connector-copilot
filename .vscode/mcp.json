@@ -1,0 +1,41 @@
+{
+    "servers": {
+        "cognitionai/deepwiki": {
+            "type": "http",
+            "url": "https://mcp.deepwiki.com/mcp",
+            "gallery": "https://api.mcp.github.com",
+            "version": "1.0.0"
+        },
+        "io.github.wonderwhy-er/desktop-commander": {
+            "type": "stdio",
+            "command": "npx",
+            "args": [
+                "--registry",
+                "https://registry.npmjs.org",
+                "@wonderwhy-er/desktop-commander@0.2.34"
+            ],
+            "gallery": "https://api.mcp.github.com",
+            "version": "0.2.34"
+        },
+        "oraios/serena": {
+            "type": "stdio",
+            "command": "uvx",
+            "args": [
+                "--from",
+                "git+https://github.com/oraios/serena",
+                "serena",
+                "start-mcp-server",
+                "serena@latest",
+                "--context",
+                "ide",
+                "--context",
+                "agent",
+                "--project",
+                "${workspaceFolder}"
+            ],
+            "gallery": "https://api.mcp.github.com",
+            "version": "1.0.0"
+        }
+    },
+    "inputs": []
+}
