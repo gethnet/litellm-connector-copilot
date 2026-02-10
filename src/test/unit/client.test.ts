@@ -187,7 +187,6 @@ suite("LiteLLM Client Unit Tests", () => {
         await client.chat({
             model: "gpt-4",
             messages: [],
-            // eslint-disable-next-line @typescript-eslint/naming-convention
             cache: { "no-cache": true },
             extra_body: { cache: { "no-cache": true, no_cache: true } },
         } as never);
