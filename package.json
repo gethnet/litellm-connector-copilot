@@ -85,6 +85,17 @@
 					"default": false,
 					"description": "Disable per-turn tool redaction when a quota error is detected in chat history. Leave off to keep redaction enabled."
 				},
+				"litellm-connector.modelOverrides": {
+					"type": "object",
+					"default": {},
+					"description": "Override or add tags for specific models. Key is the Model ID (e.g. 'gpt-4o'), value is an array of tags (e.g. ['inline-completions']).",
+					"additionalProperties": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					}
+				},
 				"litellm-connector.inactivityTimeout": {
 					"type": "number",
 					"default": 60,

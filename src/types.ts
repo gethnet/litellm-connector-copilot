@@ -59,6 +59,7 @@ export interface LiteLLMConfig {
     inactivityTimeout?: number;
     disableCaching?: boolean;
     disableQuotaToolRedaction?: boolean;
+    modelOverrides?: Record<string, string[]>;
 }
 
 /**

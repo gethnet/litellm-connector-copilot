@@ -1,6 +1,7 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import { LiteLLMChatModelProvider } from "../../providers/liteLLMProvider";
+import type { LiteLLMModelInfo } from "../../types";
 
 suite("LiteLLM Provider Unit Tests", () => {
     const mockSecrets: vscode.SecretStorage = {
@@ -92,6 +93,42 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(parseApiError(400, longError).length, 200);
 
         assert.strictEqual(parseApiError(400, ""), "API request failed with status 400");
+    });
+
+    test("getModelTags adds inline-completions for streaming chat models", () => {
+        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const getModelTags = (
+            provider as unknown as {
+                getModelTags: (
+                    modelId: string,
+                    modelInfo?: LiteLLMModelInfo,
+                    overrides?: Record<string, string[]>
+                ) => string[];
+            }
+        ).getModelTags.bind(provider);
+
+        const tags = getModelTags("test-model", {
+            mode: "chat",
+            supports_native_streaming: true,
+        });
+        assert.ok(tags.includes("inline-completions"));
+    });
+
+    test("getModelTags applies user overrides", () => {
+        const provider = new LiteLLMChatModelProvider(mockSecrets, userAgent);
+        const getModelTags = (
+            provider as unknown as {
+                getModelTags: (
+                    modelId: string,
+                    modelInfo?: LiteLLMModelInfo,
+                    overrides?: Record<string, string[]>
+                ) => string[];
+            }
+        ).getModelTags.bind(provider);
+
+        const overrides = { "test-model": ["custom-tag"] };
+        const tags = getModelTags("test-model", undefined, overrides);
+        assert.ok(tags.includes("custom-tag"));
     });
 
     test("stripUnsupportedParametersFromRequest removes known unsupported params", () => {

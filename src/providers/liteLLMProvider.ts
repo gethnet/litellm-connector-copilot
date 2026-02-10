@@ -61,6 +61,36 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
     private _repeatCount = 0;
     private _lastFinishReason: string | undefined = undefined;
 
+    /**
+     * Determines the tags for a model based on its info and user overrides.
+     */
+    private getModelTags(
+        modelId: string,
+        modelInfo?: LiteLLMModelInfo,
+        overrides?: Record<string, string[]>
+    ): string[] {
+        const tags = new Set<string>();
+
+        // Automatically add 'inline-completions' if it's a chat model that supports streaming
+        if (modelInfo?.mode === "chat") {
+            const supportsStreaming =
+                modelInfo.supports_native_streaming === true || modelInfo.supported_openai_params?.includes("stream");
+
+            if (supportsStreaming) {
+                tags.add("inline-completions");
+            }
+        }
+
+        // Apply user overrides
+        if (overrides && overrides[modelId]) {
+            for (const tag of overrides[modelId]) {
+                tags.add(tag);
+            }
+        }
+
+        return Array.from(tags);
+    }
+
     constructor(
         private readonly secrets: vscode.SecretStorage,
         private readonly userAgent: string
@@ -112,6 +142,7 @@ export class LiteLLMChatModelProvider implements LanguageModelChatProvider {
                         maxInputTokens: Math.max(1, maxInputTokens),
                         maxOutputTokens: Math.max(1, maxOutputTokens),
                         capabilities,
+                        tags: this.getModelTags(modelId, modelInfo, config.modelOverrides),
                     } satisfies LanguageModelChatInformation;
 
                     // If model has exceptionally high context, ensure we don't overflow VS Code's expectations if any

@@ -76,6 +76,7 @@ suite("ConfigManager Unit Tests", () => {
         assert.strictEqual(typeof config.inactivityTimeout, "number");
         assert.strictEqual(typeof config.disableCaching, "boolean");
         assert.strictEqual(typeof config.disableQuotaToolRedaction, "boolean");
+        assert.notStrictEqual(config.modelOverrides, undefined);
     });
 
     test("convertProviderConfiguration handles missing fields", () => {

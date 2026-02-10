@@ -7,6 +7,7 @@ export class ConfigManager {
     private static readonly INACTIVITY_TIMEOUT_KEY = "litellm-connector.inactivityTimeout";
     private static readonly DISABLE_CACHING_KEY = "litellm-connector.disableCaching";
     private static readonly DISABLE_QUOTA_TOOL_REDACTION_KEY = "litellm-connector.disableQuotaToolRedaction";
+    private static readonly MODEL_OVERRIDES_KEY = "litellm-connector.modelOverrides";
     private static readonly MIGRATION_MARKER_KEY = "litellm-connector.migrated-to-v1.109";
 
     constructor(private readonly secrets: vscode.SecretStorage) {}
@@ -26,6 +27,9 @@ export class ConfigManager {
         const disableQuotaToolRedaction = vscode.workspace
             .getConfiguration()
             .get<boolean>(ConfigManager.DISABLE_QUOTA_TOOL_REDACTION_KEY, false);
+        const modelOverrides = vscode.workspace
+            .getConfiguration()
+            .get<Record<string, string[]>>(ConfigManager.MODEL_OVERRIDES_KEY, {});
 
         return {
             url: url || "",
@@ -33,6 +37,7 @@ export class ConfigManager {
             inactivityTimeout,
             disableCaching,
             disableQuotaToolRedaction,
+            modelOverrides,
         };
     }
 
@@ -79,6 +84,9 @@ export class ConfigManager {
         const disableQuotaToolRedaction = vscode.workspace
             .getConfiguration()
             .get<boolean>(ConfigManager.DISABLE_QUOTA_TOOL_REDACTION_KEY, false);
+        const modelOverrides = vscode.workspace
+            .getConfiguration()
+            .get<Record<string, string[]>>(ConfigManager.MODEL_OVERRIDES_KEY, {});
 
         return {
             url: baseUrl,
@@ -86,6 +94,7 @@ export class ConfigManager {
             inactivityTimeout,
             disableCaching,
             disableQuotaToolRedaction,
+            modelOverrides,
         };
     }
 
