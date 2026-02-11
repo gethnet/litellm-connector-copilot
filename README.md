@@ -49,6 +49,8 @@ To use this extension, **YOU MUST** have an active GitHub Copilot plan (the Free
 
 * **🚀 VS Code 1.109+ settings modernization**: configuration now aligns with the Language Model provider settings UI.
 * **🧰 Improved error handling**: better behavior around quota/tooling errors.
+* **🧱 Tool-call compatibility hardening**: tool call IDs are normalized to comply with OpenAI-compatible limits (prevents hard failures like `tool_calls[].id` too long).
+* **🧼 Safer logging**: provider error text is sanitized to avoid dumping echoed prompt/context into logs.
 * **📦 Smaller, faster package**: production builds are bundled/minified with **esbuild**.
 * **🌐 Web-ready output**: includes a browser-target bundle for VS Code Web hosts.
 

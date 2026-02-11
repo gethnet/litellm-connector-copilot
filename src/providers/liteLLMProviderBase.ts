@@ -429,7 +429,11 @@ export abstract class LiteLLMProviderBase {
     private findQuotaErrorInMessages(
         messages: readonly LanguageModelChatRequestMessage[]
     ): { toolName: string; errorText: string; turnIndex: number } | undefined {
-        const quotaRegex = /(free\s*tier\s*quota\s*exceeded|quota\s*exceeded)/i;
+        // Be strict: only redact tools when we have strong evidence of a real rate/quota failure.
+        // Some providers echo the entire prompt/context into error text; avoid matching generic
+        // phrases that can appear in unrelated failures.
+        const quotaRegex =
+            /(\b429\b|rate\s*limit\s*exceeded|rate\s*limited|too\s*many\s*requests|insufficient\s*quota|quota\s*exceeded|exceeded\s*your\s*current\s*quota)/i;
         const toolRegex = /(insert_edit_into_file|replace_string_in_file)/i;
 
         for (let i = messages.length - 1; i >= 0; i--) {
@@ -448,12 +452,32 @@ export abstract class LiteLLMProviderBase {
 
             return {
                 toolName: toolMatch[1],
-                errorText: text.slice(0, 500),
+                // Keep logs usable and avoid dumping prompt/context.
+                errorText: this.sanitizeErrorTextForLogs(text),
                 turnIndex: i,
             };
         }
 
         return undefined;
+    }
+
+    private sanitizeErrorTextForLogs(text: string): string {
+        const trimmed = (text || "").trim();
+        if (!trimmed) {
+            return "";
+        }
+
+        // Remove common Copilot prompt wrappers if providers echo them back.
+        const withoutCopilotContext = trimmed
+            .replace(/<context>[\s\S]*?<\/context>/gi, "<context>…</context>")
+            .replace(/<editorContext>[\s\S]*?<\/editorContext>/gi, "<editorContext>…</editorContext>")
+            .replace(
+                /<reminderInstructions>[\s\S]*?<\/reminderInstructions>/gi,
+                "<reminderInstructions>…</reminderInstructions>"
+            );
+
+        // Cap size.
+        return withoutCopilotContext.length > 500 ? `${withoutCopilotContext.slice(0, 500)}…` : withoutCopilotContext;
     }
 
     private collectMessageText(message: LanguageModelChatRequestMessage): string {

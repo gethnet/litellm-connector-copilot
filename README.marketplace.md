@@ -49,6 +49,8 @@ If LiteLLM can talk to it, **Copilot can use it**.
 ## 🆕 Recent Highlights
 
 - 🚀 **VS Code 1.109+ settings modernization** (aligns with the Language Model provider settings UI)
+- 🧱 **Tool-call compatibility hardening** (normalizes tool call IDs to OpenAI-compatible limits to prevent hard failures)
+- 🧼 **Safer logging + fewer false tool redactions** (sanitizes provider error text and tightens quota/rate-limit detection)
 - 📦 **Smaller, faster package** (bundled/minified production builds)
 - 🌐 **Web-ready output** (includes a browser-target bundle for VS Code Web)
 
