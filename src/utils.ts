@@ -1,5 +1,4 @@
 import * as vscode from "vscode";
-import { createHash } from "crypto";
 import type {
     OpenAIChatMessage,
     OpenAIChatRole,
@@ -33,9 +32,16 @@ export function normalizeToolCallId(id: string, maxLen = 40): string {
 }
 
 function stableHash(input: string): string {
-    // Node is available in the extension host.
-    // Using sha256 keeps collisions extremely unlikely while staying deterministic.
-    return createHash("sha256").update(input).digest("hex");
+    // Must work in BOTH extension host (node) and web bundle.
+    // Use a small, deterministic, non-crypto hash (FNV-1a 64-bit) and encode as hex.
+    // Collision risk is low for our use (shrinking IDs) and avoids bundling Node builtins.
+    let hash = 0xcbf29ce484222325n; // offset basis
+    const prime = 0x100000001b3n;
+    for (const ch of input) {
+        hash ^= BigInt(ch.codePointAt(0) ?? 0);
+        hash = (hash * prime) & 0xffffffffffffffffn;
+    }
+    return hash.toString(16).padStart(16, "0");
 }
 import { Logger } from "./utils/logger";
 
