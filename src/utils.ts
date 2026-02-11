@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { createHash } from "crypto";
 import type {
     OpenAIChatMessage,
     OpenAIChatRole,
@@ -6,6 +7,36 @@ import type {
     OpenAIToolCall,
     OpenAIChatMessageContentItem,
 } from "./types";
+
+/**
+ * OpenAI-compatible tool_call ids are commonly limited to <= 40 chars.
+ * VS Code tool call ids can be longer; LiteLLM/OpenAI will reject them.
+ *
+ * Strategy:
+ * - Keep short ids as-is.
+ * - For longer ids, deterministically shrink to <= 40 using a stable hash.
+ * - Preserve a readable prefix for debugging.
+ */
+export function normalizeToolCallId(id: string, maxLen = 40): string {
+    const raw = (id || "").trim();
+    if (!raw) {
+        return "tc_" + stableHash("empty").slice(0, maxLen - 3);
+    }
+    if (raw.length <= maxLen) {
+        return raw;
+    }
+
+    const prefix = raw.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 10);
+    const hash = stableHash(raw); // 64 hex chars
+    const out = `tc_${prefix}_${hash}`;
+    return out.length <= maxLen ? out : out.slice(0, maxLen);
+}
+
+function stableHash(input: string): string {
+    // Node is available in the extension host.
+    // Using sha256 keeps collisions extremely unlikely while staying deterministic.
+    return createHash("sha256").update(input).digest("hex");
+}
 import { Logger } from "./utils/logger";
 
 // Tool calling sanitization helpers
@@ -181,7 +212,9 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                 }
                 // Other data types (json, etc.) can be handled here if needed in the future
             } else if (part instanceof vscode.LanguageModelToolCallPart) {
-                const id = part.callId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                const id = normalizeToolCallId(
+                    part.callId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+                );
                 let args = "{}";
                 try {
                     args = JSON.stringify(part.input ?? {});
@@ -190,7 +223,7 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                 }
                 toolCalls.push({ id, type: "function", function: { name: part.name, arguments: args } });
             } else if (isToolResultPart(part)) {
-                const callId = (part as { callId?: string }).callId ?? "";
+                const callId = normalizeToolCallId((part as { callId?: string }).callId ?? "");
                 const content = collectToolResultText(part as { content?: ReadonlyArray<unknown> });
                 toolResults.push({ callId, content });
             }

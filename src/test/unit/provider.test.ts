@@ -332,7 +332,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             {
                 role: vscode.LanguageModelChatMessageRole.Assistant,
                 name: undefined,
-                content: [new vscode.LanguageModelTextPart("Free tier quota exceeded for insert_edit_into_file")],
+                content: [new vscode.LanguageModelTextPart("429 rate limit exceeded for insert_edit_into_file")],
             },
         ];
         const tools: vscode.LanguageModelChatTool[] = [
@@ -363,7 +363,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             {
                 role: vscode.LanguageModelChatMessageRole.Assistant,
                 name: undefined,
-                content: [new vscode.LanguageModelTextPart("Free tier quota exceeded for insert_edit_into_file")],
+                content: [new vscode.LanguageModelTextPart("429 rate limit exceeded for insert_edit_into_file")],
             },
         ];
         const tools: vscode.LanguageModelChatTool[] = [
@@ -643,6 +643,41 @@ suite("LiteLLM Provider Unit Tests", () => {
         const result = detect(messages, tools, "req-6", "model-1", false);
         assert.strictEqual(result.tools.length, 1);
         assert.strictEqual(result.tools[0].name, "insert_edit_into_file");
+    });
+
+    test("detectQuotaToolRedaction does not redact on echoed Copilot context without rate/quota signal", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const detect = (
+            provider as unknown as {
+                detectQuotaToolRedaction: (
+                    messages: readonly vscode.LanguageModelChatRequestMessage[],
+                    tools: readonly vscode.LanguageModelChatTool[],
+                    requestId: string,
+                    modelId: string,
+                    disableRedaction: boolean
+                ) => { tools: readonly vscode.LanguageModelChatTool[] };
+            }
+        ).detectQuotaToolRedaction.bind(provider);
+
+        const echoed =
+            "<context>some huge context</context>\n" +
+            "<editorContext>file stuff</editorContext>\n" +
+            "tool insert_edit_into_file failed";
+
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.Assistant,
+                name: undefined,
+                content: [new vscode.LanguageModelTextPart(echoed)],
+            },
+        ];
+        const tools: vscode.LanguageModelChatTool[] = [
+            { name: "insert_edit_into_file", description: "", inputSchema: {} },
+            { name: "replace_string_in_file", description: "", inputSchema: {} },
+        ];
+
+        const result = detect(messages, tools, "req-echo", "model-1", false);
+        assert.strictEqual(result.tools.length, 2);
     });
 
     test("isParameterSupported returns false when parameter probe cache indicates unsupported", () => {

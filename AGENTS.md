@@ -42,6 +42,13 @@ This document defines **repo-wide, tool-agnostic** expectations for automated co
 
 ## 3) Repo conventions
 
+### Communication artifacts (commit messages, PRs, issues, changelogs)
+- **Be clear and concise**: state *what* changed and *why* in as few words as possible.
+- **Use emojis for visual scanning**: include 1–2 relevant emojis at the start of titles (commit/PR/issue) to improve readability.
+  - Examples: `🛠️ Fix tool-call id normalization`, `🧼 Sanitize provider error logs`, `🚀 Release v1.3.x`.
+- **Prefer outcome-focused wording**: describe user impact (e.g. “prevents hard failure”, “reduces false redactions”).
+- **Avoid noise**: no walls of text; use bullet points for PR descriptions and changelog entries.
+
 ### File structure guidance
 Group by responsibility:
 - `src/providers/`: Language Model provider implementations

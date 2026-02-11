@@ -5,6 +5,7 @@ import type {
     LiteLLMResponseTool,
     OpenAIChatMessageContentItem,
 } from "../types";
+import { normalizeToolCallId } from "../utils";
 
 /**
  * Transform a chat/completions request body to the responses API format.
@@ -24,17 +25,11 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
     for (const msg of messages) {
         if (msg.role === "assistant" && msg.tool_calls) {
             for (const tc of msg.tool_calls) {
-                let normalizedId = tc.id;
-                if (normalizedId && !normalizedId.startsWith("fc_")) {
-                    normalizedId = `fc_${normalizedId}`;
-                }
+                const normalizedId = normalizeToolCallId(tc.id);
                 toolCallIdMap.set(tc.id, normalizedId);
             }
         } else if (msg.role === "tool" && msg.tool_call_id) {
-            let normalizedId = msg.tool_call_id;
-            if (normalizedId && !normalizedId.startsWith("fc_")) {
-                normalizedId = `fc_${normalizedId}`;
-            }
+            const normalizedId = normalizeToolCallId(msg.tool_call_id);
             toolCallIdMap.set(msg.tool_call_id, normalizedId);
         }
     }
@@ -70,7 +65,7 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
             }
             if (msg.tool_calls) {
                 for (const tc of msg.tool_calls) {
-                    const normalizedId = toolCallIdMap.get(tc.id) || tc.id;
+                    const normalizedId = toolCallIdMap.get(tc.id) || normalizeToolCallId(tc.id);
                     inputArray.push({
                         type: "function_call",
                         id: normalizedId,
@@ -83,8 +78,7 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
         } else if (msg.role === "tool") {
             const toolCallId = msg.tool_call_id;
             if (toolCallId) {
-                const normalizedId =
-                    toolCallIdMap.get(toolCallId) || (toolCallId.startsWith("fc_") ? toolCallId : `fc_${toolCallId}`);
+                const normalizedId = toolCallIdMap.get(toolCallId) || normalizeToolCallId(toolCallId);
                 const toolContent = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
                 inputArray.push({
                     type: "function_call_output",
