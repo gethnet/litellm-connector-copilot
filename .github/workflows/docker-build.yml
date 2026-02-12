@@ -5,7 +5,8 @@ on:
     branches:
       - main
     paths:
-      - 'docker/Dockerfile'
+      - '.devcontainer/devcontainer.json'
+      - '.devcontainer/**'
       - '.github/workflows/docker-build.yml'
   workflow_dispatch:
 
