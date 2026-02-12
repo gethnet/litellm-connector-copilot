@@ -1,0 +1,36 @@
+name: Pull Request
+description: Submit a pull request
+title: '[PR]: '
+labels:
+  - status:new
+body:
+  - type: textarea
+    id: overview
+    attributes:
+      label: Change Log / Overview
+      description: What changed?  Outline/summarize the changes in this PR.
+    validations:
+      required: true
+  - type: textarea
+    id: related_items
+    attributes:
+      label: Related Issues, Builds, Pipeline Runs, etc.
+      description: Enter the related IDs of any item, one item per line
+      placeholder: |
+        - #13
+        - #22
+
+  - type: checkboxes
+    id: benchmarks
+    attributes:
+      label: Pull Request Pre-check
+      description: Does the PR pass all necessary checks and tests?
+      options:
+        - label: Linting Validation Passed
+          required: false
+        - label: Formatting Validation Passed
+          required: false
+        - label: Unit Testing Passes
+          required: false
+        - label: Documentation Updated
+          required: false
