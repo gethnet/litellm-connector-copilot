@@ -12,6 +12,21 @@ If LiteLLM can talk to it, **Copilot can use it**.
 
 ---
 
+## ⭐️ Support the project
+
+If you find this useful, please:
+
+- **Star on GitHub**: https://github.com/gethnet/litellm-connector-copilot
+- **Leave a rating/review** on the **VS Code Marketplace**: https://marketplace.visualstudio.com/items?itemName=GethNet.litellm-connector-copilot
+- **Rate on Open VSX**: https://open-vsx.org/extension/GethNet/litellm-connector-copilot
+
+Want to support development?
+
+- **Ko-fi**: https://ko-fi.com/amwdrizz
+- **Buy Me a Coffee**: https://buymeacoffee.com/amwdrizz
+
+---
+
 ## ✅ Requirements
 
 - 🔑 **GitHub Copilot** subscription (Free plan works)
@@ -28,7 +43,7 @@ If LiteLLM can talk to it, **Copilot can use it**.
 5. Enter:
    - **Base URL** (example: `http://localhost:4000`)
    - **API Key** (optional)
-6. Open Copilot Chat → pick a model under **LiteLLM** → chat 🎉
+6. Open Copilot Chat → pick a model under **LiteLLM** → chat
 
 ---
 
@@ -43,6 +58,7 @@ If LiteLLM can talk to it, **Copilot can use it**.
 - ⏱️ **Inactivity watchdog** to prevent stuck streams
 - 🚫🧠 **Cache bypass controls** (`no-cache` headers) with provider-aware behavior
 - 🔐 **Secure credential storage** using VS Code `SecretStorage`
+- ⌨️ **Optional inline completions** via VS Code’s stable inline completion API
 
 ---
 
@@ -68,6 +84,15 @@ If LiteLLM can talk to it, **Copilot can use it**.
 ## ⌨️ Commands
 
 - **Manage LiteLLM Provider**: Configure Base URL + API Key; refreshes models.
+- **LiteLLM: Select Inline Completion Model**: Choose a model for inline completions.
+
+---
+
+## 🐛 Bug reports & feature requests
+
+Please use GitHub Issues: https://github.com/gethnet/litellm-connector-copilot/issues
+
+Including VS Code version, extension version, model id, and LiteLLM proxy details/logs (if possible) helps reproduce issues quickly.
 
 ---
 

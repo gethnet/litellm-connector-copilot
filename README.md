@@ -13,6 +13,19 @@ Tired of being locked into a single model? The LiteLLM Connector bridges the gap
 
 ---
 
+## ⭐️ Support the project
+
+If this extension saves you time, please consider:
+
+* **Star the repo on GitHub**: https://github.com/gethnet/litellm-connector-copilot
+* **Leave a rating/review** on the **VS Code Marketplace**: https://marketplace.visualstudio.com/items?itemName=GethNet.litellm-connector-copilot
+* **Rate it on Open VSX**: https://open-vsx.org/extension/GethNet/litellm-connector-copilot
+
+You can also support ongoing development via:
+
+* **Ko-fi**: https://ko-fi.com/amwdrizz
+* **Buy Me a Coffee**: https://buymeacoffee.com/amwdrizz
+
 ## ⚠️ Important - Prerequisites ⚠️
 
 To use this extension, **YOU MUST** have an active GitHub Copilot plan (the Free plan works). This extension utilizes the VS Code Language Model Chat Provider API, which currently requires a Copilot subscription. For more details, see the [VS Code documentation](https://code.visualstudio.com/api/extension-guides/ai/language-model-chat-provider).
@@ -28,6 +41,7 @@ To use this extension, **YOU MUST** have an active GitHub Copilot plan (the Free
 * **⏱️ Inactivity Watchdog**: Optional timeout to keep long streams from hanging indefinitely.
 * **🚫🧠 Cache Bypass Controls**: Send `no-cache` headers to bypass LiteLLM caching (with provider-aware exceptions).
 * **🔐 Secure by Design**: Your API keys and URLs are stored safely in VS Code's `SecretStorage`.
+* **⌨️ Optional Inline Completions**: Use LiteLLM for inline completions via VS Code’s stable inline completion API.
 
 ## ⚡ Quick Start
 
@@ -42,6 +56,13 @@ To use this extension, **YOU MUST** have an active GitHub Copilot plan (the Free
    * Open the Copilot Chat view.
    * Click the model picker and look for the **LiteLLM** section.
 5. **Start Chatting!**
+
+### Optional: Enable Inline Completions
+
+This extension also includes an **optional** inline completions provider (disabled by default).
+
+1. Enable: `litellm-connector.inlineCompletions.enabled`
+2. Run: `LiteLLM: Select Inline Completion Model`
 
 ---
 
@@ -89,5 +110,10 @@ If you want to contribute or build from source:
 
 ## Support & Contributions
 
+### Bug reports, feature requests, and contributions
+
 * **Issues**: Report bugs or request features on [GitHub Issues](https://github.com/gethnet/litellm-connector-copilot/issues).
+   * Include VS Code version, extension version, model id, and (if possible) LiteLLM proxy logs.
+   * If streaming/tool-calls behave oddly, a minimal repro prompt + steps helps a lot.
+* **PRs welcome**: Small, focused changes with tests are easiest to review.
 * **License**: Apache-2.0
