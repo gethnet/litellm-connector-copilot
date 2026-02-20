@@ -9,6 +9,9 @@ import {
 import { registerSelectInlineCompletionModelCommand } from "./commands/inlineCompletions";
 import { Logger } from "./utils/logger";
 import { InlineCompletionsRegistrar } from "./inlineCompletions/registerInlineCompletions";
+import { LiteLLMTelemetry, PostHogBackend, BatchingBackend } from "./utils/telemetry";
+import { POSTHOG_API_KEY, POSTHOG_HOST } from "./utils/telemetry.constants";
+import * as crypto from "crypto";
 
 // Store the config manager for cleanup on deactivation
 let configManagerInstance: ConfigManager | undefined;
@@ -16,6 +19,21 @@ let configManagerInstance: ConfigManager | undefined;
 export function activate(context: vscode.ExtensionContext) {
     Logger.initialize(context);
     Logger.info("Activating extension...");
+
+    // Initialize Telemetry
+    try {
+        let machineId = context.globalState.get<string>("telemetry.machineId");
+        if (!machineId) {
+            machineId = crypto.randomUUID();
+            context.globalState.update("telemetry.machineId", machineId);
+        }
+        const backend = new PostHogBackend(POSTHOG_API_KEY, POSTHOG_HOST, machineId);
+        const batchingBackend = new BatchingBackend(backend);
+        LiteLLMTelemetry.initialize(batchingBackend);
+        Logger.info("Telemetry initialized.");
+    } catch (telemetryErr) {
+        Logger.error("Failed to initialize telemetry", telemetryErr);
+    }
 
     let ua = "litellm-vscode-chat/unknown VSCode/unknown";
     try {
@@ -122,5 +140,11 @@ export async function deactivate() {
         } catch (err) {
             Logger.error("Error during deactivation cleanup", err);
         }
+    }
+    try {
+        await LiteLLMTelemetry.shutdown();
+        Logger.info("Telemetry shutdown completed.");
+    } catch (err) {
+        Logger.error("Error during telemetry shutdown", err);
     }
 }

@@ -305,6 +305,53 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         );
     });
 
+    test("provideLanguageModelChatResponse decorates non-temperature API errors with LiteLLM Error prefix", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        interface ProviderWithConfigManager {
+            _configManager: {
+                getConfig: () => Promise<{ url: string }>;
+            };
+        }
+        const providerWithConfig = provider as unknown as ProviderWithConfigManager;
+        sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+
+        sandbox.stub(LiteLLMClient.prototype, "chat").rejects(new Error("LiteLLM API error\nSomething else"));
+
+        const model: vscode.LanguageModelChatInformation = {
+            id: "model-1",
+            name: "model-1",
+            tooltip: "",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 1000,
+            maxOutputTokens: 1000,
+            capabilities: { toolCalling: true, imageInput: false },
+        };
+
+        await assert.rejects(
+            () =>
+                provider.provideLanguageModelChatResponse(
+                    model,
+                    [
+                        {
+                            role: vscode.LanguageModelChatMessageRole.User,
+                            name: undefined,
+                            content: [new vscode.LanguageModelTextPart("hi")],
+                        },
+                    ],
+                    {
+                        modelOptions: {},
+                        tools: [],
+                        toolMode: vscode.LanguageModelChatToolMode.Auto,
+                    },
+                    { report: () => {} },
+                    new vscode.CancellationTokenSource().token
+                ),
+            /LiteLLM Error \(model-1\)/
+        );
+    });
+
     test("provideLanguageModelChatResponse surfaces parsed API error details", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 

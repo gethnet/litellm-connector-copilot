@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { LiteLLMTelemetry } from "./telemetry";
 
 export class Logger {
     private static channel: vscode.LogOutputChannel;
@@ -14,14 +15,14 @@ export class Logger {
 
     public static warn(message: string, ...args: unknown[]): void {
         this.channel?.warn(message, ...args);
+        // Telemetry for warnings (sampling handled in backend)
+        LiteLLMTelemetry.reportEvent("logger.warn", { message, args });
     }
 
     public static error(error: string | Error, ...args: unknown[]): void {
-        if (error instanceof Error) {
-            this.channel?.error(error.message, ...args, error.stack);
-        } else {
-            this.channel?.error(error, ...args);
-        }
+        const err = error instanceof Error ? error : new Error(error);
+        this.channel?.error(err.message, ...args, err.stack);
+        LiteLLMTelemetry.reportError(err, { args });
     }
 
     public static debug(message: string, ...args: unknown[]): void {

@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
 import type { LiteLLMModelInfo } from "../types";
 import { isAnthropicModel } from "../utils/modelUtils";
+import { LiteLLMTelemetry } from "../utils/telemetry";
+import { EVENTS } from "../utils/telemetry.constants";
 
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16000;
 export const DEFAULT_CONTEXT_LENGTH = 128000;
@@ -64,6 +66,15 @@ export function trimMessagesToFitBudget(
     const tokenLimit = Math.max(1, model.maxInputTokens);
     const safetyLimit = isAnthropicModel(model.id, modelInfo) ? Math.max(1, Math.floor(tokenLimit * 0.98)) : tokenLimit;
     const budget = safetyLimit - toolTokenCount;
+
+    LiteLLMTelemetry.reportEvent(EVENTS.TOKENS_ESTIMATED, {
+        modelId: model.id,
+        tokenLimit,
+        safetyLimit,
+        toolTokenCount,
+        budget,
+    });
+
     if (budget <= 0) {
         throw new Error("Message exceeds token limit.");
     }

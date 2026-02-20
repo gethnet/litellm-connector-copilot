@@ -293,4 +293,52 @@ suite("LiteLLM Client Unit Tests", () => {
         onCancel?.();
         assert.strictEqual(abortSignal?.aborted, true);
     });
+
+    test("chat decorates 400 errors with model context", async () => {
+        const client = new LiteLLMClient({ url: "http://localhost:4000", key: "k" }, "ua");
+
+        const fetchStub = sandbox.stub(global, "fetch");
+        fetchStub.resolves(
+            new Response(JSON.stringify({ error: { message: "bad" } }), {
+                status: 400,
+                statusText: "Bad Request",
+            }) as never
+        );
+
+        await assert.rejects(
+            () =>
+                client.chat(
+                    {
+                        model: "m1",
+                        messages: [],
+                        stream: true,
+                        max_tokens: 1,
+                    },
+                    "chat"
+                ),
+            /LiteLLM Error \(m1\)/
+        );
+    });
+
+    test("chat throws when response body missing", async () => {
+        const client = new LiteLLMClient({ url: "http://localhost:4000", key: "k" }, "ua");
+
+        const fetchStub = sandbox.stub(global, "fetch");
+        // Response() in node sets a non-null body by default; simulate a missing body explicitly.
+        fetchStub.resolves({ ok: true, status: 200, statusText: "OK", body: null } as unknown as Response);
+
+        await assert.rejects(
+            () =>
+                client.chat(
+                    {
+                        model: "m1",
+                        messages: [],
+                        stream: true,
+                        max_tokens: 1,
+                    },
+                    "chat"
+                ),
+            /No response body/
+        );
+    });
 });

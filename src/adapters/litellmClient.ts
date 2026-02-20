@@ -10,6 +10,7 @@ import { transformToResponsesFormat } from "./responsesAdapter";
 import { Logger } from "../utils/logger";
 import { isAnthropicModel } from "../utils/modelUtils";
 import { LiteLLMTelemetry } from "../utils/telemetry";
+import { EVENTS, FEATURE_FLAGS } from "../utils/telemetry.constants";
 
 export class LiteLLMClient {
     constructor(
@@ -73,15 +74,45 @@ export class LiteLLMClient {
         }
 
         Logger.trace(`Sending chat request to ${endpoint}`, { model: request.model });
-        let response = await this.fetchWithRateLimit(
-            `${this.config.url}${endpoint}`,
-            {
-                method: "POST",
-                headers: this.getHeaders(request.model, modelInfo),
-                body: JSON.stringify(body),
-            },
-            { token }
-        );
+        const requestId = LiteLLMTelemetry.generateRequestId();
+        const startTime = LiteLLMTelemetry.startTimer();
+
+        LiteLLMTelemetry.reportEvent(EVENTS.HTTP_REQUEST_SENT, {
+            requestId,
+            model: request.model,
+            endpoint,
+            [FEATURE_FLAGS.USED_RESPONSES_ENDPOINT]: endpoint === "/responses",
+        });
+
+        let response: Response;
+        try {
+            response = await this.fetchWithRateLimit(
+                `${this.config.url}${endpoint}`,
+                {
+                    method: "POST",
+                    headers: this.getHeaders(request.model, modelInfo),
+                    body: JSON.stringify(body),
+                },
+                { token }
+            );
+        } catch (err) {
+            const durationMs = LiteLLMTelemetry.endTimer(startTime);
+            LiteLLMTelemetry.reportEvent(EVENTS.HTTP_RESPONSE_RECEIVED, {
+                requestId,
+                model: request.model,
+                error: err instanceof Error ? err.message : String(err),
+                durationMs,
+            });
+            throw err;
+        }
+
+        const durationMs = LiteLLMTelemetry.endTimer(startTime);
+        LiteLLMTelemetry.reportEvent(EVENTS.HTTP_RESPONSE_RECEIVED, {
+            requestId,
+            model: request.model,
+            status: response.status,
+            durationMs,
+        });
 
         // Handle unsupported parameters by stripping them and retrying once
         if (response.status === 400) {
@@ -180,8 +211,17 @@ export class LiteLLMClient {
 
         if (!response.ok) {
             const errorText = await response.text();
+            const errorMessage = `LiteLLM API error: ${response.status} ${response.statusText}\n${errorText}`;
+
+            // Provide more context for common errors to help users and tests
+            if (response.status === 400 || response.status === 429) {
+                const decoratedMessage = `LiteLLM Error (${request.model}): ${errorMessage}`;
+                Logger.error(`LiteLLM API error: ${response.status} ${response.statusText}`, errorText);
+                throw new Error(decoratedMessage);
+            }
+
             Logger.error(`LiteLLM API error: ${response.status} ${response.statusText}`, errorText);
-            throw new Error(`LiteLLM API error: ${response.status} ${response.statusText}\n${errorText}`);
+            throw new Error(errorMessage);
         }
 
         if (!response.body) {

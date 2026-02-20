@@ -15,6 +15,7 @@ import { DEFAULT_CONTEXT_LENGTH, DEFAULT_MAX_OUTPUT_TOKENS, trimMessagesToFitBud
 import { ConfigManager } from "../config/configManager";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
+import { EVENTS } from "../utils/telemetry.constants";
 
 const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
     "claude-3-5-sonnet": new Set(["temperature"]),
@@ -193,6 +194,8 @@ export abstract class LiteLLMProviderBase {
         modelInfo?: LiteLLMModelInfo,
         caller?: string
     ): Promise<OpenAIChatCompletionRequest> {
+        const requestId = LiteLLMTelemetry.generateRequestId();
+
         // ProvideLanguageModelChatResponseOptions doesn't include provider configuration.
         // Some call sites pass an intersection type that includes it.
         const optionsWithConfig = options as ProvideLanguageModelChatResponseOptions & {
@@ -206,13 +209,21 @@ export abstract class LiteLLMProviderBase {
         const toolRedaction = this.detectQuotaToolRedaction(
             messages,
             options.tools ?? [],
-            `build-${Math.random().toString(36).slice(2, 10)}`,
+            requestId,
             model.id,
             config.disableQuotaToolRedaction === true,
             caller
         );
         const toolConfig = convertTools({ ...options, tools: toolRedaction.tools });
+
         const messagesToUse = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo);
+
+        LiteLLMTelemetry.reportEvent(EVENTS.REQUEST_TRIMMED, {
+            requestId,
+            originalMessageCount: messages.length,
+            trimmedMessageCount: messagesToUse.length,
+        });
+
         const openaiMessages = convertMessages(messagesToUse);
         validateRequest(messagesToUse);
 
@@ -270,6 +281,12 @@ export abstract class LiteLLMProviderBase {
             modelInfo,
             model.id
         );
+
+        LiteLLMTelemetry.reportEvent(EVENTS.REQUEST_FILTERED, {
+            requestId,
+            modelId: model.id,
+        });
+
         return requestBody;
     }
 
@@ -309,7 +326,23 @@ export abstract class LiteLLMProviderBase {
             }
         }
 
-        return client.chat(request, modelInfo?.mode, token, modelInfo);
+        try {
+            return await client.chat(request, modelInfo?.mode, token, modelInfo);
+        } catch (err) {
+            // Retry once without optional parameters if we hit an unsupported-parameter style error.
+            // This is used by unit tests and is a pragmatic compatibility shim for mixed backends.
+            const msg = err instanceof Error ? err.message : String(err);
+            if (/unsupported parameter|unknown parameter|unexpected keyword argument/i.test(msg)) {
+                const retryRequest: OpenAIChatCompletionRequest = { ...request };
+                const retryRecord = retryRequest as unknown as Record<string, unknown>;
+                delete retryRecord.temperature;
+                delete retryRecord.top_p;
+                delete retryRecord.frequency_penalty;
+                delete retryRecord.presence_penalty;
+                return await client.chat(retryRequest, modelInfo?.mode, token, modelInfo);
+            }
+            throw err;
+        }
     }
 
     protected isParameterSupported(param: string, modelInfo: LiteLLMModelInfo | undefined, modelId?: string): boolean {

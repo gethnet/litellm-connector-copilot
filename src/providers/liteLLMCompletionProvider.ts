@@ -76,6 +76,8 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
                 caller: "inline-completions",
             });
 
+            LiteLLMTelemetry.reportPerformance();
+
             return {
                 insertText: completionText,
             };
@@ -91,6 +93,8 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
                 error: errorMsg,
                 caller: "inline-completions",
             });
+
+            LiteLLMTelemetry.reportPerformance();
 
             throw err;
         }

@@ -51,8 +51,11 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         token: CancellationToken
     ): Promise<void> {
         this.resetStreamingState();
+        if (token.isCancellationRequested) {
+            throw new Error("Operation cancelled by user");
+        }
         const startTime = LiteLLMTelemetry.startTimer();
-        const requestId = Math.random().toString(36).substring(7);
+        const requestId = LiteLLMTelemetry.generateRequestId();
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const caller = (model as any).tags?.[0] || undefined;
@@ -102,78 +105,50 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             }
 
             const modelInfo = this._modelInfoCache.get(modelToUse.id);
-            const requestBody = await this.buildOpenAIChatRequest(messages, modelToUse, options, modelInfo, caller);
+            const request = await this.buildOpenAIChatRequest(messages, modelToUse, options, modelInfo, caller);
 
-            let stream: ReadableStream<Uint8Array>;
-            try {
-                // Note: sendRequestToLiteLLM may fully handle /responses by emitting directly to progress.
-                // In that case it returns an already-closed stream.
-                stream = await this.sendRequestToLiteLLM(requestBody, trackingProgress, token, caller, modelInfo);
-            } catch (err: unknown) {
-                if (token.isCancellationRequested) {
-                    throw new Error("Operation cancelled by user");
-                }
-
-                if (err instanceof Error && err.message.includes("LiteLLM API error")) {
-                    const errorText = err.message.split("\n").slice(1).join("\n");
-                    const parsedMessage = this.parseApiError(400, errorText);
-                    if (
-                        parsedMessage.toLowerCase().includes("unsupported parameter") ||
-                        parsedMessage.toLowerCase().includes("not supported")
-                    ) {
-                        Logger.warn(`Retrying request without optional parameters due to: ${parsedMessage}`);
-                        delete requestBody.temperature;
-                        delete requestBody.top_p;
-                        delete requestBody.frequency_penalty;
-                        delete requestBody.presence_penalty;
-                        delete requestBody.stop;
-
-                        if (token.isCancellationRequested) {
-                            throw new Error("Operation cancelled by user");
-                        }
-                        stream = await this.sendRequestToLiteLLM(
-                            requestBody,
-                            trackingProgress,
-                            token,
-                            caller,
-                            modelInfo
-                        );
-                    } else {
-                        throw err;
-                    }
-                } else {
-                    throw err;
-                }
-            }
-
+            const stream = await this.sendRequestToLiteLLM(request, trackingProgress, token, caller, modelInfo);
             await this.processStreamingResponse(stream, trackingProgress, token);
 
+            const durationMs = LiteLLMTelemetry.endTimer(startTime);
             LiteLLMTelemetry.reportMetric({
                 requestId,
                 model: modelToUse.id,
-                durationMs: LiteLLMTelemetry.endTimer(startTime),
+                durationMs,
+                tokensIn: 0, // TODO: estimate
+                tokensOut: 0, // TODO: estimate
                 status: "success",
-                caller,
+                ...(caller && { caller }),
             });
-        } catch (err: unknown) {
-            let errorMessage = err instanceof Error ? err.message : String(err);
-            if (errorMessage.includes("LiteLLM API error")) {
-                const statusMatch = errorMessage.match(/error: (\d+)/);
-                const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : 400;
-                const errorParts = errorMessage.split("\n");
-                const errorText = errorParts.length > 1 ? errorParts.slice(1).join("\n") : "";
-                const parsedMessage = this.parseApiError(statusCode, errorText);
-                errorMessage = `LiteLLM Error (${model.id}): ${parsedMessage}`;
-                if (
-                    parsedMessage.toLowerCase().includes("temperature") ||
-                    parsedMessage.toLowerCase().includes("unsupported value")
-                ) {
-                    errorMessage +=
-                        ". This model may not support certain parameters like temperature. Please check your model settings.";
-                }
+            LiteLLMTelemetry.reportPerformance();
+        } catch (err) {
+            const durationMs = LiteLLMTelemetry.endTimer(startTime);
+            const errorMsg = err instanceof Error ? err.message : String(err);
+
+            LiteLLMTelemetry.reportMetric({
+                requestId,
+                model: model.id,
+                durationMs,
+                status: "failure",
+                error: errorMsg,
+                ...(caller && { caller }),
+            });
+            LiteLLMTelemetry.reportPerformance();
+
+            // Normalize error messages for tests and user clarity.
+            // - If LiteLLMClient already decorated the error, preserve it.
+            // - Otherwise, wrap in "LiteLLM Error (<modelId>): ...".
+            let decorated = errorMsg;
+            if (!decorated.includes(`LiteLLM Error (${model.id})`)) {
+                decorated = `LiteLLM Error (${model.id}): ${decorated}`;
             }
-            Logger.error("Chat request failed", err);
-            throw new Error(errorMessage);
+
+            // Add a helpful hint for temperature-related failures.
+            if (decorated.toLowerCase().includes("temperature")) {
+                decorated = `${decorated}\nThis model may not support certain parameters like temperature.`;
+            }
+
+            throw new Error(decorated);
         }
     }
 

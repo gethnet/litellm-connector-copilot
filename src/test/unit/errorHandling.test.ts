@@ -185,4 +185,44 @@ suite("LiteLLM Error Handling Unit Tests", () => {
             assert.ok(error.message.includes("Something went wrong"));
         }
     });
+
+    test("provideLanguageModelChatResponse preserves LiteLLM Error wrapper when already decorated", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        const apiError = new Error("LiteLLM Error (test-model): LiteLLM API error\nSomething went wrong");
+        sandbox.stub(LiteLLMClient.prototype, "chat").rejects(apiError);
+
+        const model: vscode.LanguageModelChatInformation = {
+            id: "test-model",
+            name: "Test Model",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 4096,
+            maxOutputTokens: 1024,
+            capabilities: { toolCalling: true, imageInput: false },
+            tooltip: "test",
+        };
+
+        const progress: vscode.Progress<vscode.LanguageModelResponsePart> = {
+            report: () => {},
+        };
+
+        try {
+            const dummyMessages = [
+                new vscode.LanguageModelChatMessage(vscode.LanguageModelChatMessageRole.User, "Hello"),
+            ];
+            await provider.provideLanguageModelChatResponse(
+                model,
+                dummyMessages,
+                { toolMode: vscode.LanguageModelChatToolMode.Auto },
+                progress,
+                new vscode.CancellationTokenSource().token
+            );
+            assert.fail("Should have thrown an error");
+        } catch (err) {
+            const error = err as Error;
+            assert.ok(error.message.includes("LiteLLM Error (test-model)"));
+            assert.ok(error.message.includes("Something went wrong"));
+        }
+    });
 });

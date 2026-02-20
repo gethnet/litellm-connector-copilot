@@ -26,10 +26,10 @@ This document defines **repo-wide, tool-agnostic** expectations for automated co
 
 ### Coverage targets (tracked)
 - **Statements / Branches / Functions:** strive for **90%+**
-- **Lines:** strive for **85%+**
+- **Lines:** strive for **90%+**
 
 ### Minimums (do not regress)
-- **Lines:** **80%+** minimum
+- **Lines:** **87%+** minimum
 - **No category should drop by more than 1%** (Statements, Branches, Functions, Lines)
 
 ### Test standards
@@ -243,4 +243,6 @@ Any code you edit must be brought up to these standards:
   - Workspace settings retrieved via `vscode.workspace.getConfiguration()`
   - Use `ConfigManager.convertProviderConfiguration()` to unify config sources
 - [ ] Telemetry includes `caller` context to distinguish invocation source ("inline-completions", "terminal-chat", etc.)
+- [ ] Telemetry hooks maintained across all request stages (ingress, validation, trim, HTTP, completion)
+- [ ] Performance metrics reported at request end
 - [ ] Model discovery and caching tested for correctness and performance (shared across all providers)
