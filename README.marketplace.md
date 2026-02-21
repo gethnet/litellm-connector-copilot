@@ -55,6 +55,7 @@ Want to support development?
 - 👁️ **Vision models** supported (where available)
 - 🧠 **Smart parameter handling** for model quirks
 - 🔁 **Automatic retry** when a model rejects unsupported flags
+- 📊 **Token tracking & usage** monitoring for input/output tokens
 - ⏱️ **Inactivity watchdog** to prevent stuck streams
 - 🚫🧠 **Cache bypass controls** (`no-cache` headers) with provider-aware behavior
 - 🔐 **Secure credential storage** using VS Code `SecretStorage`
@@ -65,8 +66,10 @@ Want to support development?
 ## 🆕 Recent Highlights
 
 - 🚀 **VS Code 1.109+ settings modernization** (aligns with the Language Model provider settings UI)
+- 📊 **Enhanced Token Awareness** (improved tracking of token usage for cost and performance monitoring)
 - 🧱 **Tool-call compatibility hardening** (normalizes tool call IDs to OpenAI-compatible limits to prevent hard failures)
 - 🧼 **Safer logging + fewer false tool redactions** (sanitizes provider error text and tightens quota/rate-limit detection)
+- 🧰 **Stability Improvements** (hardened JSON parsing and stream error recovery)
 - 📦 **Smaller, faster package** (bundled/minified production builds)
 - 🌐 **Web-ready output** (includes a browser-target bundle for VS Code Web)
 

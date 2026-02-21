@@ -38,6 +38,7 @@ To use this extension, **YOU MUST** have an active GitHub Copilot plan (the Free
 * **👁️ Vision Support**: Use image-capable models to analyze screenshots and diagrams directly in chat.
 * **🧠 Smart Parameter Handling**: Automatically handles provider-specific quirks (like stripping `temperature` for O1) so you don't have to.
 * **🔁 Automatic Retry on Unsupported Params**: If a model rejects a flag, the connector can strip unsupported parameters and retry.
+* **📊 Token Tracking & Usage**: Real-time monitoring of input and output tokens for improved visibility into model costs and efficiency.
 * **⏱️ Inactivity Watchdog**: Optional timeout to keep long streams from hanging indefinitely.
 * **🚫🧠 Cache Bypass Controls**: Send `no-cache` headers to bypass LiteLLM caching (with provider-aware exceptions).
 * **🔐 Secure by Design**: Your API keys and URLs are stored safely in VS Code's `SecretStorage`.
@@ -69,7 +70,8 @@ This extension also includes an **optional** inline completions provider (disabl
 ## 🆕 Recent Highlights
 
 * **🚀 VS Code 1.109+ settings modernization**: configuration now aligns with the Language Model provider settings UI.
-* **🧰 Improved error handling**: better behavior around quota/tooling errors.
+* **📊 Enhanced Token Awareness**: Improved tracking of token usage across streaming and non-streaming responses.
+* **🧰 Improved error handling**: better behavior around quota/tooling errors and JSON parsing stability.
 * **🧱 Tool-call compatibility hardening**: tool call IDs are normalized to comply with OpenAI-compatible limits (prevents hard failures like `tool_calls[].id` too long).
 * **🧼 Safer logging**: provider error text is sanitized to avoid dumping echoed prompt/context into logs.
 * **📦 Smaller, faster package**: production builds are bundled/minified with **esbuild**.
