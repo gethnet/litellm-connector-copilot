@@ -248,11 +248,11 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                     break;
                 }
 
-                const json = tryParseJSONObject(payload);
-                if (!json) {
-                    console.log("DEBUG: LiteLLMChatProvider failed to parse JSON");
+                const jsonResult = tryParseJSONObject(payload);
+                if (!jsonResult.ok) {
                     continue;
                 }
+                const json = jsonResult.value;
 
                 // Ensure streaming state is initialized (e.g. if processStreamingResponse is called directly in tests)
                 if (!this._streamingState) {

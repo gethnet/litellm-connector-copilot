@@ -534,7 +534,6 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         const { decodeSSE } = await import("../../adapters/sse/sseDecoder.js");
         const decoded: string[] = [];
         for await (const payload of decodeSSE(makeStream(), tokenSource.token)) {
-            console.log("DEBUG: decodeSSE payload:", payload);
             decoded.push(payload);
         }
         assert.deepStrictEqual(decoded, ['{"choices":[{"delta":{"content":"Hello"}}]}']);
@@ -562,14 +561,11 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
             (providerTest as { _streamingState: unknown })._streamingState = createInitialStreamingState();
         }
 
-        console.log("DEBUG: calling processStreamingResponse");
         await providerTest.processStreamingResponse(
             makeStream() as unknown as AsyncIterable<string>,
             progress,
             tokenSource.token
         );
-        console.log("DEBUG: parts emitted:", parts.length);
-        parts.forEach((p, i) => console.log(`DEBUG: part ${i}:`, JSON.stringify(p)));
 
         // Avoid brittle `instanceof` checks in the extension host (multiple `vscode` module instances can exist).
         // Instead, assert on the structural shape of the emitted parts.
