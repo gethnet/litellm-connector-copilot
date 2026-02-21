@@ -39,6 +39,29 @@ export class LiteLLMClient {
     }
 
     /**
+     * Checks the connection to the LiteLLM proxy.
+     */
+    async checkConnection(
+        token?: vscode.CancellationToken
+    ): Promise<{ latencyMs: number; modelCount: number; sampleModelIds: string[] }> {
+        const startTime = Date.now();
+        const { data } = await this.getModelInfo(token);
+        const latencyMs = Date.now() - startTime;
+
+        const modelCount = Array.isArray(data) ? data.length : 0;
+        const sampleModelIds = Array.isArray(data)
+            ? data
+                  .slice(0, 5)
+                  .map(
+                      (entry: { model_info?: { key?: string }; model_name?: string }) =>
+                          entry.model_info?.key ?? entry.model_name ?? "unknown"
+                  )
+            : [];
+
+        return { latencyMs, modelCount, sampleModelIds };
+    }
+
+    /**
      * Sends a chat request to the LiteLLM proxy.
      */
     async chat(

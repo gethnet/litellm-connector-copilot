@@ -83,6 +83,7 @@ export interface LiteLLMModelInfo {
     max_tokens?: number;
     max_input_tokens?: number;
     max_output_tokens?: number;
+    context_window_tokens?: number;
     litellm_provider?: string;
     mode?: string;
     supports_system_messages?: boolean | null;

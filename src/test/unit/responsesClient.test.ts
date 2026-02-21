@@ -120,7 +120,7 @@ suite("ResponsesClient sendResponsesRequest", () => {
             'data: {"type":"response.output_text.delta","delta":"Hello"}\n\n',
             'data: {"type":"response.output_reasoning.delta","delta":"Think"}\n\n',
             'data: {"type":"response.output_item.delta","item":{"type":"function_call","call_id":"c1","name":"tool","arguments":"{\\"x\\":1}"}}\n',
-            'data: {"type":"response.output_item.done","item":{"type":"function_call"}}\n\n',
+            'data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"c1"}}\n\n',
             "data: [DONE]\n\n",
         ];
         fetchStub.resolves(new Response(readableFromStrings(sse), { status: 200 }));

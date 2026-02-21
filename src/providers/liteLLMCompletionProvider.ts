@@ -4,6 +4,8 @@ import type { LiteLLMConfig } from "../types";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
 import { LiteLLMProviderBase } from "./liteLLMProviderBase";
+import { decodeSSE } from "../adapters/sse/sseDecoder";
+import { createInitialStreamingState, interpretStreamEvent } from "../adapters/streaming/liteLLMStreamInterpreter";
 
 /**
  * Implements VS Code's LanguageModelTextCompletionProvider for inline completions.
@@ -133,47 +135,39 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
         stream: ReadableStream<Uint8Array>,
         token: vscode.CancellationToken
     ): Promise<string> {
-        const reader = stream.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
         let fullText = "";
+        const state = createInitialStreamingState();
 
         try {
-            while (!token.isCancellationRequested) {
-                const { done, value } = await reader.read();
-                if (done) {
+            for await (const payload of decodeSSE(stream, token)) {
+                if (token.isCancellationRequested) {
                     break;
                 }
 
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split("\n");
-                buffer = lines.pop() || "";
+                const json = this.tryParseJSON(payload);
+                if (!json) {
+                    continue;
+                }
 
-                for (const line of lines) {
-                    if (!line.startsWith("data:")) {
-                        continue;
-                    }
-                    const data = line.replace(/^data:\s*/, "");
-                    if (!data || data === "[DONE]") {
-                        continue;
-                    }
-                    try {
-                        const json = JSON.parse(data) as {
-                            choices?: Array<{ delta?: { content?: string } }>;
-                        };
-                        const delta = json.choices?.[0]?.delta;
-                        if (delta?.content) {
-                            fullText += delta.content;
-                        }
-                    } catch {
-                        // ignore malformed frames
+                const parts = interpretStreamEvent(json, state);
+                for (const part of parts) {
+                    if (part.type === "text") {
+                        fullText += part.value;
                     }
                 }
             }
-        } finally {
-            reader.releaseLock();
+        } catch (err) {
+            Logger.warn("Error while extracting completion text", err);
         }
 
         return fullText;
+    }
+
+    private tryParseJSON(text: string): unknown {
+        try {
+            return JSON.parse(text);
+        } catch {
+            return undefined;
+        }
     }
 }

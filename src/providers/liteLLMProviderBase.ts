@@ -11,10 +11,16 @@ import { convertMessages, convertTools, validateRequest } from "../utils";
 import { LiteLLMClient } from "../adapters/litellmClient";
 import { ResponsesClient } from "../adapters/responsesClient";
 import { transformToResponsesFormat } from "../adapters/responsesAdapter";
-import { DEFAULT_CONTEXT_LENGTH, DEFAULT_MAX_OUTPUT_TOKENS, trimMessagesToFitBudget } from "../adapters/tokenUtils";
+import { countTokens, trimMessagesToFitBudget } from "../adapters/tokenUtils";
 import { ConfigManager } from "../config/configManager";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
+import {
+    deriveCapabilitiesFromModelInfo,
+    capabilitiesToVSCode,
+    getModelTags as getDerivedModelTags,
+} from "../utils/modelCapabilities";
+import type { DerivedModelCapabilities } from "../utils/modelCapabilities";
 
 const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
     "claude-3-5-sonnet": new Set(["temperature"]),
@@ -48,6 +54,7 @@ const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
 export abstract class LiteLLMProviderBase {
     protected readonly _configManager: ConfigManager;
     protected readonly _modelInfoCache = new Map<string, LiteLLMModelInfo | undefined>();
+    protected readonly _derivedCapabilitiesCache = new Map<string, DerivedModelCapabilities>();
     protected readonly _parameterProbeCache = new Map<string, Set<string>>();
     protected _lastModelList: LanguageModelChatInformation[] = [];
     protected _modelListFetchedAtMs = 0;
@@ -63,6 +70,7 @@ export abstract class LiteLLMProviderBase {
     public clearModelCache(): void {
         Logger.info("Clearing model discovery cache");
         this._modelInfoCache.clear();
+        this._derivedCapabilitiesCache.clear();
         this._parameterProbeCache.clear();
         this._lastModelList = [];
         this._modelListFetchedAtMs = 0;
@@ -108,20 +116,35 @@ export abstract class LiteLLMProviderBase {
                     const modelInfo = entry.model_info;
                     this._modelInfoCache.set(modelId, modelInfo);
 
-                    const maxInputTokens = modelInfo?.max_input_tokens ?? DEFAULT_CONTEXT_LENGTH;
-                    const maxOutputTokens = modelInfo?.max_output_tokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
+                    const derived = deriveCapabilitiesFromModelInfo(modelId, modelInfo);
+                    this._derivedCapabilitiesCache.set(modelId, derived);
 
-                    const capabilities = this.buildCapabilities(modelInfo);
-                    const tags = this.getModelTags(modelId, modelInfo, config.modelOverrides);
+                    const capabilities = capabilitiesToVSCode(derived);
+                    const tags = getDerivedModelTags(modelId, derived, config.modelOverrides);
+
+                    const formatTokens = (num: number): string => {
+                        if (num >= 1000000) {
+                            return `${(num / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
+                        }
+                        if (num >= 1000) {
+                            return `${Math.floor(num / 1000)}K`;
+                        }
+                        return num.toString();
+                    };
+
+                    const inputDesc = formatTokens(derived.maxInputTokens + derived.maxOutputTokens);
+                    const outputDesc = formatTokens(derived.maxOutputTokens);
+                    const tooltip = `${modelInfo?.litellm_provider ?? "LiteLLM"} (${modelInfo?.mode ?? "responses"}) — Context: ${inputDesc} in / ${outputDesc} out`;
 
                     return {
                         id: modelId,
                         name: entry.model_name ?? modelId,
-                        tooltip: `${modelInfo?.litellm_provider ?? "LiteLLM"} (${modelInfo?.mode ?? "responses"})`,
+                        tooltip,
+                        detail: `↑ ${inputDesc}   ↓ ${outputDesc}`,
                         family: "litellm",
                         version: "1.0.0",
-                        maxInputTokens: Math.max(1, maxInputTokens),
-                        maxOutputTokens: Math.max(1, maxOutputTokens),
+                        maxInputTokens: derived.maxInputTokens,
+                        maxOutputTokens: derived.maxOutputTokens,
                         capabilities,
                         tags,
                     } as LanguageModelChatInformation;
@@ -135,6 +158,20 @@ export abstract class LiteLLMProviderBase {
             Logger.error("Failed to fetch models", err);
             return [];
         }
+    }
+
+    /**
+     * Shared token counting logic.
+     */
+    async provideTokenCount(
+        model: vscode.LanguageModelChatInformation,
+        text: string | vscode.LanguageModelChatRequestMessage,
+        _token: vscode.CancellationToken
+    ): Promise<number> {
+        const modelInfo = this._modelInfoCache.get(model.id);
+        const count = countTokens(text, model.id, modelInfo);
+        // Logger.debug(`provideTokenCount called for model ${model.id}: ${count} tokens`);
+        return count;
     }
 
     /**
@@ -155,7 +192,12 @@ export abstract class LiteLLMProviderBase {
             tags.add("inline-edit");
         }
 
-        if (modelInfo?.supports_function_calling || modelInfo?.supports_vision) {
+        if (
+            modelInfo?.supports_function_calling ||
+            modelInfo?.supports_vision ||
+            modelInfo?.supported_openai_params?.includes("tools") ||
+            modelInfo?.supported_openai_params?.includes("tool_choice")
+        ) {
             tags.add("tools");
         }
 
@@ -213,6 +255,7 @@ export abstract class LiteLLMProviderBase {
         );
         const toolConfig = convertTools({ ...options, tools: toolRedaction.tools });
         const messagesToUse = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo);
+
         const openaiMessages = convertMessages(messagesToUse);
         validateRequest(messagesToUse);
 

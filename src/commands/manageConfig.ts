@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import type { ConfigManager } from "../config/configManager";
 import type { LiteLLMChatProvider } from "../providers";
+import { LiteLLMClient } from "../adapters/litellmClient";
 
 function createConfigHandler(configManager: ConfigManager) {
     return async () => {
@@ -127,5 +128,35 @@ export function registerReloadModelsCommand(provider: LiteLLMChatProvider) {
 
         const count = provider.getLastKnownModels().length;
         vscode.window.showInformationMessage(`LiteLLM: Reloaded ${count} models.`);
+    });
+}
+
+export function registerCheckConnectionCommand(configManager: ConfigManager) {
+    return vscode.commands.registerCommand("litellm-connector.checkConnection", async () => {
+        const config = await configManager.getConfig();
+        if (!config.url) {
+            vscode.window.showErrorMessage("LiteLLM base URL not configured.");
+            return;
+        }
+
+        await vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: "LiteLLM: Checking connection",
+                cancellable: true,
+            },
+            async (_progress, token) => {
+                const client = new LiteLLMClient(config, "litellm-connector-copilot");
+                try {
+                    const result = await client.checkConnection(token);
+                    vscode.window.showInformationMessage(
+                        `LiteLLM: Connection successful! Latency: ${result.latencyMs}ms. Found ${result.modelCount} models.`
+                    );
+                } catch (err) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    vscode.window.showErrorMessage(`LiteLLM: Connection failed: ${msg}`);
+                }
+            }
+        );
     });
 }

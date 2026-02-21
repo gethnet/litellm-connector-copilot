@@ -5,6 +5,7 @@ import {
     registerManageConfigCommand,
     registerReloadModelsCommand,
     registerShowModelsCommand,
+    registerCheckConnectionCommand,
 } from "./commands/manageConfig";
 import { registerSelectInlineCompletionModelCommand } from "./commands/inlineCompletions";
 import { Logger } from "./utils/logger";
@@ -78,6 +79,7 @@ export function activate(context: vscode.ExtensionContext) {
         context.subscriptions.push(registerManageConfigCommand(context, configManager));
         context.subscriptions.push(registerShowModelsCommand(chatProvider));
         context.subscriptions.push(registerReloadModelsCommand(chatProvider));
+        context.subscriptions.push(registerCheckConnectionCommand(configManager));
         context.subscriptions.push(registerSelectInlineCompletionModelCommand(chatProvider));
         Logger.info("Config command registered.");
     } catch (cmdErr) {

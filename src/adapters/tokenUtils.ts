@@ -1,32 +1,53 @@
 import * as vscode from "vscode";
 import type { LiteLLMModelInfo } from "../types";
 import { isAnthropicModel } from "../utils/modelUtils";
+import { selectTokenizer } from "./tokenizers/selectTokenizer";
 
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16000;
 export const DEFAULT_CONTEXT_LENGTH = 128000;
 
 /**
+ * Centralized token counting utility.
+ */
+export function countTokens(
+    input: string | vscode.LanguageModelChatRequestMessage | readonly vscode.LanguageModelChatRequestMessage[],
+    modelId?: string,
+    modelInfo?: LiteLLMModelInfo
+): number {
+    const tokenizer = selectTokenizer(modelId || "default", modelInfo);
+    if (typeof input === "string") {
+        return tokenizer.countTokens(input).tokens;
+    }
+    if (Array.isArray(input)) {
+        let total = 0;
+        for (const m of input) {
+            total += tokenizer.countMessageTokens(m).tokens;
+        }
+        return total;
+    }
+    return tokenizer.countMessageTokens(input as vscode.LanguageModelChatRequestMessage).tokens;
+}
+
+/**
  * Roughly estimate tokens for VS Code chat messages (text only)
  */
-export function estimateMessagesTokens(msgs: readonly vscode.LanguageModelChatRequestMessage[]): number {
-    let total = 0;
-    for (const m of msgs) {
-        total += estimateSingleMessageTokens(m);
-    }
-    return total;
+export function estimateMessagesTokens(
+    msgs: readonly vscode.LanguageModelChatRequestMessage[],
+    modelId?: string,
+    modelInfo?: LiteLLMModelInfo
+): number {
+    return countTokens(msgs, modelId, modelInfo);
 }
 
 /**
  * Roughly estimate tokens for a single VS Code chat message (text only)
  */
-export function estimateSingleMessageTokens(msg: vscode.LanguageModelChatRequestMessage): number {
-    let total = 0;
-    for (const part of msg.content) {
-        if (part instanceof vscode.LanguageModelTextPart) {
-            total += Math.ceil(part.value.length / 4);
-        }
-    }
-    return total;
+export function estimateSingleMessageTokens(
+    msg: vscode.LanguageModelChatRequestMessage,
+    modelId?: string,
+    modelInfo?: LiteLLMModelInfo
+): number {
+    return countTokens(msg, modelId, modelInfo);
 }
 
 /**

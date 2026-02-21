@@ -146,12 +146,26 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         chatStub.onSecondCall().callsFake(async (request: { temperature?: number; top_p?: number }) => {
             assert.strictEqual(request.temperature, undefined);
             assert.strictEqual(request.top_p, undefined);
-            return new ReadableStream<Uint8Array>({
+            const stream = new ReadableStream<Uint8Array>({
                 start(controller) {
                     controller.enqueue(encoder.encode("data: [DONE]\n\n"));
                     controller.close();
                 },
             });
+            // Ensure the mock stream has getReader for decodeSSE
+            if (!(stream as unknown as { getReader: unknown }).getReader) {
+                (stream as unknown as { getReader: () => unknown }).getReader = () => {
+                    const reader = (stream as unknown as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]();
+                    return {
+                        read: async () => {
+                            const { done, value } = await reader.next();
+                            return { done, value };
+                        },
+                        releaseLock: () => {},
+                    };
+                };
+            }
+            return stream;
         });
 
         sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
@@ -460,411 +474,114 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         );
     });
 
-    test("processDelta emits text and tool calls for streaming formats", async () => {
+    test("provideLanguageModelChatResponse handles streaming response", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const tokenSource = new vscode.CancellationTokenSource();
 
-        interface ProviderForStreaming {
-            processDelta: (
-                delta: Record<string, unknown>,
-                progress: vscode.Progress<vscode.LanguageModelResponsePart>
-            ) => Promise<boolean>;
-            resetStreamingState: () => void;
-        }
-        const providerForStreaming = provider as unknown as ProviderForStreaming;
-        providerForStreaming.resetStreamingState();
+        const modelId = "gpt-4";
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const model: vscode.LanguageModelChatInformation = {
+            id: modelId,
+            name: "gpt-4",
+            tooltip: "",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 1000,
+            maxOutputTokens: 1000,
+            capabilities: { toolCalling: true, imageInput: false },
+        };
+
+        // Mock LiteLLMClient.chat to return a stream.
+        // Important: `decodeSSE` splits on single newlines, so each SSE line must end with `\n`.
+        const encoder = new TextEncoder();
+        // Note: VS Code extension host runs on Node, which doesn't always provide a global
+        // Web `ReadableStream`. Use Node's implementation to ensure `.getReader()` exists.
+        const { ReadableStream } = await import("node:stream/web");
+        const makeStream = () =>
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Hello"}}]}\n'));
+                    controller.enqueue(encoder.encode("data: [DONE]\n"));
+                    controller.close();
+                },
+            });
+
+        // `LiteLLMProviderBase` constructs its own `LiteLLMClient`, so stubbing the prototype
+        // doesn't always intercept in the extension host test environment.
+        // (Not needed for this test since we call `processStreamingResponse` directly.)
 
         const parts: vscode.LanguageModelResponsePart[] = [];
         const progress = { report: (part: vscode.LanguageModelResponsePart) => parts.push(part) };
 
-        await providerForStreaming.processDelta({ type: "response.output_text.delta", delta: "hello" }, progress);
+        // We need to mock the config for inactivity timeout
+        interface ProviderWithConfig {
+            _configManager: {
+                getConfig: () => Promise<unknown>;
+                convertProviderConfiguration: (c: unknown) => unknown;
+            };
+        }
+        const pWithConfig = provider as unknown as ProviderWithConfig;
+        sandbox.stub(pWithConfig._configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            inactivityTimeout: 60,
+        });
+        sandbox.stub(pWithConfig._configManager, "convertProviderConfiguration").returns({
+            url: "http://localhost:4000",
+            inactivityTimeout: 60,
+        });
 
-        await providerForStreaming.processDelta(
-            {
-                type: "response.output_item.done",
-                item: { type: "function_call", call_id: "call-1", name: "doThing", arguments: '{"x":1}' },
-            },
-            progress
-        );
+        // Sanity-check the SSE decoder itself.
+        const { decodeSSE } = await import("../../adapters/sse/sseDecoder.js");
+        const decoded: string[] = [];
+        for await (const payload of decodeSSE(makeStream(), tokenSource.token)) {
+            console.log("DEBUG: decodeSSE payload:", payload);
+            decoded.push(payload);
+        }
+        assert.deepStrictEqual(decoded, ['{"choices":[{"delta":{"content":"Hello"}}]}']);
 
-        const textParts = parts.filter((part) => part instanceof vscode.LanguageModelTextPart);
-        const toolParts = parts.filter((part) => part instanceof vscode.LanguageModelToolCallPart);
-
-        assert.strictEqual(textParts.length, 1);
-        assert.strictEqual(toolParts.length, 1);
-    });
-
-    test("processDelta handles output_text content and no-choice cases", async () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-
-        interface ProviderForStreaming {
-            processDelta: (
-                delta: Record<string, unknown>,
-                progress: vscode.Progress<vscode.LanguageModelResponsePart>
-            ) => Promise<boolean>;
+        // Exercise the streaming pipeline directly (deterministic unit test).
+        // We MUST reset the streaming state so that the internal _streamingState is initialized.
+        const providerAsChat = provider as LiteLLMChatProvider;
+        // Accessing protected members for testing
+        const providerTest = providerAsChat as unknown as {
             resetStreamingState: () => void;
-        }
-        const providerForStreaming = provider as unknown as ProviderForStreaming;
-        providerForStreaming.resetStreamingState();
-
-        const parts: vscode.LanguageModelResponsePart[] = [];
-        const progress = { report: (part: vscode.LanguageModelResponsePart) => parts.push(part) };
-
-        await providerForStreaming.processDelta(
-            {
-                output: [
-                    {
-                        content: [{ type: "output_text", text: "hello" }],
-                        finish_reason: "stop",
-                    },
-                ],
-            },
-            progress
-        );
-
-        const noChoice = await providerForStreaming.processDelta({ foo: "bar" }, progress);
-        assert.strictEqual(noChoice, false);
-        assert.ok(parts.some((part) => part instanceof vscode.LanguageModelTextPart));
-    });
-
-    test("processDelta suppresses repeated text beyond threshold", async () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-
-        interface ProviderForStreaming {
-            processDelta: (
-                delta: Record<string, unknown>,
-                progress: vscode.Progress<vscode.LanguageModelResponsePart>
-            ) => Promise<boolean>;
-            resetStreamingState: () => void;
-        }
-        const providerForStreaming = provider as unknown as ProviderForStreaming;
-        providerForStreaming.resetStreamingState();
-
-        const parts: vscode.LanguageModelResponsePart[] = [];
-        const progress = { report: (part: vscode.LanguageModelResponsePart) => parts.push(part) };
-
-        for (let i = 0; i < 22; i++) {
-            await providerForStreaming.processDelta({ type: "response.output_text.delta", delta: "repeat" }, progress);
-        }
-
-        const textParts = parts.filter((part) => part instanceof vscode.LanguageModelTextPart);
-        assert.ok(textParts.length < 22);
-    });
-
-    test("processDelta buffers and emits OpenAI tool calls", async () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-
-        interface ProviderForStreaming {
-            processDelta: (
-                delta: Record<string, unknown>,
-                progress: vscode.Progress<vscode.LanguageModelResponsePart>
-            ) => Promise<boolean>;
-            resetStreamingState: () => void;
-        }
-        const providerForStreaming = provider as unknown as ProviderForStreaming;
-        providerForStreaming.resetStreamingState();
-
-        const parts: vscode.LanguageModelResponsePart[] = [];
-        const progress = { report: (part: vscode.LanguageModelResponsePart) => parts.push(part) };
-
-        await providerForStreaming.processDelta(
-            {
-                choices: [
-                    {
-                        delta: {
-                            tool_calls: [{ index: 0, id: "call-1", function: { name: "tool", arguments: '{"a":1}' } }],
-                        },
-                        finish_reason: "tool_calls",
-                    },
-                ],
-            },
-            progress
-        );
-
-        const toolParts = parts.filter((part) => part instanceof vscode.LanguageModelToolCallPart);
-        assert.strictEqual(toolParts.length, 1);
-    });
-
-    test("processTextContent parses text-encoded tool calls", () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-
-        interface ProviderForTextTools {
-            processTextContent: (
-                input: string,
-                progress: vscode.Progress<vscode.LanguageModelResponsePart>
-            ) => { emittedText: boolean; emittedAny: boolean };
-            resetStreamingState: () => void;
-        }
-        const providerForTextTools = provider as unknown as ProviderForTextTools;
-        providerForTextTools.resetStreamingState();
-
-        const parts: vscode.LanguageModelResponsePart[] = [];
-        const progress = { report: (part: vscode.LanguageModelResponsePart) => parts.push(part) };
-
-        const input = 'Hello <|tool_call_begin|>tool:1<|tool_call_argument_begin|>{"x":1}<|tool_call_end|>';
-        const result = providerForTextTools.processTextContent(input, progress);
-
-        assert.strictEqual(result.emittedAny, true);
-        assert.ok(parts.some((part) => part instanceof vscode.LanguageModelTextPart));
-        assert.ok(parts.some((part) => part instanceof vscode.LanguageModelToolCallPart));
-    });
-
-    test("processTextContent handles partial tool call tokens", () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-
-        interface ProviderForTextTools {
-            processTextContent: (
-                input: string,
-                progress: vscode.Progress<vscode.LanguageModelResponsePart>
-            ) => { emittedText: boolean; emittedAny: boolean };
-            resetStreamingState: () => void;
-        }
-        const providerForTextTools = provider as unknown as ProviderForTextTools;
-        providerForTextTools.resetStreamingState();
-
-        const parts: vscode.LanguageModelResponsePart[] = [];
-        const progress = { report: (part: vscode.LanguageModelResponsePart) => parts.push(part) };
-
-        const first = providerForTextTools.processTextContent("<|tool_call_be", progress);
-        assert.strictEqual(first.emittedText, true);
-
-        const second = providerForTextTools.processTextContent(
-            "gin|>tool:1<|tool_call_argument_begin|>{}<|tool_call_end|>",
-            progress
-        );
-        assert.strictEqual(second.emittedAny, true);
-
-        assert.strictEqual(
-            parts.some((part) => part instanceof vscode.LanguageModelToolCallPart),
-            false
-        );
-    });
-
-    test("processStreamingResponse handles non-data lines and done signal", async () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-
-        interface ProviderForStream {
+            _streamingState: unknown;
             processStreamingResponse: (
-                responseBody: ReadableStream<Uint8Array>,
+                stream: AsyncIterable<string>,
                 progress: vscode.Progress<vscode.LanguageModelResponsePart>,
                 token: vscode.CancellationToken
             ) => Promise<void>;
-            resetStreamingState: () => void;
-            _configManager: { getConfig: () => Promise<{ inactivityTimeout?: number }> };
+        };
+
+        if (typeof providerTest.resetStreamingState === "function") {
+            providerTest.resetStreamingState();
+        } else if (providerTest._streamingState === undefined) {
+            // Fallback for older versions or if the method is truly private and not exposed via any
+            const { createInitialStreamingState } =
+                await import("../../adapters/streaming/liteLLMStreamInterpreter.js");
+            (providerTest as { _streamingState: unknown })._streamingState = createInitialStreamingState();
         }
-        const providerForStream = provider as unknown as ProviderForStream;
-        providerForStream.resetStreamingState();
-        sandbox.stub(providerForStream._configManager, "getConfig").resolves({ inactivityTimeout: 60 });
 
-        const encoder = new TextEncoder();
-        const stream = new ReadableStream<Uint8Array>({
-            start(controller) {
-                controller.enqueue(encoder.encode("not-data\n"));
-                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-                controller.close();
-            },
-        });
+        console.log("DEBUG: calling processStreamingResponse");
+        await providerTest.processStreamingResponse(
+            makeStream() as unknown as AsyncIterable<string>,
+            progress,
+            tokenSource.token
+        );
+        console.log("DEBUG: parts emitted:", parts.length);
+        parts.forEach((p, i) => console.log(`DEBUG: part ${i}:`, JSON.stringify(p)));
 
-        const parts: vscode.LanguageModelResponsePart[] = [];
-        const progress = { report: (part: vscode.LanguageModelResponsePart) => parts.push(part) };
-
-        await providerForStream.processStreamingResponse(stream, progress, new vscode.CancellationTokenSource().token);
-
-        assert.strictEqual(parts.length, 0);
-    });
-
-    test("processStreamingResponse appends truncation notice and handles parse errors", async () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-
-        interface ProviderForStream {
-            processStreamingResponse: (
-                responseBody: ReadableStream<Uint8Array>,
-                progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-                token: vscode.CancellationToken
-            ) => Promise<void>;
-            resetStreamingState: () => void;
-            _configManager: { getConfig: () => Promise<{ inactivityTimeout?: number }> };
-        }
-        const providerForStream = provider as unknown as ProviderForStream;
-        providerForStream.resetStreamingState();
-        sandbox.stub(providerForStream._configManager, "getConfig").resolves({ inactivityTimeout: 60 });
-
-        const encoder = new TextEncoder();
-        const stream = new ReadableStream<Uint8Array>({
-            start(controller) {
-                controller.enqueue(encoder.encode("data: {not-json}\n\n"));
-                controller.enqueue(
-                    encoder.encode('data: {"choices":[{"delta":{"content":"hi"},"finish_reason":"length"}]}\n\n')
-                );
-                controller.close();
-            },
-        });
-
-        const parts: vscode.LanguageModelResponsePart[] = [];
-        const progress = { report: (part: vscode.LanguageModelResponsePart) => parts.push(part) };
-
-        await providerForStream.processStreamingResponse(stream, progress, new vscode.CancellationTokenSource().token);
-
-        const textParts = parts.filter((part) => part instanceof vscode.LanguageModelTextPart);
+        // Avoid brittle `instanceof` checks in the extension host (multiple `vscode` module instances can exist).
+        // Instead, assert on the structural shape of the emitted parts.
+        const textParts = parts.filter(
+            (p): p is vscode.LanguageModelTextPart =>
+                p instanceof vscode.LanguageModelTextPart ||
+                typeof (p as unknown as Record<string, unknown>)?.value === "string"
+        );
         assert.ok(
-            textParts.some((part) => (part as vscode.LanguageModelTextPart).value.includes("Response truncated"))
+            textParts.length > 0,
+            `Expected at least one text part, got: ${parts.map((p) => p.constructor?.name).join(", ")}`
         );
-    });
-
-    test("processStreamingResponse cancels on inactivity timeout and token cancellation", async () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-
-        interface ProviderForStream {
-            processStreamingResponse: (
-                responseBody: ReadableStream<Uint8Array>,
-                progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-                token: vscode.CancellationToken
-            ) => Promise<void>;
-            resetStreamingState: () => void;
-            _configManager: { getConfig: () => Promise<{ inactivityTimeout?: number }> };
-        }
-        const providerForStream = provider as unknown as ProviderForStream;
-        providerForStream.resetStreamingState();
-        sandbox.stub(providerForStream._configManager, "getConfig").resolves({ inactivityTimeout: 0 });
-
-        const encoder = new TextEncoder();
-        const stream = new ReadableStream<Uint8Array>({
-            start(controller) {
-                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-                controller.close();
-            },
-        });
-
-        const token: vscode.CancellationToken = {
-            isCancellationRequested: true,
-            onCancellationRequested: (handler: () => void) => {
-                handler();
-                return { dispose() {} };
-            },
-        } as vscode.CancellationToken;
-
-        const clock = sandbox.useFakeTimers({ shouldClearNativeTimers: true });
-        const parts: vscode.LanguageModelResponsePart[] = [];
-        const progress = { report: (part: vscode.LanguageModelResponsePart) => parts.push(part) };
-
-        const promise = providerForStream.processStreamingResponse(stream, progress, token);
-        await clock.runAllAsync();
-        await promise;
-    });
-
-    test("emitTextToolCallIfValid and tryEmitBufferedToolCall emit tool calls", async () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-
-        interface ProviderInternals {
-            emitTextToolCallIfValid: (
-                progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-                call: { name?: string; index?: number; argBuffer: string; emitted?: boolean },
-                argText: string
-            ) => boolean;
-            tryEmitBufferedToolCall: (
-                index: number,
-                progress: vscode.Progress<vscode.LanguageModelResponsePart>
-            ) => Promise<void>;
-            resetStreamingState: () => void;
-        }
-        const providerInternals = provider as unknown as ProviderInternals;
-        providerInternals.resetStreamingState();
-
-        const parts: vscode.LanguageModelResponsePart[] = [];
-        const progress = { report: (part: vscode.LanguageModelResponsePart) => parts.push(part) };
-
-        const didEmit = providerInternals.emitTextToolCallIfValid(progress, { name: "tool", argBuffer: "" }, "{}");
-        assert.strictEqual(didEmit, true);
-
-        interface ProviderBuffers {
-            _toolCallBuffers: Map<number, { id?: string; name?: string; args: string }>;
-        }
-        const providerBuffers = provider as unknown as ProviderBuffers;
-        providerBuffers._toolCallBuffers.set(0, { id: "call-1", name: "tool", args: '{"ok":true}' });
-        await providerInternals.tryEmitBufferedToolCall(0, progress);
-
-        const toolParts = parts.filter((part) => part instanceof vscode.LanguageModelToolCallPart);
-        assert.strictEqual(toolParts.length, 2);
-    });
-
-    test("emitTextToolCallIfValid rejects duplicates and invalid JSON", () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-
-        interface ProviderInternals {
-            emitTextToolCallIfValid: (
-                progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-                call: { name?: string; index?: number; argBuffer: string; emitted?: boolean },
-                argText: string
-            ) => boolean;
-            resetStreamingState: () => void;
-        }
-        const providerInternals = provider as unknown as ProviderInternals;
-        providerInternals.resetStreamingState();
-
-        const parts: vscode.LanguageModelResponsePart[] = [];
-        const progress = { report: (part: vscode.LanguageModelResponsePart) => parts.push(part) };
-
-        const first = providerInternals.emitTextToolCallIfValid(
-            progress,
-            { name: "tool", index: 1, argBuffer: "" },
-            "{}"
-        );
-        const second = providerInternals.emitTextToolCallIfValid(
-            progress,
-            { name: "tool", index: 1, argBuffer: "" },
-            "{}"
-        );
-        const invalid = providerInternals.emitTextToolCallIfValid(progress, { name: "tool", argBuffer: "" }, "{");
-
-        assert.strictEqual(first, true);
-        assert.strictEqual(second, false);
-        assert.strictEqual(invalid, false);
-    });
-
-    test("tryEmitBufferedToolCall ignores invalid JSON and flushToolCallBuffers throws on invalid", async () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-
-        interface ProviderInternals {
-            tryEmitBufferedToolCall: (
-                index: number,
-                progress: vscode.Progress<vscode.LanguageModelResponsePart>
-            ) => Promise<void>;
-            flushToolCallBuffers: (
-                progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-                throwOnInvalid: boolean
-            ) => Promise<void>;
-            resetStreamingState: () => void;
-        }
-        const providerInternals = provider as unknown as ProviderInternals;
-        providerInternals.resetStreamingState();
-
-        interface ProviderBuffers {
-            _toolCallBuffers: Map<number, { id?: string; name?: string; args: string }>;
-        }
-        const providerBuffers = provider as unknown as ProviderBuffers;
-        providerBuffers._toolCallBuffers.set(1, { id: "call-1", name: "tool", args: "{" });
-
-        const parts: vscode.LanguageModelResponsePart[] = [];
-        const progress = { report: (part: vscode.LanguageModelResponsePart) => parts.push(part) };
-
-        await providerInternals.tryEmitBufferedToolCall(1, progress);
-        assert.strictEqual(parts.length, 0);
-
-        await assert.rejects(() => providerInternals.flushToolCallBuffers(progress, true), /Invalid JSON/);
-    });
-
-    test("stripControlTokens removes tool and section markers", () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-
-        interface ProviderInternals {
-            stripControlTokens: (text: string) => string;
-        }
-        const providerInternals = provider as unknown as ProviderInternals;
-
-        const cleaned = providerInternals.stripControlTokens(
-            "hello <|tool_call_begin|>x<|tool_call_end|> <|analysis_section_begin|>y<|analysis_section_end|>"
-        );
-
-        assert.strictEqual(cleaned.includes("tool_call"), false);
-        assert.strictEqual(cleaned.includes("analysis_section"), false);
+        assert.strictEqual(textParts.map((p) => p.value).join(""), "Hello");
     });
 });

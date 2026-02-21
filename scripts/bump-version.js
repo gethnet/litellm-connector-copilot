@@ -18,13 +18,13 @@ if (!["patch", "minor", "major", "none"].includes(bumpType) && !isDevRequested) 
     console.error("  patch: 0.1.0 -> 0.1.1");
     console.error("  minor: 0.1.0 -> 0.2.0");
     console.error("  major: 0.1.0 -> 1.0.0");
-    console.error("  dev:   0.1.0 -> 0.1.0-dev (or keeps -dev if present)");
-    console.error("  patch dev: 0.1.0 -> 0.1.1-dev");
+    console.error("  dev:   0.1.0 -> 0.1.0-dev1 (or increments -devN if present)");
+    console.error("  patch dev: 0.1.0 -> 0.1.1-dev1");
     process.exit(1);
 }
 
 // Parse current version
-const versionMatch = packageJson.version.match(/^(\d+)\.(\d+)\.(\d+)(-dev)?$/);
+const versionMatch = packageJson.version.match(/^(\d+)\.(\d+)\.(\d+)(-dev(\d+)?)?$/);
 if (!versionMatch) {
     console.error(`Invalid version format in package.json: ${packageJson.version}`);
     process.exit(1);
@@ -33,11 +33,24 @@ if (!versionMatch) {
 const major = parseInt(versionMatch[1]);
 const minor = parseInt(versionMatch[2]);
 const patch = parseInt(versionMatch[3]);
+const isCurrentlyDev = !!versionMatch[4];
+const currentDevNumber = versionMatch[5] ? parseInt(versionMatch[5]) : isCurrentlyDev ? 0 : null;
 
 // Calculate new version
 let nextMajor = major;
 let nextMinor = minor;
 let nextPatch = patch;
+let nextDevNumber = null;
+
+if (isDevRequested) {
+    if (bumpType === "none" && isCurrentlyDev) {
+        // Just increment dev number if no major/minor/patch bump requested
+        nextDevNumber = (currentDevNumber || 0) + 1;
+    } else {
+        // New dev cycle
+        nextDevNumber = 1;
+    }
+}
 
 switch (bumpType) {
     case "major":
@@ -56,7 +69,7 @@ switch (bumpType) {
 
 let newVersion = `${nextMajor}.${nextMinor}.${nextPatch}`;
 if (isDevRequested) {
-    newVersion += "-dev";
+    newVersion += `-dev${nextDevNumber || 1}`;
 }
 
 // Update package.json

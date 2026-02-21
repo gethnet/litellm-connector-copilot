@@ -15,9 +15,22 @@ export interface ResponsesEvent {
 }
 
 export class ResponsesClient {
-    private toolCallBuffer = "";
-    private activeToolCallId: string | undefined;
-    private activeToolName: string | undefined;
+    private readonly toolCallsInProgress = new Map<
+        string,
+        {
+            name?: string;
+            argsBuffer: string;
+        }
+    >();
+
+    /**
+     * Fallback state for providers that stream tool args before emitting a stable call id.
+     *
+     * Note: If the upstream stream interleaves multiple tool calls without call ids,
+     * there is no reliable way to disambiguate them.
+     */
+    private anonymousToolArgsBuffer = "";
+    private anonymousToolName: string | undefined;
 
     constructor(
         private readonly config: LiteLLMConfig,
@@ -138,14 +151,27 @@ export class ResponsesClient {
         else if (type === "response.output_item.delta") {
             const item = event.item;
             if (item?.type === "function_call") {
-                if (typeof item.call_id === "string") {
-                    this.activeToolCallId = item.call_id;
-                }
-                if (typeof item.name === "string") {
-                    this.activeToolName = item.name;
-                }
-                if (typeof item.arguments === "string") {
-                    this.toolCallBuffer += item.arguments;
+                const callId = typeof item.call_id === "string" ? item.call_id : undefined;
+                const name = typeof item.name === "string" ? item.name : undefined;
+                const argsDelta = typeof item.arguments === "string" ? item.arguments : undefined;
+
+                if (callId) {
+                    const state = this.toolCallsInProgress.get(callId) ?? { argsBuffer: "" };
+                    if (name) {
+                        state.name = name;
+                    }
+                    if (argsDelta) {
+                        state.argsBuffer += argsDelta;
+                    }
+                    this.toolCallsInProgress.set(callId, state);
+                } else {
+                    // No call id yet; keep a best-effort anonymous buffer.
+                    if (name) {
+                        this.anonymousToolName = name;
+                    }
+                    if (argsDelta) {
+                        this.anonymousToolArgsBuffer += argsDelta;
+                    }
                 }
             }
         }
@@ -153,20 +179,39 @@ export class ResponsesClient {
         else if (type === "response.output_item.done") {
             const item = event.item;
             if (item?.type === "function_call") {
-                const callId = (typeof item.call_id === "string" ? item.call_id : undefined) || this.activeToolCallId;
-                const name = (typeof item.name === "string" ? item.name : undefined) || this.activeToolName;
-                const args = (typeof item.arguments === "string" ? item.arguments : undefined) || this.toolCallBuffer;
+                const callId = typeof item.call_id === "string" ? item.call_id : undefined;
+                const nameFromDone = typeof item.name === "string" ? item.name : undefined;
+                const argsFromDone = typeof item.arguments === "string" ? item.arguments : undefined;
 
-                if (callId && name && args) {
-                    const parsed = tryParseJSONObject(args);
-                    if (parsed.ok) {
-                        progress.report(new vscode.LanguageModelToolCallPart(callId, name, parsed.value));
+                if (callId) {
+                    const state = this.toolCallsInProgress.get(callId);
+                    const name = nameFromDone ?? state?.name;
+                    const args = argsFromDone ?? state?.argsBuffer;
+
+                    if (name && args) {
+                        const parsed = tryParseJSONObject(args);
+                        if (parsed.ok) {
+                            progress.report(new vscode.LanguageModelToolCallPart(callId, name, parsed.value));
+                        }
+                    }
+
+                    this.toolCallsInProgress.delete(callId);
+                } else {
+                    // Best-effort anonymous done (no stable id)
+                    const name = nameFromDone ?? this.anonymousToolName;
+                    const args = argsFromDone ?? this.anonymousToolArgsBuffer;
+                    if (name && args) {
+                        const parsed = tryParseJSONObject(args);
+                        if (parsed.ok) {
+                            // If upstream doesn't provide an id, emit a deterministic placeholder.
+                            progress.report(new vscode.LanguageModelToolCallPart("anonymous", name, parsed.value));
+                        }
                     }
                 }
-                // Reset buffer
-                this.toolCallBuffer = "";
-                this.activeToolCallId = undefined;
-                this.activeToolName = undefined;
+
+                // Reset anonymous buffer (regardless of whether we emitted)
+                this.anonymousToolArgsBuffer = "";
+                this.anonymousToolName = undefined;
             }
         }
     }

@@ -52,7 +52,8 @@ suite("LiteLLM Provider Unit Tests", () => {
                 maxInputTokens: 1,
                 maxOutputTokens: 1,
                 capabilities: { toolCalling: true, imageInput: false },
-            },
+                tags: ["tools"],
+            } as unknown as vscode.LanguageModelChatInformation,
         ];
 
         provider.clearModelCache();
@@ -78,12 +79,12 @@ suite("LiteLLM Provider Unit Tests", () => {
                 maxInputTokens: 100,
                 maxOutputTokens: 100,
                 capabilities: { toolCalling: true, imageInput: false },
-            },
+                tags: ["tools"],
+            } as unknown as vscode.LanguageModelChatInformation,
         ];
 
         // Stub ConfigManager to return a config with modelIdOverride.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const configManager = (provider as any)._configManager as {
+        const configManager = (provider as unknown as { _configManager: unknown })._configManager as {
             convertProviderConfiguration: (c: Record<string, unknown>) => unknown;
         };
         sandbox.stub(configManager, "convertProviderConfiguration").returns({
@@ -406,6 +407,7 @@ suite("LiteLLM Provider Unit Tests", () => {
                     mode: "chat",
                     supports_native_streaming: true,
                     supports_function_calling: true,
+                    supported_openai_params: ["tools"],
                 } as LiteLLMModelInfo,
             },
             {

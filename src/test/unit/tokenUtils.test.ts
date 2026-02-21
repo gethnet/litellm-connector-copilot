@@ -6,10 +6,26 @@ import {
     estimateSingleMessageTokens,
     estimateToolTokens,
     trimMessagesToFitBudget,
+    countTokens,
 } from "../../adapters/tokenUtils";
 import type { LiteLLMModelInfo } from "../../types";
 
 suite("TokenUtils Unit Tests", () => {
+    test("countTokens handles strings, single messages, and message arrays", () => {
+        const text = "Hello world";
+        assert.strictEqual(countTokens(text), 3);
+
+        const msg = {
+            role: vscode.LanguageModelChatMessageRole.User,
+            content: [new vscode.LanguageModelTextPart("Hello world")],
+            name: undefined,
+        } as unknown as vscode.LanguageModelChatRequestMessage;
+        assert.strictEqual(countTokens(msg), 3);
+
+        const msgs = [msg, msg];
+        assert.strictEqual(countTokens(msgs), 6);
+    });
+
     test("estimateMessagesTokens sums single-message estimates", () => {
         const a = {
             role: vscode.LanguageModelChatMessageRole.User,
