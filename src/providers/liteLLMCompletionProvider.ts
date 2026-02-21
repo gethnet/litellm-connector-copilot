@@ -4,6 +4,7 @@ import type { LiteLLMConfig } from "../types";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
 import { LiteLLMProviderBase } from "./liteLLMProviderBase";
+import { countTokens } from "../adapters/tokenUtils";
 import { decodeSSE } from "../adapters/sse/sseDecoder";
 import { createInitialStreamingState, interpretStreamEvent } from "../adapters/streaming/liteLLMStreamInterpreter";
 
@@ -26,6 +27,7 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
     ): Promise<{ insertText: string }> {
         const requestId = Math.random().toString(36).substring(7);
         const startTime = LiteLLMTelemetry.startTimer();
+        let tokensIn: number | undefined;
 
         try {
             const config = options.configuration
@@ -43,6 +45,9 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
 
             const modelInfo = this._modelInfoCache.get(model.id);
             const messages: vscode.LanguageModelChatRequestMessage[] = [this.wrapPromptAsMessage(prompt)];
+
+            // Calculate tokensIn for telemetry
+            tokensIn = countTokens(messages, model.id, modelInfo);
 
             // Reuse the base request pipeline. We pass a minimal ProvideLanguageModelChatResponseOptions-like
             // structure with provider configuration and model options.
@@ -70,10 +75,15 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
 
             const completionText = await this.extractCompletionTextFromStream(stream, token);
 
+            // Estimate tokensOut from the completion text
+            const tokensOut = countTokens(completionText, model.id, modelInfo);
+
             LiteLLMTelemetry.reportMetric({
                 requestId,
                 model: model.id,
                 durationMs: LiteLLMTelemetry.endTimer(startTime),
+                tokensIn,
+                tokensOut,
                 status: "success",
                 caller: "inline-completions",
             });
@@ -89,6 +99,7 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
                 requestId,
                 model: options.modelId ?? "unknown",
                 durationMs: LiteLLMTelemetry.endTimer(startTime),
+                tokensIn,
                 status: "failure",
                 error: errorMsg,
                 caller: "inline-completions",

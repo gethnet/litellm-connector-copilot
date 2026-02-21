@@ -13,6 +13,7 @@ import { tryParseJSONObject } from "../utils";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
 import { LiteLLMProviderBase } from "./liteLLMProviderBase";
+import { countTokens } from "../adapters/tokenUtils";
 import { decodeSSE } from "../adapters/sse/sseDecoder";
 import { createInitialStreamingState, interpretStreamEvent } from "../adapters/streaming/liteLLMStreamInterpreter";
 import type { StreamingState } from "../adapters/streaming/liteLLMStreamInterpreter";
@@ -46,6 +47,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         this.resetStreamingState();
         const startTime = LiteLLMTelemetry.startTimer();
         const requestId = Math.random().toString(36).substring(7);
+        let tokensIn: number | undefined;
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const caller = (model as any).tags?.[0] || undefined;
@@ -97,6 +99,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             const modelInfo = this._modelInfoCache.get(modelToUse.id);
             const requestBody = await this.buildOpenAIChatRequest(messages, modelToUse, options, modelInfo, caller);
 
+            // Calculate tokensIn for telemetry
+            tokensIn = countTokens(messages, modelToUse.id, modelInfo);
+
             let stream: ReadableStream<Uint8Array>;
             try {
                 // Note: sendRequestToLiteLLM may fully handle /responses by emitting directly to progress.
@@ -133,10 +138,16 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                                 modelInfo
                             );
                             await this.processStreamingResponse(stream, trackingProgress, token);
+
+                            // Estimate tokensOut from the accumulated assistant text
+                            const tokensOut = countTokens(this._partialAssistantText, modelToUse.id, modelInfo);
+
                             LiteLLMTelemetry.reportMetric({
                                 requestId,
                                 model: modelToUse.id,
                                 durationMs: LiteLLMTelemetry.endTimer(startTime),
+                                tokensIn,
+                                tokensOut,
                                 status: "success",
                                 caller,
                             });
@@ -164,10 +175,15 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
 
             await this.processStreamingResponse(stream, trackingProgress, token);
 
+            // Estimate tokensOut from the accumulated assistant text
+            const tokensOut = countTokens(this._partialAssistantText, modelToUse.id, modelInfo);
+
             LiteLLMTelemetry.reportMetric({
                 requestId,
                 model: modelToUse.id,
                 durationMs: LiteLLMTelemetry.endTimer(startTime),
+                tokensIn,
+                tokensOut,
                 status: "success",
                 caller,
             });
@@ -189,6 +205,15 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 }
             }
             Logger.error("Chat request failed", err);
+            LiteLLMTelemetry.reportMetric({
+                requestId,
+                model: model.id,
+                durationMs: LiteLLMTelemetry.endTimer(startTime),
+                tokensIn,
+                status: "failure",
+                error: errorMessage,
+                caller,
+            });
             throw new Error(errorMessage);
         }
     }
