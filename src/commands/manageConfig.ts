@@ -3,7 +3,7 @@ import type { ConfigManager } from "../config/configManager";
 import type { LiteLLMChatProvider } from "../providers";
 import { LiteLLMClient } from "../adapters/litellmClient";
 
-function createConfigHandler(configManager: ConfigManager) {
+function createConfigHandler(configManager: ConfigManager, provider?: LiteLLMChatProvider) {
     return async () => {
         const config = await configManager.getConfig();
 
@@ -62,12 +62,26 @@ function createConfigHandler(configManager: ConfigManager) {
             key: finalKey,
         });
 
+        // Trigger a model discovery refresh if a provider is available
+        if (provider) {
+            try {
+                provider.clearModelCache();
+                await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
+            } catch (err) {
+                console.error("Failed to refresh models after config change", err);
+            }
+        }
+
         vscode.window.showInformationMessage(`LiteLLM configuration saved.`);
     };
 }
 
-export function registerManageConfigCommand(context: vscode.ExtensionContext, configManager: ConfigManager) {
-    return vscode.commands.registerCommand("litellm-connector.manage", createConfigHandler(configManager));
+export function registerManageConfigCommand(
+    context: vscode.ExtensionContext,
+    configManager: ConfigManager,
+    provider?: LiteLLMChatProvider
+) {
+    return vscode.commands.registerCommand("litellm-connector.manage", createConfigHandler(configManager, provider));
 }
 
 export function registerShowModelsCommand(provider: LiteLLMChatProvider) {

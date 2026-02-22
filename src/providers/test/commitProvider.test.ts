@@ -120,4 +120,20 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
         const resolved = await providerAny.resolveCommitModel(config, new vscode.CancellationTokenSource().token);
         assert.strictEqual(resolved.id, "m2");
     });
+
+    test("resolveCommitModel returns undefined if no match or tag found", async () => {
+        const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
+        const providerAny = provider as unknown as {
+            _lastModelList: vscode.LanguageModelChatInformation[];
+            resolveCommitModel: (
+                config: unknown,
+                token: vscode.CancellationToken
+            ) => Promise<vscode.LanguageModelChatInformation | undefined>;
+        };
+        providerAny._lastModelList = [{ id: "m1", tags: [] } as unknown as vscode.LanguageModelChatInformation];
+
+        const config = {};
+        const resolved = await providerAny.resolveCommitModel(config, new vscode.CancellationTokenSource().token);
+        assert.strictEqual(resolved, undefined);
+    });
 });

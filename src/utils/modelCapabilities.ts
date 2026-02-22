@@ -8,6 +8,7 @@ export interface DerivedModelCapabilities {
     endpointMode: "chat" | "responses" | "completions";
     maxInputTokens: number;
     maxOutputTokens: number;
+    rawContextWindow: number;
 }
 
 export function deriveCapabilitiesFromModelInfo(
@@ -37,6 +38,7 @@ export function deriveCapabilitiesFromModelInfo(
         endpointMode: (modelInfo?.mode as "chat" | "responses" | "completions") ?? "chat",
         maxInputTokens,
         maxOutputTokens,
+        rawContextWindow: rawLimit,
     };
 }
 

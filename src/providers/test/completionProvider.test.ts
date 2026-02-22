@@ -142,4 +142,36 @@ suite("LiteLLMCompletionProvider Unit Tests", () => {
 
         assert.strictEqual(resolved?.id, "override");
     });
+
+    test("resolveCompletionModel returns undefined if no match or tag found", async () => {
+        const provider = new LiteLLMCompletionProvider(mockSecrets, userAgent);
+
+        (provider as unknown as { _lastModelList: vscode.LanguageModelChatInformation[] })._lastModelList = [
+            {
+                id: "m1",
+                name: "m1",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 100,
+                maxOutputTokens: 100,
+                capabilities: { toolCalling: true, imageInput: false },
+                tags: [],
+            } as unknown as vscode.LanguageModelChatInformation,
+        ];
+
+        const resolved = await (
+            provider as unknown as {
+                resolveCompletionModel: (
+                    cfg: unknown,
+                    token: vscode.CancellationToken
+                ) => Promise<vscode.LanguageModelChatInformation | undefined>;
+            }
+        ).resolveCompletionModel({}, {
+            isCancellationRequested: false,
+            onCancellationRequested: () => ({ dispose() {} }),
+        } as vscode.CancellationToken);
+
+        assert.strictEqual(resolved, undefined);
+    });
 });

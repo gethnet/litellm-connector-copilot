@@ -7,6 +7,7 @@ import {
     registerShowModelsCommand,
     registerCheckConnectionCommand,
 } from "./commands/manageConfig";
+import { showModelPicker } from "./commands/modelPicker";
 import { registerSelectInlineCompletionModelCommand } from "./commands/inlineCompletions";
 import { registerGenerateCommitMessageCommand } from "./commands/generateCommitMessage";
 import { LiteLLMCommitMessageProvider } from "./providers/liteLLMCommitProvider";
@@ -79,12 +80,20 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Management commands to configure base URL and API key
     try {
-        context.subscriptions.push(registerManageConfigCommand(context, configManager));
+        context.subscriptions.push(registerManageConfigCommand(context, configManager, chatProvider));
         context.subscriptions.push(registerShowModelsCommand(chatProvider));
         context.subscriptions.push(registerReloadModelsCommand(chatProvider));
         context.subscriptions.push(registerCheckConnectionCommand(configManager));
         context.subscriptions.push(registerSelectInlineCompletionModelCommand(chatProvider));
         context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider));
+        context.subscriptions.push(
+            vscode.commands.registerCommand("litellm-connector.generateCommitMessage.selectModel", async () => {
+                await showModelPicker(commitProvider, {
+                    title: "Select Commit Message Model",
+                    settingKey: "commitModelIdOverride",
+                });
+            })
+        );
         Logger.info("Config command registered.");
     } catch (cmdErr) {
         Logger.error("Failed to register commands", cmdErr);

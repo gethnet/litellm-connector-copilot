@@ -136,26 +136,23 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
         config: LiteLLMConfig,
         token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelChatInformation | undefined> {
+        Logger.debug("Starting Commit Model Resolution");
         if (this._lastModelList.length === 0) {
+            Logger.trace("No model list data discovered");
             await this.discoverModels({ silent: true }, token);
         }
 
         // Use the override if provided in settings
         if (config.commitModelIdOverride) {
+            Logger.trace(`Returning model data ${config.commitModelIdOverride}`);
             return this._lastModelList.find((m) => m.id === config.commitModelIdOverride);
         }
 
         // Prefer models explicitly tagged for SCM generation
-        const tagged = this._lastModelList.find((m) => {
+        return this._lastModelList.find((m) => {
             const tags = (m as unknown as { tags?: string[] }).tags;
             return tags?.includes("scm-generator") === true;
         });
-        if (tagged) {
-            return tagged;
-        }
-
-        // Fallback: first discovered model
-        return this._lastModelList[0];
     }
 
     /**

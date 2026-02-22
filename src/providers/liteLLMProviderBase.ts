@@ -138,7 +138,7 @@ export abstract class LiteLLMProviderBase {
                         return num.toString();
                     };
 
-                    const inputDesc = formatTokens(derived.maxInputTokens + derived.maxOutputTokens);
+                    const inputDesc = formatTokens(derived.rawContextWindow);
                     const outputDesc = formatTokens(derived.maxOutputTokens);
                     const tooltip = `${modelInfo?.litellm_provider ?? "LiteLLM"} (${modelInfo?.mode ?? "responses"}) — Context: ${inputDesc} in / ${outputDesc} out`;
 

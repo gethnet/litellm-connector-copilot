@@ -130,16 +130,10 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
         }
 
         // Prefer models explicitly tagged for inline completions.
-        const tagged = this._lastModelList.find((m) => {
+        return this._lastModelList.find((m) => {
             const tags = (m as unknown as { tags?: string[] }).tags;
             return tags?.includes("inline-completions") === true;
         });
-        if (tagged) {
-            return tagged;
-        }
-
-        // Fallback: first discovered model.
-        return this._lastModelList[0];
     }
 
     private async extractCompletionTextFromStream(

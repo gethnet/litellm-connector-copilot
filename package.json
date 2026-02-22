@@ -17,7 +17,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "1.3.11-dev9",
+	"version": "1.3.11-dev13",
 	"preview": false,
 	"engines": {
 		"vscode": "^1.109.0"
@@ -100,6 +100,10 @@
 				"command": "litellm-connector.generateCommitMessage",
 				"title": "Generate Commit Message",
 				"icon": "$(sparkle)"
+			},
+			{
+				"command": "litellm-connector.generateCommitMessage.selectModel",
+				"title": "LiteLLM: Select Commit Message Model"
 			}
 		],
 		"menus": {
@@ -123,7 +127,7 @@
 					"type": "string",
 					"default": "",
 					"description": "Model id to use for LiteLLM inline completions. Run 'LiteLLM: Select Inline Completion Model' to choose from discovered models.",
-					"markdownDescription": "Model id to use for LiteLLM inline completions. Run **LiteLLM: Select Inline Completion Model** to choose from discovered models."
+					"markdownDescription": "Model id to use for LiteLLM inline completions. [Select Model](command:litellm-connector.inlineCompletions.selectModel) to choose from discovered models."
 				},
 				"litellm-connector.modelIdOverride": {
 					"type": "string",
@@ -134,7 +138,8 @@
 				"litellm-connector.commitModelIdOverride": {
 					"type": "string",
 					"default": "",
-					"description": "Override the model ID for git commit message generation. If empty, the feature is disabled."
+					"description": "Override the model ID for git commit message generation. If empty, the feature is disabled.",
+					"markdownDescription": "Override the model ID for git commit message generation. [Select Model](command:litellm-connector.generateCommitMessage.selectModel) to choose from discovered models. If empty, the feature is disabled."
 				},
 				"litellm-connector.disableQuotaToolRedaction": {
 					"type": "boolean",

@@ -12,7 +12,7 @@ export class ConfigManager {
     private static readonly INLINE_COMPLETIONS_ENABLED_KEY = "litellm-connector.inlineCompletions.enabled";
     private static readonly INLINE_COMPLETIONS_MODEL_ID_KEY = "litellm-connector.inlineCompletions.modelId";
     private static readonly MIGRATION_MARKER_KEY = "litellm-connector.migrated-to-v1.109";
-
+    private static readonly SCM_COMMIT_MSG_MODEL_ID_KEY = "litellm-connector.commitModelIdOverride";
     constructor(private readonly secrets: vscode.SecretStorage) {}
 
     /**
@@ -44,7 +44,10 @@ export class ConfigManager {
             .getConfiguration()
             .get<string>(ConfigManager.INLINE_COMPLETIONS_MODEL_ID_KEY, "")
             .trim();
-
+        const scmGitCompletionsModelId = vscode.workspace
+            .getConfiguration()
+            .get<string>(ConfigManager.SCM_COMMIT_MSG_MODEL_ID_KEY, "")
+            .trim();
         return {
             url: url || "",
             key: key || undefined,
@@ -60,6 +63,7 @@ export class ConfigManager {
                     : modelIdOverride.length > 0
                       ? modelIdOverride
                       : undefined,
+            commitModelIdOverride: `${scmGitCompletionsModelId}`,
         };
     }
 
@@ -120,6 +124,10 @@ export class ConfigManager {
             .getConfiguration()
             .get<string>(ConfigManager.INLINE_COMPLETIONS_MODEL_ID_KEY, "")
             .trim();
+        const scmGitCompletionsModelId = vscode.workspace
+            .getConfiguration()
+            .get<string>(ConfigManager.SCM_COMMIT_MSG_MODEL_ID_KEY, "")
+            .trim();
 
         return {
             url: baseUrl,
@@ -130,6 +138,7 @@ export class ConfigManager {
             modelOverrides,
             modelIdOverride: modelIdOverride.length > 0 ? modelIdOverride : undefined,
             inlineCompletionsEnabled,
+            commitModelIdOverride: `${scmGitCompletionsModelId}`,
             inlineCompletionsModelId:
                 inlineCompletionsModelId.length > 0
                     ? inlineCompletionsModelId
