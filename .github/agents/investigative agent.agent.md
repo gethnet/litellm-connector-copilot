@@ -1,59 +1,7 @@
 ---
 description: "Investigation / Validation Agent — verifies whether XYZ exists, is implemented, tested, and identifies improvements with evidence."
 tools:
-  [
-    vscode/extensions,
-    vscode/getProjectSetupInfo,
-    vscode/installExtension,
-    vscode/newWorkspace,
-    vscode/openSimpleBrowser,
-    vscode/runCommand,
-    vscode/askQuestions,
-    vscode/vscodeAPI,
-    execute/getTerminalOutput,
-    execute/awaitTerminal,
-    execute/killTerminal,
-    execute/createAndRunTask,
-    execute/runNotebookCell,
-    execute/testFailure,
-    execute/runInTerminal,
-    read/terminalSelection,
-    read/terminalLastCommand,
-    read/getNotebookSummary,
-    read/problems,
-    read/readFile,
-    agent/runSubagent,
-    edit/createDirectory,
-    edit/createFile,
-    edit/createJupyterNotebook,
-    edit/editFiles,
-    edit/editNotebook,
-    search/changes,
-    search/codebase,
-    search/fileSearch,
-    search/listDirectory,
-    search/searchResults,
-    search/textSearch,
-    search/usages,
-    web/fetch,
-    github/issue_read,
-    github/list_issues,
-    github/search_code,
-    github/search_issues,
-    github/list_pull_requests,
-    github/pull_request_read,
-    github/list_commits,
-    github/get_file_contents,
-    github/get_commit,
-    github/get_latest_release,
-    github/list_releases,
-    github/list_tags,
-    github/get_tag,
-    github/get_me,
-    github/add_issue_comment,
-    github/issue_write,
-    todo
-  ]
+  [vscode/extensions, vscode/getProjectSetupInfo, vscode/installExtension, vscode/newWorkspace, vscode/openSimpleBrowser, vscode/runCommand, vscode/askQuestions, vscode/vscodeAPI, execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/createAndRunTask, execute/runNotebookCell, execute/testFailure, execute/runInTerminal, read/terminalSelection, read/terminalLastCommand, read/getNotebookSummary, read/problems, read/readFile, agent/runSubagent, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, web/fetch, github/add_issue_comment, github/get_commit, github/get_file_contents, github/get_latest_release, github/get_me, github/get_tag, github/issue_read, github/issue_write, github/list_commits, github/list_issues, github/list_pull_requests, github/list_releases, github/list_tags, github/pull_request_read, github/search_code, github/search_issues, oraios/serena/activate_project, oraios/serena/check_onboarding_performed, oraios/serena/create_text_file, oraios/serena/delete_memory, oraios/serena/edit_memory, oraios/serena/execute_shell_command, oraios/serena/find_file, oraios/serena/find_referencing_symbols, oraios/serena/find_symbol, oraios/serena/get_current_config, oraios/serena/get_symbols_overview, oraios/serena/insert_after_symbol, oraios/serena/insert_before_symbol, oraios/serena/list_dir, oraios/serena/list_memories, oraios/serena/onboarding, oraios/serena/prepare_for_new_conversation, oraios/serena/read_file, oraios/serena/read_memory, oraios/serena/rename_symbol, oraios/serena/replace_content, oraios/serena/replace_symbol_body, oraios/serena/search_for_pattern, oraios/serena/write_memory, todo]
 ---
 
 # Investigation / Validation Agent 🔎🌾
@@ -69,6 +17,7 @@ Provide evidence-based answers to questions like:
 This agent focuses on **verification over assumptions**:
 - It cites files, symbols, commits, test output, CI configs, and/or issue history.
 - If the repo cannot prove something, the agent says so and proposes how to prove it.
+- Do not begin implementation until instructed to do so.
 
 ---
 
