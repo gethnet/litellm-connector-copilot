@@ -128,18 +128,18 @@ export abstract class LiteLLMProviderBase {
                     const capabilities = capabilitiesToVSCode(derived);
                     const tags = getDerivedModelTags(modelId, derived, config.modelOverrides);
 
-                    const formatTokens = (num: number): string => {
-                        if (num >= 1000000) {
-                            return `${(num / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
-                        }
-                        if (num >= 1000) {
-                            return `${Math.floor(num / 1000)}K`;
-                        }
-                        return num.toString();
-                    };
+                    // const formatTokens = (num: number): string => {
+                    //     if (num >= 1000000) {
+                    //         return `${(num / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
+                    //     }
+                    //     if (num >= 1000) {
+                    //         return `${Math.floor(num / 1000)}K`;
+                    //     }
+                    //     return num.toString();
+                    // };
 
-                    const inputDesc = formatTokens(derived.rawContextWindow);
-                    const outputDesc = formatTokens(derived.maxOutputTokens);
+                    const inputDesc = derived.rawContextWindow;
+                    const outputDesc = derived.maxOutputTokens;
                     const tooltip = `${modelInfo?.litellm_provider ?? "LiteLLM"} (${modelInfo?.mode ?? "responses"}) — Context: ${inputDesc} in / ${outputDesc} out`;
 
                     return {
@@ -227,6 +227,23 @@ export abstract class LiteLLMProviderBase {
     }
 
     /**
+     * Extended options including internal telemetry fields.
+     */
+    protected getTelemetryOptions(options: vscode.ProvideLanguageModelChatResponseOptions): {
+        caller?: string;
+        justification?: string;
+    } {
+        const opt = options as vscode.ProvideLanguageModelChatResponseOptions & {
+            caller?: string;
+            justification?: string;
+        };
+        return {
+            caller: opt.caller,
+            justification: opt.justification,
+        };
+    }
+
+    /**
      * Shared request builder used by all providers.
      *
      * Applies:
@@ -241,6 +258,16 @@ export abstract class LiteLLMProviderBase {
         modelInfo?: LiteLLMModelInfo,
         caller?: string
     ): Promise<OpenAIChatCompletionRequest> {
+        // Log caller and justification for telemetry/debugging
+        const telemetry = this.getTelemetryOptions(options);
+        const justification = telemetry.justification;
+        const effectiveCaller = caller || telemetry.caller;
+        Logger.info(
+            `Building request for model: ${model.id} | Caller: ${effectiveCaller || "unknown"} | Justification: ${
+                justification || "none"
+            }`
+        );
+
         // ProvideLanguageModelChatResponseOptions doesn't include provider configuration.
         // Some call sites pass an intersection type that includes it.
         const optionsWithConfig = options as ProvideLanguageModelChatResponseOptions & {

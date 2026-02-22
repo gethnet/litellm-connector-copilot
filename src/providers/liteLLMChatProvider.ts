@@ -49,8 +49,17 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         const requestId = Math.random().toString(36).substring(7);
         let tokensIn: number | undefined;
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const caller = (model as any).tags?.[0] || undefined;
+        // Extract caller/justification from options or model tags
+        const telemetry = this.getTelemetryOptions(options);
+        const modelWithTags = model as vscode.LanguageModelChatInformation & { tags?: string[] };
+        const caller = telemetry.caller || modelWithTags.tags?.[0] || "chat";
+        const justification = telemetry.justification;
+
+        Logger.info(
+            `Chat request started | RequestID: ${requestId} | Model: ${model.id} | Caller: ${caller} | Justification: ${
+                justification || "none"
+            }`
+        );
 
         const trackingProgress: Progress<LanguageModelResponsePart> = {
             report: (part) => {

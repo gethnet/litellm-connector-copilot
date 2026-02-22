@@ -28,6 +28,16 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
     ): Promise<string> {
         const requestId = Math.random().toString(36).substring(7);
         const startTime = LiteLLMTelemetry.startTimer();
+        const caller = "scm-generator";
+        const telemetry = this.getTelemetryOptions(
+            options as unknown as vscode.ProvideLanguageModelChatResponseOptions
+        );
+        const justification = telemetry.justification;
+
+        Logger.info(
+            `Commit message request started | RequestID: ${requestId} | Caller: ${caller} | Justification: ${justification || "none"}`
+        );
+
         let tokensIn: number | undefined;
         let modelId = "unknown";
 

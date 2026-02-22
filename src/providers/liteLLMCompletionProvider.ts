@@ -27,6 +27,13 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
     ): Promise<{ insertText: string }> {
         const requestId = Math.random().toString(36).substring(7);
         const startTime = LiteLLMTelemetry.startTimer();
+        const caller = options.modelId?.includes("inline") ? "inline-completions" : "text-completion";
+        const justification = (options as { justification?: string }).justification;
+
+        Logger.info(
+            `Completion request started | RequestID: ${requestId} | Model: ${options.modelId || "auto"} | Caller: ${caller} | Justification: ${justification || "none"}`
+        );
+
         let tokensIn: number | undefined;
 
         try {
