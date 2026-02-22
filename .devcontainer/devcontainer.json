@@ -19,6 +19,9 @@
 		"GITHUB_AUTH_TOKEN": "${localEnv:GITHUB_TOKEN}",
 		"GH_TOKEN": "${localEnv:GITHUB_TOKEN}"
 	},
+	"mounts": [
+		"source=${localEnv:HOME}/.ssh,target=/home/node/.ssh,type=bind,consistency=cached"
+	],
 	"customizations": {
 		"vscode": {
 			"extensions": [
