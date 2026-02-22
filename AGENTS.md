@@ -60,11 +60,10 @@ Group by responsibility:
 - `src/utils/`: shared utilities (logging, telemetry, model helpers)
 - `src/config/`: configuration and secrets
 - `src/commands/`: command registrations and UI entry points
-- `src/test/`: tests grouped by module under test
-  - `unit/providerBase.test.ts` — Base orchestrator tests
-  - `unit/chatProvider.test.ts` — Chat provider tests
-  - `unit/completionProvider.test.ts` — Completions provider tests
-  - `unit/...` — Other module tests
+- `src/**/test/`: unit tests co-located with the module under test
+- `src/test/`: integration tests and shared test utilities
+  - `integration/` — end-to-end and cross-module tests
+  - `utils/` — shared mocks and test helpers
 
 Prefer names that convey intent (`*Client`, `*Adapter`, `*Utils`, `*Provider`).
 

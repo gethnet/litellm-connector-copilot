@@ -95,8 +95,22 @@
 			{
 				"command": "litellm-connector.checkConnection",
 				"title": "LiteLLM: Check Connection"
+			},
+			{
+				"command": "litellm-connector.generateCommitMessage",
+				"title": "Generate Commit Message",
+				"icon": "$(sparkle)"
 			}
 		],
+		"menus": {
+			"scm/title": [
+				{
+					"command": "litellm-connector.generateCommitMessage",
+					"group": "navigation",
+					"when": "config.litellm-connector.commitModelIdOverride != ''"
+				}
+			]
+		},
 		"configuration": {
 			"title": "LiteLLM Connector",
 			"properties": {
@@ -116,6 +130,11 @@
 					"default": "",
 					"markdownDeprecationMessage": "Deprecated: use `litellm-connector.inlineCompletions.modelId` instead.",
 					"description": "(Deprecated) Optional: force a specific LiteLLM model id for inline completions."
+				},
+				"litellm-connector.commitModelIdOverride": {
+					"type": "string",
+					"default": "",
+					"description": "Override the model ID for git commit message generation. If empty, the feature is disabled."
 				},
 				"litellm-connector.disableQuotaToolRedaction": {
 					"type": "boolean",

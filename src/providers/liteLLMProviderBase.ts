@@ -1,6 +1,5 @@
 import * as vscode from "vscode";
 import type {
-    CancellationToken,
     LanguageModelChatInformation,
     LanguageModelChatRequestMessage,
     ProvideLanguageModelChatResponseOptions,
@@ -82,15 +81,22 @@ export abstract class LiteLLMProviderBase {
     }
 
     /**
+     * Public access to model info from cache.
+     */
+    public getModelInfo(modelId: string): LiteLLMModelInfo | undefined {
+        return this._modelInfoCache.get(modelId);
+    }
+
+    /**
      * Fetches and caches models from the LiteLLM proxy.
      *
      * This is shared between chat and completions providers so that both can reuse
      * the same discovery + tag logic.
      */
-    protected async discoverModels(
+    public async discoverModels(
         _options: { silent: boolean },
-        token: CancellationToken
-    ): Promise<LanguageModelChatInformation[]> {
+        token: vscode.CancellationToken
+    ): Promise<vscode.LanguageModelChatInformation[]> {
         Logger.debug("discoverModels called");
         try {
             const config = await this._configManager.getConfig();

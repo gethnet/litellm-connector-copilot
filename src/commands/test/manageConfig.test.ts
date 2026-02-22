@@ -5,8 +5,10 @@ import {
     registerManageConfigCommand,
     registerReloadModelsCommand,
     registerShowModelsCommand,
+    registerCheckConnectionCommand,
 } from "../../commands/manageConfig";
 import { ConfigManager } from "../../config/configManager";
+import { LiteLLMClient } from "../../adapters/litellmClient";
 import type { LiteLLMChatProvider } from "../../providers";
 
 suite("ManageConfig Command Unit Tests", () => {
@@ -306,5 +308,68 @@ suite("Model Commands Unit Tests", () => {
         assert.strictEqual(provideStub.calledOnce, true);
         assert.strictEqual(infoStub.calledOnce, true);
         assert.ok(String(infoStub.firstCall.args[0]).includes("Reloaded"));
+    });
+
+    test("checkConnection: reports success on valid connection", async () => {
+        const configManagerStub = sandbox.createStubInstance(ConfigManager);
+        configManagerStub.getConfig.resolves({ url: "http://localhost:4000", key: "k" });
+
+        const checkStub = sandbox.stub(LiteLLMClient.prototype, "checkConnection").resolves({
+            latencyMs: 100,
+            modelCount: 5,
+            sampleModelIds: ["m1", "m2"],
+        });
+
+        sandbox.stub(vscode.window, "withProgress").callsFake(async (_opts, task) => {
+            return task(
+                { report: () => {} } as unknown as vscode.Progress<unknown>,
+                new vscode.CancellationTokenSource().token
+            );
+        });
+        const infoStub = sandbox.stub(vscode.window, "showInformationMessage");
+
+        let handler: (() => Promise<void>) | undefined;
+        sandbox.stub(vscode.commands, "registerCommand").callsFake((id, cb) => {
+            if (id === "litellm-connector.checkConnection") {
+                handler = cb as () => Promise<void>;
+            }
+            return { dispose: () => {} } as vscode.Disposable;
+        });
+
+        registerCheckConnectionCommand(configManagerStub as unknown as ConfigManager);
+        await handler?.();
+
+        assert.strictEqual(checkStub.calledOnce, true);
+        assert.strictEqual(infoStub.calledOnce, true);
+        assert.ok(String(infoStub.firstCall.args[0]).includes("Connection successful"));
+    });
+
+    test("checkConnection: reports error on failed connection", async () => {
+        const configManagerStub = sandbox.createStubInstance(ConfigManager);
+        configManagerStub.getConfig.resolves({ url: "http://localhost:4000", key: "k" });
+
+        sandbox.stub(LiteLLMClient.prototype, "checkConnection").rejects(new Error("Network Error"));
+
+        sandbox.stub(vscode.window, "withProgress").callsFake(async (_opts, task) => {
+            return task(
+                { report: () => {} } as unknown as vscode.Progress<unknown>,
+                new vscode.CancellationTokenSource().token
+            );
+        });
+        const errorStub = sandbox.stub(vscode.window, "showErrorMessage");
+
+        let handler: (() => Promise<void>) | undefined;
+        sandbox.stub(vscode.commands, "registerCommand").callsFake((id, cb) => {
+            if (id === "litellm-connector.checkConnection") {
+                handler = cb as () => Promise<void>;
+            }
+            return { dispose: () => {} } as vscode.Disposable;
+        });
+
+        registerCheckConnectionCommand(configManagerStub as unknown as ConfigManager);
+        await handler?.();
+
+        assert.strictEqual(errorStub.calledOnce, true);
+        assert.ok(String(errorStub.firstCall.args[0]).includes("Connection failed: Network Error"));
     });
 });

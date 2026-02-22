@@ -71,6 +71,9 @@ export interface LiteLLMConfig {
 
     /** Model id to use for LiteLLM inline completions. */
     inlineCompletionsModelId?: string;
+
+    /** Model id to use for LiteLLM commit message generation. */
+    commitModelIdOverride?: string;
 }
 
 /**
