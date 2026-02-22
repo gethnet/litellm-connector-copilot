@@ -55,9 +55,10 @@ jobs:
 
       - name: Upload test results to Codecov
         if: always()
-        uses: codecov/test-results-action@v1
+        uses: codecov/codecov-action@v5
         with:
           files: test-results/**/*.xml
+          report_type: test_results
           fail_ci_if_error: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' }}
           token: ${{ secrets.CODECOV_TOKEN }}
 

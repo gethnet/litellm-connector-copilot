@@ -2,7 +2,7 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import * as sinon from "sinon";
 
-import { InlineCompletionsRegistrar } from "../../inlineCompletions/registerInlineCompletions";
+import { InlineCompletionsRegistrar } from "..//registerInlineCompletions";
 import { LiteLLMTelemetry } from "../../utils/telemetry";
 
 suite("InlineCompletionsRegistrar Unit Tests", () => {

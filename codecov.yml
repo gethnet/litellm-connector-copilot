@@ -1,0 +1,53 @@
+comment:
+  layout: "reach,diff,flags,files,components"
+  behavior: default
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: auto
+        threshold: 0%
+
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        target: auto
+  individual_components:
+    - component_id: adapters
+      name: adapters
+      paths:
+        - src/adapters/**
+    - component_id: providers
+      name: providers
+      paths:
+        - src/providers/**
+    - component_id: commands
+      name: commands
+      paths:
+        - src/commands/**
+    - component_id: config
+      name: config
+      paths:
+        - src/config/**
+    - component_id: inline-completions
+      name: inline-completions
+      paths:
+        - src/inlineCompletions/**
+    - component_id: utils
+      name: utils
+      paths:
+        - src/utils/**
+    - component_id: streaming
+      name: streaming
+      paths:
+        - src/adapters/streaming/**
+    - component_id: sse
+      name: sse
+      paths:
+        - src/adapters/sse/**

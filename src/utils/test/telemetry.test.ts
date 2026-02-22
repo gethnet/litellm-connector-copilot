@@ -1,8 +1,8 @@
 import * as assert from "assert";
 import * as sinon from "sinon";
-import type { IMetrics } from "../../utils/telemetry";
-import { LiteLLMTelemetry } from "../../utils/telemetry";
-import { Logger } from "../../utils/logger";
+import type { IMetrics } from "..//telemetry";
+import { LiteLLMTelemetry } from "..//telemetry";
+import { Logger } from "..//logger";
 
 suite("Telemetry Unit Tests", () => {
     let loggerDebugStub: sinon.SinonStub;

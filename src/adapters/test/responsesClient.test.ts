@@ -1,7 +1,7 @@
 import * as assert from "assert";
 import * as sinon from "sinon";
 import * as vscode from "vscode";
-import { ResponsesClient } from "../../adapters/responsesClient";
+import { ResponsesClient } from "../responsesClient";
 import type { LiteLLMConfig, LiteLLMResponsesRequest } from "../../types";
 import { Logger } from "../../utils/logger";
 

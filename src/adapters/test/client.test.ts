@@ -1,5 +1,5 @@
 import * as assert from "assert";
-import { LiteLLMClient } from "../../adapters/litellmClient";
+import { LiteLLMClient } from "../litellmClient";
 import * as sinon from "sinon";
 
 suite("LiteLLM Client Unit Tests", () => {

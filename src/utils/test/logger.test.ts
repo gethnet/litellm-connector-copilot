@@ -1,7 +1,7 @@
 import * as assert from "assert";
 import * as sinon from "sinon";
 import * as vscode from "vscode";
-import { Logger } from "../../utils/logger";
+import { Logger } from "..//logger";
 
 suite("Logger Unit Tests", () => {
     let mockChannel: {

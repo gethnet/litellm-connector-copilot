@@ -1,6 +1,6 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
-import { decodeSSE } from "../../adapters/sse/sseDecoder";
+import { decodeSSE } from "../sseDecoder";
 
 suite("SSE Decoder Unit Tests", () => {
     test("decodes simple data frames", async () => {

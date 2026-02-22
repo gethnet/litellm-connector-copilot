@@ -2,7 +2,7 @@ import * as assert from "assert";
 import * as sinon from "sinon";
 import * as vscode from "vscode";
 
-import { LiteLLMChatProvider } from "../../providers";
+import { LiteLLMChatProvider } from "../";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 import { ResponsesClient } from "../../adapters/responsesClient";
 import { Logger } from "../../utils/logger";

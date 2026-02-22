@@ -3,10 +3,7 @@ import * as vscode from "vscode";
 import * as sinon from "sinon";
 
 import type { LiteLLMConfig } from "../../types";
-import {
-    LiteLLMInlineCompletionProvider,
-    buildInlineCompletionPrompt,
-} from "../../inlineCompletions/liteLLMInlineCompletionProvider";
+import { LiteLLMInlineCompletionProvider, buildInlineCompletionPrompt } from "..//liteLLMInlineCompletionProvider";
 
 suite("LiteLLMInlineCompletionProvider Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;

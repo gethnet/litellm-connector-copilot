@@ -1,5 +1,5 @@
 import * as assert from "assert";
-import { transformToResponsesFormat } from "../../adapters/responsesAdapter";
+import { transformToResponsesFormat } from "../responsesAdapter";
 import { normalizeToolCallId } from "../../utils";
 
 suite("Responses Adapter Unit Tests", () => {

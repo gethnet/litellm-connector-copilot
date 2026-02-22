@@ -2,7 +2,7 @@ import * as assert from "assert";
 import type * as vscode from "vscode";
 import * as sinon from "sinon";
 
-import { LiteLLMCompletionProvider } from "../../providers";
+import { LiteLLMCompletionProvider } from "../";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 
 suite("LiteLLMCompletionProvider Unit Tests", () => {

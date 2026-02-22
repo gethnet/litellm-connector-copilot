@@ -7,7 +7,7 @@ import {
     estimateToolTokens,
     trimMessagesToFitBudget,
     countTokens,
-} from "../../adapters/tokenUtils";
+} from "../tokenUtils";
 import type { LiteLLMModelInfo } from "../../types";
 
 suite("TokenUtils Unit Tests", () => {

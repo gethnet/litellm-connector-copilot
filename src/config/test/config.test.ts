@@ -1,7 +1,7 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import * as sinon from "sinon";
-import { ConfigManager } from "../../config/configManager";
+import { ConfigManager } from "..//configManager";
 
 suite("ConfigManager Unit Tests", () => {
     let mockSecrets: vscode.SecretStorage;
