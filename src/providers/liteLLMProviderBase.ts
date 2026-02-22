@@ -128,28 +128,28 @@ export abstract class LiteLLMProviderBase {
                     const capabilities = capabilitiesToVSCode(derived);
                     const tags = getDerivedModelTags(modelId, derived, config.modelOverrides);
 
-                    // const formatTokens = (num: number): string => {
-                    //     if (num >= 1000000) {
-                    //         return `${(num / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
-                    //     }
-                    //     if (num >= 1000) {
-                    //         return `${Math.floor(num / 1000)}K`;
-                    //     }
-                    //     return num.toString();
-                    // };
+                    const formatTokens = (num: number): string => {
+                        if (num >= 1000000) {
+                            return `${(num / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
+                        }
+                        if (num >= 1000) {
+                            return `${Math.floor(num / 1000)}K`;
+                        }
+                        return num.toString();
+                    };
 
-                    const inputDesc = derived.rawContextWindow;
-                    const outputDesc = derived.maxOutputTokens;
+                    const inputDesc = formatTokens(derived.rawContextWindow);
+                    const outputDesc = formatTokens(derived.maxOutputTokens);
                     const tooltip = `${modelInfo?.litellm_provider ?? "LiteLLM"} (${modelInfo?.mode ?? "responses"}) — Context: ${inputDesc} in / ${outputDesc} out`;
 
                     return {
                         id: modelId,
                         name: entry.model_name ?? modelId,
                         tooltip,
-                        detail: `↑ ${inputDesc}   ↓ ${outputDesc}`,
+                        detail: `↑${inputDesc} ↓${outputDesc}`,
                         family: "litellm",
                         version: "1.0.0",
-                        maxInputTokens: derived.maxInputTokens,
+                        maxInputTokens: derived.rawContextWindow,
                         maxOutputTokens: derived.maxOutputTokens,
                         capabilities,
                         tags,
