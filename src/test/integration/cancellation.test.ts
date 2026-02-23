@@ -1,6 +1,7 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import { LiteLLMClient } from "../../adapters/litellmClient";
+import type { OpenAIChatCompletionRequest } from "../../types";
 
 suite("LiteLLM Client Cancellation Tests", () => {
     const config = { url: "http://localhost:1234", key: "test-key" };
@@ -8,13 +9,11 @@ suite("LiteLLM Client Cancellation Tests", () => {
 
     test("chat should be aborted when token is cancelled during fetch", async () => {
         const cts = new vscode.CancellationTokenSource();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const request = { model: "test", messages: [], stream: true } as any;
+        const request: OpenAIChatCompletionRequest = { model: "test", messages: [], stream: true };
 
         // Mock fetch to delay then check signal
         const originalFetch = global.fetch;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (global as any).fetch = async (url: string, init: RequestInit) => {
+        (global as typeof globalThis).fetch = (async (url: string | URL | Request, init?: RequestInit) => {
             return new Promise((resolve, reject) => {
                 const timeout = setTimeout(() => {
                     resolve(
@@ -27,12 +26,14 @@ suite("LiteLLM Client Cancellation Tests", () => {
                         )
                     );
                 }, 100);
-                init.signal?.addEventListener("abort", () => {
-                    clearTimeout(timeout);
-                    reject(new DOMException("Aborted", "AbortError"));
-                });
+                if (init?.signal) {
+                    init.signal.addEventListener("abort", () => {
+                        clearTimeout(timeout);
+                        reject(new DOMException("Aborted", "AbortError"));
+                    });
+                }
             });
-        };
+        }) as typeof fetch;
 
         try {
             const chatPromise = client.chat(request, "chat", cts.token);
@@ -56,14 +57,18 @@ suite("LiteLLM Client Cancellation Tests", () => {
         // Mock fetch to fail once with 500
         let callCount = 0;
         const originalFetch = global.fetch;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (global as any).fetch = async () => {
+        (global as typeof globalThis).fetch = (async () => {
             callCount++;
             return new Response("Error", { status: 500 });
-        };
+        }) as typeof fetch;
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const clientAny = client as any;
+        const clientAny = client as unknown as {
+            fetchWithRetry: (
+                url: string,
+                init: RequestInit,
+                opts: { retries: number; delayMs: number; token: vscode.CancellationToken }
+            ) => Promise<Response>;
+        };
         // Use a small delay for test reliability
         const retryPromise = clientAny.fetchWithRetry(
             "http://url",

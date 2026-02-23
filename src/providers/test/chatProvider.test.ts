@@ -478,19 +478,6 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const tokenSource = new vscode.CancellationTokenSource();
 
-        const modelId = "gpt-4";
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const model: vscode.LanguageModelChatInformation = {
-            id: modelId,
-            name: "gpt-4",
-            tooltip: "",
-            family: "litellm",
-            version: "1.0.0",
-            maxInputTokens: 1000,
-            maxOutputTokens: 1000,
-            capabilities: { toolCalling: true, imageInput: false },
-        };
-
         // Mock LiteLLMClient.chat to return a stream.
         // Important: `decodeSSE` splits on single newlines, so each SSE line must end with `\n`.
         const encoder = new TextEncoder();
