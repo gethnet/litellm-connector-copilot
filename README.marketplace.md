@@ -56,6 +56,8 @@ Want to support development?
 - 🧠 **Smart parameter handling** for model quirks
 - 🔁 **Automatic retry** when a model rejects unsupported flags
 - 📊 **Token tracking & usage** monitoring for input/output tokens
+- ✍️ **Git commit generation** from staged changes in the SCM view
+- 🔍 **Connection diagnostics** to verify proxy configuration
 - ⏱️ **Inactivity watchdog** to prevent stuck streams
 - 🚫🧠 **Cache bypass controls** (`no-cache` headers) with provider-aware behavior
 - 🔐 **Secure credential storage** using VS Code `SecretStorage`
@@ -65,13 +67,13 @@ Want to support development?
 
 ## 🆕 Recent Highlights
 
+- ✍️ **Git Commit Message Generation** (generate messages from staged changes directly in the SCM view)
+- 📊 **Enhanced Token Awareness** (real-time token counting and context window display in model tooltips)
+- 🔍 **Connection Diagnostics** (new `Check Connection` command to validate proxy settings)
 - 🚀 **VS Code 1.109+ settings modernization** (aligns with the Language Model provider settings UI)
-- 📊 **Enhanced Token Awareness** (improved tracking of token usage for cost and performance monitoring)
-- 🧱 **Tool-call compatibility hardening** (normalizes tool call IDs to OpenAI-compatible limits to prevent hard failures)
-- 🧼 **Safer logging + fewer false tool redactions** (sanitizes provider error text and tightens quota/rate-limit detection)
+- 🧱 **Tool-call compatibility hardening** (normalizes tool call IDs to OpenAI-compatible limits)
 - 🧰 **Stability Improvements** (hardened JSON parsing and stream error recovery)
 - 📦 **Smaller, faster package** (bundled/minified production builds)
-- 🌐 **Web-ready output** (includes a browser-target bundle for VS Code Web)
 
 ---
 
@@ -87,7 +89,9 @@ Want to support development?
 ## ⌨️ Commands
 
 - **Manage LiteLLM Provider**: Configure Base URL + API Key; refreshes models.
+- **LiteLLM: Check Connection**: Verify proxy URL and API key configuration.
 - **LiteLLM: Select Inline Completion Model**: Choose a model for inline completions.
+- **LiteLLM: Select Commit Message Model**: Choose a model for git commit generation.
 
 ---
 
