@@ -1,9 +1,10 @@
 import * as assert from "assert";
-import type * as vscode from "vscode";
+import * as vscode from "vscode";
 import * as sinon from "sinon";
 
 import { LiteLLMCompletionProvider } from "../";
 import { LiteLLMClient } from "../../adapters/litellmClient";
+import { LiteLLMTelemetry } from "../../utils/telemetry";
 
 suite("LiteLLMCompletionProvider Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -101,6 +102,49 @@ suite("LiteLLMCompletionProvider Unit Tests", () => {
         assert.strictEqual(res.insertText, "hello");
     });
 
+    test("provideTextCompletion reports failure telemetry on error", async () => {
+        const provider = new LiteLLMCompletionProvider(mockSecrets, userAgent);
+        const reportStub = sandbox.stub(LiteLLMTelemetry, "reportMetric");
+
+        // Force a configuration error
+        const configManager = (provider as unknown as { _configManager: { getConfig: () => Promise<unknown> } })
+            ._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({ url: "" });
+
+        try {
+            await provider.provideTextCompletion("prompt", {}, {
+                isCancellationRequested: false,
+                onCancellationRequested: () => ({ dispose() {} }),
+            } as vscode.CancellationToken);
+        } catch {
+            // Expected
+        }
+
+        assert.ok(reportStub.calledOnce);
+        const metric = reportStub.firstCall.args[0];
+        assert.strictEqual(metric.status, "failure");
+        assert.ok(metric.error?.includes("configuration not found"));
+    });
+
+    test("provideTextCompletion throws if no model available", async () => {
+        const provider = new LiteLLMCompletionProvider(mockSecrets, userAgent);
+        (provider as unknown as { _lastModelList: vscode.LanguageModelChatInformation[] })._lastModelList = [];
+        sandbox.stub(provider, "discoverModels" as keyof LiteLLMCompletionProvider).resolves();
+
+        const configManager = (provider as unknown as { _configManager: { getConfig: () => Promise<unknown> } })
+            ._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+
+        await assert.rejects(
+            () =>
+                provider.provideTextCompletion("prompt", {}, {
+                    isCancellationRequested: false,
+                    onCancellationRequested: () => ({ dispose() {} }),
+                } as vscode.CancellationToken),
+            /No model available/
+        );
+    });
+
     test("resolveCompletionModel prefers modelIdOverride", async () => {
         const provider = new LiteLLMCompletionProvider(mockSecrets, userAgent);
 
@@ -173,5 +217,50 @@ suite("LiteLLMCompletionProvider Unit Tests", () => {
         } as vscode.CancellationToken);
 
         assert.strictEqual(resolved, undefined);
+    });
+
+    test("extractCompletionTextFromStream handles cancellation and invalid JSON", async () => {
+        const provider = new LiteLLMCompletionProvider(mockSecrets, userAgent);
+
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"a"}}]}\n'));
+                controller.enqueue(encoder.encode("data: invalid-json\n"));
+                controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"b"}}]}\n'));
+                controller.close();
+            },
+        });
+
+        const tokenSource = new vscode.CancellationTokenSource();
+
+        // Test with invalid JSON skipping
+        const res = await (
+            provider as unknown as {
+                extractCompletionTextFromStream: (
+                    stream: ReadableStream<Uint8Array>,
+                    token: vscode.CancellationToken
+                ) => Promise<string>;
+            }
+        ).extractCompletionTextFromStream(stream, tokenSource.token);
+        assert.strictEqual(res, "ab");
+
+        // Test with cancellation
+        const stream2 = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"a"}}]}\n'));
+                controller.close();
+            },
+        });
+        tokenSource.cancel();
+        const res2 = await (
+            provider as unknown as {
+                extractCompletionTextFromStream: (
+                    stream: ReadableStream<Uint8Array>,
+                    token: vscode.CancellationToken
+                ) => Promise<string>;
+            }
+        ).extractCompletionTextFromStream(stream2, tokenSource.token);
+        assert.strictEqual(res2, "");
     });
 });

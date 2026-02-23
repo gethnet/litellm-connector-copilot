@@ -90,6 +90,32 @@ suite("ResponsesClient sendResponsesRequest", () => {
         assert.strictEqual(headers["X-API-Key"], config.key);
     });
 
+    test("sets Cache-Control: no-cache when disableCaching is true and model is not Anthropic", async () => {
+        const cachingConfig: LiteLLMConfig = { ...config, disableCaching: true };
+        const client = new ResponsesClient(cachingConfig, userAgent);
+        const body: LiteLLMResponsesRequest = { model: "gpt-4", input: [] };
+        fetchStub.resolves(new Response(readableFromStrings([""]), { status: 200 }));
+
+        await client.sendResponsesRequest(body, { report: () => {} }, new vscode.CancellationTokenSource().token);
+
+        const [, init] = fetchStub.firstCall.args as [string, RequestInit];
+        const headers = normalizeHeaders(init?.headers);
+        assert.strictEqual(headers["Cache-Control"], "no-cache");
+    });
+
+    test("does not set Cache-Control: no-cache for Anthropic models even if disableCaching is true", async () => {
+        const cachingConfig: LiteLLMConfig = { ...config, disableCaching: true };
+        const client = new ResponsesClient(cachingConfig, userAgent);
+        const body: LiteLLMResponsesRequest = { model: "claude-3-opus", input: [] };
+        fetchStub.resolves(new Response(readableFromStrings([""]), { status: 200 }));
+
+        await client.sendResponsesRequest(body, { report: () => {} }, new vscode.CancellationTokenSource().token);
+
+        const [, init] = fetchStub.firstCall.args as [string, RequestInit];
+        const headers = normalizeHeaders(init?.headers);
+        assert.strictEqual(headers["Cache-Control"], undefined);
+    });
+
     test("throws on non-OK response", async () => {
         const client = makeClient();
         fetchStub.resolves(new Response("bad", { status: 500, statusText: "Server" }));
