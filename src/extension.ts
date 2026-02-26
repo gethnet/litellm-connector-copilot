@@ -6,6 +6,7 @@ import {
     registerReloadModelsCommand,
     registerShowModelsCommand,
     registerCheckConnectionCommand,
+    registerResetConfigCommand,
 } from "./commands/manageConfig";
 import { showModelPicker } from "./commands/modelPicker";
 import { registerSelectInlineCompletionModelCommand } from "./commands/inlineCompletions";
@@ -46,21 +47,6 @@ export function activate(context: vscode.ExtensionContext) {
     inlineRegistrar.initialize();
     context.subscriptions.push(inlineRegistrar);
 
-    // Attempt to migrate configuration from legacy secret storage to new v1.109+ provider configuration
-    configManager
-        .migrateToProviderConfiguration()
-        .then((migrated) => {
-            if (migrated) {
-                Logger.info("Successfully migrated configuration to v1.109+ provider settings.");
-                vscode.window.showInformationMessage(
-                    "LiteLLM Connector has been updated. Your configuration has been automatically migrated to the new settings format."
-                );
-            }
-        })
-        .catch((err) => {
-            Logger.error("Error during configuration migration", err);
-        });
-
     // Register the LiteLLM provider under the vendor id used in package.json
     try {
         Logger.info("Registering LanguageModelChatProvider...");
@@ -84,6 +70,7 @@ export function activate(context: vscode.ExtensionContext) {
         context.subscriptions.push(registerShowModelsCommand(chatProvider));
         context.subscriptions.push(registerReloadModelsCommand(chatProvider));
         context.subscriptions.push(registerCheckConnectionCommand(configManager));
+        context.subscriptions.push(registerResetConfigCommand(configManager, chatProvider));
         context.subscriptions.push(registerSelectInlineCompletionModelCommand(chatProvider));
         context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider));
         context.subscriptions.push(
@@ -109,15 +96,13 @@ export function activate(context: vscode.ExtensionContext) {
                 Logger.info("Extension not configured. Prompting user...");
                 vscode.window
                     .showInformationMessage(
-                        "LiteLLM Connector is not configured. Please configure your Base URL and API Key in the LiteLLM Chat Provider settings.",
-                        "Open Settings"
+                        "LiteLLM Connector is not configured. Configure your Base URL and API Key to continue.",
+                        "Configure"
                     )
                     .then((selection) => {
-                        if (selection === "Open Settings") {
-                            vscode.commands.executeCommand(
-                                "workbench.action.openSettings",
-                                "@provider:litellm-connector"
-                            );
+                        if (selection === "Configure") {
+                            // Use the classic configuration flow (reliable for model discovery).
+                            vscode.commands.executeCommand("litellm-connector.manage");
                         }
                     });
             }
@@ -128,14 +113,6 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export async function deactivate() {
-    // Clean up configuration data when extension is deactivated or uninstalled
-    if (configManagerInstance) {
-        try {
-            Logger.info("Cleaning up LiteLLM configuration...");
-            await configManagerInstance.cleanupAllConfiguration();
-            Logger.info("Configuration cleanup completed.");
-        } catch (err) {
-            Logger.error("Error during deactivation cleanup", err);
-        }
-    }
+    // Intentionally do not clear user configuration on deactivate.
+    // Users expect provider settings and secrets to persist across reloads.
 }

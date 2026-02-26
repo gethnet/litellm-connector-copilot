@@ -131,14 +131,10 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         interface ProviderWithConfigManager {
             _configManager: {
                 getConfig: () => Promise<{ url: string }>;
-                convertProviderConfiguration: (c: Record<string, unknown>) => { url: string };
             };
         }
         const providerWithConfig = provider as unknown as ProviderWithConfigManager;
         sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({ url: "http://localhost:4000" });
-        sandbox.stub(providerWithConfig._configManager, "convertProviderConfiguration").returns({
-            url: "http://localhost:4000",
-        });
 
         const chatStub = sandbox.stub(LiteLLMClient.prototype, "chat");
         const encoder = new TextEncoder();
@@ -196,7 +192,6 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 modelOptions: { temperature: 0.9, top_p: 0.8 },
                 tools: [],
                 toolMode: vscode.LanguageModelChatToolMode.Auto,
-                configuration: { baseUrl: "http://localhost:4000" },
             },
             { report: () => {} },
             new vscode.CancellationTokenSource().token
@@ -325,14 +320,10 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         interface ProviderWithConfigManager {
             _configManager: {
                 getConfig: () => Promise<{ url: string }>;
-                convertProviderConfiguration: (c: Record<string, unknown>) => { url: string };
             };
         }
         const providerWithConfig = provider as unknown as ProviderWithConfigManager;
         sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({ url: "http://localhost:4000" });
-        sandbox.stub(providerWithConfig._configManager, "convertProviderConfiguration").returns({
-            url: "http://localhost:4000",
-        });
 
         sandbox
             .stub(LiteLLMClient.prototype, "chat")
@@ -366,7 +357,6 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                         modelOptions: { temperature: 0.9 },
                         tools: [],
                         toolMode: vscode.LanguageModelChatToolMode.Auto,
-                        configuration: { baseUrl: "http://localhost:4000" },
                     },
                     { report: () => {} },
                     new vscode.CancellationTokenSource().token
@@ -381,14 +371,10 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         interface ProviderWithConfigManager {
             _configManager: {
                 getConfig: () => Promise<{ url: string }>;
-                convertProviderConfiguration: (c: Record<string, unknown>) => { url: string };
             };
         }
         const providerWithConfig = provider as unknown as ProviderWithConfigManager;
         sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({ url: "http://localhost:4000" });
-        sandbox.stub(providerWithConfig._configManager, "convertProviderConfiguration").returns({
-            url: "http://localhost:4000",
-        });
 
         sandbox
             .stub(LiteLLMClient.prototype, "chat")
@@ -420,7 +406,6 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                         modelOptions: { temperature: 0.9 },
                         tools: [],
                         toolMode: vscode.LanguageModelChatToolMode.Auto,
-                        configuration: { baseUrl: "http://localhost:4000" },
                     },
                     { report: () => {} },
                     new vscode.CancellationTokenSource().token
@@ -504,15 +489,10 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         interface ProviderWithConfig {
             _configManager: {
                 getConfig: () => Promise<unknown>;
-                convertProviderConfiguration: (c: unknown) => unknown;
             };
         }
         const pWithConfig = provider as unknown as ProviderWithConfig;
         sandbox.stub(pWithConfig._configManager, "getConfig").resolves({
-            url: "http://localhost:4000",
-            inactivityTimeout: 60,
-        });
-        sandbox.stub(pWithConfig._configManager, "convertProviderConfiguration").returns({
             url: "http://localhost:4000",
             inactivityTimeout: 60,
         });

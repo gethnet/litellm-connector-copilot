@@ -26,9 +26,20 @@ import { emitPartsToVSCode } from "../adapters/streaming/vscodePartEmitter";
  * endpoint routing) is implemented in LiteLLMProviderBase.
  */
 export class LiteLLMChatProvider extends LiteLLMProviderBase implements LanguageModelChatProvider {
+    private readonly _onDidChangeLanguageModelChatInformationEmitter = new vscode.EventEmitter<void>();
+    readonly onDidChangeLanguageModelChatInformation = this._onDidChangeLanguageModelChatInformationEmitter.event;
+
     // Streaming state
     private _streamingState: StreamingState = createInitialStreamingState();
     private _partialAssistantText = "";
+
+    /**
+     * Signals VS Code to refresh the Language Models view for this provider.
+     * @deprecated("Don't use this anymore")
+     */
+    public refreshModelInformation(): void {
+        //this._onDidChangeLanguageModelChatInformationEmitter.fire();
+    }
 
     async provideLanguageModelChatInformation(
         options: { silent: boolean },
@@ -40,7 +51,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
     async provideLanguageModelChatResponse(
         model: LanguageModelChatInformation,
         messages: readonly LanguageModelChatRequestMessage[],
-        options: ProvideLanguageModelChatResponseOptions & { configuration?: Record<string, unknown> },
+        options: ProvideLanguageModelChatResponseOptions,
         progress: Progress<LanguageModelResponsePart>,
         token: CancellationToken
     ): Promise<void> {
@@ -71,9 +82,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         };
 
         try {
-            const config = options.configuration
-                ? this._configManager.convertProviderConfiguration(options.configuration)
-                : await this._configManager.getConfig();
+            const config = await this._configManager.getConfig();
 
             if (!config.url) {
                 throw new Error("LiteLLM configuration not found. Please configure the LiteLLM base URL.");

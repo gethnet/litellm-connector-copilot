@@ -42,11 +42,11 @@ suite("Extension Activation Unit Tests", () => {
         // Inline registrar should be created+initialized.
         const initStub = sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
 
-        // Migration path should not throw.
-        sandbox.stub(ConfigManager.prototype, "migrateToProviderConfiguration").resolves(false);
-
         // Config prompt path: treat as configured.
         sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
+
+        // Avoid unexpected UI prompts.
+        sandbox.stub(vscode.window, "showInformationMessage");
 
         // Provider registration.
         const lmReg = { dispose() {} } as vscode.Disposable;
@@ -65,7 +65,43 @@ suite("Extension Activation Unit Tests", () => {
         assert.ok(context.subscriptions.length >= 2);
     });
 
-    test("deactivate cleans up configuration when initialized", async () => {
+    test("activate prompts classic config flow when not configured", async () => {
+        const context = {
+            subscriptions: [],
+            secrets: {} as vscode.SecretStorage,
+        } as unknown as vscode.ExtensionContext;
+
+        sandbox.stub(vscode.window, "createOutputChannel").returns({
+            info() {},
+            warn() {},
+            error() {},
+            debug() {},
+            trace() {},
+            show() {},
+            dispose() {},
+        } as unknown as vscode.LogOutputChannel);
+
+        sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
+        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
+
+        // Not configured => show prompt.
+        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(false);
+
+        sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
+        sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
+
+        const execStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
+        sandbox.stub(vscode.window, "showInformationMessage").resolves("Configure" as never);
+
+        extension.activate(context);
+
+        // Wait a tick for the isConfigured promise chain and the selection handler.
+        await new Promise((r) => setTimeout(r, 0));
+
+        assert.strictEqual(execStub.calledWith("litellm-connector.manage"), true);
+    });
+
+    test("deactivate does not clear configuration", async () => {
         // Ensure Logger doesn't explode if used during deactivate.
         sandbox.stub(vscode.window, "createOutputChannel").returns({
             info() {},
@@ -85,16 +121,12 @@ suite("Extension Activation Unit Tests", () => {
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
         // vscode.version is a non-configurable property in the test host; don't stub it.
         sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
-        sandbox.stub(ConfigManager.prototype, "migrateToProviderConfiguration").resolves(false);
         sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
         sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
         sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
 
-        const cleanupStub = sandbox.stub(ConfigManager.prototype, "cleanupAllConfiguration").resolves();
-
         extension.activate(context);
         await extension.deactivate();
-
-        assert.strictEqual(cleanupStub.calledOnce, true);
+        // No cleanup should be triggered on deactivate; settings/secrets should persist.
     });
 });

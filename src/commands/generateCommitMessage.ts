@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import type { LiteLLMCommitMessageProvider } from "../providers/liteLLMCommitProvider";
+import { deriveCapabilitiesFromModelInfo } from "../utils/modelCapabilities";
 import { GitUtils } from "../utils/gitUtils";
 import { Logger } from "../utils/logger";
 import { showModelPicker } from "./modelPicker";
@@ -43,8 +44,9 @@ export function registerGenerateCommitMessageCommand(provider: LiteLLMCommitMess
 
             // Check diff size
             const modelInfo = provider.getModelInfo(modelId);
-            const maxTokens = modelInfo?.max_input_tokens || 128000;
-            const { diff: processedDiff, isTruncated } = GitUtils.checkDiffSize(diff, maxTokens);
+            const capabilities = deriveCapabilitiesFromModelInfo(modelId, modelInfo);
+            const maxTokens = capabilities.maxInputTokens;
+            const { diff: processedDiff, isTruncated } = GitUtils.checkDiffSize(diff, maxTokens, modelId);
 
             if (isTruncated) {
                 vscode.window.showWarningMessage("The diff was truncated to fit within the model's context window.");

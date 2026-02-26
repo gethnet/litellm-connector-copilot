@@ -67,6 +67,7 @@ function createConfigHandler(configManager: ConfigManager, provider?: LiteLLMCha
             try {
                 provider.clearModelCache();
                 await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
+                provider.refreshModelInformation();
             } catch (err) {
                 console.error("Failed to refresh models after config change", err);
             }
@@ -172,5 +173,29 @@ export function registerCheckConnectionCommand(configManager: ConfigManager) {
                 }
             }
         );
+    });
+}
+
+export function registerResetConfigCommand(configManager: ConfigManager, provider?: LiteLLMChatProvider) {
+    return vscode.commands.registerCommand("litellm-connector.reset", async () => {
+        const confirmed = await vscode.window.showWarningMessage(
+            "Are you sure you want to reset ALL LiteLLM configuration? This will clear your Base URL, API Key, and all custom settings.",
+            { modal: true },
+            "Reset All"
+        );
+
+        if (confirmed === "Reset All") {
+            try {
+                await configManager.cleanupAllConfiguration();
+                if (provider) {
+                    provider.clearModelCache();
+                    //provider.refreshModelInformation();
+                }
+                vscode.window.showInformationMessage("LiteLLM configuration has been reset.");
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                vscode.window.showErrorMessage(`LiteLLM: Reset failed: ${msg}`);
+            }
+        }
     });
 }

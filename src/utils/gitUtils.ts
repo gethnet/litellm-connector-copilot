@@ -94,9 +94,10 @@ export class GitUtils {
      * Checks if the diff exceeds a certain token threshold and determines truncation strategy.
      * @param diff The diff string
      * @param maxTokens The max tokens allowed by the model
+     * @param modelId Optional model ID for logging
      * @returns Object containing the (possibly truncated) diff and a flag
      */
-    static checkDiffSize(diff: string, maxTokens: number): { diff: string; isTruncated: boolean } {
+    static checkDiffSize(diff: string, maxTokens: number, modelId?: string): { diff: string; isTruncated: boolean } {
         // Rough estimate: 4 characters per token
         const estimatedTokens = diff.length / 4;
 
@@ -106,7 +107,7 @@ export class GitUtils {
 
         // If it exceeds model capacity
         Logger.warn(
-            `Diff size (${estimatedTokens} tokens) exceeds model capacity (${maxTokens}) against reference GPT-4o-mini (128k)`
+            `Diff size (${estimatedTokens} tokens) exceeds model capacity (${maxTokens}) for model ${modelId || "unknown"}`
         );
 
         // Truncate to fit within 90% of maxTokens

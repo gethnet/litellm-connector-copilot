@@ -94,7 +94,7 @@ export abstract class LiteLLMProviderBase {
      * the same discovery + tag logic.
      */
     public async discoverModels(
-        _options: { silent: boolean },
+        options: { silent: boolean },
         token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelChatInformation[]> {
         Logger.debug("discoverModels called");
@@ -102,11 +102,32 @@ export abstract class LiteLLMProviderBase {
             const config = await this._configManager.getConfig();
             Logger.debug(`Config URL: ${config.url ? "set" : "not set"}`);
             if (!config.url) {
-                Logger.info("No base URL configured, returning empty model list.");
+                // When invoked from the Language Models view with silent=false, VS Code is allowed to prompt.
+                // Use the classic configuration workflow to capture baseUrl/apiKey into canonical storage.
+                if (!options.silent) {
+                    Logger.info("No base URL configured; prompting for classic configuration (silent=false)");
+                    await vscode.commands.executeCommand("litellm-connector.manage");
+
+                    const refreshed = await this._configManager.getConfig();
+                    if (!refreshed.url) {
+                        Logger.info("Classic configuration was not completed; returning empty model list.");
+                        return [];
+                    }
+                    Logger.debug("Classic configuration completed; continuing model discovery.");
+                } else {
+                    Logger.info("No base URL configured, returning empty model list.");
+                    return [];
+                }
+            }
+
+            // Re-read config after potential prompt.
+            const effectiveConfig = await this._configManager.getConfig();
+            if (!effectiveConfig.url) {
+                Logger.info("No base URL configured after prompt, returning empty model list.");
                 return [];
             }
 
-            const client = new LiteLLMClient(config, this.userAgent);
+            const client = new LiteLLMClient(effectiveConfig, this.userAgent);
             Logger.debug("Fetching model info from LiteLLM...");
             const { data } = await client.getModelInfo(token);
 
@@ -126,7 +147,7 @@ export abstract class LiteLLMProviderBase {
                     this._derivedCapabilitiesCache.set(modelId, derived);
 
                     const capabilities = capabilitiesToVSCode(derived);
-                    const tags = getDerivedModelTags(modelId, derived, config.modelOverrides);
+                    const tags = getDerivedModelTags(modelId, derived, effectiveConfig.modelOverrides);
 
                     const formatTokens = (num: number): string => {
                         if (num >= 1000000) {
@@ -268,15 +289,7 @@ export abstract class LiteLLMProviderBase {
             }`
         );
 
-        // ProvideLanguageModelChatResponseOptions doesn't include provider configuration.
-        // Some call sites pass an intersection type that includes it.
-        const optionsWithConfig = options as ProvideLanguageModelChatResponseOptions & {
-            configuration?: Record<string, unknown>;
-        };
-
-        const config = optionsWithConfig.configuration
-            ? this._configManager.convertProviderConfiguration(optionsWithConfig.configuration)
-            : await this._configManager.getConfig();
+        const config = await this._configManager.getConfig();
 
         const toolRedaction = this.detectQuotaToolRedaction(
             messages,
