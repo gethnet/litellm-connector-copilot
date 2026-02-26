@@ -27,6 +27,17 @@ Want to support development?
 
 ---
 
+## 🚨 Troubleshooting: Connection Issues 🚨
+
+If the extension fails to connect or models don't show up:
+
+1.  **Manual Setup**: Run **`Manage LiteLLM Provider`** from the Command Palette (`Ctrl+Shift+P`). This often fixes setup "hiccups".
+2.  **Verify**: Run **`LiteLLM: Check Connection`** to test your settings.
+3.  **Reset**: If things are totally stuck, run **`LiteLLM: Reset All Configuration`**. This is the "nuke" option to clear all state.
+4.  **Note**: Reinstalling usually won't help as settings are stored securely in VS Code. Use the Reset command instead.
+
+---
+
 ## ✅ Requirements
 
 - 🔑 **GitHub Copilot** subscription (Free plan works)

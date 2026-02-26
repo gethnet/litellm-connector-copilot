@@ -26,6 +26,15 @@ You can also support ongoing development via:
 * **Ko-fi**: https://ko-fi.com/amwdrizz
 * **Buy Me a Coffee**: https://buymeacoffee.com/amwdrizz
 
+## 🚨 Troubleshooting: Connection & On-boarding Issues 🚨
+
+If you encounter issues where the extension fails to connect to LiteLLM or models do not appear in the picker after configuration:
+
+1.  **Try Manual Configuration**: Open the Command Palette (`Ctrl+Shift+P` or `Cmd+Shift+P`) and run **`Manage LiteLLM Provider`**. This manually triggers the configuration workflow and often resolves state inconsistencies.
+2.  **Check Connection**: Run the **`LiteLLM: Check Connection`** command to verify your Base URL and API Key are valid.
+3.  **The "Nuke" Option**: if the extension state is completely corrupted, run **`LiteLLM: Reset All Configuration`** from the Command Palette. This will wipe all stored URLs and API keys, allowing you to start fresh.
+4.  **Avoid Reinstalling**: Reinstalling the extension usually does **not** clear the underlying `SecretStorage` where your credentials are kept. Use the commands above instead.
+
 ## ⚠️ Important - Prerequisites ⚠️
 
 To use this extension, **YOU MUST** have an active GitHub Copilot plan (the Free plan works). This extension utilizes the VS Code Language Model Chat Provider API, which currently requires a Copilot subscription. For more details, see the [VS Code documentation](https://code.visualstudio.com/api/extension-guides/ai/language-model-chat-provider).
