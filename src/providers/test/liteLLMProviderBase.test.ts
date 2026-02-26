@@ -5,7 +5,6 @@ import { LiteLLMChatProvider } from "../";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 import { ResponsesClient } from "../../adapters/responsesClient";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../../types";
-import type { ConfigManager } from "../../config/configManager";
 
 suite("LiteLLM Provider Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
