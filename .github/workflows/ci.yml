@@ -7,15 +7,18 @@ concurrency:
 on:
   push:
     branches:
-      - geth-dev
       - main
+      - dev
+      - geth-dev
+      - dev/**
       - bugfix/**
       - enhance/**
       - feat/**
   pull_request:
     branches:
-      - geth-dev
       - main
+      - geth-dev
+      - dev
   workflow_call:
     outputs:
       version:
