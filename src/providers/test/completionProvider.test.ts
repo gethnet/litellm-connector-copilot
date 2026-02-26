@@ -54,9 +54,9 @@ suite("LiteLLMCompletionProvider Unit Tests", () => {
 
         // Ensure config is present.
         const configManager = (provider as unknown as { _configManager: unknown })._configManager as {
-            convertProviderConfiguration: (c: Record<string, unknown>) => unknown;
+            getConfig: () => Promise<unknown>;
         };
-        sandbox.stub(configManager, "convertProviderConfiguration").returns({
+        sandbox.stub(configManager, "getConfig").resolves({
             url: "http://localhost:4000",
             key: "k",
             disableQuotaToolRedaction: false,
@@ -91,7 +91,6 @@ suite("LiteLLMCompletionProvider Unit Tests", () => {
             {
                 modelId: "m1",
                 modelOptions: {},
-                configuration: { baseUrl: "http://localhost:4000", apiKey: "k" },
             },
             {
                 isCancellationRequested: false,

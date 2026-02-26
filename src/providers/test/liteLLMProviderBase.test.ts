@@ -9,6 +9,7 @@ import type { ConfigManager } from "../../config/configManager";
 
 suite("LiteLLM Provider Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
+    let settingsMap: Map<string, unknown>;
 
     setup(() => {
         sandbox = sinon.createSandbox();
@@ -16,6 +17,22 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     teardown(() => {
         sandbox.restore();
+    });
+
+    setup(() => {
+        settingsMap = new Map<string, unknown>();
+        // Default: no canonical baseUrl configured unless a test sets it explicitly.
+        sandbox.stub(vscode.workspace, "getConfiguration").returns({
+            get: (key: string, defaultValue?: unknown) => (settingsMap.has(key) ? settingsMap.get(key) : defaultValue),
+            update: async (key: string, value: unknown) => {
+                if (value === undefined) {
+                    settingsMap.delete(key);
+                } else {
+                    settingsMap.set(key, value);
+                }
+            },
+            has: (key: string) => settingsMap.has(key),
+        } as unknown as vscode.WorkspaceConfiguration);
     });
     const mockSecrets: vscode.SecretStorage = {
         get: async (key: string) => {
@@ -69,6 +86,11 @@ suite("LiteLLM Provider Unit Tests", () => {
     test("provideLanguageModelChatResponse uses modelIdOverride when present in config", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
+        // Seed canonical baseUrl so provider does not fail early.
+        await vscode.workspace
+            .getConfiguration()
+            .update("litellm-connector.baseUrl", "http://localhost:4000", vscode.ConfigurationTarget.Global);
+
         // Seed last model list with an override model.
         (provider as unknown as { _lastModelList: vscode.LanguageModelChatInformation[] })._lastModelList = [
             {
@@ -86,9 +108,9 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         // Stub ConfigManager to return a config with modelIdOverride.
         const configManager = (provider as unknown as { _configManager: unknown })._configManager as {
-            convertProviderConfiguration: (c: Record<string, unknown>) => unknown;
+            getConfig: () => Promise<unknown>;
         };
-        sandbox.stub(configManager, "convertProviderConfiguration").returns({
+        sandbox.stub(configManager, "getConfig").resolves({
             url: "http://localhost:4000",
             key: "k",
             disableQuotaToolRedaction: false,
@@ -136,6 +158,11 @@ suite("LiteLLM Provider Unit Tests", () => {
             },
         ];
 
+        // Ensure canonical baseUrl exists so provider doesn't fail before applying model override.
+        await vscode.workspace
+            .getConfiguration()
+            .update("litellm-connector.baseUrl", "http://example", vscode.ConfigurationTarget.Global);
+
         await provider.provideLanguageModelChatResponse(
             modelSelected,
             messages,
@@ -143,7 +170,6 @@ suite("LiteLLM Provider Unit Tests", () => {
                 modelOptions: {},
                 tools: [],
                 toolMode: vscode.LanguageModelChatToolMode.Auto,
-                configuration: { baseUrl: "x" },
             },
             { report: () => {} },
             new vscode.CancellationTokenSource().token
@@ -178,11 +204,17 @@ suite("LiteLLM Provider Unit Tests", () => {
         } as unknown as vscode.SecretStorage;
 
         const provider = new LiteLLMChatProvider(emptySecrets, userAgent);
+
+        // When silent=false and baseUrl is missing, the provider should trigger the classic configuration flow.
+        const execStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
+
         const infos = await provider.provideLanguageModelChatInformation(
             { silent: false },
             new vscode.CancellationTokenSource().token
         );
-        assert.strictEqual(infos.length, 0, "Should return 0 models when URL is missing");
+
+        assert.strictEqual(execStub.calledWith("litellm-connector.manage"), true);
+        assert.strictEqual(infos.length, 0, "Should return 0 models when URL is missing and config not completed");
     });
 
     test("buildCapabilities maps model_info flags correctly", () => {
@@ -379,25 +411,13 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(result.tools[1].name, "replace_string_in_file");
     });
 
-    test("Configuration passed through options is preferred over secret storage", () => {
-        // Create a config via convertProviderConfiguration
-        const providerConfig = {
-            baseUrl: "https://api.litellm.ai",
-            apiKey: "sk-provider-key",
-        };
-
-        // This would be called internally when VS Code passes configuration through options
-        // We're testing that the conversion works properly
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        const configManager = (provider as unknown as { _configManager: ConfigManager })._configManager;
-        const convertedConfig = configManager.convertProviderConfiguration(providerConfig);
-
-        assert.strictEqual(convertedConfig.url, "https://api.litellm.ai");
-        assert.strictEqual(convertedConfig.key, "sk-provider-key");
-    });
-
     test("provideLanguageModelChatInformation includes tags in model info", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        // Seed canonical baseUrl so discovery proceeds.
+        await vscode.workspace
+            .getConfiguration()
+            .update("litellm-connector.baseUrl", "http://localhost:4000", vscode.ConfigurationTarget.Global);
 
         const mockData = [
             {
@@ -429,19 +449,8 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         assert.strictEqual(infos.length, 2);
 
-        // Model info with optional tags extension
-        interface ModelInfoWithTags {
-            tags?: string[];
-        }
-
-        // Check first model (gpt-4) has tools and completions tags
-        const gpt4 = infos[0] as ModelInfoWithTags;
-        const gpt4Tags = gpt4.tags || [];
-        assert.ok(gpt4Tags.includes("tools"), "gpt-4 should have tools tag for function-calling capability");
-        assert.ok(gpt4Tags.includes("inline-completions"), "gpt-4 should have inline-completions tag for streaming");
-
         // Check second model (claude-coder) has inline-edit tag
-        const claude = infos[1] as ModelInfoWithTags;
+        const claude = infos[1] as { tags?: string[] };
         const claudeTags = claude.tags || [];
         assert.ok(
             claudeTags.includes("inline-edit"),

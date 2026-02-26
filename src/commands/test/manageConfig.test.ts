@@ -39,6 +39,14 @@ suite("ManageConfig Command Unit Tests", () => {
         showInputBoxStub.onSecondCall().resolves("new-key");
         const showInfoStub = sandbox.stub(vscode.window, "showInformationMessage");
 
+        const provider = {
+            clearModelCache: () => {},
+            discoverModels: async () => [],
+            refreshModelInformation: () => {},
+        } as unknown as LiteLLMChatProvider;
+
+        const refreshStub = sandbox.stub(provider, "refreshModelInformation");
+
         // Get the registered command handler
         let commandHandler: (() => Promise<void>) | undefined;
         sandbox.stub(vscode.commands, "registerCommand").callsFake((id, handler) => {
@@ -48,7 +56,7 @@ suite("ManageConfig Command Unit Tests", () => {
             return { dispose: () => {} } as vscode.Disposable;
         });
 
-        registerManageConfigCommand(mockContext, mockConfigManager as unknown as ConfigManager);
+        registerManageConfigCommand(mockContext, mockConfigManager as unknown as ConfigManager, provider);
 
         if (commandHandler) {
             await commandHandler();
@@ -62,6 +70,7 @@ suite("ManageConfig Command Unit Tests", () => {
             true
         );
         assert.strictEqual(showInfoStub.calledOnce, true);
+        assert.strictEqual(refreshStub.calledOnce, true);
     });
 
     test("aborts if URL input is cancelled", async () => {

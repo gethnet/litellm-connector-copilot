@@ -21,7 +21,6 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
         options: {
             modelId?: string;
             modelOptions?: Record<string, unknown>;
-            configuration?: Record<string, unknown>;
         },
         token: vscode.CancellationToken
     ): Promise<{ insertText: string }> {
@@ -37,9 +36,7 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
         let tokensIn: number | undefined;
 
         try {
-            const config = options.configuration
-                ? this._configManager.convertProviderConfiguration(options.configuration)
-                : await this._configManager.getConfig();
+            const config = await this._configManager.getConfig();
 
             if (!config.url) {
                 throw new Error("LiteLLM configuration not found. Please configure the LiteLLM base URL.");
@@ -57,13 +54,12 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
             tokensIn = countTokens(messages, model.id, modelInfo);
 
             // Reuse the base request pipeline. We pass a minimal ProvideLanguageModelChatResponseOptions-like
-            // structure with provider configuration and model options.
+            // structure with model options.
             const requestBody = await this.buildOpenAIChatRequest(
                 messages,
                 model,
                 {
                     modelOptions: options.modelOptions,
-                    configuration: options.configuration,
                     tools: [],
                 } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
                 modelInfo,

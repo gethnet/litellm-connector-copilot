@@ -17,10 +17,10 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "1.3.12",
+	"version": "1.3.13-dev30",
 	"preview": false,
 	"engines": {
-		"vscode": "^1.109.0"
+		"vscode": "^1.109.2"
 	},
 	"categories": [
 		"AI",
@@ -53,26 +53,7 @@
 			{
 				"vendor": "litellm-connector",
 				"displayName": "LiteLLM",
-				"configuration": {
-					"title": "LiteLLM Connector",
-					"properties": {
-						"baseUrl": {
-							"type": "string",
-							"description": "Base URL for the LiteLLM proxy server",
-							"title": "Base URL",
-							"placeholder": "http://localhost:4000"
-						},
-						"apiKey": {
-							"type": "string",
-							"secret": true,
-							"description": "API key for LiteLLM proxy authentication",
-							"title": "API Key"
-						}
-					},
-					"required": [
-						"baseUrl"
-					]
-				}
+				"managementCommand": "litellm-connector.manage"
 			}
 		],
 		"commands": [
@@ -97,6 +78,10 @@
 				"title": "LiteLLM: Check Connection"
 			},
 			{
+				"command": "litellm-connector.reset",
+				"title": "LiteLLM: Reset All Configuration (Nuke)"
+			},
+			{
 				"command": "litellm-connector.generateCommitMessage",
 				"title": "Generate Commit Message",
 				"icon": "$(sparkle)"
@@ -118,6 +103,16 @@
 		"configuration": {
 			"title": "LiteLLM Connector",
 			"properties": {
+				"litellm-connector.baseUrl": {
+					"type": "string",
+					"default": "",
+					"description": "Base URL for the LiteLLM proxy server (used for model discovery and requests)."
+				},
+				"litellm-connector.apiKeySecretRef": {
+					"type": "string",
+					"default": "default",
+					"description": "Reference name for the API key stored in VS Code SecretStorage."
+				},
 				"litellm-connector.inlineCompletions.enabled": {
 					"type": "boolean",
 					"default": false,
