@@ -1,6 +1,5 @@
 import type { LiteLLMModelInfo } from "../../types";
 import { HeuristicTokenizer } from "./heuristicTokenizer";
-import { TiktokenTokenizer } from "./tiktokenTokenizer";
 import type { Tokenizer } from "./types";
 
 export function selectTokenizer(modelId: string, modelInfo?: LiteLLMModelInfo): Tokenizer {
@@ -13,7 +12,7 @@ export function selectTokenizer(modelId: string, modelInfo?: LiteLLMModelInfo): 
         modelId.startsWith("text-embedding-");
 
     if (isOpenAICompatible) {
-        return new TiktokenTokenizer(modelId);
+        return new HeuristicTokenizer();
     }
 
     // For other providers (Anthropic, Google, etc.), we still use heuristic

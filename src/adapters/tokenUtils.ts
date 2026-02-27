@@ -122,7 +122,18 @@ export function trimMessagesToFitBudget(
 ): readonly vscode.LanguageModelChatRequestMessage[] {
     const toolTokenCount = estimateToolTokens(tools);
     const tokenLimit = Math.max(1, model.maxInputTokens);
-    const safetyLimit = isAnthropicModel(model.id, modelInfo) ? Math.max(1, Math.floor(tokenLimit * 0.98)) : tokenLimit;
+    // Apply a flat safety buffer to avoid context overflow due to tokenizer variance,
+    // provider-side framing, and other hidden tokens.
+    //
+    // This is intentionally applied to *all* models (not just Anthropic) because
+    // overflow failures are catastrophic and the 5% reduction is a small tradeoff.
+    const bufferedLimit = Math.max(1, Math.floor(tokenLimit * 0.95));
+
+    // Keep an additional small margin for Anthropic-style models which tend to be
+    // stricter about context limits.
+    const safetyLimit = isAnthropicModel(model.id, modelInfo)
+        ? Math.max(1, Math.floor(bufferedLimit * 0.98))
+        : bufferedLimit;
     const budget = safetyLimit - toolTokenCount;
     if (budget <= 0) {
         throw new Error("Message exceeds token limit.");
