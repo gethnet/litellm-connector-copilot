@@ -11,6 +11,7 @@ on:
       - dev
       - geth-dev
       - dev/**
+      - fix/**
       - bugfix/**
       - enhance/**
       - feat/**
