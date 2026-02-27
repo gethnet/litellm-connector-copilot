@@ -15,7 +15,6 @@ suite("LiteLLM Error Handling Unit Tests", function () {
         const runningOnCI =
             process.env.CI === "true" || process.env.CI === "1" || process.env.GITHUB_ACTIONS === "true";
         if (runningOnCI) {
-            // eslint-disable-next-line @typescript-eslint/no-invalid-this
             this.skip();
         }
     });

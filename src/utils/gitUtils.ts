@@ -91,29 +91,18 @@ export class GitUtils {
     }
 
     /**
-     * Checks if the diff exceeds a certain token threshold and determines truncation strategy.
-     * @param diff The diff string
-     * @param maxTokens The max tokens allowed by the model
-     * @param modelId Optional model ID for logging
-     * @returns Object containing the (possibly truncated) diff and a flag
+     * Truncates a string to fit within a specific token limit using a character-based heuristic.
+     * @param text The text to truncate
+     * @param maxTokens The maximum allowed tokens
+     * @returns The truncated text
      */
-    static checkDiffSize(diff: string, maxTokens: number, modelId?: string): { diff: string; isTruncated: boolean } {
+    static truncateToTokenLimit(text: string, maxTokens: number): string {
         // Rough estimate: 4 characters per token
-        const estimatedTokens = diff.length / 4;
-
-        if (estimatedTokens < maxTokens) {
-            return { diff, isTruncated: false };
+        const allowedChars = maxTokens * 4;
+        if (text.length <= allowedChars) {
+            return text;
         }
 
-        // If it exceeds model capacity
-        Logger.warn(
-            `Diff size (${estimatedTokens} tokens) exceeds model capacity (${maxTokens}) for model ${modelId || "unknown"}`
-        );
-
-        // Truncate to fit within 90% of maxTokens
-        const allowedChars = maxTokens * 4 * 0.9;
-        const truncatedDiff = diff.substring(0, allowedChars) + "\n\n[... Diff truncated due to context limits ...]";
-
-        return { diff: truncatedDiff, isTruncated: true };
+        return text.substring(0, allowedChars) + "\n\n[... Content truncated due to context limits ...]";
     }
 }

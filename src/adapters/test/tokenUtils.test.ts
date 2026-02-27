@@ -13,32 +13,35 @@ import type { LiteLLMModelInfo } from "../../types";
 suite("TokenUtils Unit Tests", () => {
     test("countTokens handles strings, single messages, and message arrays", () => {
         const text = "Hello world";
-        assert.strictEqual(countTokens(text), 3);
+        // "Hello world" is 11 chars. 11/3.5 = 3.14 -> 4 tokens
+        // Words: 2 * 1.3 = 2.6 -> 3 tokens
+        // Max(4, 3) = 4
+        assert.strictEqual(countTokens(text), 4);
 
         const msg = {
             role: vscode.LanguageModelChatMessageRole.User,
             content: [new vscode.LanguageModelTextPart("Hello world")],
             name: undefined,
         } as unknown as vscode.LanguageModelChatRequestMessage;
-        assert.strictEqual(countTokens(msg), 3);
+        assert.strictEqual(countTokens(msg), 4);
 
         const msgs = [msg, msg];
-        assert.strictEqual(countTokens(msgs), 6);
+        assert.strictEqual(countTokens(msgs), 8);
     });
 
     test("estimateMessagesTokens sums single-message estimates", () => {
         const a = {
             role: vscode.LanguageModelChatMessageRole.User,
-            content: [new vscode.LanguageModelTextPart("abcd")], // 1 token
+            content: [new vscode.LanguageModelTextPart("abcd")], // 4 chars -> 2 tokens
             name: undefined,
         } as unknown as vscode.LanguageModelChatRequestMessage;
         const b = {
             role: vscode.LanguageModelChatMessageRole.User,
-            content: [new vscode.LanguageModelTextPart("abcdefgh")], // 2 tokens
+            content: [new vscode.LanguageModelTextPart("abcdefgh")], // 8 chars -> 3 tokens
             name: undefined,
         } as unknown as vscode.LanguageModelChatRequestMessage;
 
-        assert.strictEqual(estimateMessagesTokens([a, b]), 3);
+        assert.strictEqual(estimateMessagesTokens([a, b]), 5);
     });
 
     test("estimateSingleMessageTokens estimates text parts", () => {
@@ -48,8 +51,8 @@ suite("TokenUtils Unit Tests", () => {
             name: undefined,
         } as unknown as vscode.LanguageModelChatRequestMessage;
 
-        // "Hello world" is 11 chars. 11/4 = 2.75 -> 3
-        assert.strictEqual(estimateSingleMessageTokens(msg), 3);
+        // "Hello world" -> 4 tokens
+        assert.strictEqual(estimateSingleMessageTokens(msg), 4);
     });
 
     test("estimateToolTokens estimates based on JSON length", () => {

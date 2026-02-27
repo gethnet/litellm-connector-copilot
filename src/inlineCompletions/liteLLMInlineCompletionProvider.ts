@@ -1,9 +1,13 @@
 import * as vscode from "vscode";
 
-import { estimateSingleMessageTokens } from "../adapters/tokenUtils";
+import { calculateAvailableContext, countTokens } from "../adapters/tokenUtils";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
 import type { LiteLLMConfig } from "../types";
+
+const INLINE_SYSTEM_PROMPT =
+    "You are an inline code completion engine.\nContinue the code at the cursor. Output only the text to insert.";
+const INLINE_WRAPPER_PROMPT = "\n\n<prefix>\n\n</prefix>\n<cursor></cursor>\n<suffix>\n\n</suffix>";
 
 export interface InlineCompletionsDependencies {
     /** Reads current config (including inline completions settings). */
@@ -91,10 +95,22 @@ export class LiteLLMInlineCompletionProvider implements vscode.InlineCompletionI
             return null;
         }
 
+        // Precise context calculation for inline completions
+        const reservedOutput = 256;
+        const maxInput = config.inlineCompletionsMaxContextTokens || 4096;
+
+        const availableTokens = calculateAvailableContext(
+            maxInput,
+            reservedOutput,
+            [INLINE_SYSTEM_PROMPT, INLINE_WRAPPER_PROMPT],
+            modelId
+        );
+
         const { prompt, prefixTokens, suffixTokens } = buildInlineCompletionPrompt(document, position, {
-            // Reserve some output space; we can tune later.
-            reservedOutputTokens: 256,
-            maxContextTokens: 4096,
+            reservedOutputTokens: reservedOutput,
+            maxContextTokens: maxInput,
+            availableTokens: availableTokens,
+            modelId: modelId,
         });
 
         LiteLLMTelemetry.reportMetric({
@@ -184,6 +200,10 @@ export interface PromptWindowOptions {
     reservedOutputTokens: number;
     /** Target max tokens for prefix+suffix. */
     maxContextTokens: number;
+    /** Calculated available tokens after system prompts. */
+    availableTokens: number;
+    /** Model ID for tokenizer selection. */
+    modelId: string;
 }
 
 export function buildInlineCompletionPrompt(
@@ -196,30 +216,21 @@ export function buildInlineCompletionPrompt(
     const prefixFull = fullText.slice(0, offset);
     const suffixFull = fullText.slice(offset);
 
-    // We use a simple chat-message token estimator (chars/4) for budgeting.
-    // Build two synthetic messages to reuse the estimator.
-    const makeMsg = (value: string): vscode.LanguageModelChatRequestMessage => ({
-        role: vscode.LanguageModelChatMessageRole.User,
-        content: [new vscode.LanguageModelTextPart(value)],
-        name: undefined,
-    });
-
-    const budget = Math.max(256, options.maxContextTokens - options.reservedOutputTokens);
+    const budget = options.availableTokens;
 
     // Prefer more prefix than suffix (common inline completion UX).
     const suffixBudget = Math.floor(budget * 0.25);
     const prefixBudget = budget - suffixBudget;
 
-    const prefix = trimTextToTokenBudget(prefixFull, prefixBudget);
-    const suffix = trimTextToTokenBudget(suffixFull, suffixBudget);
+    const prefix = trimTextToTokenBudget(prefixFull, prefixBudget, options.modelId);
+    const suffix = trimTextToTokenBudget(suffixFull, suffixBudget, options.modelId);
 
-    const prefixTokens = estimateSingleMessageTokens(makeMsg(prefix));
-    const suffixTokens = estimateSingleMessageTokens(makeMsg(suffix));
+    const prefixTokens = countTokens(prefix, options.modelId);
+    const suffixTokens = countTokens(suffix, options.modelId);
 
     // Prompt format: provide cursor marker and suffix so the model can continue.
     const prompt = [
-        "You are an inline code completion engine.",
-        "Continue the code at the cursor. Output only the text to insert.",
+        INLINE_SYSTEM_PROMPT,
         "",
         "<prefix>",
         prefix,
@@ -233,18 +244,26 @@ export function buildInlineCompletionPrompt(
     return { prompt, prefixTokens, suffixTokens };
 }
 
-function trimTextToTokenBudget(text: string, tokenBudget: number): string {
+function trimTextToTokenBudget(text: string, tokenBudget: number, modelId: string): string {
     if (tokenBudget <= 0) {
         return "";
     }
 
-    // Approx tokens ~= chars/4 -> chars ~= tokens*4.
-    const maxChars = Math.max(0, tokenBudget * 4);
-    if (text.length <= maxChars) {
+    // Use actual tokenizer for measurement during trimming
+    const tokens = countTokens(text, modelId);
+    if (tokens <= tokenBudget) {
         return text;
     }
 
-    // Keep the end of prefix (most relevant) and start of suffix.
-    // We don't know if it's prefix or suffix here; callers pass appropriate slice.
-    return text.slice(text.length - maxChars);
+    // Heuristic first pass to speed up trimming
+    const ratio = tokenBudget / tokens;
+    const charLimit = Math.floor(text.length * ratio);
+    let trimmed = text.length > charLimit ? text.slice(-charLimit) : text; // For prefix, we keep the end
+
+    // Fine-grained trim if still over
+    while (countTokens(trimmed, modelId) > tokenBudget && trimmed.length > 0) {
+        trimmed = trimmed.slice(Math.floor(trimmed.length * 0.1)); // Remove 10% at a time
+    }
+
+    return trimmed;
 }

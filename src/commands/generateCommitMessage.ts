@@ -4,6 +4,8 @@ import { deriveCapabilitiesFromModelInfo } from "../utils/modelCapabilities";
 import { GitUtils } from "../utils/gitUtils";
 import { Logger } from "../utils/logger";
 import { showModelPicker } from "./modelPicker";
+import { calculateAvailableContext } from "../adapters/tokenUtils";
+import { COMMIT_MESSAGE_PROMPT, COMMIT_SYSTEM_PROMPT } from "../utils/prompts";
 
 /**
  * Registers the command to generate a git commit message.
@@ -42,11 +44,30 @@ export function registerGenerateCommitMessageCommand(provider: LiteLLMCommitMess
                 return;
             }
 
-            // Check diff size
+            // Check diff size with precise context calculation
             const modelInfo = provider.getModelInfo(modelId);
             const capabilities = deriveCapabilitiesFromModelInfo(modelId, modelInfo);
-            const maxTokens = capabilities.maxInputTokens;
-            const { diff: processedDiff, isTruncated } = GitUtils.checkDiffSize(diff, maxTokens, modelId);
+
+            // Calculate precise budget: MaxInput - MaxOutput - Static Prompts
+            const availableTokens = calculateAvailableContext(
+                capabilities.maxInputTokens,
+                modelInfo?.max_output_tokens || 2000, // Reserve space for the commit message
+                [COMMIT_SYSTEM_PROMPT, COMMIT_MESSAGE_PROMPT, "Here is the diff:\n\n"],
+                modelId,
+                modelInfo
+            );
+
+            const estimatedDiffTokens = diff.length / 4;
+            let processedDiff = diff;
+            let isTruncated = false;
+
+            if (estimatedDiffTokens > availableTokens) {
+                processedDiff = GitUtils.truncateToTokenLimit(diff, availableTokens);
+                isTruncated = true;
+                Logger.warn(
+                    `Diff truncated for ${modelId}. Available: ${availableTokens}, Estimated: ${estimatedDiffTokens}`
+                );
+            }
 
             if (isTruncated) {
                 vscode.window.showWarningMessage("The diff was truncated to fit within the model's context window.");

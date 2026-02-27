@@ -1,0 +1,272 @@
+
+> litellm-connector-copilot@1.4.1-dev1 test:coverage
+> npm run clean && npm run pretest && node -e "const fs = require('fs'); const path = require('path'); const coveragePath = path.join(process.cwd(), 'coverage'); if (fs.existsSync(coveragePath)) fs.rmSync(coveragePath, { recursive: true, force: true });" && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && xvfb-run vscode-test --args="--no-sandbox" --coverage --coverage-output coverage --coverage-reporter lcovonly --coverage-reporter html --coverage-reporter text-summary
+
+
+> litellm-connector-copilot@1.4.1-dev1 clean
+> rm -rf ./dist ./out ./coverage ./test-results
+
+
+> litellm-connector-copilot@1.4.1-dev1 pretest
+> npm run compile
+
+
+> litellm-connector-copilot@1.4.1-dev1 compile
+> tsc -p ./
+
+- Resolving version...
+✔ Validated version: 1.109.5
+✔ Found existing install in /workspaces/litellm-connector-copilot/.vscode-test/vscode-linux-x64-1.109.5
+- Resolving version...
+✔ Validated version: 1.109.5
+✔ Found existing install in /workspaces/litellm-connector-copilot/.vscode-test/vscode-linux-x64-1.109.5
+[945277:0227/032438.212712:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[945277:0227/032438.222209:ERROR:dbus/object_proxy.cc:573] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: 
+[945277:0227/032438.222568:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[945277:0227/032438.222587:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[945277:0227/032438.222594:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[945277:0227/032438.222604:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[945277:0227/032438.222612:ERROR:dbus/object_proxy.cc:573] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: 
+[945306:0227/032438.306225:ERROR:components/viz/service/main/viz_main_impl.cc:189] Exiting GPU process due to errors during initialization
+[90m[main 2026-02-27T03:24:38.380Z][0m update#setState disabled
+[90m[main 2026-02-27T03:24:38.382Z][0m update#ctor - updates are disabled by the environment
+[945277:0227/032438.383649:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[945361:0227/032438.504662:ERROR:components/viz/service/main/viz_main_impl.cc:189] Exiting GPU process due to errors during initialization
+Started local extension host with pid 945503.
+Loading development extension at /workspaces/litellm-connector-copilot
+MCP Registry configured: https://api.mcp.github.com
+Settings Sync: Account status changed from uninitialized to unavailable
+[0m[0m
+[0m  Utility Unit Tests[0m
+  [32m  ✔[0m[90m convertMessages handles text and images[0m
+  [32m  ✔[0m[90m convertMessages emits tool calls and tool results[0m
+  [32m  ✔[0m[90m convertMessages maps user/assistant text[0m
+  [32m  ✔[0m[90m convertMessages defaults unknown roles to system[0m
+  [32m  ✔[0m[90m convertMessages emits assistant tool call even without text[0m
+  [32m  ✔[0m[90m validateRequest throws when tool call is followed by non-user message[0m
+  [32m  ✔[0m[90m convertTools throws when ToolMode.Required with multiple tools[0m
+  [32m  ✔[0m[90m tryParseJSONObject handles valid and invalid JSON[0m
+  [32m  ✔[0m[90m validateTools rejects invalid names[0m
+  [32m  ✔[0m[90m validateRequest enforces tool result pairing[0m
+  [32m  ✔[0m[90m validateRequest with multiple tool calls requires matching results[0m
+  [32m  ✔[0m[90m convertTools sanitizes names and schemas and enforces Required mode[0m
+  [32m  ✔[0m[90m convertTools returns empty when no tools[0m
+  [32m  ✔[0m[90m isToolResultPart type guard[0m
+  [32m  ✔[0m[90m tryParseJSONObject rejects empty and arrays[0m
+[0m  Telemetry Unit Tests[0m
+  [32m  ✔[0m[90m reportMetric logs to Logger.debug[0m
+  [32m  ✔[0m[90m Timer methods return numbers[0m
+  [32m  ✔[0m[90m reportMetric includes caller context when provided[0m
+  [32m  ✔[0m[90m reportMetric handles metrics without caller[0m
+  [32m  ✔[0m[90m reportMetric logs different caller contexts[0m
+[0m  Model Tags Unit Tests[0m
+  [32m  ✔[0m[90m getModelTags adds inline-completions for chat models with streaming[0m
+  [32m  ✔[0m[90m getModelTags adds inline-edit for coder models[0m
+  [32m  ✔[0m[90m getModelTags adds tools tag for function-calling models[0m
+  [32m  ✔[0m[90m getModelTags adds tools tag for vision-capable models[0m
+  [32m  ✔[0m[90m getModelTags applies user overrides[0m
+  [32m  ✔[0m[90m getModelTags returns empty for non-streaming models[0m
+  [32m  ✔[0m[90m getModelTags handles models with no info[0m
+  [32m  ✔[0m[90m getModelTags combines defaults with overrides[0m
+[0m  Logger Unit Tests[0m
+  [32m  ✔[0m[90m Logger.initialize creates channel and adds to subscriptions[0m
+  [32m  ✔[0m[90m Logger methods call channel methods[0m
+  [32m  ✔[0m[90m Logger.error handles strings and Errors[0m
+[0m  GitUtils Unit Tests[0m
+  [32m  ✔[0m[90m truncateToTokenLimit returns full text if within limits[0m
+  [32m  ✔[0m[90m truncateToTokenLimit truncates text if exceeds limits[0m
+  [32m  ✔[0m[90m getGitAPI returns undefined if extension missing[0m
+  [32m  ✔[0m[90m getStagedDiff returns undefined if API missing[0m
+  [32m  ✔[0m[90m getStagedDiff returns full diff from internal repository[0m
+  [32m  ✔[0m[90m getStagedDiff falls back to manual diff aggregation[0m
+[0m  Types Unit Tests[0m
+  [32m  ✔[0m[90m LiteLLMConfig supports optional inline completions fields[0m
+  [32m  ✔[0m[90m OpenAIChatCompletionRequest shape is assignable[0m
+  [32m  ✔[0m[90m LiteLLMResponseInputItem union accepts message and tool items[0m
+  [32m  ✔[0m[90m LiteLLMModelInfo index signature allows extra fields[0m
+  [32m  ✔[0m[90m OpenAIToolCall is assignable[0m
+[0m  Token Telemetry Regression Tests[0m
+DEBUG: LiteLLMChatProvider payload: {"choices":[{"delta":{"content":"Hello world"}}]}
+DEBUG: LiteLLMChatProvider interpreted parts: [{"type":"text","value":"Hello world"}]
+  [32m  ✔[0m[90m LiteLLMChatProvider reports tokensIn and tokensOut on success[0m
+  [32m  ✔[0m[90m LiteLLMChatProvider reports tokensIn on failure[0m
+  [32m  ✔[0m[90m LiteLLMCompletionProvider reports tokensIn and tokensOut on success[0m
+[0m  Responses Client Unit Tests[0m
+  [32m  ✔[0m[90m handleEvent processes text delta[0m
+  [32m  ✔[0m[90m handleEvent processes reasoning delta[0m
+  [32m  ✔[0m[90m handleEvent buffers and emits tool calls[0m
+  [32m  ✔[0m[90m handleEvent buffers tool calls per call_id (interleaving safe)[0m
+[0m  Extension Activation Unit Tests[0m
+  [32m  ✔[0m[90m activate registers providers and commands[0m
+  [32m  ✔[0m[90m activate prompts classic config flow when not configured[0m
+  [32m  ✔[0m[90m deactivate does not clear configuration[0m
+[0m  LiteLLM Error Handling Unit Tests[0m
+DEBUG: LiteLLMChatProvider payload: {"choices":[{"delta":{"content":"Success after retry"}}]}
+DEBUG: LiteLLMChatProvider interpreted parts: [{"type":"text","value":"Success after retry"}]
+  [32m  ✔[0m[90m provideLanguageModelChatResponse retries without parameters on unsupported parameter error[0m
+  [32m  ✔[0m[90m provideLanguageModelChatResponse handles unsupported parameter error from LiteLLM (when retry also fails)[0m
+  [32m  ✔[0m[90m provideLanguageModelChatResponse handles generic 400 error[0m
+[0m  LiteLLM Client Cancellation Tests[0m
+  [32m  ✔[0m[90m chat should be aborted when token is cancelled during fetch[0m
+  [32m  ✔[0m[90m fetchWithRetry should respect cancellation during sleep[0m[31m (103ms)[0m
+[0m  Stream Interpreter Unit Tests[0m
+  [32m  ✔[0m[90m interprets OpenAI text delta[0m
+  [32m  ✔[0m[90m interprets OpenAI tool call delta[0m
+  [32m  ✔[0m[90m emits tool call and finish on finish_reason[0m
+  [32m  ✔[0m[90m interprets LiteLLM /responses format[0m
+[0m  LiteLLM Provider Unit Tests[0m
+  [32m  ✔[0m[90m clearModelCache resets model list and caches[0m
+  [32m  ✔[0m[90m provideLanguageModelChatResponse uses modelIdOverride when present in config[0m
+  [32m  ✔[0m[90m provideLanguageModelChatInformation returns array (no key -> empty)[0m
+  [32m  ✔[0m[90m provideLanguageModelChatInformation handles missing URL[0m
+  [32m  ✔[0m[90m buildCapabilities maps model_info flags correctly[0m
+  [32m  ✔[0m[90m parseApiError extracts meaningful error messages[0m
+  [32m  ✔[0m[90m getModelTags adds inline-completions for streaming chat models[0m
+  [32m  ✔[0m[90m getModelTags applies user overrides[0m
+  [32m  ✔[0m[90m stripUnsupportedParametersFromRequest removes known unsupported params[0m
+  [32m  ✔[0m[90m stripUnsupportedParametersFromRequest handles o1 models[0m
+  [32m  ✔[0m[90m detectQuotaToolRedaction removes failing tool when enabled[0m
+  [32m  ✔[0m[90m detectQuotaToolRedaction does not remove tool when disabled[0m
+  [32m  ✔[0m[90m provideLanguageModelChatInformation includes tags in model info[0m
+  [32m  ✔[0m[90m provideLanguageModelChatInformation applies model overrides to tags[0m
+  [32m  ✔[0m[90m provideLanguageModelChatInformation returns empty when /model/info data is invalid[0m
+  [32m  ✔[0m[90m provideLanguageModelChatInformation returns empty when /model/info throws[0m
+  [32m  ✔[0m[90m detectQuotaToolRedaction does not redact when quota tool is not present[0m
+  [32m  ✔[0m[90m detectQuotaToolRedaction does not redact when message has no text[0m
+  [32m  ✔[0m[90m detectQuotaToolRedaction does not redact when quota regex does not match[0m
+  [32m  ✔[0m[90m detectQuotaToolRedaction does not redact when tool regex does not match[0m
+  [32m  ✔[0m[90m detectQuotaToolRedaction does not redact on echoed Copilot context without rate/quota signal[0m
+  [32m  ✔[0m[90m isParameterSupported returns false when parameter probe cache indicates unsupported[0m
+  [32m  ✔[0m[90m isParameterSupported returns false when modelId matches known model limitations substring[0m
+  [32m  ✔[0m[90m stripUnsupportedParametersFromRequest removes cache keys inside extra_body and deletes empty containers[0m
+[0m  LiteLLMCompletionProvider Unit Tests[0m
+  [32m  ✔[0m[90m provideTextCompletion extracts text from SSE stream[0m
+  [32m  ✔[0m[90m provideTextCompletion reports failure telemetry on error[0m
+  [32m  ✔[0m[90m provideTextCompletion throws if no model available[0m
+  [32m  ✔[0m[90m resolveCompletionModel prefers modelIdOverride[0m
+  [32m  ✔[0m[90m resolveCompletionModel returns undefined if no match or tag found[0m
+  [32m  ✔[0m[90m extractCompletionTextFromStream handles cancellation and invalid JSON[0m
+[0m  LiteLLMCommitMessageProvider Unit Tests[0m
+  [32m  ✔[0m[90m provideCommitMessage generates a commit message from a diff[0m
+  [32m  ✔[0m[90m resolveCommitModel uses commitModelIdOverride if present[0m
+  [32m  ✔[0m[90m resolveCommitModel prefers scm-generator tag[0m
+  [32m  ✔[0m[90m resolveCommitModel returns undefined if no match or tag found[0m
+[0m  LiteLLM Chat Provider Unit Tests[0m
+  [32m  ✔[0m[90m provideTokenCount handles string and message inputs[0m
+  [32m  ✔[0m[90m provideLanguageModelChatResponse throws when config URL is missing[0m
+  [32m  ✔[0m[90m provideLanguageModelChatResponse retries without optional parameters on unsupported param error[0m
+  [32m  ✔[0m[90m provideLanguageModelChatResponse refreshes model override and logs when refresh fails[0m
+  [32m  ✔[0m[90m provideLanguageModelChatResponse throws on cancellation during request[0m
+  [32m  ✔[0m[90m provideLanguageModelChatResponse surfaces parsed API error details[0m
+  [32m  ✔[0m[90m provideLanguageModelChatResponse decorates temperature-related API errors[0m
+  [32m  ✔[0m[90m provideLanguageModelChatResponse rethrows non-API errors[0m
+DEBUG: LiteLLMChatProvider payload: {"choices":[{"delta":{"content":"Hello"}}]}
+DEBUG: LiteLLMChatProvider interpreted parts: [{"type":"text","value":"Hello"}]
+  [32m  ✔[0m[90m provideLanguageModelChatResponse handles streaming response[0m
+[0m  InlineCompletionsRegistrar Unit Tests[0m
+  [32m  ✔[0m[90m initialize does not register provider when disabled[0m
+  [32m  ✔[0m[90m initialize registers provider when enabled[0m
+  [32m  ✔[0m[90m configuration change toggles registration[0m
+[0m  LiteLLMInlineCompletionProvider Unit Tests[0m
+  [32m  ✔[0m[90m buildInlineCompletionPrompt trims to token budget[0m
+  [32m  ✔[0m[90m provideInlineCompletionItems returns null when disabled[0m
+  [32m  ✔[0m[90m provideInlineCompletionItems returns item when enabled and configured[0m
+  [32m  ✔[0m[90m provideInlineCompletionItems returns null when missing baseUrl[0m
+  [32m  ✔[0m[90m provideInlineCompletionItems returns null when model not selected[0m
+  [32m  ✔[0m[90m provideInlineCompletionItems returns null when completion is whitespace[0m
+  [32m  ✔[0m[90m provideInlineCompletionItems returns null and reports failure when completion provider throws[0m
+[0m  ConfigManager Unit Tests[0m
+  [32m  ✔[0m[90m getConfig returns empty values when nothing is stored[0m
+  [32m  ✔[0m[90m setConfig and getConfig roundtrip[0m
+  [32m  ✔[0m[90m setConfig deletes keys when values are missing[0m
+  [32m  ✔[0m[90m isConfigured returns true only when url is present[0m
+  [32m  ✔[0m[90m getConfig reads modelIdOverride and trims whitespace[0m
+  [32m  ✔[0m[90m getConfig treats whitespace-only modelIdOverride as unset[0m
+  [32m  ✔[0m[90m cleanupAllConfiguration removes all stored configuration[0m
+[0m  ModelPicker Unit Tests[0m
+  [32m  ✔[0m[90m showModelPicker reports warning when no models available[0m
+  [32m  ✔[0m[90m showModelPicker updates configuration on selection[0m
+  [32m  ✔[0m[90m showModelPicker clears configuration on 'Clear Selection'[0m
+  [32m  ✔[0m[90m showModelPicker does nothing if picker dismissed[0m
+[0m  ManageConfig Command Unit Tests[0m
+  [32m  ✔[0m[90m registers command correctly[0m
+  [32m  ✔[0m[90m updates config when input is provided[0m
+  [32m  ✔[0m[90m aborts if URL input is cancelled[0m
+  [32m  ✔[0m[90m shows unmasked API key when 'thisisunsafe' is entered with existing key[0m
+  [32m  ✔[0m[90m does not show unmasked key if 'thisisunsafe' is entered without existing key[0m
+  [32m  ✔[0m[90m allows editing API key in unmasked mode[0m
+[0m  Model Commands Unit Tests[0m
+  [32m  ✔[0m[90m showModels: prompts to reload when cache is empty[0m
+  [32m  ✔[0m[90m showModels: quick pick copies model id[0m
+  [32m  ✔[0m[90m reloadModels: clears cache and refetches[0m
+  [32m  ✔[0m[90m checkConnection: reports success on valid connection[0m
+  [32m  ✔[0m[90m checkConnection: reports error on failed connection[0m
+[0m  InlineCompletions Command Unit Tests[0m
+  [32m  ✔[0m[90m registerSelectInlineCompletionModelCommand registers the command[0m
+  [32m  ✔[0m[90m handler reports failure when no models available[0m
+  [32m  ✔[0m[90m handler reports cancelled when picker dismissed[0m
+  [32m  ✔[0m[90m handler updates configuration when model is selected[0m
+[0m  GenerateCommitMessage Command Unit Tests[0m
+  [32m  ✔[0m[90m registerGenerateCommitMessageCommand registers the command[0m
+  [32m  ✔[0m[90m handler prompts for model if not configured[0m
+  [32m  ✔[0m[90m handler generates commit message and updates input box[0m
+  [32m  ✔[0m[90m handler reports error if diff retrieval fails[0m
+[0m  Regression: Model ID Copy Bug[0m
+  [32m  ✔[0m[90m showModels: quick pick copies full model id including provider prefix[0m
+[0m  TokenUtils Unit Tests[0m
+  [32m  ✔[0m[90m countTokens handles strings, single messages, and message arrays[0m
+  [32m  ✔[0m[90m estimateMessagesTokens sums single-message estimates[0m
+  [32m  ✔[0m[90m estimateSingleMessageTokens estimates text parts[0m
+  [32m  ✔[0m[90m estimateToolTokens estimates based on JSON length[0m
+  [32m  ✔[0m[90m estimateToolTokens returns 0 when JSON serialization fails[0m
+  [32m  ✔[0m[90m isAnthropicModel identifies models correctly[0m
+  [32m  ✔[0m[90m trimMessagesToFitBudget keeps system message and recent messages[0m
+  [32m  ✔[0m[90m trimMessagesToFitBudget throws if budget is too small[0m
+  [32m  ✔[0m[90m trimMessagesToFitBudget protects assistant message on 'continue'[0m
+  [32m  ✔[0m[90m trimMessagesToFitBudget throws when tool tokens consume entire budget[0m
+  [32m  ✔[0m[90m trimMessagesToFitBudget throws when system message alone exceeds budget[0m
+[0m  ResponsesClient sendResponsesRequest[0m
+  [32m  ✔[0m[90m sets headers with api key[0m
+  [32m  ✔[0m[90m sets Cache-Control: no-cache when disableCaching is true and model is not Anthropic[0m
+  [32m  ✔[0m[90m does not set Cache-Control: no-cache for Anthropic models even if disableCaching is true[0m
+  [32m  ✔[0m[90m throws on non-OK response[0m
+  [32m  ✔[0m[90m throws when response body missing[0m
+  [32m  ✔[0m[90m parses SSE chunks and ignores DONE[0m
+  [32m  ✔[0m[90m handles partial lines across chunks[0m
+  [32m  ✔[0m[90m stops on cancellation[0m
+  [32m  ✔[0m[90m logs parse errors and continues[0m
+[0m  Responses Adapter Unit Tests[0m
+  [32m  ✔[0m[90m transformToResponsesFormat normalizes tool call IDs[0m
+  [32m  ✔[0m[90m transformToResponsesFormat synthesizes function_call for orphaned outputs[0m
+  [32m  ✔[0m[90m transformToResponsesFormat skips empty messages[0m
+  [32m  ✔[0m[90m transformToResponsesFormat handles conversation history when switching models[0m
+  [32m  ✔[0m[90m transformToResponsesFormat shrinks overlong tool call IDs to <= 40 chars[0m
+[0m  LiteLLM Client Unit Tests[0m
+  [32m  ✔[0m[90m getHeaders includes Authorization and X-API-Key[0m
+  [32m  ✔[0m[90m getHeaders includes Cache-Control: no-cache when disabled[0m
+  [32m  ✔[0m[90m getHeaders bypasses Cache-Control for Claude models[0m
+  [32m  ✔[0m[90m chat includes no_cache in body when disabled[0m
+  [32m  ✔[0m[90m chat bypasses no_cache for Claude models[0m
+  [32m  ✔[0m[90m getEndpoint resolves correctly[0m
+  [32m  ✔[0m[90m chat retries without caching if unsupported parameter error occurs[0m
+  [32m  ✔[0m[90m chat retries by stripping specific parameter mentioned in error[0m
+  [32m  ✔[0m[90m chat strips cache and extra_body.cache when backend rejects unknown parameter cache[0m
+  [32m  ✔[0m[90m parseRetryAfterDelayMs handles seconds, future date, and invalid values[0m
+  [32m  ✔[0m[90m getModelInfo returns JSON when response is ok[0m
+  [32m  ✔[0m[90m getModelInfo throws with status details when response is not ok[0m
+  [32m  ✔[0m[90m getModelInfo aborts fetch when cancellation token fires[0m
+[0m  SSE Decoder Unit Tests[0m
+  [32m  ✔[0m[90m decodes simple data frames[0m
+  [32m  ✔[0m[90m handles partial chunks and multi-line frames[0m
+  [32m  ✔[0m[90m respects cancellation token[0m
+  [32m  ✔[0m[90m ignores non-data lines[0m
+[92m [0m[32m 187 passing[0m[90m (2s)[0m
+[90m[main 2026-02-27T03:24:42.983Z][0m Extension host with pid 945503 exited with code: 0, signal: unknown.
+Exit code:   0
+
+=============================== Coverage summary ===============================
+Statements   : 91.24% ( 4094/4487 )
+Branches     : 76.94% ( 624/811 )
+Functions    : 93.05% ( 134/144 )
+Lines        : 91.24% ( 4094/4487 )
+================================================================================

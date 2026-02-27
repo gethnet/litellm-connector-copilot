@@ -72,6 +72,9 @@ export interface LiteLLMConfig {
     /** Model id to use for LiteLLM inline completions. */
     inlineCompletionsModelId?: string;
 
+    /** Max context tokens to use for LiteLLM inline completions. */
+    inlineCompletionsMaxContextTokens?: number;
+
     /** Model id to use for LiteLLM commit message generation. */
     commitModelIdOverride?: string;
 }

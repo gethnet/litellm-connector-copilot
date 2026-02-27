@@ -15,27 +15,22 @@ suite("GitUtils Unit Tests", () => {
         sandbox.restore();
     });
 
-    test("checkDiffSize returns full diff if within limits", () => {
-        const diff = "small diff";
+    test("truncateToTokenLimit returns full text if within limits", () => {
+        const text = "small diff";
         const maxTokens = 100;
-        const result = GitUtils.checkDiffSize(diff, maxTokens);
-        assert.strictEqual(result.diff, diff);
-        assert.strictEqual(result.isTruncated, false);
+        const result = GitUtils.truncateToTokenLimit(text, maxTokens);
+        assert.strictEqual(result, text);
     });
 
-    test("checkDiffSize truncates diff if exceeds limits", () => {
+    test("truncateToTokenLimit truncates text if exceeds limits", () => {
         // Create a diff that is roughly 200 tokens (800 characters)
-        const diff = "a".repeat(800);
+        const text = "a".repeat(800);
         const maxTokens = 100;
-        const result = GitUtils.checkDiffSize(diff, maxTokens);
+        const result = GitUtils.truncateToTokenLimit(text, maxTokens);
 
-        assert.strictEqual(result.isTruncated, true);
-        assert.strictEqual(result.diff.includes("[... Diff truncated due to context limits ...]"), true);
-        // Truncated chars = 100 * 4 * 0.9 = 360
-        assert.strictEqual(
-            result.diff.length <= 360 + "[... Diff truncated due to context limits ...]".length + 2,
-            true
-        );
+        assert.strictEqual(result.includes("[... Content truncated due to context limits ...]"), true);
+        // Truncated chars = 100 * 4 = 400
+        assert.strictEqual(result.length <= 400 + "[... Content truncated due to context limits ...]".length + 2, true);
     });
 
     test("getGitAPI returns undefined if extension missing", async () => {

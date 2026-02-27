@@ -3,8 +3,20 @@ import type { Tokenizer, TokenizationResult } from "./types";
 
 export class HeuristicTokenizer implements Tokenizer {
     countTokens(text: string): TokenizationResult {
-        // Basic chars/4 heuristic
-        return { tokens: Math.ceil(text.length / 4) };
+        if (!text) {
+            return { tokens: 0 };
+        }
+        // A more accurate heuristic than chars/4:
+        // 1. Split by whitespace and punctuation
+        // 2. Average tokens per word in code is higher than prose
+        // 3. Common estimate: 1 word ≈ 1.3 tokens, or ~3.5 chars per token for code
+
+        const words = text.trim().split(/\s+/).length;
+        const charBased = Math.ceil(text.length / 3.5);
+        const wordBased = Math.ceil(words * 1.3);
+
+        // Take the max of char-based and word-based for a safer "upper bound" estimate
+        return { tokens: Math.max(charBased, wordBased) };
     }
 
     countMessageTokens(message: LanguageModelChatRequestMessage): TokenizationResult {

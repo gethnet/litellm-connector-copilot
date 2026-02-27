@@ -27,6 +27,8 @@ suite("LiteLLMInlineCompletionProvider Unit Tests", () => {
         const { prompt, prefixTokens, suffixTokens } = buildInlineCompletionPrompt(doc, new vscode.Position(0, 0), {
             reservedOutputTokens: 256,
             maxContextTokens: 1024,
+            availableTokens: 500,
+            modelId: "test-model",
         });
 
         assert.ok(prompt.includes("<prefix>"));
