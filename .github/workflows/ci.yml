@@ -76,7 +76,7 @@ jobs:
         run: npm run package:marketplace
 
       - name: Upload VSIX
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: vsix
           path: litellm-connector-copilot-${{ steps.package_info.outputs.version }}.vsix
@@ -84,7 +84,7 @@ jobs:
 
       - name: Upload Coverage Results
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage/
@@ -92,7 +92,7 @@ jobs:
 
       - name: Upload Test Results
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: test-results
           path: |
