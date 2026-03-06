@@ -73,6 +73,7 @@ export abstract class LiteLLMProviderBase {
         this._parameterProbeCache.clear();
         this._lastModelList = [];
         this._modelListFetchedAtMs = 0;
+        Logger.info("Cleared cache");
     }
 
     /** Returns the last discovered model list (may be empty if never fetched). */
@@ -139,7 +140,8 @@ export abstract class LiteLLMProviderBase {
             Logger.info(`Found ${data.length} models`);
             const infos: LanguageModelChatInformation[] = data.map(
                 (entry: { model_info?: LiteLLMModelInfo; model_name?: string }, index: number) => {
-                    const modelId = entry.model_info?.key ?? entry.model_name ?? `model-${index}`;
+                    // const modelId = entry.model_info?.key ?? entry.model_name ?? `model-${index}`;
+                    const modelId = entry.model_info?.id ?? entry.model_info?.key ?? `model-${index}`;
                     const modelInfo = entry.model_info;
                     this._modelInfoCache.set(modelId, modelInfo);
 
@@ -163,12 +165,21 @@ export abstract class LiteLLMProviderBase {
                     const outputDesc = formatTokens(derived.maxOutputTokens);
                     const tooltip = `${modelInfo?.litellm_provider ?? "LiteLLM"} (${modelInfo?.mode ?? "responses"}) — Context: ${inputDesc} in / ${outputDesc} out`;
 
+                    // Derive family from provider to help Copilot shape requests correctly
+                    const provider = modelInfo?.litellm_provider?.toLowerCase();
+                    let family = "litellm";
+                    if (provider === "openai") {
+                        family = "gpt4";
+                    } else if (provider === "anthropic") {
+                        family = "claude";
+                    }
+
                     return {
                         id: modelId,
                         name: entry.model_name ?? modelId,
                         tooltip,
                         detail: `↑${inputDesc} ↓${outputDesc}`,
-                        family: "litellm",
+                        family: family,
                         version: "1.0.0",
                         maxInputTokens: derived.rawContextWindow,
                         maxOutputTokens: derived.maxOutputTokens,
@@ -304,6 +315,16 @@ export abstract class LiteLLMProviderBase {
 
         const openaiMessages = convertMessages(messagesToUse);
         validateRequest(messagesToUse);
+
+        Logger.debug(
+            `[buildOpenAIChatRequest] Final message count: ${openaiMessages.length}, Tool count: ${options.tools?.length ?? 0}`
+        );
+        if (openaiMessages.some((m) => m.tool_calls?.length || m.role === "tool")) {
+            const ids = openaiMessages.flatMap(
+                (m) => m.tool_calls?.map((tc) => tc.id) || (m.tool_call_id ? [m.tool_call_id] : [])
+            );
+            Logger.trace(`[buildOpenAIChatRequest] Tool IDs in request: ${ids.join(", ")}`);
+        }
 
         const requestBody: OpenAIChatCompletionRequest = {
             model: model.id,

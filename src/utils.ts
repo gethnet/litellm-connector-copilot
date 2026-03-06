@@ -12,23 +12,36 @@ import type {
  * VS Code tool call ids can be longer; LiteLLM/OpenAI will reject them.
  *
  * Strategy:
- * - Keep short ids as-is.
+ * - Always ensure IDs start with 'fc_' to satisfy strict models (e.g. gpt-5.3-codex).
  * - For longer ids, deterministically shrink to <= 40 using a stable hash.
  * - Preserve a readable prefix for debugging.
  */
 export function normalizeToolCallId(id: string, maxLen = 40): string {
     const raw = (id || "").trim();
+    const prefix = "fc_";
+
     if (!raw) {
-        return "tc_" + stableHash("empty").slice(0, maxLen - 3);
+        const generated = prefix + stableHash("empty").slice(0, maxLen - prefix.length);
+        Logger.trace(`[normalizeToolCallId] Empty ID provided, generated: ${generated}`);
+        return generated;
     }
-    if (raw.length <= maxLen) {
+
+    // If it already starts with fc_ and is short enough, keep it
+    if (raw.startsWith(prefix) && raw.length <= maxLen) {
+        Logger.trace(`[normalizeToolCallId] Valid ID kept as-is: ${raw}`);
         return raw;
     }
 
-    const prefix = raw.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 10);
-    const hash = stableHash(raw); // 64 hex chars
-    const out = `tc_${prefix}_${hash}`;
-    return out.length <= maxLen ? out : out.slice(0, maxLen);
+    // Otherwise, normalize it to ensure it starts with fc_
+    // Strip common prefixes we want to replace to keep the middle part readable
+    const cleanRaw = raw.replace(/^call_|^tc_/, "");
+    const safeMiddle = cleanRaw.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 10);
+    const hash = stableHash(raw); // Hash the FULL original ID for stability
+    const out = `${prefix}${safeMiddle}_${hash}`;
+    const final = out.length <= maxLen ? out : out.slice(0, maxLen);
+
+    Logger.trace(`[normalizeToolCallId] ID normalized to satisfy prefix/length: ${raw} -> ${final}`);
+    return final;
 }
 
 function stableHash(input: string): string {
@@ -221,6 +234,7 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                 const id = normalizeToolCallId(
                     part.callId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
                 );
+                Logger.debug(`[convertMessages] Tool call: ${part.name} (orig: ${part.callId}, norm: ${id})`);
                 let args = "{}";
                 try {
                     args = JSON.stringify(part.input ?? {});
@@ -230,6 +244,9 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                 toolCalls.push({ id, type: "function", function: { name: part.name, arguments: args } });
             } else if (isToolResultPart(part)) {
                 const callId = normalizeToolCallId((part as { callId?: string }).callId ?? "");
+                Logger.debug(
+                    `[convertMessages] Tool result: (orig: ${(part as { callId?: string }).callId}, norm: ${callId})`
+                );
                 const content = collectToolResultText(part as { content?: ReadonlyArray<unknown> });
                 toolResults.push({ callId, content });
             }

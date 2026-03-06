@@ -57,7 +57,7 @@ suite("Utility Unit Tests", () => {
         const out = convertMessages(messages) as Array<{
             role: string;
             content: unknown;
-            tool_calls?: Array<{ function: { name: string; arguments: string } }>;
+            tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
             tool_call_id?: string;
         }>;
         assert.strictEqual(out.length, 2);
@@ -66,9 +66,17 @@ suite("Utility Unit Tests", () => {
         assert.ok(Array.isArray(assistant.tool_calls));
         assert.strictEqual(assistant.tool_calls[0].function.name, "run");
         assert.strictEqual(assistant.tool_calls[0].function.arguments, '{"x":1}');
+
+        // Verify the new fc_ prefix normalization
+        assert.ok(
+            assistant.tool_calls[0].id.startsWith("fc_"),
+            `Expected ID to start with fc_, got ${assistant.tool_calls[0].id}`
+        );
+
         const toolResult = out[1];
         assert.strictEqual(toolResult.role, "tool");
-        assert.strictEqual(toolResult.tool_call_id, callId);
+        // The tool_call_id should match the normalized ID from the assistant message
+        assert.strictEqual(toolResult.tool_call_id, assistant.tool_calls[0].id);
         assert.strictEqual(toolResult.content, 'ok{"a":2}');
     });
 
@@ -116,11 +124,12 @@ suite("Utility Unit Tests", () => {
             },
         ];
 
-        const out = convertMessages(messages) as Array<{ role: string; tool_calls?: unknown[] }>;
+        const out = convertMessages(messages) as Array<{ role: string; tool_calls?: Array<{ id: string }> }>;
         assert.strictEqual(out.length, 1);
         assert.strictEqual(out[0].role, "assistant");
         assert.ok(Array.isArray(out[0].tool_calls));
         assert.strictEqual(out[0].tool_calls?.length, 1);
+        assert.ok(out[0].tool_calls?.[0].id.startsWith("fc_"));
     });
 
     test("validateRequest throws when tool call is followed by non-user message", () => {

@@ -6,6 +6,7 @@ import type {
     OpenAIChatMessageContentItem,
 } from "../types";
 import { normalizeToolCallId } from "../utils";
+import { Logger } from "../utils/logger";
 
 /**
  * Transform a chat/completions request body to the responses API format.
@@ -27,10 +28,12 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
             for (const tc of msg.tool_calls) {
                 const normalizedId = normalizeToolCallId(tc.id);
                 toolCallIdMap.set(tc.id, normalizedId);
+                Logger.trace(`[responsesAdapter] Mapped assistant tool call ID: ${tc.id} -> ${normalizedId}`);
             }
         } else if (msg.role === "tool" && msg.tool_call_id) {
             const normalizedId = normalizeToolCallId(msg.tool_call_id);
             toolCallIdMap.set(msg.tool_call_id, normalizedId);
+            Logger.trace(`[responsesAdapter] Mapped tool result ID: ${msg.tool_call_id} -> ${normalizedId}`);
         }
     }
 
@@ -66,6 +69,7 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
             if (msg.tool_calls) {
                 for (const tc of msg.tool_calls) {
                     const normalizedId = toolCallIdMap.get(tc.id) || normalizeToolCallId(tc.id);
+                    Logger.debug(`[responsesAdapter] Adding function_call: ${tc.function.name} (id: ${normalizedId})`);
                     inputArray.push({
                         type: "function_call",
                         id: normalizedId,
@@ -79,6 +83,7 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
             const toolCallId = msg.tool_call_id;
             if (toolCallId) {
                 const normalizedId = toolCallIdMap.get(toolCallId) || normalizeToolCallId(toolCallId);
+                Logger.debug(`[responsesAdapter] Adding function_call_output (id: ${normalizedId})`);
                 const toolContent = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
                 inputArray.push({
                     type: "function_call_output",
@@ -99,6 +104,7 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
         if (item.type === "function_call") {
             const id = item.id;
             seenCallIds.add(id);
+            Logger.trace(`[responsesAdapter] Final pass function_call id: ${id}`);
             // Ensure both id and call_id are present for compatibility
             finalInputArray.push({
                 ...item,
@@ -109,11 +115,18 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
             const call_id = item.call_id;
             if (!seenCallIds.has(call_id)) {
                 // Synthesize missing call
+                Logger.warn(`[responsesAdapter] Synthesizing missing call for output id: ${call_id}`);
+
+                // Try to find the actual tool name from the tools array if possible
+                // This helps avoid generic "Tool 1" labels in the UI
+                const toolDef = requestBody.tools?.find((t) => t.function.name !== undefined);
+                const name = toolDef?.function.name || "previous_tool_call";
+
                 finalInputArray.push({
                     type: "function_call",
                     id: call_id,
                     call_id: call_id,
-                    name: "previous_tool_call",
+                    name: name,
                     arguments: "{}",
                 });
                 seenCallIds.add(call_id);
@@ -150,13 +163,16 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
         responsesBody.tools = requestBody.tools
             .map((tool) => {
                 const func = tool.function;
-                if (!func.name || !func.description || !func.parameters) {
+                if (!func.name || !func.parameters) {
+                    Logger.warn(
+                        `[responsesAdapter] Dropping tool ${func.name || "unknown"} - missing name or parameters`
+                    );
                     return null;
                 }
                 return {
                     type: "function" as const,
                     name: func.name,
-                    description: func.description,
+                    description: func.description || "", // Allow empty description
                     parameters: func.parameters,
                 };
             })
