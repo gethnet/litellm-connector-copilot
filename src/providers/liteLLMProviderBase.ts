@@ -5,7 +5,12 @@ import type {
     ProvideLanguageModelChatResponseOptions,
 } from "vscode";
 
-import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, OpenAIFunctionToolDef } from "../types";
+import type {
+    LiteLLMModelInfo,
+    OpenAIChatCompletionRequest,
+    OpenAIFunctionToolDef,
+    LiteLLMTokenCounterRequest,
+} from "../types";
 import { convertMessages, convertTools, validateRequest } from "../utils";
 import { LiteLLMClient } from "../adapters/litellmClient";
 import { ResponsesClient } from "../adapters/responsesClient";
@@ -204,12 +209,31 @@ export abstract class LiteLLMProviderBase {
     async provideTokenCount(
         model: vscode.LanguageModelChatInformation,
         text: string | vscode.LanguageModelChatRequestMessage,
-        _token: vscode.CancellationToken
+        token: vscode.CancellationToken
     ): Promise<number> {
+        try {
+            const config = await this._configManager.getConfig();
+            if (config.url) {
+                const client = new LiteLLMClient(config, this.userAgent);
+                const request: LiteLLMTokenCounterRequest = {
+                    model: model.id,
+                };
+
+                if (typeof text === "string") {
+                    request.prompt = text;
+                } else {
+                    request.messages = convertMessages([text]);
+                }
+
+                const response = await client.countTokens(request, token);
+                return response.token_count;
+            }
+        } catch (err) {
+            Logger.warn(`Remote token count failed for ${model.id}, falling back to local`, err);
+        }
+
         const modelInfo = this._modelInfoCache.get(model.id);
-        const count = countTokens(text, model.id, modelInfo);
-        // Logger.debug(`provideTokenCount called for model ${model.id}: ${count} tokens`);
-        return count;
+        return countTokens(text, model.id, modelInfo);
     }
 
     /**

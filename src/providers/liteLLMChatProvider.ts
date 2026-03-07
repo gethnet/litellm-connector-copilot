@@ -48,6 +48,14 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         return this.discoverModels(options, token);
     }
 
+    async provideTokenCount(
+        model: LanguageModelChatInformation,
+        text: string | LanguageModelChatRequestMessage,
+        token: CancellationToken
+    ): Promise<number> {
+        return super.provideTokenCount(model, text, token);
+    }
+
     async provideLanguageModelChatResponse(
         model: LanguageModelChatInformation,
         messages: readonly LanguageModelChatRequestMessage[],
@@ -234,14 +242,6 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             });
             throw new Error(errorMessage);
         }
-    }
-
-    async provideTokenCount(
-        model: vscode.LanguageModelChatInformation,
-        text: string | vscode.LanguageModelChatRequestMessage,
-        token: vscode.CancellationToken
-    ): Promise<number> {
-        return super.provideTokenCount(model, text, token);
     }
 
     protected resetStreamingState(): void {

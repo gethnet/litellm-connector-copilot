@@ -126,7 +126,27 @@ export interface LiteLLMModelEntry {
  * Response envelope for LiteLLM /model/info endpoint.
  */
 export interface LiteLLMModelInfoResponse {
-    data: LiteLLMModelEntry[];
+    data: Array<{
+        model_name?: string;
+        model_info?: LiteLLMModelInfo;
+    }>;
+}
+
+/**
+ * Request for LiteLLM token counter endpoint.
+ */
+export interface LiteLLMTokenCounterRequest {
+    model: string;
+    prompt?: string;
+    messages?: OpenAIChatMessage[];
+    contents?: Record<string, unknown>[];
+}
+
+/**
+ * Response from LiteLLM token counter endpoint.
+ */
+export interface LiteLLMTokenCounterResponse {
+    token_count: number;
 }
 
 /**

@@ -5,6 +5,8 @@ import type {
     OpenAIChatCompletionRequest,
     LiteLLMResponsesRequest,
     LiteLLMModelInfo,
+    LiteLLMTokenCounterRequest,
+    LiteLLMTokenCounterResponse,
 } from "../types";
 import { transformToResponsesFormat } from "./responsesAdapter";
 import { Logger } from "../utils/logger";
@@ -59,6 +61,35 @@ export class LiteLLMClient {
             : [];
 
         return { latencyMs, modelCount, sampleModelIds };
+    }
+
+    /**
+     * Counts tokens for a prompt or messages using LiteLLM's token counter.
+     */
+    async countTokens(
+        request: LiteLLMTokenCounterRequest,
+        token?: vscode.CancellationToken
+    ): Promise<LiteLLMTokenCounterResponse> {
+        const controller = new AbortController();
+        if (token) {
+            token.onCancellationRequested(() => controller.abort());
+        }
+
+        Logger.trace(`Counting tokens for model ${request.model} at ${this.config.url}/utils/token_counter`);
+        const resp = await fetch(`${this.config.url}/utils/token_counter`, {
+            method: "POST",
+            headers: this.getHeaders(),
+            body: JSON.stringify(request),
+            signal: controller.signal,
+        });
+
+        if (!resp.ok) {
+            const errorText = await resp.text();
+            Logger.error(`Failed to count tokens: ${resp.status} ${resp.statusText} - ${errorText}`);
+            throw new Error(`Failed to count tokens: ${resp.status} ${resp.statusText}`);
+        }
+
+        return resp.json() as Promise<LiteLLMTokenCounterResponse>;
     }
 
     /**

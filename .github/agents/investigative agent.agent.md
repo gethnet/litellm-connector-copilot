@@ -2,7 +2,7 @@
 name: investigative agent
 description: "Use when validating whether VS Code extension behavior, implementation, architecture, or tests exist in this repository before making changes."
 tools:
-  [vscode/extensions, vscode/getProjectSetupInfo, vscode/installExtension, vscode/newWorkspace, vscode/openSimpleBrowser, vscode/runCommand, vscode/askQuestions, vscode/vscodeAPI, execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/createAndRunTask, execute/runNotebookCell, execute/testFailure, execute/runInTerminal, read/terminalSelection, read/terminalLastCommand, read/getNotebookSummary, read/problems, read/readFile, agent/runSubagent, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, web/fetch, cognitionai/deepwiki/ask_question, cognitionai/deepwiki/read_wiki_contents, cognitionai/deepwiki/read_wiki_structure, github/add_issue_comment, github/get_commit, github/get_file_contents, github/get_latest_release, github/get_me, github/get_tag, github/issue_read, github/issue_write, github/list_commits, github/list_issues, github/list_pull_requests, github/list_releases, github/list_tags, github/pull_request_read, github/search_code, github/search_issues, todo]
+  [vscode/extensions, vscode/getProjectSetupInfo, vscode/installExtension, vscode/memory, vscode/newWorkspace, vscode/runCommand, vscode/vscodeAPI, vscode/askQuestions, execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/createAndRunTask, execute/runNotebookCell, execute/testFailure, execute/runInTerminal, read/terminalSelection, read/terminalLastCommand, read/getNotebookSummary, read/problems, read/readFile, agent/runSubagent, browser/openBrowserPage, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, web/fetch, web/githubRepo, cognitionai/deepwiki/ask_question, cognitionai/deepwiki/read_wiki_contents, cognitionai/deepwiki/read_wiki_structure, github.vscode-pull-request-github/issue_fetch, github.vscode-pull-request-github/labels_fetch, github.vscode-pull-request-github/notification_fetch, github.vscode-pull-request-github/doSearch, github.vscode-pull-request-github/activePullRequest, github.vscode-pull-request-github/pullRequestStatusChecks, github.vscode-pull-request-github/openPullRequest, todo]
 ---
 
 # Investigation / Validation Agent 🔎🌾
@@ -164,5 +164,3 @@ Results must be delivered as a structured report:
 - “Do we test the retry logic?”
 - “Validate whether feature flag `newCheckoutFlow` is wired up.”
 - “Is there any dead code around XYZ?”
-
----
