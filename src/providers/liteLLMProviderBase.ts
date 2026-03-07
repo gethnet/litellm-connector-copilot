@@ -40,6 +40,7 @@ const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
     "o1-preview": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
     "o1-mini": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
     "o1-": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
+    "gpt-5-mini": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
 };
 
 /**
@@ -179,18 +180,20 @@ export abstract class LiteLLMProviderBase {
                         family = "claude";
                     }
 
-                    return {
+                    const info = {
                         id: modelId,
                         name: entry.model_name ?? modelId,
                         tooltip,
-                        detail: `↑${inputDesc} ↓${outputDesc}`,
+                        detail: `Context: ${inputDesc} | Output: ${outputDesc}`,
                         family: family,
                         version: "1.0.0",
                         maxInputTokens: derived.rawContextWindow,
                         maxOutputTokens: derived.maxOutputTokens,
                         capabilities,
                         tags,
-                    } as LanguageModelChatInformation;
+                    };
+
+                    return info as vscode.LanguageModelChatInformation;
                 }
             );
 
@@ -211,13 +214,64 @@ export abstract class LiteLLMProviderBase {
         text: string | vscode.LanguageModelChatRequestMessage,
         token: vscode.CancellationToken
     ): Promise<number> {
-        try {
-            const config = await this._configManager.getConfig();
-            if (config.url) {
+        const modelInfo = this._modelInfoCache.get(model.id);
+
+        // Always calculate local count first for immediate response
+        const localCount = countTokens(text, model.id, modelInfo);
+
+        // For very small strings, local count is sufficient and avoids any overhead
+        if (typeof text === "string" && text.length < 200) {
+            return localCount;
+        }
+
+        const contentKey = typeof text === "string" ? text : JSON.stringify(text);
+        const cacheKey = `${model.id}:${contentKey}`;
+
+        const cached = tokenCountCache.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+            return cached.count;
+        }
+
+        // Check if there's already a pending background request for this content
+        if (pendingRequests.has(cacheKey)) {
+            // We return the local count immediately but don't block.
+            // The NEXT call will likely get the cached value once the pending one resolves.
+            return localCount;
+        }
+
+        // Kick off background refinement without awaiting it
+        this.refineTokenCountInBackground(model, text, cacheKey, token).catch((err) => {
+            Logger.trace(`Background token refinement failed (expected during rapid updates): ${err.message}`);
+        });
+
+        // Return local count immediately to keep UI responsive
+        return localCount;
+    }
+
+    /**
+     * Refines the token count in the background using LiteLLM and updates the cache.
+     */
+    private async refineTokenCountInBackground(
+        model: vscode.LanguageModelChatInformation,
+        text: string | vscode.LanguageModelChatRequestMessage,
+        cacheKey: string,
+        token: vscode.CancellationToken
+    ): Promise<void> {
+        // Debounce: Wait a bit to see if more requests for the same content come in
+        await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS));
+        if (token.isCancellationRequested) {
+            return;
+        }
+
+        const promise = (async () => {
+            try {
+                const config = await this._configManager.getConfig();
+                if (!config.url) {
+                    return 0;
+                }
+
                 const client = new LiteLLMClient(config, this.userAgent);
-                const request: LiteLLMTokenCounterRequest = {
-                    model: model.id,
-                };
+                const request: LiteLLMTokenCounterRequest = { model: model.id };
 
                 if (typeof text === "string") {
                     request.prompt = text;
@@ -226,14 +280,22 @@ export abstract class LiteLLMProviderBase {
                 }
 
                 const response = await client.countTokens(request, token);
-                return response.token_count;
-            }
-        } catch (err) {
-            Logger.warn(`Remote token count failed for ${model.id}, falling back to local`, err);
-        }
+                tokenCountCache.set(cacheKey, { count: response.token_count, timestamp: Date.now() });
 
-        const modelInfo = this._modelInfoCache.get(model.id);
-        return countTokens(text, model.id, modelInfo);
+                // Cleanup cache if it grows too large
+                if (tokenCountCache.size > 200) {
+                    const keys = Array.from(tokenCountCache.keys());
+                    tokenCountCache.delete(keys[0]);
+                }
+
+                return response.token_count;
+            } finally {
+                pendingRequests.delete(cacheKey);
+            }
+        })();
+
+        pendingRequests.set(cacheKey, promise);
+        await promise;
     }
 
     /**
@@ -656,3 +718,15 @@ export abstract class LiteLLMProviderBase {
         return `API request failed with status ${statusCode}`;
     }
 }
+
+/**
+ * Simple in-memory cache for token counts to avoid redundant network calls.
+ */
+const tokenCountCache = new Map<string, { count: number; timestamp: number }>();
+const CACHE_TTL_MS = 60000; // Increase to 1 minute for better stability
+const DEBOUNCE_MS = 300;
+
+/**
+ * Tracks pending background token count requests to avoid redundant network calls.
+ */
+const pendingRequests = new Map<string, Promise<number>>();

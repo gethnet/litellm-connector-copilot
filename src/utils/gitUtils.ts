@@ -91,6 +91,74 @@ export class GitUtils {
     }
 
     /**
+     * Compacts a Git diff by removing context lines and focusing on changes.
+     * This is useful when the diff is too large for the context window.
+     * @param diff The original diff string
+     * @param maxTokens The target token limit
+     * @returns A compacted diff string
+     */
+    static compactDiff(diff: string, maxTokens: number): string {
+        const lines = diff.split("\n");
+        const maxChars = maxTokens * 4;
+
+        if (diff.length <= maxChars) {
+            return diff;
+        }
+
+        Logger.info(`Compacting diff from ${diff.length} to ${maxChars} chars`);
+
+        // First pass: remove most context lines, keeping only hunk headers and changes
+        // A git diff line starts with:
+        // '--- ' or '+++ ' (file headers)
+        // '@@ ' (hunk header)
+        // '+' or '-' (changes)
+        // ' ' (context)
+
+        const compactedLines: string[] = [];
+
+        for (const line of lines) {
+            // Check for file headers first
+            if (line.startsWith("--- ") || line.startsWith("+++ ")) {
+                compactedLines.push(line);
+                continue;
+            }
+
+            // Check for hunk headers
+            if (line.startsWith("@@ ")) {
+                compactedLines.push(line);
+                continue;
+            }
+
+            // Check for additions/deletions
+            // We must be careful not to match file headers here, but we already handled them above
+            if (line.startsWith("+") || line.startsWith("-")) {
+                compactedLines.push(line);
+                continue;
+            }
+
+            // If it's a context line, we only keep it if we have plenty of space,
+            // or we just omit it to be safe and focus on the changes.
+            // For now, let's omit context lines entirely if we're compacting.
+            // This is the most aggressive form of compacting.
+        }
+
+        const result = compactedLines.join("\n");
+
+        // Final sanity check: if we somehow removed everything (e.g. malformed diff),
+        // fall back to truncation
+        if (result.trim().length === 0 && diff.trim().length > 0) {
+            return this.truncateToTokenLimit(diff, maxTokens);
+        }
+
+        // If it's still too large, we might need to truncate at the file level
+        if (result.length > maxChars) {
+            return this.truncateToTokenLimit(result, maxTokens);
+        }
+
+        return result;
+    }
+
+    /**
      * Truncates a string to fit within a specific token limit using a character-based heuristic.
      * @param text The text to truncate
      * @param maxTokens The maximum allowed tokens

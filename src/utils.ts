@@ -213,7 +213,6 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                 // Handle image and other data parts
                 if (part.mimeType.startsWith("image/")) {
                     // Convert image data to base64 for OpenAI vision API
-                    // Properly handle Uint8Array to ensure cross-platform compatibility
                     let base64Data: string;
                     if (part.data instanceof Uint8Array) {
                         base64Data = Buffer.from(part.data).toString("base64");
@@ -228,8 +227,22 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                             url: `data:${part.mimeType};base64,${base64Data}`,
                         },
                     });
+                } else if (part.mimeType.startsWith("application/json")) {
+                    // Handle JSON data parts by decoding and appending as text
+                    const jsonStr = Buffer.from(part.data).toString("utf-8");
+                    textParts.push(jsonStr);
+                } else if (part.mimeType.startsWith("text/")) {
+                    // Handle explicit text data parts
+                    const textStr = Buffer.from(part.data).toString("utf-8");
+                    textParts.push(textStr);
+                } else if (part.mimeType === "cache_control") {
+                    // Handle cache_control data parts (e.g. for prompt caching)
+                    // We log this for now to verify it's being received;
+                    // actual implementation depends on the specific provider support in LiteLLM.
+                    Logger.debug(
+                        `[convertMessages] Received cache_control part: ${Buffer.from(part.data).toString("utf-8")}`
+                    );
                 }
-                // Other data types (json, etc.) can be handled here if needed in the future
             } else if (part instanceof vscode.LanguageModelToolCallPart) {
                 const id = normalizeToolCallId(
                     part.callId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`

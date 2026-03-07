@@ -62,11 +62,17 @@ export function registerGenerateCommitMessageCommand(provider: LiteLLMCommitMess
             let isTruncated = false;
 
             if (estimatedDiffTokens > availableTokens) {
-                processedDiff = GitUtils.truncateToTokenLimit(diff, availableTokens);
-                isTruncated = true;
-                Logger.warn(
-                    `Diff truncated for ${modelId}. Available: ${availableTokens}, Estimated: ${estimatedDiffTokens}`
-                );
+                // Try to compact the diff first before hard truncation
+                processedDiff = GitUtils.compactDiff(diff, availableTokens);
+
+                // If still too large, it was already truncated within compactDiff if needed,
+                // but we check if it's different from original to show warning.
+                if (processedDiff.length < diff.length) {
+                    isTruncated = true;
+                    Logger.warn(
+                        `Diff compacted/truncated for ${modelId}. Available: ${availableTokens}, Original Estimated: ${estimatedDiffTokens}`
+                    );
+                }
             }
 
             if (isTruncated) {

@@ -347,6 +347,34 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(requestBody.max_tokens, 1000);
     });
 
+    test("stripUnsupportedParametersFromRequest handles gpt-5-mini models", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const strip = (
+            provider as unknown as {
+                stripUnsupportedParametersFromRequest: (
+                    requestBody: Record<string, unknown>,
+                    modelInfo: unknown,
+                    modelId?: string
+                ) => void;
+            }
+        ).stripUnsupportedParametersFromRequest.bind(provider);
+
+        const requestBody: Record<string, unknown> = {
+            temperature: 1.0,
+            top_p: 1.0,
+            presence_penalty: 0.0,
+            max_tokens: 1000,
+        };
+
+        // gpt-5-mini models shouldn't have temperature, top_p, or penalties
+        strip(requestBody, undefined, "gpt-5-mini");
+
+        assert.strictEqual(requestBody.temperature, undefined);
+        assert.strictEqual(requestBody.top_p, undefined);
+        assert.strictEqual(requestBody.presence_penalty, undefined);
+        assert.strictEqual(requestBody.max_tokens, 1000);
+    });
+
     test("detectQuotaToolRedaction removes failing tool when enabled", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const detect = (
@@ -740,5 +768,49 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         assert.ok(!("cache" in requestBody));
         assert.ok(!("extra_body" in requestBody));
+    });
+
+    test("provideTokenCount uses local counting for small strings", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const countTokensSpy = sandbox.spy(LiteLLMClient.prototype, "countTokens");
+
+        const model = { id: "test-model" } as vscode.LanguageModelChatInformation;
+        const text = "short text";
+        const token = { isCancellationRequested: false } as vscode.CancellationToken;
+
+        const count = await provider.provideTokenCount(model, text, token);
+
+        assert.ok(count > 0);
+        assert.strictEqual(countTokensSpy.called, false, "Should not call remote token counter for small strings");
+    });
+
+    test("provideTokenCount kicks off background refinement for large strings", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        
+        sandbox.stub(provider as unknown as { _configManager: unknown }, "_configManager").value({
+            getConfig: async () => ({ url: "http://localhost:4000" }),
+        });
+
+        const remoteCount = 123;
+        const countTokensStub = sandbox
+            .stub(LiteLLMClient.prototype, "countTokens")
+            .resolves({ token_count: remoteCount });
+
+        const model = { id: "test-model" } as vscode.LanguageModelChatInformation;
+        const largeText = "a".repeat(600); 
+        const token = { isCancellationRequested: false } as vscode.CancellationToken;
+
+        // First call - returns local count immediately, but kicks off background
+        const count1 = await provider.provideTokenCount(model, largeText, token);
+        assert.notStrictEqual(count1, remoteCount, "Should return local count immediately");
+        
+        // Wait for background debounce and execution
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        assert.strictEqual(countTokensStub.callCount, 1, "Should have called remote counter in background");
+
+        // Second call - should now return cached remote count
+        const count2 = await provider.provideTokenCount(model, largeText, token);
+        assert.strictEqual(count2, remoteCount, "Should return cached remote count on second call");
     });
 });
