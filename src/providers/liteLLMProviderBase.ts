@@ -58,6 +58,9 @@ const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
  */
 export abstract class LiteLLMProviderBase {
     protected readonly _configManager: ConfigManager;
+    protected readonly _onDidChangeLanguageModelChatInformationEmitter = new vscode.EventEmitter<void>();
+    readonly onDidChangeLanguageModelChatInformation = this._onDidChangeLanguageModelChatInformationEmitter.event;
+
     protected readonly _modelInfoCache = new Map<string, LiteLLMModelInfo | undefined>();
     protected readonly _derivedCapabilitiesCache = new Map<string, DerivedModelCapabilities>();
     protected readonly _parameterProbeCache = new Map<string, Set<string>>();
@@ -71,6 +74,12 @@ export abstract class LiteLLMProviderBase {
         this._configManager = new ConfigManager(secrets);
     }
 
+    /** Signals VS Code to refresh the Language Models view for this provider. */
+    public refreshModelInformation(): void {
+        Logger.info("Firing onDidChangeLanguageModelChatInformation");
+        this._onDidChangeLanguageModelChatInformationEmitter.fire();
+    }
+
     /** Clears all model-related caches (model list, model info, parameter probe). */
     public clearModelCache(): void {
         Logger.info("Clearing model discovery cache");
@@ -79,6 +88,7 @@ export abstract class LiteLLMProviderBase {
         this._parameterProbeCache.clear();
         this._lastModelList = [];
         this._modelListFetchedAtMs = 0;
+        this.refreshModelInformation();
         Logger.info("Cleared cache");
     }
 
@@ -197,8 +207,14 @@ export abstract class LiteLLMProviderBase {
                 }
             );
 
+            const hasChanged = JSON.stringify(this._lastModelList) !== JSON.stringify(infos);
             this._lastModelList = infos;
             this._modelListFetchedAtMs = Date.now();
+
+            if (hasChanged) {
+                this.refreshModelInformation();
+            }
+
             return infos;
         } catch (err) {
             Logger.error("Failed to fetch models", err);

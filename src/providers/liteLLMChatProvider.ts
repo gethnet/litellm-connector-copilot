@@ -26,20 +26,9 @@ import { emitPartsToVSCode } from "../adapters/streaming/vscodePartEmitter";
  * endpoint routing) is implemented in LiteLLMProviderBase.
  */
 export class LiteLLMChatProvider extends LiteLLMProviderBase implements LanguageModelChatProvider {
-    private readonly _onDidChangeLanguageModelChatInformationEmitter = new vscode.EventEmitter<void>();
-    readonly onDidChangeLanguageModelChatInformation = this._onDidChangeLanguageModelChatInformationEmitter.event;
-
     // Streaming state
     private _streamingState: StreamingState = createInitialStreamingState();
     private _partialAssistantText = "";
-
-    /**
-     * Signals VS Code to refresh the Language Models view for this provider.
-     * @deprecated("Don't use this anymore")
-     */
-    public refreshModelInformation(): void {
-        //this._onDidChangeLanguageModelChatInformationEmitter.fire();
-    }
 
     async provideLanguageModelChatInformation(
         options: { silent: boolean },

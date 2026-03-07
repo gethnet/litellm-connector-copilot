@@ -20,13 +20,22 @@
 	"version": "1.4.3-dev9",
 	"preview": false,
 	"engines": {
-		"vscode": "^1.109.2"
+		"vscode": "^1.110.0"
 	},
 	"categories": [
 		"AI",
 		"Chat",
 		"Machine Learning",
 		"Other"
+	],
+	"keywords": [
+		"litellm",
+		"llm",
+		"copilot",
+		"ai-connector",
+		"openai",
+		"anthropic",
+		"local-llm"
 	],
 	"galleryBanner": {
 		"color": "#100f11",
