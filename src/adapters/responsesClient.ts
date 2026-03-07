@@ -12,6 +12,12 @@ export interface ResponsesEvent {
     item?: Record<string, unknown>;
     choices?: Record<string, unknown>[];
     output?: Record<string, unknown>[];
+    response?: {
+        usage?: {
+            input_tokens?: number;
+            output_tokens?: number;
+        };
+    };
 }
 
 export class ResponsesClient {
@@ -31,6 +37,26 @@ export class ResponsesClient {
      */
     private anonymousToolArgsBuffer = "";
     private anonymousToolName: string | undefined;
+
+    private emitExperimentalUsageData(
+        progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+        promptTokens: number,
+        completionTokens: number
+    ): void {
+        Logger.debug(
+            `Emitting experimental usage data part | promptTokens: ${promptTokens} | completionTokens: ${completionTokens}`
+        );
+        progress.report(
+            vscode.LanguageModelDataPart.json(
+                {
+                    kind: "usage",
+                    promptTokens,
+                    completionTokens,
+                },
+                "application/vnd.litellm.usage+json"
+            )
+        );
+    }
 
     constructor(
         private readonly config: LiteLLMConfig,
@@ -212,6 +238,16 @@ export class ResponsesClient {
                 // Reset anonymous buffer (regardless of whether we emitted)
                 this.anonymousToolArgsBuffer = "";
                 this.anonymousToolName = undefined;
+            }
+        } else if (type === "response.completed") {
+            const promptTokens = event.response?.usage?.input_tokens;
+            const completionTokens = event.response?.usage?.output_tokens;
+            if (
+                this.config.experimentalEmitUsageData &&
+                typeof promptTokens === "number" &&
+                typeof completionTokens === "number"
+            ) {
+                this.emitExperimentalUsageData(progress, promptTokens, completionTokens);
             }
         }
     }

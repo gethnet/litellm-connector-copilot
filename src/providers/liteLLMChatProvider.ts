@@ -30,6 +30,26 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
     private _streamingState: StreamingState = createInitialStreamingState();
     private _partialAssistantText = "";
 
+    private emitExperimentalUsageData(
+        progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+        tokensIn: number,
+        tokensOut: number
+    ): void {
+        Logger.debug(
+            `Emitting experimental usage data part | promptTokens: ${tokensIn} | completionTokens: ${tokensOut}`
+        );
+        progress.report(
+            vscode.LanguageModelDataPart.json(
+                {
+                    kind: "usage",
+                    promptTokens: tokensIn,
+                    completionTokens: tokensOut,
+                },
+                "application/vnd.litellm.usage+json"
+            )
+        );
+    }
+
     async provideLanguageModelChatInformation(
         options: { silent: boolean },
         token: CancellationToken
@@ -166,6 +186,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                                 status: "success",
                                 caller,
                             });
+                            if (config.experimentalEmitUsageData && typeof tokensIn === "number") {
+                                this.emitExperimentalUsageData(trackingProgress, tokensIn, tokensOut);
+                            }
                             return;
                         } catch (retryErr: unknown) {
                             // If retry fails, throw a more descriptive error
@@ -202,6 +225,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 status: "success",
                 caller,
             });
+            if (config.experimentalEmitUsageData && typeof tokensIn === "number") {
+                this.emitExperimentalUsageData(trackingProgress, tokensIn, tokensOut);
+            }
         } catch (err: unknown) {
             let errorMessage = err instanceof Error ? err.message : String(err);
             if (errorMessage.includes("LiteLLM API error")) {

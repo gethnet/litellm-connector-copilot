@@ -8,6 +8,7 @@ export class ConfigManager {
     private static readonly DEFAULT_API_KEY_SECRET_REF = "default";
     private static readonly INACTIVITY_TIMEOUT_KEY = "litellm-connector.inactivityTimeout";
     private static readonly DISABLE_CACHING_KEY = "litellm-connector.disableCaching";
+    private static readonly EXPERIMENTAL_EMIT_USAGE_DATA_KEY = "litellm-connector.experimentalEmitUsageData";
     private static readonly DISABLE_QUOTA_TOOL_REDACTION_KEY = "litellm-connector.disableQuotaToolRedaction";
     private static readonly MODEL_OVERRIDES_KEY = "litellm-connector.modelOverrides";
     private static readonly MODEL_ID_OVERRIDE_KEY = "litellm-connector.modelIdOverride";
@@ -40,6 +41,9 @@ export class ConfigManager {
         const disableCaching = vscode.workspace
             .getConfiguration()
             .get<boolean>(ConfigManager.DISABLE_CACHING_KEY, true);
+        const experimentalEmitUsageData = vscode.workspace
+            .getConfiguration()
+            .get<boolean>(ConfigManager.EXPERIMENTAL_EMIT_USAGE_DATA_KEY, false);
         const disableQuotaToolRedaction = vscode.workspace
             .getConfiguration()
             .get<boolean>(ConfigManager.DISABLE_QUOTA_TOOL_REDACTION_KEY, false);
@@ -66,6 +70,7 @@ export class ConfigManager {
             key: key || undefined,
             inactivityTimeout,
             disableCaching,
+            experimentalEmitUsageData,
             disableQuotaToolRedaction,
             modelOverrides,
             modelIdOverride: modelIdOverride.length > 0 ? modelIdOverride : undefined,

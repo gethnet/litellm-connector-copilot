@@ -40,6 +40,8 @@ suite("ConfigManager Unit Tests", () => {
                     return 60;
                 case "litellm-connector.disableCaching":
                     return true;
+                case "litellm-connector.experimentalEmitUsageData":
+                    return false;
                 case "litellm-connector.disableQuotaToolRedaction":
                     return false;
                 case "litellm-connector.modelOverrides":
@@ -171,6 +173,15 @@ suite("ConfigManager Unit Tests", () => {
         const manager = new ConfigManager(mockSecrets);
         const cfg = await manager.getConfig();
         assert.strictEqual(cfg.modelIdOverride, undefined);
+    });
+
+    test("getConfig reads experimental usage emission flag", async () => {
+        settingsMap.set("litellm-connector.experimentalEmitUsageData", true);
+
+        const manager = new ConfigManager(mockSecrets);
+        const cfg = await manager.getConfig();
+
+        assert.strictEqual(cfg.experimentalEmitUsageData, true);
     });
 
     test("cleanupAllConfiguration removes all stored configuration", async () => {

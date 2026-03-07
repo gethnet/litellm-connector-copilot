@@ -58,6 +58,8 @@ export interface LiteLLMConfig {
     key?: string;
     inactivityTimeout?: number;
     disableCaching?: boolean;
+    /** Experimental: emit token usage metadata as a response data part for manual UI probing. */
+    experimentalEmitUsageData?: boolean;
     disableQuotaToolRedaction?: boolean;
     modelOverrides?: Record<string, string[]>;
     /**
