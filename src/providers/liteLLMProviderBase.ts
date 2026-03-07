@@ -140,8 +140,8 @@ export abstract class LiteLLMProviderBase {
             Logger.info(`Found ${data.length} models`);
             const infos: LanguageModelChatInformation[] = data.map(
                 (entry: { model_info?: LiteLLMModelInfo; model_name?: string }, index: number) => {
-                    // const modelId = entry.model_info?.key ?? entry.model_name ?? `model-${index}`;
-                    const modelId = entry.model_info?.id ?? entry.model_info?.key ?? `model-${index}`;
+                    const modelId = entry.model_info?.key ?? entry.model_name ?? `model-${index}`;
+                    // const modelId = entry.model_info?.id ?? entry.model_info?.key ?? `model-${index}`;
                     const modelInfo = entry.model_info;
                     this._modelInfoCache.set(modelId, modelInfo);
 
