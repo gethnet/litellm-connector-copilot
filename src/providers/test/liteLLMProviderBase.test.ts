@@ -169,6 +169,7 @@ suite("LiteLLM Provider Unit Tests", () => {
                 modelOptions: {},
                 tools: [],
                 toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
             },
             { report: () => {} },
             new vscode.CancellationTokenSource().token
@@ -786,7 +787,7 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     test("provideTokenCount kicks off background refinement for large strings", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        
+
         sandbox.stub(provider as unknown as { _configManager: unknown }, "_configManager").value({
             getConfig: async () => ({ url: "http://localhost:4000" }),
         });
@@ -797,16 +798,16 @@ suite("LiteLLM Provider Unit Tests", () => {
             .resolves({ token_count: remoteCount });
 
         const model = { id: "test-model" } as vscode.LanguageModelChatInformation;
-        const largeText = "a".repeat(600); 
+        const largeText = "a".repeat(600);
         const token = { isCancellationRequested: false } as vscode.CancellationToken;
 
         // First call - returns local count immediately, but kicks off background
         const count1 = await provider.provideTokenCount(model, largeText, token);
         assert.notStrictEqual(count1, remoteCount, "Should return local count immediately");
-        
+
         // Wait for background debounce and execution
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
         assert.strictEqual(countTokensStub.callCount, 1, "Should have called remote counter in background");
 
         // Second call - should now return cached remote count

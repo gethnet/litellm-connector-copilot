@@ -79,6 +79,9 @@ export interface LiteLLMConfig {
 
     /** Model id to use for LiteLLM commit message generation. */
     commitModelIdOverride?: string;
+
+    /** Experimental: enable V2 Chat Provider using proposed VS Code APIs. */
+    v2ApiEnabled?: boolean;
 }
 
 /**

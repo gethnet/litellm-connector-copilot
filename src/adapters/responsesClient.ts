@@ -46,12 +46,35 @@ export class ResponsesClient {
         Logger.debug(
             `Emitting experimental usage data part | promptTokens: ${promptTokens} | completionTokens: ${completionTokens}`
         );
+        const detailsString = `Context: ${promptTokens} tokens | Output: ${completionTokens} tokens`;
+
+        // 1. Try direct DTO injection (bypassing type system)
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (progress as any).report({
+                kind: "usage",
+                promptTokens: promptTokens,
+                completionTokens: completionTokens,
+                details: detailsString,
+                metadata: {
+                    details: detailsString,
+                },
+            });
+        } catch (e) {
+            Logger.trace("Direct usage DTO injection failed", e);
+        }
+
+        // 2. Keep the DataPart probe as fallback
         progress.report(
             vscode.LanguageModelDataPart.json(
                 {
                     kind: "usage",
                     promptTokens,
                     completionTokens,
+                    details: detailsString,
+                    metadata: {
+                        details: detailsString,
+                    },
                 },
                 "application/vnd.litellm.usage+json"
             )

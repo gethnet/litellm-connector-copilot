@@ -17,7 +17,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "1.4.3-dev12",
+	"version": "1.4.3-dev19",
 	"preview": false,
 	"engines": {
 		"vscode": "^1.110.0"
@@ -150,6 +150,11 @@
 					"default": false,
 					"description": "Experimental: emit token usage metadata as a response data part to probe whether Copilot or VS Code surfaces context usage in chat UI."
 				},
+				"litellm-connector.experimental.v2ApiEnabled": {
+					"type": "boolean",
+					"default": false,
+					"description": "Experimental: enable the V2 Chat Provider architecture using proposed VS Code APIs (LanguageModelChatMessage2, Thinking parts, etc.)."
+				},
 				"litellm-connector.disableQuotaToolRedaction": {
 					"type": "boolean",
 					"default": false,
@@ -182,6 +187,10 @@
 	},
 	"main": "./dist/extension.js",
 	"browser": "./dist/web/extension.js",
+	"enabledApiProposals": [
+		"chatProvider",
+		"languageModelThinkingPart"
+	],
 	"scripts": {
 		"clean": "rm -rf ./dist ./out ./coverage ./test-results",
 		"clean:build": "rm -rf ./dist ./out",
@@ -190,8 +199,7 @@
 		"vscode:pack:dev": "npm run clean:build && tsc --noEmit && node esbuild.js && npx vsce package",
 		"vscode:pack": "npm run clean:build && tsc --noEmit && node esbuild.js --production && npx vsce package",
 		"package:marketplace": "cp README.md README.github.md && cp README.marketplace.md README.md && npm run vscode:pack && mv README.github.md README.md",
-		"download-api": "dts dev",
-		"postdownload-api": "yes n | dts main && node -e \"const fs = require('fs'); if (fs.existsSync('vscode.d.ts')) { fs.renameSync('vscode.d.ts', 'src/vscode.d.ts'); console.log('Moved vscode.d.ts to src/'); }\"",
+		"download-api": "dts main && mv vscode.d.ts src/ && dts dev && mv vscode.proposed.*.d.ts src/",
 		"postinstall": "npm run download-api",
 		"lint": "eslint --fix",
 		"lint:check": "eslint",

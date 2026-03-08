@@ -125,6 +125,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                         modelOptions: {},
                         tools: [],
                         toolMode: vscode.LanguageModelChatToolMode.Auto,
+                        requestInitiator: "test",
                     },
                     { report: () => {} },
                     new vscode.CancellationTokenSource().token
@@ -200,6 +201,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 modelOptions: { temperature: 0.9, top_p: 0.8 },
                 tools: [],
                 toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
             },
             { report: () => {} },
             new vscode.CancellationTokenSource().token
@@ -262,6 +264,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 modelOptions: {},
                 tools: [],
                 toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
             },
             { report: () => {} },
             new vscode.CancellationTokenSource().token
@@ -314,6 +317,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                         modelOptions: {},
                         tools: [],
                         toolMode: vscode.LanguageModelChatToolMode.Auto,
+                        requestInitiator: "test",
                     },
                     { report: () => {} },
                     token
@@ -365,6 +369,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                         modelOptions: { temperature: 0.9 },
                         tools: [],
                         toolMode: vscode.LanguageModelChatToolMode.Auto,
+                        requestInitiator: "test",
                     },
                     { report: () => {} },
                     new vscode.CancellationTokenSource().token
@@ -414,6 +419,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                         modelOptions: { temperature: 0.9 },
                         tools: [],
                         toolMode: vscode.LanguageModelChatToolMode.Auto,
+                        requestInitiator: "test",
                     },
                     { report: () => {} },
                     new vscode.CancellationTokenSource().token
@@ -459,6 +465,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                         modelOptions: {},
                         tools: [],
                         toolMode: vscode.LanguageModelChatToolMode.Auto,
+                        requestInitiator: "test",
                     },
                     { report: () => {} },
                     new vscode.CancellationTokenSource().token
@@ -608,6 +615,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 modelOptions: {},
                 tools: [],
                 toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
             },
             { report: (part) => reported.push(part) },
             new vscode.CancellationTokenSource().token

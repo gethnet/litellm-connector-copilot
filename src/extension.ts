@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { LiteLLMChatProvider } from "./providers";
+import { LiteLLMChatProviderV2 } from "./providers/liteLLMChatProviderV2";
 import { ConfigManager } from "./config/configManager";
 import {
     registerManageConfigCommand,
@@ -39,52 +40,70 @@ export function activate(context: vscode.ExtensionContext) {
 
     configManagerInstance = new ConfigManager(context.secrets);
     const configManager = configManagerInstance;
-    const chatProvider = new LiteLLMChatProvider(context.secrets, ua);
+    const chatProviderV1 = new LiteLLMChatProvider(context.secrets, ua);
+    const chatProviderV2 = new LiteLLMChatProviderV2(context.secrets, ua);
     const commitProvider = new LiteLLMCommitMessageProvider(context.secrets, ua);
+
+    // Register based on config
+    void configManager.getConfig().then((config) => {
+        const activeChatProvider = config.v2ApiEnabled ? chatProviderV2 : chatProviderV1;
+
+        // Register the LiteLLM provider under the vendor id used in package.json
+        try {
+            Logger.info(`Registering LanguageModelChatProvider (V2: ${!!config.v2ApiEnabled})...`);
+            const registration = vscode.lm.registerLanguageModelChatProvider(
+                "litellm-connector",
+                activeChatProvider as unknown as vscode.LanguageModelChatProvider
+            );
+            if (registration) {
+                context.subscriptions.push(registration);
+                Logger.info("Provider registered successfully.");
+            } else {
+                Logger.error("registerLanguageModelChatProvider returned undefined/null");
+            }
+        } catch (err) {
+            Logger.error("Failed to register provider", err);
+        }
+
+        // Management commands to configure base URL and API key
+        try {
+            context.subscriptions.push(
+                registerManageConfigCommand(
+                    context,
+                    configManager,
+                    activeChatProvider as unknown as LiteLLMChatProvider
+                )
+            );
+            context.subscriptions.push(registerShowModelsCommand(activeChatProvider as unknown as LiteLLMChatProvider));
+            context.subscriptions.push(
+                registerReloadModelsCommand(activeChatProvider as unknown as LiteLLMChatProvider)
+            );
+            context.subscriptions.push(registerCheckConnectionCommand(configManager));
+            context.subscriptions.push(
+                registerResetConfigCommand(configManager, activeChatProvider as unknown as LiteLLMChatProvider)
+            );
+            context.subscriptions.push(
+                registerSelectInlineCompletionModelCommand(activeChatProvider as unknown as LiteLLMChatProvider)
+            );
+            context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider));
+            context.subscriptions.push(
+                vscode.commands.registerCommand("litellm-connector.generateCommitMessage.selectModel", async () => {
+                    await showModelPicker(commitProvider, {
+                        title: "Select Commit Message Model",
+                        settingKey: "commitModelIdOverride",
+                    });
+                })
+            );
+            Logger.info("Config command registered.");
+        } catch (cmdErr) {
+            Logger.error("Failed to register commands", cmdErr);
+        }
+    });
 
     // Stable inline completions (optional; disabled by default)
     const inlineRegistrar = new InlineCompletionsRegistrar(context.secrets, ua, context);
     inlineRegistrar.initialize();
     context.subscriptions.push(inlineRegistrar);
-
-    // Register the LiteLLM provider under the vendor id used in package.json
-    try {
-        Logger.info("Registering LanguageModelChatProvider...");
-        const registration = vscode.lm.registerLanguageModelChatProvider("litellm-connector", chatProvider);
-        if (registration) {
-            context.subscriptions.push(registration);
-            Logger.info("Provider registered successfully.");
-        } else {
-            Logger.error("registerLanguageModelChatProvider returned undefined/null");
-        }
-    } catch (err) {
-        Logger.error("Failed to register provider", err);
-    }
-
-    // NOTE: VS Code stable 1.109 typings (and runtime) do not expose a text-completions LM provider API.
-    // Inline completions must be implemented via vscode.languages.registerInlineCompletionItemProvider instead.
-
-    // Management commands to configure base URL and API key
-    try {
-        context.subscriptions.push(registerManageConfigCommand(context, configManager, chatProvider));
-        context.subscriptions.push(registerShowModelsCommand(chatProvider));
-        context.subscriptions.push(registerReloadModelsCommand(chatProvider));
-        context.subscriptions.push(registerCheckConnectionCommand(configManager));
-        context.subscriptions.push(registerResetConfigCommand(configManager, chatProvider));
-        context.subscriptions.push(registerSelectInlineCompletionModelCommand(chatProvider));
-        context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider));
-        context.subscriptions.push(
-            vscode.commands.registerCommand("litellm-connector.generateCommitMessage.selectModel", async () => {
-                await showModelPicker(commitProvider, {
-                    title: "Select Commit Message Model",
-                    settingKey: "commitModelIdOverride",
-                });
-            })
-        );
-        Logger.info("Config command registered.");
-    } catch (cmdErr) {
-        Logger.error("Failed to register commands", cmdErr);
-    }
 
     // Note: Configuration is now primarily handled through VS Code's Language Model provider settings UI (v1.109+).
     // The legacy management command is retained for backward compatibility.

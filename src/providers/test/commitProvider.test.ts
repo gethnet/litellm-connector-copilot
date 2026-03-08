@@ -136,4 +136,60 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
         const resolved = await providerAny.resolveCommitModel(config, new vscode.CancellationTokenSource().token);
         assert.strictEqual(resolved, undefined);
     });
+
+    test("provideCommitMessage strips markdown code blocks from the generated message", async () => {
+        const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
+
+        // Seed model list
+        const providerAny = provider as unknown as { _lastModelList: vscode.LanguageModelChatInformation[] };
+        providerAny._lastModelList = [
+            {
+                id: "test-model",
+                name: "Test Model",
+                maxInputTokens: 1000,
+                maxOutputTokens: 1000,
+                capabilities: { toolCalling: true, imageInput: false },
+                tags: ["scm-generator"],
+            } as unknown as vscode.LanguageModelChatInformation,
+        ];
+
+        // Mock config
+        const configManager = (provider as unknown as { _configManager: unknown })._configManager as {
+            getConfig: () => Promise<{ url: string; key: string }>;
+        };
+        sandbox.stub(configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            key: "test-key",
+        });
+
+        // Mock LiteLLMClient.chat with markdown code blocks
+        const chatStub = sandbox.stub(LiteLLMClient.prototype, "chat");
+        chatStub.callsFake(async () => {
+            const encoder = new TextEncoder();
+            const frames = [
+                'data: {"choices":[{"delta":{"content":"```markdown\\n"}}]}\n',
+                'data: {"choices":[{"delta":{"content":"feat: "}}]}\n',
+                'data: {"choices":[{"delta":{"content":"add thing\\n"}}]}\n',
+                'data: {"choices":[{"delta":{"content":"```"}}]}\n',
+                "data: [DONE]\n\n",
+            ].join("");
+
+            return new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(encoder.encode(frames));
+                    controller.close();
+                },
+            });
+        });
+
+        const diff = "staged changes diff";
+        const result = await provider.provideCommitMessage(
+            diff,
+            { modelOptions: {} } as vscode.LanguageModelChatRequestOptions,
+            new vscode.CancellationTokenSource().token
+        );
+
+        // The expected result should have the backticks and "markdown" language tag stripped
+        assert.strictEqual(result, "feat: add thing");
+    });
 });

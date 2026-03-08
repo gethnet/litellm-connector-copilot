@@ -87,4 +87,19 @@ suite("Stream Interpreter Unit Tests", () => {
         const doneParts = interpretStreamEvent(doneEvent, state);
         assert.deepStrictEqual(doneParts, [{ type: "finish" }]);
     });
+
+    test("interprets Gemini native format", () => {
+        const state = createInitialStreamingState();
+        const event = {
+            candidates: [
+                {
+                    content: {
+                        parts: [{ text: "hello from gemini" }],
+                    },
+                },
+            ],
+        };
+        const parts = interpretStreamEvent(event, state);
+        assert.deepStrictEqual(parts, [{ type: "text", value: "hello from gemini" }]);
+    });
 });

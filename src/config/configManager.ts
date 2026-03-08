@@ -15,6 +15,7 @@ export class ConfigManager {
     private static readonly INLINE_COMPLETIONS_ENABLED_KEY = "litellm-connector.inlineCompletions.enabled";
     private static readonly INLINE_COMPLETIONS_MODEL_ID_KEY = "litellm-connector.inlineCompletions.modelId";
     private static readonly SCM_COMMIT_MSG_MODEL_ID_KEY = "litellm-connector.commitModelIdOverride";
+    private static readonly V2_API_ENABLED_KEY = "litellm-connector.experimental.v2ApiEnabled";
     constructor(private readonly secrets: vscode.SecretStorage) {}
 
     private getApiKeySecretStorageKey(ref: string): string {
@@ -65,6 +66,8 @@ export class ConfigManager {
             .getConfiguration()
             .get<string>(ConfigManager.SCM_COMMIT_MSG_MODEL_ID_KEY, "")
             .trim();
+        const v2ApiEnabled = vscode.workspace.getConfiguration().get<boolean>(ConfigManager.V2_API_ENABLED_KEY, false);
+
         return {
             url,
             key: key || undefined,
@@ -82,6 +85,7 @@ export class ConfigManager {
                       ? modelIdOverride
                       : undefined,
             commitModelIdOverride: `${scmGitCompletionsModelId}`,
+            v2ApiEnabled,
         };
     }
 
