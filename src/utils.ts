@@ -282,7 +282,7 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                 try {
                     args = JSON.stringify(part.input ?? {});
                 } catch {
-                    args = "{}";
+                    // Fallback to empty JSON if stringify fails
                 }
                 toolCalls.push({ id, type: "function", function: { name: part.name, arguments: args } });
             } else if (isToolResultPart(part)) {

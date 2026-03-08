@@ -167,7 +167,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 stream = await this.sendRequestToLiteLLM(requestBody, trackingProgress, token, caller, modelInfo);
             } catch (err: unknown) {
                 if (token.isCancellationRequested) {
-                    throw new Error("Operation cancelled by user");
+                    throw new Error("Operation cancelled by user", { cause: err });
                 }
 
                 if (err instanceof Error && err.message.includes("LiteLLM API error")) {
@@ -185,7 +185,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                         delete requestBody.stop;
 
                         if (token.isCancellationRequested) {
-                            throw new Error("Operation cancelled by user");
+                            throw new Error("Operation cancelled by user", { cause: err });
                         }
                         try {
                             stream = await this.sendRequestToLiteLLM(
@@ -224,7 +224,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                                 const parsedMessage = this.parseApiError(statusCode, errorText);
                                 retryErrorMessage = `LiteLLM Error (${model.id}): ${parsedMessage}. This model may not support certain parameters like temperature.`;
                             }
-                            throw new Error(retryErrorMessage);
+                            throw new Error(retryErrorMessage, { cause: retryErr });
                         }
                     } else {
                         throw err;
@@ -278,7 +278,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 error: errorMessage,
                 caller,
             });
-            throw new Error(errorMessage);
+            throw new Error(errorMessage, { cause: err });
         }
     }
 
