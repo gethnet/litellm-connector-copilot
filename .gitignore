@@ -11,8 +11,8 @@ node_modules
 *.vsix
 
 # Auto-generated VS Code type definitions
-**/*vscode.d.ts
-**/*vscode.proposed.*
+**/vscode.d.ts
+**/vscode.proposed.*
 
 # Logs
 logs
