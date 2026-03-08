@@ -315,7 +315,7 @@ export class LiteLLMClient {
                 await this.sleep(delayMs, options?.token);
             } catch (err: unknown) {
                 if (err instanceof Error && err.name === "AbortError") {
-                    throw new Error("Operation cancelled by user");
+                    throw new Error("Operation cancelled by user", { cause: err });
                 }
                 if (attempt >= maxRetries) {
                     throw err;

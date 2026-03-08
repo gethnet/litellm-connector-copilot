@@ -114,6 +114,7 @@ suite("LiteLLM Error Handling Unit Tests", function () {
             modelOptions: { temperature: 0.5 },
             toolMode: vscode.LanguageModelChatToolMode.Auto,
             configuration: { baseUrl: "http://localhost:4000" },
+            requestInitiator: "test",
         };
 
         // Validate retry behavior (request mutation) without depending on streaming emission.
@@ -167,6 +168,7 @@ suite("LiteLLM Error Handling Unit Tests", function () {
         const options: vscode.ProvideLanguageModelChatResponseOptions = {
             modelOptions: { temperature: 0.5 },
             toolMode: vscode.LanguageModelChatToolMode.Auto, // LanguageModelChatToolMode.Auto
+            requestInitiator: "test",
         };
 
         const progress: vscode.Progress<vscode.LanguageModelResponsePart> = {
@@ -214,7 +216,7 @@ suite("LiteLLM Error Handling Unit Tests", function () {
             await provider.provideLanguageModelChatResponse(
                 model,
                 dummyMessages,
-                { toolMode: vscode.LanguageModelChatToolMode.Auto },
+                { toolMode: vscode.LanguageModelChatToolMode.Auto, requestInitiator: "test" },
                 progress,
                 new vscode.CancellationTokenSource().token
             );

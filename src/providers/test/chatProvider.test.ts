@@ -125,6 +125,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                         modelOptions: {},
                         tools: [],
                         toolMode: vscode.LanguageModelChatToolMode.Auto,
+                        requestInitiator: "test",
                     },
                     { report: () => {} },
                     new vscode.CancellationTokenSource().token
@@ -200,6 +201,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 modelOptions: { temperature: 0.9, top_p: 0.8 },
                 tools: [],
                 toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
             },
             { report: () => {} },
             new vscode.CancellationTokenSource().token
@@ -262,6 +264,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 modelOptions: {},
                 tools: [],
                 toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
             },
             { report: () => {} },
             new vscode.CancellationTokenSource().token
@@ -314,6 +317,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                         modelOptions: {},
                         tools: [],
                         toolMode: vscode.LanguageModelChatToolMode.Auto,
+                        requestInitiator: "test",
                     },
                     { report: () => {} },
                     token
@@ -365,6 +369,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                         modelOptions: { temperature: 0.9 },
                         tools: [],
                         toolMode: vscode.LanguageModelChatToolMode.Auto,
+                        requestInitiator: "test",
                     },
                     { report: () => {} },
                     new vscode.CancellationTokenSource().token
@@ -414,6 +419,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                         modelOptions: { temperature: 0.9 },
                         tools: [],
                         toolMode: vscode.LanguageModelChatToolMode.Auto,
+                        requestInitiator: "test",
                     },
                     { report: () => {} },
                     new vscode.CancellationTokenSource().token
@@ -459,6 +465,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                         modelOptions: {},
                         tools: [],
                         toolMode: vscode.LanguageModelChatToolMode.Auto,
+                        requestInitiator: "test",
                     },
                     { report: () => {} },
                     new vscode.CancellationTokenSource().token
@@ -554,5 +561,79 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
             `Expected at least one text part, got: ${parts.map((p) => p.constructor?.name).join(", ")}`
         );
         assert.strictEqual(textParts.map((p) => p.value).join(""), "Hello");
+    });
+
+    test("provideLanguageModelChatResponse emits experimental usage data part after streaming", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const debugStub = sandbox.stub(Logger, "debug");
+
+        interface ProviderWithConfigManager {
+            _configManager: {
+                getConfig: () => Promise<{ url: string; experimentalEmitUsageData?: boolean }>;
+            };
+        }
+        const providerWithConfig = provider as unknown as ProviderWithConfigManager;
+        sandbox
+            .stub(providerWithConfig._configManager, "getConfig")
+            .resolves({ url: "http://localhost:4000", experimentalEmitUsageData: true });
+
+        const encoder = new TextEncoder();
+        sandbox.stub(LiteLLMClient.prototype, "chat").callsFake(
+            async () =>
+                new ReadableStream<Uint8Array>({
+                    start(controller) {
+                        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'));
+                        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                        controller.close();
+                    },
+                })
+        );
+        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
+
+        const model: vscode.LanguageModelChatInformation = {
+            id: "model-1",
+            name: "model-1",
+            tooltip: "",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 1000,
+            maxOutputTokens: 1000,
+            capabilities: { toolCalling: true, imageInput: false },
+        };
+
+        const reported: vscode.LanguageModelResponsePart[] = [];
+        await provider.provideLanguageModelChatResponse(
+            model,
+            [
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [new vscode.LanguageModelTextPart("hi")],
+                },
+            ],
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+            },
+            { report: (part) => reported.push(part) },
+            new vscode.CancellationTokenSource().token
+        );
+
+        const usagePart = reported.find((part) => part instanceof vscode.LanguageModelDataPart);
+        assert.ok(usagePart, "Expected a usage LanguageModelDataPart to be emitted");
+
+        const dataPart = usagePart as vscode.LanguageModelDataPart;
+        assert.strictEqual(dataPart.mimeType, "application/vnd.litellm.usage+json");
+        const payload = JSON.parse(Buffer.from(dataPart.data).toString("utf-8")) as {
+            kind: string;
+            promptTokens: number;
+            completionTokens: number;
+        };
+        assert.strictEqual(payload.kind, "usage");
+        assert.ok(payload.promptTokens > 0);
+        assert.ok(payload.completionTokens > 0);
+        assert.ok(debugStub.calledWithMatch(sinon.match(/experimental usage data part/i)));
     });
 });

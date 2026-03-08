@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import type { LiteLLMModelInfo } from "../types";
 import { isAnthropicModel } from "../utils/modelUtils";
 import { selectTokenizer } from "./tokenizers/selectTokenizer";
+import type { V2ChatMessage } from "../providers/v2Types";
 
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16000;
 export const DEFAULT_CONTEXT_LENGTH = 128000;
@@ -65,6 +66,51 @@ export function countTokens(
         return total;
     }
     return tokenizer.countMessageTokens(input as vscode.LanguageModelChatRequestMessage).tokens;
+}
+
+export function countTokensForV2Messages(
+    input: string | V2ChatMessage | readonly V2ChatMessage[],
+    modelId?: string,
+    modelInfo?: LiteLLMModelInfo
+): number {
+    if (typeof input === "string") {
+        return countTokens(input, modelId, modelInfo);
+    }
+
+    const messages = Array.isArray(input) ? input : [input];
+    let total = 0;
+    for (const message of messages) {
+        for (const part of message.content) {
+            switch (part.type) {
+                case "text":
+                    total += countTokens(part.text, modelId, modelInfo);
+                    break;
+                case "thinking":
+                    total += countTokens(
+                        Array.isArray(part.value) ? part.value.join("") : part.value,
+                        modelId,
+                        modelInfo
+                    );
+                    break;
+                case "data":
+                    if (
+                        part.mimeType.startsWith("text/") ||
+                        part.mimeType.includes("json") ||
+                        part.mimeType === "cache_control"
+                    ) {
+                        total += countTokens(Buffer.from(part.data).toString("utf-8"), modelId, modelInfo);
+                    }
+                    break;
+                case "tool_call":
+                    total += countTokens(`${part.name}${JSON.stringify(part.input ?? {})}`, modelId, modelInfo);
+                    break;
+                case "tool_result":
+                    total += countTokens(JSON.stringify(part.content ?? []), modelId, modelInfo);
+                    break;
+            }
+        }
+    }
+    return total;
 }
 
 /**
@@ -179,6 +225,75 @@ export function trimMessagesToFitBudget(
 
         // If it's a continuation, we MUST include the immediately preceding assistant message
         // to provide context for where to resume.
+        const isProtectedAssistantMessage =
+            isContinuation &&
+            i === remaining.length - 2 &&
+            msg.role === (vscode.LanguageModelChatMessageRole.Assistant as unknown as number);
+
+        if (used + msgTokens <= budget || selected.length === (systemMessage ? 1 : 0) || isProtectedAssistantMessage) {
+            selected.splice(systemMessage ? 1 : 0, 0, msg);
+            used += msgTokens;
+        } else {
+            break;
+        }
+    }
+
+    return selected;
+}
+
+export function trimV2MessagesForBudget(
+    messages: readonly V2ChatMessage[],
+    tools: { type: string; function: { name: string; description?: string; parameters?: object } }[] | undefined,
+    model: vscode.LanguageModelChatInformation,
+    modelInfo?: LiteLLMModelInfo
+): readonly V2ChatMessage[] {
+    const toolTokenCount = estimateToolTokens(tools);
+    const tokenLimit = Math.max(1, model.maxInputTokens);
+    const bufferedLimit = Math.max(1, Math.floor(tokenLimit * 0.95));
+    const safetyLimit = isAnthropicModel(model.id, modelInfo)
+        ? Math.max(1, Math.floor(bufferedLimit * 0.98))
+        : bufferedLimit;
+    const budget = safetyLimit - toolTokenCount;
+    if (budget <= 0) {
+        throw new Error("Message exceeds token limit.");
+    }
+
+    let systemMessage: V2ChatMessage | undefined;
+    const remaining: V2ChatMessage[] = [];
+    const userRole = vscode.LanguageModelChatMessageRole.User as unknown as number;
+    const assistantRole = vscode.LanguageModelChatMessageRole.Assistant as unknown as number;
+    for (const msg of messages) {
+        const roleNum = msg.role as unknown as number;
+        const isSystem = roleNum !== userRole && roleNum !== assistantRole;
+        if (!systemMessage && isSystem) {
+            systemMessage = msg;
+        } else {
+            remaining.push(msg);
+        }
+    }
+
+    const selected: V2ChatMessage[] = [];
+    let used = 0;
+
+    const lastMessage = remaining.length > 0 ? remaining[remaining.length - 1] : undefined;
+    const isContinuation =
+        lastMessage?.role === (vscode.LanguageModelChatMessageRole.User as unknown as number) &&
+        lastMessage.content.length === 1 &&
+        lastMessage.content[0]?.type === "text" &&
+        lastMessage.content[0].text.trim().toLowerCase() === "continue";
+
+    if (systemMessage) {
+        const sysTokens = countTokensForV2Messages(systemMessage, model.id, modelInfo);
+        if (sysTokens > budget) {
+            throw new Error("Message exceeds token limit.");
+        }
+        selected.push(systemMessage);
+        used += sysTokens;
+    }
+
+    for (let i = remaining.length - 1; i >= 0; i--) {
+        const msg = remaining[i];
+        const msgTokens = countTokensForV2Messages(msg, model.id, modelInfo);
         const isProtectedAssistantMessage =
             isContinuation &&
             i === remaining.length - 2 &&

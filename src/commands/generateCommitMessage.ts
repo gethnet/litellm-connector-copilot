@@ -6,6 +6,7 @@ import { Logger } from "../utils/logger";
 import { showModelPicker } from "./modelPicker";
 import { calculateAvailableContext } from "../adapters/tokenUtils";
 import { COMMIT_MESSAGE_PROMPT, COMMIT_SYSTEM_PROMPT } from "../utils/prompts";
+import { stripMarkdownCodeBlocks } from "../utils";
 
 /**
  * Registers the command to generate a git commit message.
@@ -118,9 +119,16 @@ export function registerGenerateCommitMessageCommand(provider: LiteLLMCommitMess
                             (chunk) => {
                                 accumulatedText += chunk;
                                 // Update input box incrementally (streaming effect)
-                                inputBox.value = accumulatedText;
+                                // We apply a light filter here to hide backticks/markdown tags
+                                // as they arrive, providing a cleaner UI experience.
+                                const filtered = accumulatedText
+                                    .replace(/^```(?:\w+)?\s*/, "") // Strip starting block
+                                    .replace(/```$/, ""); // Strip ending block if it just arrived
+                                inputBox.value = filtered;
                             }
                         );
+                        // Ensure final value is fully sanitized
+                        inputBox.value = stripMarkdownCodeBlocks(accumulatedText);
                     } catch (err) {
                         Logger.error("Failed to generate commit message", err);
                         vscode.window.showErrorMessage(

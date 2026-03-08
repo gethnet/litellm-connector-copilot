@@ -30,6 +30,49 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
     private _streamingState: StreamingState = createInitialStreamingState();
     private _partialAssistantText = "";
 
+    private emitExperimentalUsageData(
+        progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+        tokensIn: number,
+        tokensOut: number
+    ): void {
+        Logger.debug(
+            `Emitting experimental usage data part | promptTokens: ${tokensIn} | completionTokens: ${tokensOut}`
+        );
+        const detailsString = `Context: ${tokensIn} tokens | Output: ${tokensOut} tokens`;
+
+        // 1. Try direct DTO injection (bypassing type system)
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (progress as any).report({
+                kind: "usage",
+                promptTokens: tokensIn,
+                completionTokens: tokensOut,
+                details: detailsString,
+                metadata: {
+                    details: detailsString,
+                },
+            });
+        } catch (e) {
+            Logger.trace("Direct usage DTO injection failed", e);
+        }
+
+        // 2. Keep the DataPart probe as fallback
+        progress.report(
+            vscode.LanguageModelDataPart.json(
+                {
+                    kind: "usage",
+                    promptTokens: tokensIn,
+                    completionTokens: tokensOut,
+                    details: detailsString,
+                    metadata: {
+                        details: detailsString,
+                    },
+                },
+                "application/vnd.litellm.usage+json"
+            )
+        );
+    }
+
     async provideLanguageModelChatInformation(
         options: { silent: boolean },
         token: CancellationToken
@@ -124,7 +167,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 stream = await this.sendRequestToLiteLLM(requestBody, trackingProgress, token, caller, modelInfo);
             } catch (err: unknown) {
                 if (token.isCancellationRequested) {
-                    throw new Error("Operation cancelled by user");
+                    throw new Error("Operation cancelled by user", { cause: err });
                 }
 
                 if (err instanceof Error && err.message.includes("LiteLLM API error")) {
@@ -142,7 +185,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                         delete requestBody.stop;
 
                         if (token.isCancellationRequested) {
-                            throw new Error("Operation cancelled by user");
+                            throw new Error("Operation cancelled by user", { cause: err });
                         }
                         try {
                             stream = await this.sendRequestToLiteLLM(
@@ -166,6 +209,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                                 status: "success",
                                 caller,
                             });
+                            if (config.experimentalEmitUsageData && typeof tokensIn === "number") {
+                                this.emitExperimentalUsageData(trackingProgress, tokensIn, tokensOut);
+                            }
                             return;
                         } catch (retryErr: unknown) {
                             // If retry fails, throw a more descriptive error
@@ -178,7 +224,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                                 const parsedMessage = this.parseApiError(statusCode, errorText);
                                 retryErrorMessage = `LiteLLM Error (${model.id}): ${parsedMessage}. This model may not support certain parameters like temperature.`;
                             }
-                            throw new Error(retryErrorMessage);
+                            throw new Error(retryErrorMessage, { cause: retryErr });
                         }
                     } else {
                         throw err;
@@ -202,6 +248,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 status: "success",
                 caller,
             });
+            if (config.experimentalEmitUsageData && typeof tokensIn === "number") {
+                this.emitExperimentalUsageData(trackingProgress, tokensIn, tokensOut);
+            }
         } catch (err: unknown) {
             let errorMessage = err instanceof Error ? err.message : String(err);
             if (errorMessage.includes("LiteLLM API error")) {
@@ -229,7 +278,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 error: errorMessage,
                 caller,
             });
-            throw new Error(errorMessage);
+            throw new Error(errorMessage, { cause: err });
         }
     }
 

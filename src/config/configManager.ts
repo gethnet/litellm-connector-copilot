@@ -8,12 +8,14 @@ export class ConfigManager {
     private static readonly DEFAULT_API_KEY_SECRET_REF = "default";
     private static readonly INACTIVITY_TIMEOUT_KEY = "litellm-connector.inactivityTimeout";
     private static readonly DISABLE_CACHING_KEY = "litellm-connector.disableCaching";
+    private static readonly EXPERIMENTAL_EMIT_USAGE_DATA_KEY = "litellm-connector.experimentalEmitUsageData";
     private static readonly DISABLE_QUOTA_TOOL_REDACTION_KEY = "litellm-connector.disableQuotaToolRedaction";
     private static readonly MODEL_OVERRIDES_KEY = "litellm-connector.modelOverrides";
     private static readonly MODEL_ID_OVERRIDE_KEY = "litellm-connector.modelIdOverride";
     private static readonly INLINE_COMPLETIONS_ENABLED_KEY = "litellm-connector.inlineCompletions.enabled";
     private static readonly INLINE_COMPLETIONS_MODEL_ID_KEY = "litellm-connector.inlineCompletions.modelId";
     private static readonly SCM_COMMIT_MSG_MODEL_ID_KEY = "litellm-connector.commitModelIdOverride";
+    private static readonly V2_API_ENABLED_KEY = "litellm-connector.experimental.v2ApiEnabled";
     constructor(private readonly secrets: vscode.SecretStorage) {}
 
     private getApiKeySecretStorageKey(ref: string): string {
@@ -40,6 +42,9 @@ export class ConfigManager {
         const disableCaching = vscode.workspace
             .getConfiguration()
             .get<boolean>(ConfigManager.DISABLE_CACHING_KEY, true);
+        const experimentalEmitUsageData = vscode.workspace
+            .getConfiguration()
+            .get<boolean>(ConfigManager.EXPERIMENTAL_EMIT_USAGE_DATA_KEY, false);
         const disableQuotaToolRedaction = vscode.workspace
             .getConfiguration()
             .get<boolean>(ConfigManager.DISABLE_QUOTA_TOOL_REDACTION_KEY, false);
@@ -61,11 +66,14 @@ export class ConfigManager {
             .getConfiguration()
             .get<string>(ConfigManager.SCM_COMMIT_MSG_MODEL_ID_KEY, "")
             .trim();
+        const v2ApiEnabled = vscode.workspace.getConfiguration().get<boolean>(ConfigManager.V2_API_ENABLED_KEY, false);
+
         return {
             url,
             key: key || undefined,
             inactivityTimeout,
             disableCaching,
+            experimentalEmitUsageData,
             disableQuotaToolRedaction,
             modelOverrides,
             modelIdOverride: modelIdOverride.length > 0 ? modelIdOverride : undefined,
@@ -77,6 +85,7 @@ export class ConfigManager {
                       ? modelIdOverride
                       : undefined,
             commitModelIdOverride: `${scmGitCompletionsModelId}`,
+            v2ApiEnabled,
         };
     }
 

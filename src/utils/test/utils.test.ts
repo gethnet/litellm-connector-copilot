@@ -152,7 +152,9 @@ suite("Utility Unit Tests", () => {
             { name: "t1", description: "", inputSchema: {} },
             { name: "t2", description: "", inputSchema: {} },
         ];
-        assert.throws(() => convertTools({ tools, toolMode: vscode.LanguageModelChatToolMode.Required }));
+        assert.throws(() =>
+            convertTools({ tools, toolMode: vscode.LanguageModelChatToolMode.Required, requestInitiator: "test" })
+        );
     });
 
     test("tryParseJSONObject handles valid and invalid JSON", () => {
@@ -223,7 +225,11 @@ suite("Utility Unit Tests", () => {
             },
         ];
 
-        const res = convertTools({ tools, toolMode: vscode.LanguageModelChatToolMode.Required });
+        const res = convertTools({
+            tools,
+            toolMode: vscode.LanguageModelChatToolMode.Required,
+            requestInitiator: "test",
+        });
         assert.ok(res.tools);
         assert.strictEqual(res.tools?.length, 1);
         assert.strictEqual(res.tools?.[0].function.name, "tool_-bad_name");
@@ -244,7 +250,11 @@ suite("Utility Unit Tests", () => {
     });
 
     test("convertTools returns empty when no tools", () => {
-        const res = convertTools({ tools: [], toolMode: vscode.LanguageModelChatToolMode.Auto });
+        const res = convertTools({
+            tools: [],
+            toolMode: vscode.LanguageModelChatToolMode.Auto,
+            requestInitiator: "test",
+        });
         assert.deepStrictEqual(res, {});
     });
 

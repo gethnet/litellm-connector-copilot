@@ -12,10 +12,17 @@ import type {
     LiteLLMTokenCounterRequest,
 } from "../types";
 import { convertMessages, convertTools, validateRequest } from "../utils";
+import {
+    convertV2MessagesToOpenAI,
+    convertV2MessagesToProviderMessages,
+    normalizeMessagesForV2Pipeline,
+    validateV2Messages,
+} from "../utils";
 import { LiteLLMClient } from "../adapters/litellmClient";
 import { ResponsesClient } from "../adapters/responsesClient";
 import { transformToResponsesFormat } from "../adapters/responsesAdapter";
 import { countTokens, trimMessagesToFitBudget } from "../adapters/tokenUtils";
+import { countTokensForV2Messages, trimV2MessagesForBudget } from "../adapters/tokenUtils";
 import { ConfigManager } from "../config/configManager";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
@@ -25,6 +32,7 @@ import {
     getModelTags as getDerivedModelTags,
 } from "../utils/modelCapabilities";
 import type { DerivedModelCapabilities } from "../utils/modelCapabilities";
+import type { V2ChatMessage } from "./v2Types";
 
 const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
     "claude-3-5-sonnet": new Set(["temperature"]),
@@ -114,7 +122,7 @@ export abstract class LiteLLMProviderBase {
         options: { silent: boolean },
         token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelChatInformation[]> {
-        Logger.debug("discoverModels called");
+        Logger.trace("discoverModels called");
         try {
             const config = await this._configManager.getConfig();
             Logger.debug(`Config URL: ${config.url ? "set" : "not set"}`);
@@ -145,7 +153,7 @@ export abstract class LiteLLMProviderBase {
             }
 
             const client = new LiteLLMClient(effectiveConfig, this.userAgent);
-            Logger.debug("Fetching model info from LiteLLM...");
+            Logger.trace("Fetching model info from LiteLLM...");
             const { data } = await client.getModelInfo(token);
 
             if (!data || !Array.isArray(data)) {
@@ -483,6 +491,105 @@ export abstract class LiteLLMProviderBase {
             model.id
         );
         return requestBody;
+    }
+
+    protected async buildV2ChatRequest(
+        messages: readonly V2ChatMessage[],
+        model: LanguageModelChatInformation,
+        options: ProvideLanguageModelChatResponseOptions,
+        modelInfo?: LiteLLMModelInfo,
+        caller?: string
+    ): Promise<OpenAIChatCompletionRequest> {
+        const telemetry = this.getTelemetryOptions(options);
+        const justification = telemetry.justification;
+        const effectiveCaller = caller || telemetry.caller;
+        Logger.info(
+            `Building V2 request for model: ${model.id} | Caller: ${effectiveCaller || "unknown"} | Justification: ${
+                justification || "none"
+            }`
+        );
+
+        const toolConfig = convertTools(options);
+        const trimmedMessages = trimV2MessagesForBudget(messages, toolConfig.tools, model, modelInfo);
+        validateV2Messages(trimmedMessages);
+        const transportMessages = convertV2MessagesToProviderMessages(trimmedMessages);
+
+        const requestBody: OpenAIChatCompletionRequest = {
+            model: model.id,
+            messages: convertV2MessagesToOpenAI(trimmedMessages),
+            stream: true,
+            max_tokens:
+                typeof options.modelOptions?.max_tokens === "number"
+                    ? Math.min(options.modelOptions.max_tokens, model.maxOutputTokens)
+                    : model.maxOutputTokens,
+        };
+
+        if (this.isParameterSupported("temperature", modelInfo, model.id)) {
+            requestBody.temperature = (options.modelOptions?.temperature as number) ?? 0.7;
+        }
+        if (this.isParameterSupported("frequency_penalty", modelInfo, model.id)) {
+            requestBody.frequency_penalty = (options.modelOptions?.frequency_penalty as number) ?? 0.2;
+        }
+        if (this.isParameterSupported("presence_penalty", modelInfo, model.id)) {
+            requestBody.presence_penalty = (options.modelOptions?.presence_penalty as number) ?? 0.1;
+        }
+
+        if (options.modelOptions) {
+            const mo = options.modelOptions as Record<string, unknown>;
+            if (this.isParameterSupported("stop", modelInfo, model.id) && mo.stop) {
+                requestBody.stop = mo.stop as string | string[];
+            }
+            if (this.isParameterSupported("top_p", modelInfo, model.id) && typeof mo.top_p === "number") {
+                requestBody.top_p = mo.top_p;
+            }
+            if (
+                this.isParameterSupported("frequency_penalty", modelInfo, model.id) &&
+                typeof mo.frequency_penalty === "number"
+            ) {
+                requestBody.frequency_penalty = mo.frequency_penalty;
+            }
+            if (
+                this.isParameterSupported("presence_penalty", modelInfo, model.id) &&
+                typeof mo.presence_penalty === "number"
+            ) {
+                requestBody.presence_penalty = mo.presence_penalty;
+            }
+        }
+
+        if (toolConfig.tools) {
+            requestBody.tools = toolConfig.tools as unknown as OpenAIFunctionToolDef[];
+        }
+        if (toolConfig.tool_choice) {
+            requestBody.tool_choice = toolConfig.tool_choice;
+        }
+
+        this.stripUnsupportedParametersFromRequest(
+            requestBody as unknown as Record<string, unknown>,
+            modelInfo,
+            model.id
+        );
+
+        void transportMessages;
+
+        return requestBody;
+    }
+
+    protected normalizeMessagesForV2Pipeline(
+        messages: readonly (
+            | vscode.LanguageModelChatRequestMessage
+            | vscode.LanguageModelChatMessage2
+            | vscode.LanguageModelChatMessage
+        )[]
+    ): V2ChatMessage[] {
+        return normalizeMessagesForV2Pipeline(messages);
+    }
+
+    protected countTokensForV2Messages(
+        input: string | V2ChatMessage | readonly V2ChatMessage[],
+        modelId?: string,
+        modelInfo?: LiteLLMModelInfo
+    ): number {
+        return countTokensForV2Messages(input, modelId, modelInfo);
     }
 
     /** Sends a request to LiteLLM, with /responses fallback when applicable. */
