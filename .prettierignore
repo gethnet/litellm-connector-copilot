@@ -7,5 +7,6 @@ dist/**
 **/*.json
 **/*.mjs
 **/*vscode.d.ts
+**/*vscode.proposed.*
 .build/**
 esbuild.js
