@@ -166,6 +166,41 @@ suite("ResponsesClient sendResponsesRequest", () => {
         assert.deepStrictEqual(toolCall.input, { x: 1 });
     });
 
+    test("emits experimental usage data part when responses stream includes usage event", async () => {
+        const debugStub = sinon.stub(Logger, "debug");
+        const experimentalClient = new ResponsesClient(
+            { ...config, experimentalEmitUsageData: true } as LiteLLMConfig,
+            userAgent
+        );
+        const sse = [
+            'data: {"type":"response.output_text.delta","delta":"Hello"}\n\n',
+            'data: {"type":"response.completed","response":{"usage":{"input_tokens":12,"output_tokens":4}}}\n\n',
+            "data: [DONE]\n\n",
+        ];
+        fetchStub.resolves(new Response(readableFromStrings(sse), { status: 200 }));
+        const { progress, reported } = makeProgress();
+
+        await experimentalClient.sendResponsesRequest(
+            makeRequest(),
+            progress,
+            new vscode.CancellationTokenSource().token
+        );
+
+        const usagePart = reported.find((part) => part instanceof vscode.LanguageModelDataPart);
+        assert.ok(usagePart, "Expected a usage LanguageModelDataPart to be emitted");
+        const dataPart = usagePart as vscode.LanguageModelDataPart;
+        assert.strictEqual(dataPart.mimeType, "application/vnd.litellm.usage+json");
+        const payload = JSON.parse(Buffer.from(dataPart.data).toString("utf-8")) as {
+            kind: string;
+            promptTokens: number;
+            completionTokens: number;
+        };
+        assert.strictEqual(payload.kind, "usage");
+        assert.strictEqual(payload.promptTokens, 12);
+        assert.strictEqual(payload.completionTokens, 4);
+        assert.ok(debugStub.calledWithMatch(sinon.match(/experimental usage data part/i)));
+    });
+
     test("handles partial lines across chunks", async () => {
         const client = makeClient();
         const chunks = ['data: {"type":"response.output_text.delta","delta":"Hello"}', "\n\ndata: [DONE]\n"];

@@ -7,6 +7,7 @@ import { countTokens } from "../adapters/tokenUtils";
 import { decodeSSE } from "../adapters/sse/sseDecoder";
 import { createInitialStreamingState, interpretStreamEvent } from "../adapters/streaming/liteLLMStreamInterpreter";
 import { COMMIT_MESSAGE_PROMPT, COMMIT_SYSTEM_PROMPT } from "../utils/prompts";
+import { stripMarkdownCodeBlocks } from "../utils";
 
 /**
  * Provider for generating Git commit messages using LiteLLM.
@@ -107,8 +108,11 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
             // Extract the final text from the stream
             const commitMessage = await this.extractTextFromStream(stream, token, onProgress);
 
+            // Sanitize the message by stripping markdown code blocks
+            const sanitizedMessage = stripMarkdownCodeBlocks(commitMessage);
+
             // Estimate tokensOut from the generated text
-            const tokensOut = countTokens(commitMessage, model.id, modelInfo);
+            const tokensOut = countTokens(sanitizedMessage, model.id, modelInfo);
 
             LiteLLMTelemetry.reportMetric({
                 requestId,
@@ -120,7 +124,7 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
                 caller: "scm-generator",
             });
 
-            return commitMessage.trim();
+            return sanitizedMessage;
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : String(err);
             Logger.error(`Commit message generation failed: ${errorMsg}`, err);

@@ -5,12 +5,24 @@ import type {
     ProvideLanguageModelChatResponseOptions,
 } from "vscode";
 
-import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, OpenAIFunctionToolDef } from "../types";
+import type {
+    LiteLLMModelInfo,
+    OpenAIChatCompletionRequest,
+    OpenAIFunctionToolDef,
+    LiteLLMTokenCounterRequest,
+} from "../types";
 import { convertMessages, convertTools, validateRequest } from "../utils";
+import {
+    convertV2MessagesToOpenAI,
+    convertV2MessagesToProviderMessages,
+    normalizeMessagesForV2Pipeline,
+    validateV2Messages,
+} from "../utils";
 import { LiteLLMClient } from "../adapters/litellmClient";
 import { ResponsesClient } from "../adapters/responsesClient";
 import { transformToResponsesFormat } from "../adapters/responsesAdapter";
 import { countTokens, trimMessagesToFitBudget } from "../adapters/tokenUtils";
+import { countTokensForV2Messages, trimV2MessagesForBudget } from "../adapters/tokenUtils";
 import { ConfigManager } from "../config/configManager";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
@@ -20,6 +32,7 @@ import {
     getModelTags as getDerivedModelTags,
 } from "../utils/modelCapabilities";
 import type { DerivedModelCapabilities } from "../utils/modelCapabilities";
+import type { V2ChatMessage } from "./v2Types";
 
 const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
     "claude-3-5-sonnet": new Set(["temperature"]),
@@ -35,6 +48,7 @@ const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
     "o1-preview": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
     "o1-mini": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
     "o1-": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
+    "gpt-5-mini": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
 };
 
 /**
@@ -52,6 +66,9 @@ const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
  */
 export abstract class LiteLLMProviderBase {
     protected readonly _configManager: ConfigManager;
+    protected readonly _onDidChangeLanguageModelChatInformationEmitter = new vscode.EventEmitter<void>();
+    readonly onDidChangeLanguageModelChatInformation = this._onDidChangeLanguageModelChatInformationEmitter.event;
+
     protected readonly _modelInfoCache = new Map<string, LiteLLMModelInfo | undefined>();
     protected readonly _derivedCapabilitiesCache = new Map<string, DerivedModelCapabilities>();
     protected readonly _parameterProbeCache = new Map<string, Set<string>>();
@@ -65,6 +82,12 @@ export abstract class LiteLLMProviderBase {
         this._configManager = new ConfigManager(secrets);
     }
 
+    /** Signals VS Code to refresh the Language Models view for this provider. */
+    public refreshModelInformation(): void {
+        Logger.info("Firing onDidChangeLanguageModelChatInformation");
+        this._onDidChangeLanguageModelChatInformationEmitter.fire();
+    }
+
     /** Clears all model-related caches (model list, model info, parameter probe). */
     public clearModelCache(): void {
         Logger.info("Clearing model discovery cache");
@@ -73,6 +96,8 @@ export abstract class LiteLLMProviderBase {
         this._parameterProbeCache.clear();
         this._lastModelList = [];
         this._modelListFetchedAtMs = 0;
+        this.refreshModelInformation();
+        Logger.info("Cleared cache");
     }
 
     /** Returns the last discovered model list (may be empty if never fetched). */
@@ -97,7 +122,7 @@ export abstract class LiteLLMProviderBase {
         options: { silent: boolean },
         token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelChatInformation[]> {
-        Logger.debug("discoverModels called");
+        Logger.trace("discoverModels called");
         try {
             const config = await this._configManager.getConfig();
             Logger.debug(`Config URL: ${config.url ? "set" : "not set"}`);
@@ -128,7 +153,7 @@ export abstract class LiteLLMProviderBase {
             }
 
             const client = new LiteLLMClient(effectiveConfig, this.userAgent);
-            Logger.debug("Fetching model info from LiteLLM...");
+            Logger.trace("Fetching model info from LiteLLM...");
             const { data } = await client.getModelInfo(token);
 
             if (!data || !Array.isArray(data)) {
@@ -140,6 +165,7 @@ export abstract class LiteLLMProviderBase {
             const infos: LanguageModelChatInformation[] = data.map(
                 (entry: { model_info?: LiteLLMModelInfo; model_name?: string }, index: number) => {
                     const modelId = entry.model_info?.key ?? entry.model_name ?? `model-${index}`;
+                    // const modelId = entry.model_info?.id ?? entry.model_info?.key ?? `model-${index}`;
                     const modelInfo = entry.model_info;
                     this._modelInfoCache.set(modelId, modelInfo);
 
@@ -163,23 +189,40 @@ export abstract class LiteLLMProviderBase {
                     const outputDesc = formatTokens(derived.maxOutputTokens);
                     const tooltip = `${modelInfo?.litellm_provider ?? "LiteLLM"} (${modelInfo?.mode ?? "responses"}) — Context: ${inputDesc} in / ${outputDesc} out`;
 
-                    return {
+                    // Derive family from provider to help Copilot shape requests correctly
+                    const provider = modelInfo?.litellm_provider?.toLowerCase();
+                    let family = "litellm";
+                    if (provider === "openai") {
+                        family = "gpt4";
+                    } else if (provider === "anthropic") {
+                        family = "claude";
+                    }
+
+                    const info = {
                         id: modelId,
                         name: entry.model_name ?? modelId,
                         tooltip,
-                        detail: `↑${inputDesc} ↓${outputDesc}`,
-                        family: "litellm",
+                        detail: `Context: ${inputDesc} | Output: ${outputDesc}`,
+                        family: family,
                         version: "1.0.0",
                         maxInputTokens: derived.rawContextWindow,
                         maxOutputTokens: derived.maxOutputTokens,
                         capabilities,
                         tags,
-                    } as LanguageModelChatInformation;
+                    };
+
+                    return info as vscode.LanguageModelChatInformation;
                 }
             );
 
+            const hasChanged = JSON.stringify(this._lastModelList) !== JSON.stringify(infos);
             this._lastModelList = infos;
             this._modelListFetchedAtMs = Date.now();
+
+            if (hasChanged) {
+                this.refreshModelInformation();
+            }
+
             return infos;
         } catch (err) {
             Logger.error("Failed to fetch models", err);
@@ -193,12 +236,90 @@ export abstract class LiteLLMProviderBase {
     async provideTokenCount(
         model: vscode.LanguageModelChatInformation,
         text: string | vscode.LanguageModelChatRequestMessage,
-        _token: vscode.CancellationToken
+        token: vscode.CancellationToken
     ): Promise<number> {
         const modelInfo = this._modelInfoCache.get(model.id);
-        const count = countTokens(text, model.id, modelInfo);
-        // Logger.debug(`provideTokenCount called for model ${model.id}: ${count} tokens`);
-        return count;
+
+        // Always calculate local count first for immediate response
+        const localCount = countTokens(text, model.id, modelInfo);
+
+        // For very small strings, local count is sufficient and avoids any overhead
+        if (typeof text === "string" && text.length < 200) {
+            return localCount;
+        }
+
+        const contentKey = typeof text === "string" ? text : JSON.stringify(text);
+        const cacheKey = `${model.id}:${contentKey}`;
+
+        const cached = tokenCountCache.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+            return cached.count;
+        }
+
+        // Check if there's already a pending background request for this content
+        if (pendingRequests.has(cacheKey)) {
+            // We return the local count immediately but don't block.
+            // The NEXT call will likely get the cached value once the pending one resolves.
+            return localCount;
+        }
+
+        // Kick off background refinement without awaiting it
+        this.refineTokenCountInBackground(model, text, cacheKey, token).catch((err) => {
+            Logger.trace(`Background token refinement failed (expected during rapid updates): ${err.message}`);
+        });
+
+        // Return local count immediately to keep UI responsive
+        return localCount;
+    }
+
+    /**
+     * Refines the token count in the background using LiteLLM and updates the cache.
+     */
+    private async refineTokenCountInBackground(
+        model: vscode.LanguageModelChatInformation,
+        text: string | vscode.LanguageModelChatRequestMessage,
+        cacheKey: string,
+        token: vscode.CancellationToken
+    ): Promise<void> {
+        // Debounce: Wait a bit to see if more requests for the same content come in
+        await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS));
+        if (token.isCancellationRequested) {
+            return;
+        }
+
+        const promise = (async () => {
+            try {
+                const config = await this._configManager.getConfig();
+                if (!config.url) {
+                    return 0;
+                }
+
+                const client = new LiteLLMClient(config, this.userAgent);
+                const request: LiteLLMTokenCounterRequest = { model: model.id };
+
+                if (typeof text === "string") {
+                    request.prompt = text;
+                } else {
+                    request.messages = convertMessages([text]);
+                }
+
+                const response = await client.countTokens(request, token);
+                tokenCountCache.set(cacheKey, { count: response.token_count, timestamp: Date.now() });
+
+                // Cleanup cache if it grows too large
+                if (tokenCountCache.size > 200) {
+                    const keys = Array.from(tokenCountCache.keys());
+                    tokenCountCache.delete(keys[0]);
+                }
+
+                return response.token_count;
+            } finally {
+                pendingRequests.delete(cacheKey);
+            }
+        })();
+
+        pendingRequests.set(cacheKey, promise);
+        await promise;
     }
 
     /**
@@ -305,6 +426,16 @@ export abstract class LiteLLMProviderBase {
         const openaiMessages = convertMessages(messagesToUse);
         validateRequest(messagesToUse);
 
+        Logger.debug(
+            `[buildOpenAIChatRequest] Final message count: ${openaiMessages.length}, Tool count: ${options.tools?.length ?? 0}`
+        );
+        if (openaiMessages.some((m) => m.tool_calls?.length || m.role === "tool")) {
+            const ids = openaiMessages.flatMap(
+                (m) => m.tool_calls?.map((tc) => tc.id) || (m.tool_call_id ? [m.tool_call_id] : [])
+            );
+            Logger.trace(`[buildOpenAIChatRequest] Tool IDs in request: ${ids.join(", ")}`);
+        }
+
         const requestBody: OpenAIChatCompletionRequest = {
             model: model.id,
             messages: openaiMessages,
@@ -360,6 +491,105 @@ export abstract class LiteLLMProviderBase {
             model.id
         );
         return requestBody;
+    }
+
+    protected async buildV2ChatRequest(
+        messages: readonly V2ChatMessage[],
+        model: LanguageModelChatInformation,
+        options: ProvideLanguageModelChatResponseOptions,
+        modelInfo?: LiteLLMModelInfo,
+        caller?: string
+    ): Promise<OpenAIChatCompletionRequest> {
+        const telemetry = this.getTelemetryOptions(options);
+        const justification = telemetry.justification;
+        const effectiveCaller = caller || telemetry.caller;
+        Logger.info(
+            `Building V2 request for model: ${model.id} | Caller: ${effectiveCaller || "unknown"} | Justification: ${
+                justification || "none"
+            }`
+        );
+
+        const toolConfig = convertTools(options);
+        const trimmedMessages = trimV2MessagesForBudget(messages, toolConfig.tools, model, modelInfo);
+        validateV2Messages(trimmedMessages);
+        const transportMessages = convertV2MessagesToProviderMessages(trimmedMessages);
+
+        const requestBody: OpenAIChatCompletionRequest = {
+            model: model.id,
+            messages: convertV2MessagesToOpenAI(trimmedMessages),
+            stream: true,
+            max_tokens:
+                typeof options.modelOptions?.max_tokens === "number"
+                    ? Math.min(options.modelOptions.max_tokens, model.maxOutputTokens)
+                    : model.maxOutputTokens,
+        };
+
+        if (this.isParameterSupported("temperature", modelInfo, model.id)) {
+            requestBody.temperature = (options.modelOptions?.temperature as number) ?? 0.7;
+        }
+        if (this.isParameterSupported("frequency_penalty", modelInfo, model.id)) {
+            requestBody.frequency_penalty = (options.modelOptions?.frequency_penalty as number) ?? 0.2;
+        }
+        if (this.isParameterSupported("presence_penalty", modelInfo, model.id)) {
+            requestBody.presence_penalty = (options.modelOptions?.presence_penalty as number) ?? 0.1;
+        }
+
+        if (options.modelOptions) {
+            const mo = options.modelOptions as Record<string, unknown>;
+            if (this.isParameterSupported("stop", modelInfo, model.id) && mo.stop) {
+                requestBody.stop = mo.stop as string | string[];
+            }
+            if (this.isParameterSupported("top_p", modelInfo, model.id) && typeof mo.top_p === "number") {
+                requestBody.top_p = mo.top_p;
+            }
+            if (
+                this.isParameterSupported("frequency_penalty", modelInfo, model.id) &&
+                typeof mo.frequency_penalty === "number"
+            ) {
+                requestBody.frequency_penalty = mo.frequency_penalty;
+            }
+            if (
+                this.isParameterSupported("presence_penalty", modelInfo, model.id) &&
+                typeof mo.presence_penalty === "number"
+            ) {
+                requestBody.presence_penalty = mo.presence_penalty;
+            }
+        }
+
+        if (toolConfig.tools) {
+            requestBody.tools = toolConfig.tools as unknown as OpenAIFunctionToolDef[];
+        }
+        if (toolConfig.tool_choice) {
+            requestBody.tool_choice = toolConfig.tool_choice;
+        }
+
+        this.stripUnsupportedParametersFromRequest(
+            requestBody as unknown as Record<string, unknown>,
+            modelInfo,
+            model.id
+        );
+
+        void transportMessages;
+
+        return requestBody;
+    }
+
+    protected normalizeMessagesForV2Pipeline(
+        messages: readonly (
+            | vscode.LanguageModelChatRequestMessage
+            | vscode.LanguageModelChatMessage2
+            | vscode.LanguageModelChatMessage
+        )[]
+    ): V2ChatMessage[] {
+        return normalizeMessagesForV2Pipeline(messages);
+    }
+
+    protected countTokensForV2Messages(
+        input: string | V2ChatMessage | readonly V2ChatMessage[],
+        modelId?: string,
+        modelInfo?: LiteLLMModelInfo
+    ): number {
+        return countTokensForV2Messages(input, modelId, modelInfo);
     }
 
     /** Sends a request to LiteLLM, with /responses fallback when applicable. */
@@ -611,3 +841,15 @@ export abstract class LiteLLMProviderBase {
         return `API request failed with status ${statusCode}`;
     }
 }
+
+/**
+ * Simple in-memory cache for token counts to avoid redundant network calls.
+ */
+const tokenCountCache = new Map<string, { count: number; timestamp: number }>();
+const CACHE_TTL_MS = 60000; // Increase to 1 minute for better stability
+const DEBOUNCE_MS = 300;
+
+/**
+ * Tracks pending background token count requests to avoid redundant network calls.
+ */
+const pendingRequests = new Map<string, Promise<number>>();

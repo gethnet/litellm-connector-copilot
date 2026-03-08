@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import type { V2ChatMessage, V2MessagePart } from "./providers/v2Types";
 import type {
     OpenAIChatMessage,
     OpenAIChatRole,
@@ -12,23 +13,36 @@ import type {
  * VS Code tool call ids can be longer; LiteLLM/OpenAI will reject them.
  *
  * Strategy:
- * - Keep short ids as-is.
+ * - Always ensure IDs start with 'fc_' to satisfy strict models (e.g. gpt-5.3-codex).
  * - For longer ids, deterministically shrink to <= 40 using a stable hash.
  * - Preserve a readable prefix for debugging.
  */
 export function normalizeToolCallId(id: string, maxLen = 40): string {
     const raw = (id || "").trim();
+    const prefix = "fc_";
+
     if (!raw) {
-        return "tc_" + stableHash("empty").slice(0, maxLen - 3);
+        const generated = prefix + stableHash("empty").slice(0, maxLen - prefix.length);
+        Logger.trace(`[normalizeToolCallId] Empty ID provided, generated: ${generated}`);
+        return generated;
     }
-    if (raw.length <= maxLen) {
+
+    // If it already starts with fc_ and is short enough, keep it
+    if (raw.startsWith(prefix) && raw.length <= maxLen) {
+        Logger.trace(`[normalizeToolCallId] Valid ID kept as-is: ${raw}`);
         return raw;
     }
 
-    const prefix = raw.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 10);
-    const hash = stableHash(raw); // 64 hex chars
-    const out = `tc_${prefix}_${hash}`;
-    return out.length <= maxLen ? out : out.slice(0, maxLen);
+    // Otherwise, normalize it to ensure it starts with fc_
+    // Strip common prefixes we want to replace to keep the middle part readable
+    const cleanRaw = raw.replace(/^call_|^tc_/, "");
+    const safeMiddle = cleanRaw.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 10);
+    const hash = stableHash(raw); // Hash the FULL original ID for stability
+    const out = `${prefix}${safeMiddle}_${hash}`;
+    const final = out.length <= maxLen ? out : out.slice(0, maxLen);
+
+    Logger.trace(`[normalizeToolCallId] ID normalized to satisfy prefix/length: ${raw} -> ${final}`);
+    return final;
 }
 
 function stableHash(input: string): string {
@@ -107,6 +121,35 @@ function pruneUnknownSchemaKeywords(schema: unknown): Record<string, unknown> {
         }
     }
     return out;
+}
+
+/**
+ * Strips Markdown code blocks from a string.
+ * If the string contains triple backticks, it extracts the content inside them.
+ * If multiple code blocks exist, it joins them.
+ * If no code blocks exist, it returns the original string trimmed.
+ */
+export function stripMarkdownCodeBlocks(text: string): string {
+    const trimmed = text.trim();
+    if (!trimmed.includes("```")) {
+        return trimmed;
+    }
+
+    // Regex to match code blocks: ```[lang]\n(content)\n```
+    // Supports optional language tag and handles non-greedy matching for content.
+    const codeBlockRegex = /```(?:\w+)?\s*([\s\S]*?)\s*```/g;
+    const matches = [...trimmed.matchAll(codeBlockRegex)];
+
+    if (matches.length > 0) {
+        return matches
+            .map((m) => m[1].trim())
+            .filter((content) => content.length > 0)
+            .join("\n\n");
+    }
+
+    // Fallback: if there are backticks but no complete block match,
+    // just strip the backticks themselves as a safety measure.
+    return trimmed.replace(/```/g, "").trim();
 }
 
 function sanitizeSchema(input: unknown, propName?: string): Record<string, unknown> {
@@ -200,7 +243,6 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                 // Handle image and other data parts
                 if (part.mimeType.startsWith("image/")) {
                     // Convert image data to base64 for OpenAI vision API
-                    // Properly handle Uint8Array to ensure cross-platform compatibility
                     let base64Data: string;
                     if (part.data instanceof Uint8Array) {
                         base64Data = Buffer.from(part.data).toString("base64");
@@ -215,21 +257,39 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                             url: `data:${part.mimeType};base64,${base64Data}`,
                         },
                     });
+                } else if (part.mimeType.startsWith("application/json")) {
+                    // Handle JSON data parts by decoding and appending as text
+                    const jsonStr = Buffer.from(part.data).toString("utf-8");
+                    textParts.push(jsonStr);
+                } else if (part.mimeType.startsWith("text/")) {
+                    // Handle explicit text data parts
+                    const textStr = Buffer.from(part.data).toString("utf-8");
+                    textParts.push(textStr);
+                } else if (part.mimeType === "cache_control") {
+                    // Handle cache_control data parts (e.g. for prompt caching)
+                    // We log this for now to verify it's being received;
+                    // actual implementation depends on the specific provider support in LiteLLM.
+                    Logger.trace(
+                        `[convertMessages] Received cache_control part: ${Buffer.from(part.data).toString("utf-8")}`
+                    );
                 }
-                // Other data types (json, etc.) can be handled here if needed in the future
             } else if (part instanceof vscode.LanguageModelToolCallPart) {
                 const id = normalizeToolCallId(
                     part.callId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
                 );
+                Logger.trace(`[convertMessages] Tool call: ${part.name} (orig: ${part.callId}, norm: ${id})`);
                 let args = "{}";
                 try {
                     args = JSON.stringify(part.input ?? {});
                 } catch {
-                    args = "{}";
+                    // Fallback to empty JSON if stringify fails
                 }
                 toolCalls.push({ id, type: "function", function: { name: part.name, arguments: args } });
             } else if (isToolResultPart(part)) {
                 const callId = normalizeToolCallId((part as { callId?: string }).callId ?? "");
+                Logger.trace(
+                    `[convertMessages] Tool result: (orig: ${(part as { callId?: string }).callId}, norm: ${callId})`
+                );
                 const content = collectToolResultText(part as { content?: ReadonlyArray<unknown> });
                 toolResults.push({ callId, content });
             }
@@ -257,6 +317,217 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
         }
     }
     return out;
+}
+
+function toUint8Array(data: unknown): Uint8Array {
+    if (data instanceof Uint8Array) {
+        return data;
+    }
+    if (typeof data === "string") {
+        return Buffer.from(data, "utf-8");
+    }
+    if (data instanceof ArrayBuffer) {
+        return new Uint8Array(data);
+    }
+    return Buffer.from(JSON.stringify(data ?? null), "utf-8");
+}
+
+function decodeV2DataPart(part: Extract<V2MessagePart, { type: "data" }>): string | undefined {
+    if (part.mimeType.startsWith("text/") || part.mimeType.includes("json") || part.mimeType === "cache_control") {
+        return Buffer.from(part.data).toString("utf-8");
+    }
+    return undefined;
+}
+
+export function normalizeMessagesForV2Pipeline(
+    messages: readonly (
+        | vscode.LanguageModelChatRequestMessage
+        | vscode.LanguageModelChatMessage2
+        | vscode.LanguageModelChatMessage
+    )[]
+): V2ChatMessage[] {
+    return messages.map((message) => {
+        const content: V2MessagePart[] = [];
+        for (const part of message.content ?? []) {
+            if (part instanceof vscode.LanguageModelTextPart) {
+                content.push({ type: "text", text: part.value });
+                continue;
+            }
+            if (part instanceof vscode.LanguageModelDataPart) {
+                content.push({
+                    type: "data",
+                    mimeType: part.mimeType,
+                    data: toUint8Array(part.data),
+                });
+                continue;
+            }
+            if (part instanceof vscode.LanguageModelToolCallPart) {
+                content.push({
+                    type: "tool_call",
+                    callId: part.callId,
+                    name: part.name,
+                    input: part.input,
+                });
+                continue;
+            }
+            if (isToolResultPart(part)) {
+                content.push({
+                    type: "tool_result",
+                    callId: (part as { callId: string }).callId,
+                    content: (part as { content: ReadonlyArray<unknown> }).content ?? [],
+                });
+                continue;
+            }
+
+            const maybeThinking = part as {
+                value?: string | string[];
+                id?: string;
+                metadata?: Record<string, unknown>;
+            };
+            if (typeof maybeThinking?.value === "string" || Array.isArray(maybeThinking?.value)) {
+                content.push({
+                    type: "thinking",
+                    value: maybeThinking.value,
+                    id: maybeThinking.id,
+                    metadata: maybeThinking.metadata,
+                });
+            }
+        }
+
+        return {
+            role: message.role,
+            name: message.name,
+            content,
+        };
+    });
+}
+
+export function convertV2MessagesToProviderMessages(
+    messages: readonly V2ChatMessage[]
+): vscode.LanguageModelChatRequestMessage[] {
+    const downgraded: vscode.LanguageModelChatRequestMessage[] = messages.map((message) => {
+        const content: Array<vscode.LanguageModelInputPart | unknown> = [];
+
+        for (const part of message.content) {
+            switch (part.type) {
+                case "text":
+                    content.push(new vscode.LanguageModelTextPart(part.text));
+                    break;
+                case "data":
+                    if (part.mimeType.startsWith("image/")) {
+                        content.push(new vscode.LanguageModelDataPart(part.data, part.mimeType));
+                    } else if (part.mimeType.startsWith("text/")) {
+                        content.push(new vscode.LanguageModelDataPart(part.data, part.mimeType));
+                    }
+                    break;
+                case "thinking":
+                    break;
+                case "tool_call":
+                    content.push(
+                        new vscode.LanguageModelToolCallPart(
+                            part.callId,
+                            part.name,
+                            (part.input ?? {}) as Record<string, unknown>
+                        )
+                    );
+                    break;
+                case "tool_result":
+                    content.push(new vscode.LanguageModelToolResultPart(part.callId, [...part.content]));
+                    break;
+            }
+        }
+
+        return {
+            role: message.role,
+            name: message.name,
+            content,
+        } as vscode.LanguageModelChatRequestMessage;
+    });
+
+    return downgraded;
+}
+
+export function convertV2MessagesToOpenAI(messages: readonly V2ChatMessage[]): OpenAIChatMessage[] {
+    return convertMessages(convertV2MessagesToTransportMessages(messages));
+}
+
+export function convertV2MessagesToTransportMessages(
+    messages: readonly V2ChatMessage[]
+): vscode.LanguageModelChatRequestMessage[] {
+    return messages.map((message) => {
+        const content: Array<vscode.LanguageModelInputPart | unknown> = [];
+
+        for (const part of message.content) {
+            switch (part.type) {
+                case "text":
+                    content.push(new vscode.LanguageModelTextPart(part.text));
+                    break;
+                case "data":
+                    if (part.mimeType.startsWith("image/")) {
+                        content.push(new vscode.LanguageModelDataPart(part.data, part.mimeType));
+                    } else {
+                        const decoded = decodeV2DataPart(part);
+                        if (decoded) {
+                            content.push(new vscode.LanguageModelTextPart(decoded));
+                        }
+                    }
+                    break;
+                case "thinking":
+                    content.push(
+                        new vscode.LanguageModelTextPart(Array.isArray(part.value) ? part.value.join("") : part.value)
+                    );
+                    break;
+                case "tool_call":
+                    content.push(
+                        new vscode.LanguageModelToolCallPart(
+                            part.callId,
+                            part.name,
+                            (part.input ?? {}) as Record<string, unknown>
+                        )
+                    );
+                    break;
+                case "tool_result":
+                    content.push(new vscode.LanguageModelToolResultPart(part.callId, [...part.content]));
+                    break;
+            }
+        }
+
+        return {
+            role: message.role,
+            name: message.name,
+            content,
+        } as vscode.LanguageModelChatRequestMessage;
+    });
+}
+
+export function validateV2Messages(messages: readonly V2ChatMessage[]): void {
+    const downgraded = messages.map((message) => ({
+        role: message.role,
+        name: message.name,
+        content: message.content
+            .filter((part) => part.type !== "thinking")
+            .map((part) => {
+                switch (part.type) {
+                    case "text":
+                        return new vscode.LanguageModelTextPart(part.text);
+                    case "data":
+                        return new vscode.LanguageModelDataPart(part.data, part.mimeType);
+                    case "tool_call":
+                        return new vscode.LanguageModelToolCallPart(
+                            part.callId,
+                            part.name,
+                            (part.input ?? {}) as Record<string, unknown>
+                        );
+                    case "tool_result":
+                        return new vscode.LanguageModelToolResultPart(part.callId, [...part.content]);
+                    default:
+                        return undefined;
+                }
+            })
+            .filter((part): part is vscode.LanguageModelInputPart => part !== undefined),
+    })) as vscode.LanguageModelChatRequestMessage[];
+
+    validateRequest(downgraded);
 }
 
 /**

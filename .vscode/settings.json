@@ -12,6 +12,7 @@
     "chat.tools.terminal.autoApprove": {
         "/^npm .*$/": true,
         "xvfb-run": true,
-        "npx vscode-test": true
+        "npx vscode-test": true,
+        "npx tsc": true
     }
 }

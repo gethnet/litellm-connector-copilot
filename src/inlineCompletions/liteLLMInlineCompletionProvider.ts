@@ -69,7 +69,7 @@ export class LiteLLMInlineCompletionProvider implements vscode.InlineCompletionI
         }
 
         if (!config.url) {
-            Logger.debug("Inline completions: missing baseUrl; returning no items");
+            Logger.info("Inline completions: missing baseUrl; returning no items");
             LiteLLMTelemetry.reportMetric({
                 requestId,
                 model: config.inlineCompletionsModelId ?? "unset",
@@ -83,7 +83,7 @@ export class LiteLLMInlineCompletionProvider implements vscode.InlineCompletionI
 
         const modelId = config.inlineCompletionsModelId;
         if (!modelId) {
-            Logger.debug("Inline completions: no model configured; returning no items");
+            Logger.info("Inline completions: no model configured; returning no items");
             LiteLLMTelemetry.reportMetric({
                 requestId,
                 model: "unset",
