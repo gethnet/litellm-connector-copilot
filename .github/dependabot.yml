@@ -8,9 +8,9 @@ updates:
     labels:
       - "chore:dependencies"
     ignore:
-      - dependency-name: "node"
-        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
-
+      # Ignore @types/node updates beyond version 22
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
