@@ -74,6 +74,7 @@ export abstract class LiteLLMProviderBase {
     protected readonly _parameterProbeCache = new Map<string, Set<string>>();
     protected _lastModelList: LanguageModelChatInformation[] = [];
     protected _modelListFetchedAtMs = 0;
+    private _inFlightDiscovery: Promise<vscode.LanguageModelChatInformation[]> | undefined;
 
     constructor(
         protected readonly secrets: vscode.SecretStorage,
@@ -119,6 +120,33 @@ export abstract class LiteLLMProviderBase {
      * the same discovery + tag logic.
      */
     public async discoverModels(
+        options: { silent: boolean },
+        token: vscode.CancellationToken
+    ): Promise<vscode.LanguageModelChatInformation[]> {
+        if (this._inFlightDiscovery) {
+            Logger.trace("Returning in-flight discovery promise");
+            return this._inFlightDiscovery;
+        }
+
+        const TTL_MS = 30000; // 30 seconds
+        const now = Date.now();
+        if (options.silent && this._lastModelList.length > 0 && now - this._modelListFetchedAtMs < TTL_MS) {
+            Logger.trace("Returning cached models (within TTL)");
+            return this._lastModelList;
+        }
+
+        this._inFlightDiscovery = (async () => {
+            try {
+                return await this._doDiscoverModels(options, token);
+            } finally {
+                this._inFlightDiscovery = undefined;
+            }
+        })();
+
+        return this._inFlightDiscovery;
+    }
+
+    private async _doDiscoverModels(
         options: { silent: boolean },
         token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelChatInformation[]> {
