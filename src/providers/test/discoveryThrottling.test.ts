@@ -23,6 +23,10 @@ suite("LiteLLM Discovery Throttling Tests", () => {
 
     const userAgent = "Test/1.0";
 
+    function createProvider() {
+        return new LiteLLMChatProvider(mockSecrets, userAgent);
+    }
+
     setup(() => {
         sandbox = sinon.createSandbox();
     });
@@ -32,9 +36,9 @@ suite("LiteLLM Discovery Throttling Tests", () => {
     });
 
     test("discoverModels should deduplicate in-flight requests", async () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const provider = createProvider();
         const getModelInfoStub = sandbox.stub(LiteLLMClient.prototype, "getModelInfo").callsFake(async () => {
-            await new Promise((resolve) => setTimeout(resolve, 50));
+            await new Promise((resolve) => setTimeout(resolve, 100));
             return { data: [{ model_name: "test-model" }] };
         });
 
@@ -44,24 +48,22 @@ suite("LiteLLM Discovery Throttling Tests", () => {
 
         await Promise.all([p1, p2]);
 
-        // BUG: Currently this will be 2 because there is no deduplication
         assert.strictEqual(getModelInfoStub.callCount, 1, "Should only call LiteLLM once for concurrent requests");
     });
 
     test("discoverModels should respect TTL for subsequent calls", async () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const provider = createProvider();
         const getModelInfoStub = sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({
             data: [{ model_name: "test-model" }],
         });
 
         // First call
         await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
-        assert.strictEqual(getModelInfoStub.callCount, 1);
+        assert.strictEqual(getModelInfoStub.callCount, 1, "First call should hit LiteLLM");
 
         // Second call immediately after
         await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
 
-        // BUG: Currently this will be 2 because there is no TTL check
-        assert.strictEqual(getModelInfoStub.callCount, 1, "Should return cached models within TTL");
+        assert.strictEqual(getModelInfoStub.callCount, 1, "Second call should return cached models within TTL");
     });
 });
