@@ -22,6 +22,7 @@ suite("LiteLLM Discovery Throttling Tests", () => {
     } as unknown as vscode.SecretStorage;
 
     const userAgent = "Test/1.0";
+    let clock: sinon.SinonFakeTimers;
 
     function createProvider() {
         return new LiteLLMChatProvider(mockSecrets, userAgent);
@@ -29,6 +30,7 @@ suite("LiteLLM Discovery Throttling Tests", () => {
 
     setup(() => {
         sandbox = sinon.createSandbox();
+        clock = sandbox.useFakeTimers();
     });
 
     teardown(() => {
@@ -37,14 +39,21 @@ suite("LiteLLM Discovery Throttling Tests", () => {
 
     test("discoverModels should deduplicate in-flight requests", async () => {
         const provider = createProvider();
-        const getModelInfoStub = sandbox.stub(LiteLLMClient.prototype, "getModelInfo").callsFake(async () => {
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            return { data: [{ model_name: "test-model" }] };
+        let resolveRequest: (value: unknown) => void;
+        const requestPromise = new Promise((resolve) => {
+            resolveRequest = resolve;
         });
+
+        const getModelInfoStub = sandbox
+            .stub(LiteLLMClient.prototype, "getModelInfo")
+            .returns(requestPromise as Promise<{ data: { model_name: string }[] }>);
 
         // Fire multiple concurrent discovery requests
         const p1 = provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
         const p2 = provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
+
+        // Resolve the underlying request
+        resolveRequest!({ data: [{ model_name: "test-model" }] });
 
         await Promise.all([p1, p2]);
 
@@ -61,9 +70,17 @@ suite("LiteLLM Discovery Throttling Tests", () => {
         await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
         assert.strictEqual(getModelInfoStub.callCount, 1, "First call should hit LiteLLM");
 
+        // Advance clock by 10 seconds (well within 30s TTL)
+        clock.tick(10000);
+
         // Second call immediately after
         await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
-
         assert.strictEqual(getModelInfoStub.callCount, 1, "Second call should return cached models within TTL");
+
+        // Advance clock past TTL (31 seconds)
+        clock.tick(21000);
+
+        await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
+        assert.strictEqual(getModelInfoStub.callCount, 2, "Call after TTL should hit LiteLLM again");
     });
 });
