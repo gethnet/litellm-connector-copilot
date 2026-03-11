@@ -39,18 +39,19 @@ suite("LiteLLM Discovery Throttling Tests", () => {
 
     test("discoverModels should deduplicate in-flight requests", async () => {
         const provider = createProvider();
-        let resolveRequest: (value: unknown) => void;
-        const requestPromise = new Promise((resolve) => {
+        let resolveRequest: (value: { data: { model_name: string }[] }) => void;
+        const requestPromise = new Promise<{ data: { model_name: string }[] }>((resolve) => {
             resolveRequest = resolve;
         });
 
-        const getModelInfoStub = sandbox
-            .stub(LiteLLMClient.prototype, "getModelInfo")
-            .returns(requestPromise as Promise<{ data: { model_name: string }[] }>);
+        const getModelInfoStub = sandbox.stub(LiteLLMClient.prototype, "getModelInfo").returns(requestPromise);
 
         // Fire multiple concurrent discovery requests
         const p1 = provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
         const p2 = provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
+
+        // Wait a microtask to ensure they both hit the in-flight guard
+        await Promise.resolve();
 
         // Resolve the underlying request
         resolveRequest!({ data: [{ model_name: "test-model" }] });
@@ -77,7 +78,7 @@ suite("LiteLLM Discovery Throttling Tests", () => {
         await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
         assert.strictEqual(getModelInfoStub.callCount, 1, "Second call should return cached models within TTL");
 
-        // Advance clock past TTL (31 seconds)
+        // Advance clock past TTL (31 seconds total)
         clock.tick(21000);
 
         await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
