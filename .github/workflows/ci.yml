@@ -15,8 +15,6 @@ on:
       - bugfix/**
       - enhance/**
       - feat/**
-    tags:
-      - 'rel/v*'
   pull_request:
     branches:
       - main
