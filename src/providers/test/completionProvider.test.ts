@@ -73,8 +73,8 @@ suite("LiteLLMCompletionProvider Unit Tests", () => {
 
             const encoder = new TextEncoder();
             const frames = [
-                'data: {"choices":[{"delta":{"content":"hel"}}]}\n',
-                'data: {"choices":[{"delta":{"content":"lo"}}]}\n',
+                'data: {"choices":[{"delta":{"content":"hel"}}]}\n\n',
+                'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n',
                 "data: [DONE]\n\n",
             ].join("");
 
@@ -224,9 +224,9 @@ suite("LiteLLMCompletionProvider Unit Tests", () => {
         const encoder = new TextEncoder();
         const stream = new ReadableStream<Uint8Array>({
             start(controller) {
-                controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"a"}}]}\n'));
-                controller.enqueue(encoder.encode("data: invalid-json\n"));
-                controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"b"}}]}\n'));
+                controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"a"}}]}\n\n'));
+                controller.enqueue(encoder.encode("data: invalid-json\n\n"));
+                controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"b"}}]}\n\n'));
                 controller.close();
             },
         });

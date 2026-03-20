@@ -7,6 +7,8 @@ import { Logger } from "../../utils/logger";
 
 const encoder = new TextEncoder();
 
+/*eslint no-useless-escape: "off"*/
+
 suite("ResponsesClient sendResponsesRequest", () => {
     const config: LiteLLMConfig = { url: "http://localhost:4000", key: "test-key" };
     const userAgent = "test-ua";
@@ -145,7 +147,7 @@ suite("ResponsesClient sendResponsesRequest", () => {
         const sse = [
             'data: {"type":"response.output_text.delta","delta":"Hello"}\n\n',
             'data: {"type":"response.output_reasoning.delta","delta":"Think"}\n\n',
-            'data: {"type":"response.output_item.delta","item":{"type":"function_call","call_id":"c1","name":"tool","arguments":"{\\"x\\":1}"}}\n',
+            'data: {"type":"response.output_item.delta","item":{"type":"function_call","call_id":"c1","name":"tool","arguments":"{\\"x\\":1}"}}\n\n',
             'data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"c1"}}\n\n',
             "data: [DONE]\n\n",
         ];
@@ -211,6 +213,22 @@ suite("ResponsesClient sendResponsesRequest", () => {
 
         assert.strictEqual(reported.length, 1);
         assert.strictEqual((reported[0] as vscode.LanguageModelTextPart).value, "Hello");
+    });
+
+    test("parses multiline SSE data that contains escaped special characters", async () => {
+        const client = makeClient();
+        const sse = [
+            'data: {"type":"response.output_text.delta",\n',
+            'data: "delta":"semi; colon: quote \\\" and backtick `"}\n\n',
+            "data: [DONE]\n\n",
+        ];
+        fetchStub.resolves(new Response(readableFromStrings(sse), { status: 200 }));
+        const { progress, reported } = makeProgress();
+
+        await client.sendResponsesRequest(makeRequest(), progress, new vscode.CancellationTokenSource().token);
+
+        assert.strictEqual(reported.length, 1);
+        assert.strictEqual((reported[0] as vscode.LanguageModelTextPart).value, 'semi; colon: quote " and backtick `');
     });
 
     test("stops on cancellation", async () => {

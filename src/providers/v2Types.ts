@@ -8,7 +8,7 @@ export type V2MessagePart =
     | { type: "tool_result"; callId: string; content: ReadonlyArray<unknown> };
 
 export interface V2ChatMessage {
-    role: vscode.LanguageModelChatMessageRole;
+    role: string | vscode.LanguageModelChatMessageRole;
     name: string | undefined;
     content: V2MessagePart[];
 }

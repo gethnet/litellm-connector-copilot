@@ -26,7 +26,15 @@ export function emitV2PartsToVSCode(
             }
             case "tool_call":
                 if (part.id && part.name) {
-                    progress.report(new vscode.LanguageModelToolCallPart(part.id, part.name, JSON.parse(part.args)));
+                    try {
+                        const args = part.args ? JSON.parse(part.args) : {};
+                        progress.report(new vscode.LanguageModelToolCallPart(part.id, part.name, args));
+                    } catch (e) {
+                        // Log the error but don't crash the entire response stream
+                        console.error(`Failed to parse tool call arguments for ${part.name}:`, e);
+                        // Fallback: emit with raw string if the consumer can handle it, or empty object
+                        progress.report(new vscode.LanguageModelToolCallPart(part.id, part.name, {}));
+                    }
                 }
                 break;
             case "response":

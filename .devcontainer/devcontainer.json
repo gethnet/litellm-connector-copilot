@@ -35,7 +35,9 @@
 				"hbenl.vscode-test-explorer",
 				"ms-vscode.test-adapter-converter",
 				"ryanluker.vscode-coverage-gutters",
-				"GitHub.vscode-pull-request-github"
+				"GitHub.vscode-pull-request-github",
+				"AutomataLabs.copilot-mcp",
+				"patricio0312rev.agentkit-vscode"
 			],
 			"settings": {
 				"editor.formatOnSave": true,

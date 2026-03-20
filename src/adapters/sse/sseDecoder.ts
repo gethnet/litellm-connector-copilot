@@ -12,6 +12,37 @@ export async function* decodeSSE(
     const decoder = new TextDecoder();
     let buffer = "";
 
+    const extractEvent = (rawEvent: string): { payload?: string; sawDone: boolean } => {
+        if (!rawEvent.trim()) {
+            return { sawDone: false };
+        }
+
+        const dataLines: string[] = [];
+        let sawDone = false;
+
+        for (const line of rawEvent.split(/\r?\n/)) {
+            if (!line.startsWith("data:")) {
+                continue;
+            }
+
+            const value = line.startsWith("data: ") ? line.slice(6) : line.slice(5);
+            if (value === "[DONE]") {
+                sawDone = true;
+                continue;
+            }
+            dataLines.push(value);
+        }
+
+        if (dataLines.length === 0) {
+            return { sawDone };
+        }
+
+        return {
+            payload: dataLines.join("\n"),
+            sawDone,
+        };
+    };
+
     try {
         while (true) {
             if (token?.isCancellationRequested) {
@@ -24,36 +55,30 @@ export async function* decodeSSE(
             }
 
             buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
 
-            for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed || !trimmed.startsWith("data: ")) {
-                    continue;
+            let separatorIndex = buffer.search(/\r?\n\r?\n/);
+            while (separatorIndex >= 0) {
+                const event = buffer.slice(0, separatorIndex);
+                const separatorMatch = buffer.slice(separatorIndex).match(/^\r?\n\r?\n/);
+                const separatorLength = separatorMatch?.[0].length ?? 2;
+                buffer = buffer.slice(separatorIndex + separatorLength);
+
+                const { payload, sawDone } = extractEvent(event);
+                if (payload) {
+                    yield payload;
                 }
-
-                const payload = trimmed.slice(6);
-                if (payload === "[DONE]") {
+                if (sawDone) {
                     return;
                 }
-                yield payload;
+
+                separatorIndex = buffer.search(/\r?\n\r?\n/);
             }
         }
 
-        // Handle remaining buffer if it looks like a complete line (though SSE should end with \n)
+        // Flush any trailing complete event if the stream ended without an extra separator.
         if (buffer.trim()) {
-            const lines = buffer.split("\n");
-            for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed || !trimmed.startsWith("data: ")) {
-                    continue;
-                }
-
-                const payload = trimmed.slice(6);
-                if (payload === "[DONE]") {
-                    return;
-                }
+            const { payload } = extractEvent(buffer);
+            if (payload) {
                 yield payload;
             }
         }

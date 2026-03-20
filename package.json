@@ -17,8 +17,8 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "1.4.6",
-	"preview": false,
+	"version": "1.5.0",
+	"preview": true,
 	"engines": {
 		"vscode": "^1.110.0"
 	},
@@ -125,13 +125,14 @@
 				"litellm-connector.inlineCompletions.enabled": {
 					"type": "boolean",
 					"default": false,
-					"description": "Enable LiteLLM inline completions via VS Code's stable inline completion provider API. Disable to use Copilot or other inline completion providers."
+					"description": "Enable LiteLLM inline completions via VS Code's stable inline completion provider API. Disable to use Copilot or other inline completion providers.",
+					"deprecationMessage": "This is going away"
 				},
 				"litellm-connector.inlineCompletions.modelId": {
 					"type": "string",
 					"default": "",
-					"description": "Model id to use for LiteLLM inline completions. Run 'LiteLLM: Select Inline Completion Model' to choose from discovered models.",
-					"markdownDescription": "Model id to use for LiteLLM inline completions. [Select Model](command:litellm-connector.inlineCompletions.selectModel) to choose from discovered models."
+					"markdownDescription": "Use VS Code's inline chat default model setting instead. Configure [In-line Chat Model](vscode://settings/inlineChat.defaultModel) or Settings UI → Inline Chat → Default Model.",
+					"markdownDeprecationMessage": "Use VS Code's ['inlineChat.defaultModel' setting](vscode://settings/inlineChat.defaultModel) to control the default model for inline chat."
 				},
 				"litellm-connector.modelIdOverride": {
 					"type": "string",
@@ -145,15 +146,21 @@
 					"description": "Override the model ID for git commit message generation. If empty, the feature is disabled.",
 					"markdownDescription": "Override the model ID for git commit message generation. [Select Model](command:litellm-connector.generateCommitMessage.selectModel) to choose from discovered models. If empty, the feature is disabled."
 				},
-				"litellm-connector.experimentalEmitUsageData": {
+				"litellm-connector.emitUsageData": {
 					"type": "boolean",
 					"default": false,
-					"description": "Experimental: emit token usage metadata as a response data part to probe whether Copilot or VS Code surfaces context usage in chat UI."
+					"description": "Emit token usage metadata as a response data part to probe whether Copilot or VS Code surfaces context usage in chat UI.",
+					"tags": [
+						"experimental"
+					]
 				},
-				"litellm-connector.experimental.v2ApiEnabled": {
+				"litellm-connector.enableResponsesApi": {
 					"type": "boolean",
 					"default": false,
-					"description": "Experimental: enable the V2 Chat Provider architecture using proposed VS Code APIs (LanguageModelChatMessage2, Thinking parts, etc.)."
+					"description": "Enables support for VSCode Response API <-> LiteLLM Responses",
+					"tags": [
+						"experimental"
+					]
 				},
 				"litellm-connector.disableQuotaToolRedaction": {
 					"type": "boolean",
@@ -179,7 +186,16 @@
 				"litellm-connector.disableCaching": {
 					"type": "boolean",
 					"default": true,
-					"description": "When enabled, LiteLLM caching will be bypassed by sending 'no-cache: true' and 'Cache-Control: no-cache' headers."
+					"description": "When enabled, LiteLLM caching will be bypassed by sending 'no-cache: true' and 'Cache-Control: no-cache' headers.",
+					"tags": [
+						"experimental"
+					]
+				},
+				"litellm-connector.sendDefaultParameters": {
+					"type": "boolean",
+					"default": false,
+					"markdownDescription": "When enabled, LiteLLM Connector will send default values for temperature (0.7), frequency_penalty (0.2), and presence_penalty (0.1) if not explicitly provided by VS Code. Recommended: false.",
+					"deprecationMessage": "This setting is temporary and will be removed in a future version. Defaults will be omitted by default."
 				}
 			}
 		},
@@ -189,7 +205,12 @@
 	"browser": "./dist/web/extension.js",
 	"enabledApiProposals": [
 		"chatProvider",
-		"languageModelThinkingPart"
+		"languageModelCapabilities",
+		"languageModelProxy",
+		"languageModelSystem",
+		"languageModelThinkingPart",
+		"languageModelToolResultAudience",
+		"languageModelToolSupportsModel"
 	],
 	"scripts": {
 		"clean": "rm -rf ./dist ./out ./coverage ./test-results",

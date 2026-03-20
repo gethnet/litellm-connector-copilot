@@ -4,6 +4,7 @@ import * as sinon from "sinon";
 import { registerGenerateCommitMessageCommand } from "../generateCommitMessage";
 import { LiteLLMCommitMessageProvider } from "../../providers/liteLLMCommitProvider";
 import { GitUtils } from "../../utils/gitUtils";
+import type { ConfigManager } from "../../config/configManager";
 
 suite("GenerateCommitMessage Command Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -29,9 +30,9 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         registerGenerateCommitMessageCommand(mockProvider as unknown as LiteLLMCommitMessageProvider);
         const handler = registerStub.firstCall.args[1] as () => Promise<void>;
 
-        sandbox.stub(vscode.workspace, "getConfiguration").returns({
-            get: sandbox.stub().withArgs("commitModelIdOverride").returns(undefined),
-        } as unknown as vscode.WorkspaceConfiguration);
+        mockProvider.getConfigManager.returns({
+            getConfig: async () => ({ commitModelIdOverride: undefined }),
+        } as unknown as ConfigManager);
 
         const infoMsgStub = sandbox.stub(vscode.window, "showInformationMessage").resolves(undefined);
 
@@ -47,9 +48,9 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         const handler = registerStub.firstCall.args[1] as () => Promise<void>;
 
         // Mock configuration
-        sandbox.stub(vscode.workspace, "getConfiguration").returns({
-            get: sandbox.stub().withArgs("commitModelIdOverride").returns("test-model"),
-        } as unknown as vscode.WorkspaceConfiguration);
+        mockProvider.getConfigManager.returns({
+            getConfig: async () => ({ commitModelIdOverride: "test-model" }),
+        } as unknown as ConfigManager);
 
         // Mock GitUtils
         sandbox.stub(GitUtils, "getStagedDiff").resolves("test-diff");
@@ -87,9 +88,9 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         registerGenerateCommitMessageCommand(mockProvider as unknown as LiteLLMCommitMessageProvider);
         const handler = registerStub.firstCall.args[1] as () => Promise<void>;
 
-        sandbox.stub(vscode.workspace, "getConfiguration").returns({
-            get: sandbox.stub().withArgs("commitModelIdOverride").returns("test-model"),
-        } as unknown as vscode.WorkspaceConfiguration);
+        mockProvider.getConfigManager.returns({
+            getConfig: async () => ({ commitModelIdOverride: "test-model" }),
+        } as unknown as ConfigManager);
 
         sandbox.stub(GitUtils, "getStagedDiff").resolves(undefined);
         const errorMsgStub = sandbox.stub(vscode.window, "showErrorMessage");

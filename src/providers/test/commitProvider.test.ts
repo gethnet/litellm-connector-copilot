@@ -59,8 +59,8 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
         chatStub.callsFake(async () => {
             const encoder = new TextEncoder();
             const frames = [
-                'data: {"choices":[{"delta":{"content":"feat: "}}]}\n',
-                'data: {"choices":[{"delta":{"content":"add thing"}}]}\n',
+                'data: {"choices":[{"delta":{"content":"feat: "}}]}\n\n',
+                'data: {"choices":[{"delta":{"content":"add thing"}}]}\n\n',
                 "data: [DONE]\n\n",
             ].join("");
 
@@ -167,10 +167,10 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
         chatStub.callsFake(async () => {
             const encoder = new TextEncoder();
             const frames = [
-                'data: {"choices":[{"delta":{"content":"```markdown\\n"}}]}\n',
-                'data: {"choices":[{"delta":{"content":"feat: "}}]}\n',
-                'data: {"choices":[{"delta":{"content":"add thing\\n"}}]}\n',
-                'data: {"choices":[{"delta":{"content":"```"}}]}\n',
+                'data: {"choices":[{"delta":{"content":"```markdown\\n"}}]}\n\n',
+                'data: {"choices":[{"delta":{"content":"feat: "}}]}\n\n',
+                'data: {"choices":[{"delta":{"content":"add thing\\n"}}]}\n\n',
+                'data: {"choices":[{"delta":{"content":"```"}}]}\n\n',
                 "data: [DONE]\n\n",
             ].join("");
 

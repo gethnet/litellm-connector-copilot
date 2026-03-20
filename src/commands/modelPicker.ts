@@ -48,8 +48,8 @@ export async function showModelPicker(provider: LiteLLMProviderBase, options: Mo
         });
 
         // Add a "Clear" option if there's an existing selection
-        const config = vscode.workspace.getConfiguration("litellm-connector");
-        const currentModel = config.get<string>(options.settingKey);
+        const config = await provider.getConfigManager().getConfig();
+        const currentModel = config[options.settingKey as keyof typeof config] as string | undefined;
 
         if (currentModel) {
             items.unshift({
@@ -69,7 +69,9 @@ export async function showModelPicker(provider: LiteLLMProviderBase, options: Mo
         }
 
         if (selected.label === "$(clear-all) Clear Selection") {
-            await config.update(options.settingKey, undefined, vscode.ConfigurationTarget.Global);
+            await vscode.workspace
+                .getConfiguration("litellm-connector")
+                .update(options.settingKey, undefined, vscode.ConfigurationTarget.Global);
             if (options.onClear) {
                 options.onClear();
             }
@@ -77,7 +79,9 @@ export async function showModelPicker(provider: LiteLLMProviderBase, options: Mo
             return;
         }
 
-        await config.update(options.settingKey, selected.label, vscode.ConfigurationTarget.Global);
+        await vscode.workspace
+            .getConfiguration("litellm-connector")
+            .update(options.settingKey, selected.label, vscode.ConfigurationTarget.Global);
         if (options.onSelect) {
             options.onSelect(selected.label);
         }

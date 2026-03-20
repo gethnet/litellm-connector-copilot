@@ -189,7 +189,8 @@ export function trimMessagesToFitBudget(
     const remaining: vscode.LanguageModelChatRequestMessage[] = [];
     const userRole = vscode.LanguageModelChatMessageRole.User as unknown as number;
     const assistantRole = vscode.LanguageModelChatMessageRole.Assistant as unknown as number;
-    for (const msg of messages) {
+    const messageArray = Array.isArray(messages) ? messages : Array.from(messages);
+    for (const msg of messageArray) {
         const roleNum = msg.role as unknown as number;
         const isSystem = roleNum !== userRole && roleNum !== assistantRole;
         if (!systemMessage && isSystem) {
@@ -262,7 +263,8 @@ export function trimV2MessagesForBudget(
     const remaining: V2ChatMessage[] = [];
     const userRole = vscode.LanguageModelChatMessageRole.User as unknown as number;
     const assistantRole = vscode.LanguageModelChatMessageRole.Assistant as unknown as number;
-    for (const msg of messages) {
+    const messageArray = Array.isArray(messages) ? messages : Array.from(messages);
+    for (const msg of messageArray) {
         const roleNum = msg.role as unknown as number;
         const isSystem = roleNum !== userRole && roleNum !== assistantRole;
         if (!systemMessage && isSystem) {

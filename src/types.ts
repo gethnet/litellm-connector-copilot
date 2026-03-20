@@ -82,6 +82,9 @@ export interface LiteLLMConfig {
 
     /** Experimental: enable V2 Chat Provider using proposed VS Code APIs. */
     v2ApiEnabled?: boolean;
+
+    /** When enabled, send default values for temperature, frequency_penalty, and presence_penalty if not provided by VS Code. */
+    sendDefaultParameters?: boolean;
 }
 
 /**

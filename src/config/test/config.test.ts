@@ -40,7 +40,7 @@ suite("ConfigManager Unit Tests", () => {
                     return 60;
                 case "litellm-connector.disableCaching":
                     return true;
-                case "litellm-connector.experimentalEmitUsageData":
+                case "litellm-connector.emitUsageData":
                     return false;
                 case "litellm-connector.disableQuotaToolRedaction":
                     return false;
@@ -176,7 +176,7 @@ suite("ConfigManager Unit Tests", () => {
     });
 
     test("getConfig reads experimental usage emission flag", async () => {
-        settingsMap.set("litellm-connector.experimentalEmitUsageData", true);
+        settingsMap.set("litellm-connector.emitUsageData", true);
 
         const manager = new ConfigManager(mockSecrets);
         const cfg = await manager.getConfig();

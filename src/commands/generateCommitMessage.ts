@@ -15,8 +15,8 @@ export function registerGenerateCommitMessageCommand(provider: LiteLLMCommitMess
     return vscode.commands.registerCommand("litellm-connector.generateCommitMessage", async (scm: unknown) => {
         try {
             // Check if model is configured, if not, show picker
-            const config = vscode.workspace.getConfiguration("litellm-connector");
-            const modelId = config.get<string>("commitModelIdOverride");
+            const config = await provider.getConfigManager().getConfig();
+            const modelId = config.commitModelIdOverride;
 
             if (!modelId) {
                 const result = await vscode.window.showInformationMessage(
