@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 export class Logger {
     private static channel: vscode.LogOutputChannel;
 
-    public static initialize(context: vscode.ExtensionContext) {
+    public static initialize(context: vscode.ExtensionContext): void {
         this.channel = vscode.window.createOutputChannel("LiteLLM", { log: true });
         context.subscriptions.push(this.channel);
     }

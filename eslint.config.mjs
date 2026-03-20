@@ -4,20 +4,19 @@
  * See https://eslint.style and https://typescript-eslint.io for additional linting options.
  */
 // @ts-check
+import { defineConfig, globalIgnores } from '@eslint/config-helpers';
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import stylistic from '@stylistic/eslint-plugin';
 
-export default tseslint.config(
-	{
-		ignores: [
-			'.vscode-test',
-			'out',
-			'dist',
-			'esbuild.js',
-			'**/*.d.ts'
-		]
-	},
+export default defineConfig(
+	globalIgnores([
+		'.vscode-test',
+		'out',
+		'dist',
+		'esbuild.js',
+		'**/*.d.ts'
+	]),
 	{
 		files: ['**/*.{js,mjs,cjs,ts,jsx,tsx}'],
 	},
@@ -30,7 +29,10 @@ export default tseslint.config(
 			}
 		},
 		rules: {
-			'@typescript-eslint/no-floating-promises': 'error'
+			'@typescript-eslint/no-floating-promises': 'error',
+			'@typescript-eslint/no-deprecated': 'off',
+			'@typescript-eslint/ban-tslint-comment': 'warn',
+			'@typescript-eslint/explicit-module-boundary-types': 'off',
 		}
 	},
 	js.configs.recommended,
@@ -60,7 +62,7 @@ export default tseslint.config(
 					'ignoreRestSiblings': true
 				}
 			],
-			'@typescript-eslint/consistent-type-imports': ["warn", { "prefer": "type-imports" }]
+			'@typescript-eslint/consistent-type-imports': ["warn", { "prefer": "type-imports" }],
 		}
 	}
 );

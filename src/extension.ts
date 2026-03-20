@@ -1,6 +1,5 @@
 import * as vscode from "vscode";
 import { LiteLLMChatProvider } from "./providers";
-import { LiteLLMChatProviderV2 } from "./providers/liteLLMChatProviderV2";
 import { ConfigManager } from "./config/configManager";
 import {
     registerManageConfigCommand,
@@ -12,8 +11,10 @@ import {
 import { showModelPicker } from "./commands/modelPicker";
 import { registerSelectInlineCompletionModelCommand } from "./commands/inlineCompletions";
 import { registerGenerateCommitMessageCommand } from "./commands/generateCommitMessage";
+import { registerSetLogLevelCommand } from "./commands/setLogLevel";
 import { LiteLLMCommitMessageProvider } from "./providers/liteLLMCommitProvider";
 import { Logger } from "./utils/logger";
+import { StructuredLogger } from "./observability";
 import { InlineCompletionsRegistrar } from "./inlineCompletions/registerInlineCompletions";
 
 // Store the config manager for cleanup on deactivation
@@ -22,6 +23,9 @@ let configManagerInstance: ConfigManager | undefined;
 export function activate(context: vscode.ExtensionContext) {
     Logger.initialize(context);
     Logger.info("Activating extension...");
+
+    // Initialize v2 structured logger
+    StructuredLogger.initialize(context);
 
     let ua = "litellm-vscode-chat/unknown VSCode/unknown";
     try {
@@ -40,50 +44,31 @@ export function activate(context: vscode.ExtensionContext) {
 
     configManagerInstance = new ConfigManager(context.secrets);
     const configManager = configManagerInstance;
+
+    // Legacy providers (will be removed after v2 migration)
+    // @deprecated - Will be replaced by v2 baseline providers
     const chatProviderV1 = new LiteLLMChatProvider(context.secrets, ua);
-    const chatProviderV2 = new LiteLLMChatProviderV2(context.secrets, ua);
+    // @deprecated - Will be replaced by v2 baseline providers
     const commitProvider = new LiteLLMCommitMessageProvider(context.secrets, ua);
 
-    // Register based on config
-    void configManager.getConfig().then((config) => {
-        const activeChatProvider = config.v2ApiEnabled ? chatProviderV2 : chatProviderV1;
+    // Track active provider registration for hot-swap
+    const activeProvider: LiteLLMChatProvider = chatProviderV1;
 
-        // Register the LiteLLM provider under the vendor id used in package.json
-        try {
-            Logger.info(`Registering LanguageModelChatProvider (V2: ${!!config.v2ApiEnabled})...`);
-            const registration = vscode.lm.registerLanguageModelChatProvider(
-                "litellm-connector",
-                activeChatProvider as unknown as vscode.LanguageModelChatProvider
-            );
-            if (registration) {
-                context.subscriptions.push(registration);
-                Logger.info("Provider registered successfully.");
-            } else {
-                Logger.error("registerLanguageModelChatProvider returned undefined/null");
-            }
-        } catch (err) {
-            Logger.error("Failed to register provider", err);
-        }
-
+    // Register based on initial config
+    void configManager.getConfig().then(() => {
         // Management commands to configure base URL and API key
         try {
             context.subscriptions.push(
-                registerManageConfigCommand(
-                    context,
-                    configManager,
-                    activeChatProvider as unknown as LiteLLMChatProvider
-                )
+                registerManageConfigCommand(context, configManager, activeProvider as unknown as LiteLLMChatProvider)
             );
-            context.subscriptions.push(registerShowModelsCommand(activeChatProvider as unknown as LiteLLMChatProvider));
-            context.subscriptions.push(
-                registerReloadModelsCommand(activeChatProvider as unknown as LiteLLMChatProvider)
-            );
+            context.subscriptions.push(registerShowModelsCommand(activeProvider as unknown as LiteLLMChatProvider));
+            context.subscriptions.push(registerReloadModelsCommand(activeProvider as unknown as LiteLLMChatProvider));
             context.subscriptions.push(registerCheckConnectionCommand(configManager));
             context.subscriptions.push(
-                registerResetConfigCommand(configManager, activeChatProvider as unknown as LiteLLMChatProvider)
+                registerResetConfigCommand(configManager, activeProvider as unknown as LiteLLMChatProvider)
             );
             context.subscriptions.push(
-                registerSelectInlineCompletionModelCommand(activeChatProvider as unknown as LiteLLMChatProvider)
+                registerSelectInlineCompletionModelCommand(activeProvider as unknown as LiteLLMChatProvider)
             );
             context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider));
             context.subscriptions.push(
@@ -94,6 +79,9 @@ export function activate(context: vscode.ExtensionContext) {
                     });
                 })
             );
+
+            context.subscriptions.push(registerSetLogLevelCommand());
+
             Logger.info("Config command registered.");
         } catch (cmdErr) {
             Logger.error("Failed to register commands", cmdErr);

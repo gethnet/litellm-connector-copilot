@@ -2,6 +2,7 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import { decodeSSE } from "../sseDecoder";
 
+/*eslint no-useless-escape: "off"*/
 suite("SSE Decoder Unit Tests", () => {
     test("decodes simple data frames", async () => {
         const stream = new ReadableStream<Uint8Array>({
@@ -34,6 +35,30 @@ suite("SSE Decoder Unit Tests", () => {
         }
 
         assert.deepStrictEqual(results, ['{"text": "hello"}']);
+    });
+
+    test("rejoins multiline data lines within a single event", async () => {
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(
+                    new TextEncoder().encode(
+                        'data: {"type":"response.output_text.delta",\n' +
+                            'data: "delta":"semi; colon: quote \\\" and backtick `"}\n\n' +
+                            "data: [DONE]\n\n"
+                    )
+                );
+                controller.close();
+            },
+        });
+
+        const results: string[] = [];
+        for await (const payload of decodeSSE(stream)) {
+            results.push(payload);
+        }
+
+        assert.deepStrictEqual(results, [
+            '{"type":"response.output_text.delta",\n"delta":"semi; colon: quote \\\" and backtick `"}',
+        ]);
     });
 
     test("respects cancellation token", async () => {

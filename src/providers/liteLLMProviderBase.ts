@@ -45,13 +45,12 @@ const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
     "gpt-5.1-codex-mini": new Set(["temperature", "frequency_penalty", "presence_penalty"]),
     "gpt-5.1-codex-max": new Set(["temperature", "frequency_penalty", "presence_penalty"]),
     "codex-mini-latest": new Set(["temperature", "frequency_penalty", "presence_penalty"]),
-    "o1-preview": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
-    "o1-mini": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
     "o1-": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
-    "gpt-5-mini": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
+    "gpt-5": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
 };
 
 /**
+ *
  * Shared orchestration base for all LiteLLM-backed VS Code language model providers.
  *
  * Responsibilities:
@@ -74,12 +73,18 @@ export abstract class LiteLLMProviderBase {
     protected readonly _parameterProbeCache = new Map<string, Set<string>>();
     protected _lastModelList: LanguageModelChatInformation[] = [];
     protected _modelListFetchedAtMs = 0;
+    private _inFlightDiscovery: Promise<vscode.LanguageModelChatInformation[]> | undefined;
 
     constructor(
         protected readonly secrets: vscode.SecretStorage,
         protected readonly userAgent: string
     ) {
         this._configManager = new ConfigManager(secrets);
+    }
+
+    /** Exposes the ConfigManager for external access (e.g., commands that need configuration). */
+    public getConfigManager(): ConfigManager {
+        return this._configManager;
     }
 
     /** Signals VS Code to refresh the Language Models view for this provider. */
@@ -119,6 +124,33 @@ export abstract class LiteLLMProviderBase {
      * the same discovery + tag logic.
      */
     public async discoverModels(
+        options: { silent: boolean },
+        token: vscode.CancellationToken
+    ): Promise<vscode.LanguageModelChatInformation[]> {
+        if (this._inFlightDiscovery) {
+            Logger.trace("Returning in-flight discovery promise");
+            return this._inFlightDiscovery;
+        }
+
+        const TTL_MS = 30000; // 30 seconds
+        const now = Date.now();
+        if (options.silent && this._lastModelList.length > 0 && now - this._modelListFetchedAtMs < TTL_MS) {
+            Logger.trace("Returning cached models (within TTL)");
+            return this._lastModelList;
+        }
+
+        this._inFlightDiscovery = (async () => {
+            try {
+                return await this._doDiscoverModels(options, token);
+            } finally {
+                this._inFlightDiscovery = undefined;
+            }
+        })();
+
+        return this._inFlightDiscovery;
+    }
+
+    private async _doDiscoverModels(
         options: { silent: boolean },
         token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelChatInformation[]> {
@@ -446,36 +478,26 @@ export abstract class LiteLLMProviderBase {
                     : model.maxOutputTokens,
         };
 
+        const mo = (options.modelOptions as Record<string, unknown>) ?? {};
+
         if (this.isParameterSupported("temperature", modelInfo, model.id)) {
-            requestBody.temperature = (options.modelOptions?.temperature as number) ?? 0.7;
+            const temp = mo.temperature as number | undefined;
+            requestBody.temperature = temp ?? (config.sendDefaultParameters ? 0.7 : undefined);
         }
         if (this.isParameterSupported("frequency_penalty", modelInfo, model.id)) {
-            requestBody.frequency_penalty = (options.modelOptions?.frequency_penalty as number) ?? 0.2;
+            const fp = mo.frequency_penalty as number | undefined;
+            requestBody.frequency_penalty = fp ?? (config.sendDefaultParameters ? 0.2 : undefined);
         }
         if (this.isParameterSupported("presence_penalty", modelInfo, model.id)) {
-            requestBody.presence_penalty = (options.modelOptions?.presence_penalty as number) ?? 0.1;
+            const pp = mo.presence_penalty as number | undefined;
+            requestBody.presence_penalty = pp ?? (config.sendDefaultParameters ? 0.1 : undefined);
         }
 
-        if (options.modelOptions) {
-            const mo = options.modelOptions as Record<string, unknown>;
-            if (this.isParameterSupported("stop", modelInfo, model.id) && mo.stop) {
-                requestBody.stop = mo.stop as string | string[];
-            }
-            if (this.isParameterSupported("top_p", modelInfo, model.id) && typeof mo.top_p === "number") {
-                requestBody.top_p = mo.top_p;
-            }
-            if (
-                this.isParameterSupported("frequency_penalty", modelInfo, model.id) &&
-                typeof mo.frequency_penalty === "number"
-            ) {
-                requestBody.frequency_penalty = mo.frequency_penalty;
-            }
-            if (
-                this.isParameterSupported("presence_penalty", modelInfo, model.id) &&
-                typeof mo.presence_penalty === "number"
-            ) {
-                requestBody.presence_penalty = mo.presence_penalty;
-            }
+        if (this.isParameterSupported("stop", modelInfo, model.id) && mo.stop) {
+            requestBody.stop = mo.stop as string | string[];
+        }
+        if (this.isParameterSupported("top_p", modelInfo, model.id) && typeof mo.top_p === "number") {
+            requestBody.top_p = mo.top_p;
         }
 
         if (toolConfig.tools) {
@@ -509,9 +531,20 @@ export abstract class LiteLLMProviderBase {
             }`
         );
 
+        const config = await this._configManager.getConfig();
+
         const toolConfig = convertTools(options);
         const trimmedMessages = trimV2MessagesForBudget(messages, toolConfig.tools, model, modelInfo);
         validateV2Messages(trimmedMessages);
+
+        if (model.id === "gemini-3.1-flash-lite-preview") {
+            for (const message of trimmedMessages) {
+                if ((message.role as number) === 3) {
+                    message.role = vscode.LanguageModelChatMessageRole.User;
+                }
+            }
+        }
+
         const transportMessages = convertV2MessagesToProviderMessages(trimmedMessages);
 
         const requestBody: OpenAIChatCompletionRequest = {
@@ -524,36 +557,26 @@ export abstract class LiteLLMProviderBase {
                     : model.maxOutputTokens,
         };
 
+        const mo = (options.modelOptions as Record<string, unknown>) ?? {};
+
         if (this.isParameterSupported("temperature", modelInfo, model.id)) {
-            requestBody.temperature = (options.modelOptions?.temperature as number) ?? 0.7;
+            const temp = mo.temperature as number | undefined;
+            requestBody.temperature = temp ?? (config.sendDefaultParameters ? 0.7 : undefined);
         }
         if (this.isParameterSupported("frequency_penalty", modelInfo, model.id)) {
-            requestBody.frequency_penalty = (options.modelOptions?.frequency_penalty as number) ?? 0.2;
+            const fp = mo.frequency_penalty as number | undefined;
+            requestBody.frequency_penalty = fp ?? (config.sendDefaultParameters ? 0.2 : undefined);
         }
         if (this.isParameterSupported("presence_penalty", modelInfo, model.id)) {
-            requestBody.presence_penalty = (options.modelOptions?.presence_penalty as number) ?? 0.1;
+            const pp = mo.presence_penalty as number | undefined;
+            requestBody.presence_penalty = pp ?? (config.sendDefaultParameters ? 0.1 : undefined);
         }
 
-        if (options.modelOptions) {
-            const mo = options.modelOptions as Record<string, unknown>;
-            if (this.isParameterSupported("stop", modelInfo, model.id) && mo.stop) {
-                requestBody.stop = mo.stop as string | string[];
-            }
-            if (this.isParameterSupported("top_p", modelInfo, model.id) && typeof mo.top_p === "number") {
-                requestBody.top_p = mo.top_p;
-            }
-            if (
-                this.isParameterSupported("frequency_penalty", modelInfo, model.id) &&
-                typeof mo.frequency_penalty === "number"
-            ) {
-                requestBody.frequency_penalty = mo.frequency_penalty;
-            }
-            if (
-                this.isParameterSupported("presence_penalty", modelInfo, model.id) &&
-                typeof mo.presence_penalty === "number"
-            ) {
-                requestBody.presence_penalty = mo.presence_penalty;
-            }
+        if (this.isParameterSupported("stop", modelInfo, model.id) && mo.stop) {
+            requestBody.stop = mo.stop as string | string[];
+        }
+        if (this.isParameterSupported("top_p", modelInfo, model.id) && typeof mo.top_p === "number") {
+            requestBody.top_p = mo.top_p;
         }
 
         if (toolConfig.tools) {

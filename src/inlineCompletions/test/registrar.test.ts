@@ -4,32 +4,65 @@ import * as sinon from "sinon";
 
 import { InlineCompletionsRegistrar } from "..//registerInlineCompletions";
 import { LiteLLMTelemetry } from "../../utils/telemetry";
+import { ConfigManager } from "../../config/configManager";
 
 suite("InlineCompletionsRegistrar Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
+    let mockSecrets: vscode.SecretStorage;
 
     setup(() => {
         sandbox = sinon.createSandbox();
+        // Create a proper mock for SecretStorage
+        mockSecrets = {
+            get: sandbox.stub().resolves(undefined),
+            store: sandbox.stub().resolves(),
+            delete: sandbox.stub().resolves(),
+            onDidChange: sandbox.stub(),
+        } as unknown as vscode.SecretStorage;
     });
 
     teardown(() => {
         sandbox.restore();
     });
 
-    test("initialize does not register provider when disabled", () => {
+    /**
+     * Wait for async operations to complete by polling until a condition is met or timeout.
+     */
+    async function waitForAsyncOperation(
+        condition: () => boolean,
+        timeoutMs = 1000,
+        pollIntervalMs = 10
+    ): Promise<void> {
+        const startTime = Date.now();
+        while (Date.now() - startTime < timeoutMs) {
+            if (condition()) {
+                return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+        }
+        // Final check after timeout
+        if (!condition()) {
+            throw new Error(`Async operation did not complete within ${timeoutMs}ms`);
+        }
+    }
+
+    test("initialize does not register provider when disabled", async () => {
         const context = { subscriptions: [] } as unknown as vscode.ExtensionContext;
 
-        const getStub = sandbox
-            .stub(vscode.workspace, "getConfiguration")
-            .returns({ get: () => false } as unknown as vscode.WorkspaceConfiguration);
-        void getStub;
+        // Stub ConfigManager.getConfig to return inlineCompletionsEnabled: false
+        sandbox.stub(ConfigManager.prototype, "getConfig").resolves({
+            inlineCompletionsEnabled: false,
+        } as unknown as Awaited<ReturnType<ConfigManager["getConfig"]>>);
 
         const registerStub = sandbox.stub(vscode.languages, "registerInlineCompletionItemProvider");
         const metricStub = sandbox.stub(LiteLLMTelemetry, "reportMetric");
 
-        const registrar = new InlineCompletionsRegistrar({} as vscode.SecretStorage, "ua", context);
+        const registrar = new InlineCompletionsRegistrar(mockSecrets, "ua", context);
 
         registrar.initialize();
+
+        // Wait for async refreshRegistration to complete
+        await waitForAsyncOperation(() => metricStub.called);
 
         assert.strictEqual(registerStub.called, false);
         assert.strictEqual(
@@ -44,20 +77,24 @@ suite("InlineCompletionsRegistrar Unit Tests", () => {
         );
     });
 
-    test("initialize registers provider when enabled", () => {
+    test("initialize registers provider when enabled", async () => {
         const context = { subscriptions: [] } as unknown as vscode.ExtensionContext;
 
-        sandbox
-            .stub(vscode.workspace, "getConfiguration")
-            .returns({ get: () => true } as unknown as vscode.WorkspaceConfiguration);
+        // Stub ConfigManager.getConfig to return inlineCompletionsEnabled: true
+        sandbox.stub(ConfigManager.prototype, "getConfig").resolves({
+            inlineCompletionsEnabled: true,
+        } as unknown as Awaited<ReturnType<ConfigManager["getConfig"]>>);
 
         const disposable = { dispose: sandbox.stub() } as unknown as vscode.Disposable;
         const registerStub = sandbox.stub(vscode.languages, "registerInlineCompletionItemProvider").returns(disposable);
         const metricStub = sandbox.stub(LiteLLMTelemetry, "reportMetric");
 
-        const registrar = new InlineCompletionsRegistrar({} as vscode.SecretStorage, "ua", context);
+        const registrar = new InlineCompletionsRegistrar(mockSecrets, "ua", context);
 
         registrar.initialize();
+
+        // Wait for async refreshRegistration to complete
+        await waitForAsyncOperation(() => metricStub.called);
 
         assert.strictEqual(registerStub.calledOnce, true);
         assert.ok(Array.isArray(context.subscriptions));
@@ -73,13 +110,17 @@ suite("InlineCompletionsRegistrar Unit Tests", () => {
         );
     });
 
-    test("configuration change toggles registration", () => {
+    test("configuration change toggles registration", async () => {
         const context = { subscriptions: [] } as unknown as vscode.ExtensionContext;
 
         let enabled = false;
-        sandbox
-            .stub(vscode.workspace, "getConfiguration")
-            .callsFake(() => ({ get: () => enabled }) as unknown as vscode.WorkspaceConfiguration);
+        // Stub ConfigManager.getConfig to return dynamic inlineCompletionsEnabled
+        sandbox.stub(ConfigManager.prototype, "getConfig").callsFake(
+            async () =>
+                ({
+                    inlineCompletionsEnabled: enabled,
+                }) as unknown as Awaited<ReturnType<ConfigManager["getConfig"]>>
+        );
 
         let changeHandler: ((e: vscode.ConfigurationChangeEvent) => void) | undefined;
         sandbox.stub(vscode.workspace, "onDidChangeConfiguration").callsFake((cb) => {
@@ -90,8 +131,11 @@ suite("InlineCompletionsRegistrar Unit Tests", () => {
         const disposable = { dispose: sandbox.stub() } as unknown as vscode.Disposable;
         const registerStub = sandbox.stub(vscode.languages, "registerInlineCompletionItemProvider").returns(disposable);
 
-        const registrar = new InlineCompletionsRegistrar({} as vscode.SecretStorage, "ua", context);
+        const registrar = new InlineCompletionsRegistrar(mockSecrets, "ua", context);
         registrar.initialize();
+
+        // Wait for async refreshRegistration to complete
+        await waitForAsyncOperation(() => !registerStub.called);
 
         // Initially disabled -> not registered
         assert.strictEqual(registerStub.called, false);
@@ -102,6 +146,9 @@ suite("InlineCompletionsRegistrar Unit Tests", () => {
             affectsConfiguration: (key: string) => key === "litellm-connector.inlineCompletions.enabled",
         } as unknown as vscode.ConfigurationChangeEvent);
 
+        // Wait for async refreshRegistration to complete
+        await waitForAsyncOperation(() => registerStub.calledOnce);
+
         assert.strictEqual(registerStub.calledOnce, true);
 
         // Disable and trigger configuration event -> should dispose
@@ -109,6 +156,9 @@ suite("InlineCompletionsRegistrar Unit Tests", () => {
         changeHandler?.({
             affectsConfiguration: (key: string) => key === "litellm-connector.inlineCompletions.enabled",
         } as unknown as vscode.ConfigurationChangeEvent);
+
+        // Wait for async refreshRegistration to complete
+        await waitForAsyncOperation(() => (disposable as unknown as { dispose: sinon.SinonStub }).dispose.calledOnce);
 
         assert.strictEqual((disposable as unknown as { dispose: sinon.SinonStub }).dispose.calledOnce, true);
     });

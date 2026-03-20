@@ -68,6 +68,7 @@ If the extension fails to connect or models don't show up:
 - 🔁 **Automatic retry** when a model rejects unsupported flags
 - 📊 **Token tracking & usage** monitoring for input/output tokens
 - ✍️ **Git commit generation** from staged changes in the SCM view
+- 🧼 **Smart Sanitization** automatically strips Markdown code blocks from generated commit messages
 - 🔍 **Connection diagnostics** to verify proxy configuration
 - ⏱️ **Inactivity watchdog** to prevent stuck streams
 - 🚫🧠 **Cache bypass controls** (`no-cache` headers) with provider-aware behavior
@@ -78,6 +79,7 @@ If the extension fails to connect or models don't show up:
 
 ## 🆕 Recent Highlights
 
+- 🧼 **SCM Message Sanitization** (automatically cleans up generated commit messages by stripping triple backticks)
 - ✍️ **Git Commit Message Generation** (generate messages from staged changes directly in the SCM view)
 - 📊 **Enhanced Token Awareness** (real-time token counting and context window display in model tooltips)
 - 🔍 **Connection Diagnostics** (new `Check Connection` command to validate proxy settings)

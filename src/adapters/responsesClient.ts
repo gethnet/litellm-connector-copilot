@@ -3,6 +3,7 @@ import type { LiteLLMConfig, LiteLLMResponsesRequest, LiteLLMModelInfo } from ".
 import { tryParseJSONObject } from "../utils";
 import { Logger } from "../utils/logger";
 import { isAnthropicModel } from "../utils/modelUtils";
+import { decodeSSE } from "./sse/sseDecoder";
 
 export interface ResponsesEvent {
     type: string;
@@ -136,42 +137,15 @@ export class ResponsesClient {
         progress: vscode.Progress<vscode.LanguageModelResponsePart>,
         token: vscode.CancellationToken
     ): Promise<void> {
-        const reader = stream.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        try {
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done || token.isCancellationRequested) {
-                    break;
-                }
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split("\n");
-                buffer = lines.pop() || "";
-
-                for (const line of lines) {
-                    const trimmed = line.trim();
-                    if (!trimmed || !trimmed.startsWith("data: ")) {
-                        continue;
-                    }
-
-                    const data = trimmed.slice(6);
-                    if (data === "[DONE]") {
-                        continue;
-                    }
-
-                    try {
-                        const event = JSON.parse(data) as ResponsesEvent;
-                        await this.handleEvent(event, progress);
-                    } catch (e) {
-                        Logger.error("Failed to parse SSE data", e, data);
-                    }
-                }
+        // Use the shared SSE decoder which correctly handles multiline data frames,
+        // partial chunks, and the [DONE] marker.
+        for await (const payload of decodeSSE(stream, token)) {
+            try {
+                const event = JSON.parse(payload) as ResponsesEvent;
+                await this.handleEvent(event, progress);
+            } catch (e) {
+                Logger.error("Failed to parse SSE data", e, payload);
             }
-        } finally {
-            reader.releaseLock();
         }
     }
 

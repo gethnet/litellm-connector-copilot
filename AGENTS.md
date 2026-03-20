@@ -13,7 +13,7 @@ This document defines **repo-wide, tool-agnostic** expectations for automated co
 - **DRY by design**: centralize shared logic, constants, and helpers instead of duplicating behavior across modules.
 - **No black boxes**: if something “just works”, document *why* (assumptions, invariants, and failure modes).
 - **Reusable by default**: extract pure helpers and shared utilities; avoid copy/paste.
-- **Small, composable modules**: keep files focused; avoid monolithic logic.
+- **Small, composable modules**: keep files focused; avoid monolithic logic. Limit any TypeScript file to no more than **1000 lines of code**. Break/split up larger files into smaller modular files or sub-modules before they exceed this threshold.
 - **Logical file placement**: place new code in the most specific folder that owns the responsibility; prefer extending an existing module before creating a parallel one with overlapping behavior.
 - **Consistent style**: match existing patterns (TypeScript, ESLint/Prettier).
 - **Well documented code**: add clear comments where behavior is non-obvious so the next reader understands expectations, invariants, and failure modes without reverse engineering the logic.

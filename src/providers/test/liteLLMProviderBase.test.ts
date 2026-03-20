@@ -50,6 +50,153 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     const userAgent = "GitHubCopilotChat/test VSCode/test";
 
+    test("buildOpenAIChatRequest respects sendDefaultParameters = false (default)", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const build = (
+            provider as unknown as {
+                buildOpenAIChatRequest: (
+                    messages: readonly vscode.LanguageModelChatRequestMessage[],
+                    model: vscode.LanguageModelChatInformation,
+                    options: vscode.ProvideLanguageModelChatResponseOptions
+                ) => Promise<OpenAIChatCompletionRequest>;
+            }
+        ).buildOpenAIChatRequest.bind(provider);
+
+        const configManager = (provider as unknown as { _configManager: { getConfig: () => Promise<unknown> } })
+            ._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            sendDefaultParameters: false,
+        });
+
+        const model = {
+            id: "gpt-4",
+            maxInputTokens: 8192,
+            maxOutputTokens: 4096,
+        } as vscode.LanguageModelChatInformation;
+
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("hello")],
+                name: undefined,
+            },
+        ];
+
+        const request = await build(messages, model, {
+            modelOptions: {},
+        } as unknown as vscode.ProvideLanguageModelChatResponseOptions);
+        assert.strictEqual(
+            request.temperature,
+            undefined,
+            "Temperature should be undefined when sendDefaultParameters is false"
+        );
+        assert.strictEqual(
+            request.frequency_penalty,
+            undefined,
+            "frequency_penalty should be undefined when sendDefaultParameters is false"
+        );
+        assert.strictEqual(
+            request.presence_penalty,
+            undefined,
+            "presence_penalty should be undefined when sendDefaultParameters is false"
+        );
+    });
+
+    test("buildOpenAIChatRequest respects sendDefaultParameters = true", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const build = (
+            provider as unknown as {
+                buildOpenAIChatRequest: (
+                    messages: readonly vscode.LanguageModelChatRequestMessage[],
+                    model: vscode.LanguageModelChatInformation,
+                    options: vscode.ProvideLanguageModelChatResponseOptions
+                ) => Promise<OpenAIChatCompletionRequest>;
+            }
+        ).buildOpenAIChatRequest.bind(provider);
+
+        const configManager = (provider as unknown as { _configManager: { getConfig: () => Promise<unknown> } })
+            ._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            sendDefaultParameters: true,
+        });
+
+        const model = {
+            id: "gpt-4",
+            maxInputTokens: 8192,
+            maxOutputTokens: 4096,
+        } as vscode.LanguageModelChatInformation;
+
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("hello")],
+                name: undefined,
+            },
+        ];
+
+        const request = await build(messages, model, {
+            modelOptions: {},
+        } as unknown as vscode.ProvideLanguageModelChatResponseOptions);
+        assert.strictEqual(request.temperature, 0.7, "Temperature should be 0.7 when sendDefaultParameters is true");
+        assert.strictEqual(
+            request.frequency_penalty,
+            0.2,
+            "frequency_penalty should be 0.2 when sendDefaultParameters is true"
+        );
+        assert.strictEqual(
+            request.presence_penalty,
+            0.1,
+            "presence_penalty should be 0.1 when sendDefaultParameters is true"
+        );
+    });
+
+    test("buildOpenAIChatRequest prefers modelOptions over defaults", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const build = (
+            provider as unknown as {
+                buildOpenAIChatRequest: (
+                    messages: readonly vscode.LanguageModelChatRequestMessage[],
+                    model: vscode.LanguageModelChatInformation,
+                    options: vscode.ProvideLanguageModelChatResponseOptions
+                ) => Promise<OpenAIChatCompletionRequest>;
+            }
+        ).buildOpenAIChatRequest.bind(provider);
+
+        const configManager = (provider as unknown as { _configManager: { getConfig: () => Promise<unknown> } })
+            ._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            sendDefaultParameters: true,
+        });
+
+        const model = {
+            id: "gpt-4",
+            maxInputTokens: 8192,
+            maxOutputTokens: 4096,
+        } as vscode.LanguageModelChatInformation;
+
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("hello")],
+                name: undefined,
+            },
+        ];
+
+        const request = await build(messages, model, {
+            modelOptions: {
+                temperature: 0.5,
+                frequency_penalty: 0.8,
+                presence_penalty: undefined,
+            },
+        } as unknown as vscode.ProvideLanguageModelChatResponseOptions);
+        assert.strictEqual(request.temperature, 0.5, "Should use provided temperature 0.5");
+        assert.strictEqual(request.frequency_penalty, 0.8, "Should use provided frequency_penalty 0.8");
+        assert.strictEqual(request.presence_penalty, 0.1, "Should use default presence_penalty 0.1");
+    });
+
     test("clearModelCache resets model list and caches", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 

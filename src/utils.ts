@@ -339,6 +339,8 @@ function decodeV2DataPart(part: Extract<V2MessagePart, { type: "data" }>): strin
     return undefined;
 }
 
+import { lmcr_toString } from "./utils/mapChatRoles";
+
 export function normalizeMessagesForV2Pipeline(
     messages: readonly (
         | vscode.LanguageModelChatRequestMessage
@@ -346,14 +348,17 @@ export function normalizeMessagesForV2Pipeline(
         | vscode.LanguageModelChatMessage
     )[]
 ): V2ChatMessage[] {
-    return messages.map((message) => {
+    Logger.info("Entering normalizeMessagesForV2Pipeline", { messageCount: messages.length });
+    return messages.map((message, idx) => {
         const content: V2MessagePart[] = [];
+        Logger.debug(`Normalizing message ${idx}`, { role: message.role, partCount: message.content?.length });
         for (const part of message.content ?? []) {
             if (part instanceof vscode.LanguageModelTextPart) {
                 content.push({ type: "text", text: part.value });
                 continue;
             }
             if (part instanceof vscode.LanguageModelDataPart) {
+                Logger.debug(`Processing data part in message ${idx}`, { mimeType: part.mimeType });
                 content.push({
                     type: "data",
                     mimeType: part.mimeType,
@@ -362,6 +367,7 @@ export function normalizeMessagesForV2Pipeline(
                 continue;
             }
             if (part instanceof vscode.LanguageModelToolCallPart) {
+                Logger.debug(`Processing tool call part in message ${idx}`, { callId: part.callId, name: part.name });
                 content.push({
                     type: "tool_call",
                     callId: part.callId,
@@ -371,9 +377,11 @@ export function normalizeMessagesForV2Pipeline(
                 continue;
             }
             if (isToolResultPart(part)) {
+                const callId = (part as { callId: string }).callId;
+                Logger.debug(`Processing tool result part in message ${idx}`, { callId });
                 content.push({
                     type: "tool_result",
-                    callId: (part as { callId: string }).callId,
+                    callId,
                     content: (part as { content: ReadonlyArray<unknown> }).content ?? [],
                 });
                 continue;
@@ -385,6 +393,7 @@ export function normalizeMessagesForV2Pipeline(
                 metadata?: Record<string, unknown>;
             };
             if (typeof maybeThinking?.value === "string" || Array.isArray(maybeThinking?.value)) {
+                Logger.debug(`Processing thinking part in message ${idx}`, { id: maybeThinking.id });
                 content.push({
                     type: "thinking",
                     value: maybeThinking.value,
@@ -395,7 +404,7 @@ export function normalizeMessagesForV2Pipeline(
         }
 
         return {
-            role: message.role,
+            role: lmcr_toString(message.role),
             name: message.name,
             content,
         };
@@ -405,7 +414,8 @@ export function normalizeMessagesForV2Pipeline(
 export function convertV2MessagesToProviderMessages(
     messages: readonly V2ChatMessage[]
 ): vscode.LanguageModelChatRequestMessage[] {
-    const downgraded: vscode.LanguageModelChatRequestMessage[] = messages.map((message) => {
+    Logger.info("Entering convertV2MessagesToProviderMessages", { messageCount: messages.length });
+    const downgraded: vscode.LanguageModelChatRequestMessage[] = messages.map((message, idx) => {
         const content: Array<vscode.LanguageModelInputPart | unknown> = [];
 
         for (const part of message.content) {
@@ -414,6 +424,7 @@ export function convertV2MessagesToProviderMessages(
                     content.push(new vscode.LanguageModelTextPart(part.text));
                     break;
                 case "data":
+                    Logger.debug(`Converting data part in message ${idx}`, { mimeType: part.mimeType });
                     if (part.mimeType.startsWith("image/")) {
                         content.push(new vscode.LanguageModelDataPart(part.data, part.mimeType));
                     } else if (part.mimeType.startsWith("text/")) {
@@ -421,8 +432,10 @@ export function convertV2MessagesToProviderMessages(
                     }
                     break;
                 case "thinking":
+                    Logger.debug(`Dropping thinking part in message ${idx} (provider downgrade)`);
                     break;
                 case "tool_call":
+                    Logger.debug(`Converting tool call part in message ${idx}`, { callId: part.callId });
                     content.push(
                         new vscode.LanguageModelToolCallPart(
                             part.callId,
@@ -432,6 +445,7 @@ export function convertV2MessagesToProviderMessages(
                     );
                     break;
                 case "tool_result":
+                    Logger.debug(`Converting tool result part in message ${idx}`, { callId: part.callId });
                     content.push(new vscode.LanguageModelToolResultPart(part.callId, [...part.content]));
                     break;
             }
@@ -454,7 +468,8 @@ export function convertV2MessagesToOpenAI(messages: readonly V2ChatMessage[]): O
 export function convertV2MessagesToTransportMessages(
     messages: readonly V2ChatMessage[]
 ): vscode.LanguageModelChatRequestMessage[] {
-    return messages.map((message) => {
+    Logger.info("Entering convertV2MessagesToTransportMessages", { messageCount: messages.length });
+    return messages.map((message, idx) => {
         const content: Array<vscode.LanguageModelInputPart | unknown> = [];
 
         for (const part of message.content) {
@@ -464,20 +479,27 @@ export function convertV2MessagesToTransportMessages(
                     break;
                 case "data":
                     if (part.mimeType.startsWith("image/")) {
+                        Logger.debug(`Converting image data part in message ${idx}`, { mimeType: part.mimeType });
                         content.push(new vscode.LanguageModelDataPart(part.data, part.mimeType));
                     } else {
                         const decoded = decodeV2DataPart(part);
+                        Logger.debug(`Decoding non-image data part in message ${idx}`, {
+                            mimeType: part.mimeType,
+                            success: !!decoded,
+                        });
                         if (decoded) {
                             content.push(new vscode.LanguageModelTextPart(decoded));
                         }
                     }
                     break;
                 case "thinking":
+                    Logger.debug(`Converting thinking part to text in message ${idx}`);
                     content.push(
                         new vscode.LanguageModelTextPart(Array.isArray(part.value) ? part.value.join("") : part.value)
                     );
                     break;
                 case "tool_call":
+                    Logger.debug(`Converting tool call part in message ${idx}`, { callId: part.callId });
                     content.push(
                         new vscode.LanguageModelToolCallPart(
                             part.callId,
@@ -487,6 +509,7 @@ export function convertV2MessagesToTransportMessages(
                     );
                     break;
                 case "tool_result":
+                    Logger.debug(`Converting tool result part in message ${idx}`, { callId: part.callId });
                     content.push(new vscode.LanguageModelToolResultPart(part.callId, [...part.content]));
                     break;
             }
@@ -501,11 +524,18 @@ export function convertV2MessagesToTransportMessages(
 }
 
 export function validateV2Messages(messages: readonly V2ChatMessage[]): void {
-    const downgraded = messages.map((message) => ({
+    Logger.info("Entering validateV2Messages", { messageCount: messages.length });
+    const downgraded = messages.map((message, idx) => ({
         role: message.role,
         name: message.name,
         content: message.content
-            .filter((part) => part.type !== "thinking")
+            .filter((part) => {
+                if (part.type === "thinking") {
+                    Logger.debug(`Filtering out thinking part for validation in message ${idx}`);
+                    return false;
+                }
+                return true;
+            })
             .map((part) => {
                 switch (part.type) {
                     case "text":
@@ -676,19 +706,30 @@ export function isToolResultPart(value: unknown): value is { callId: string; con
 /**
  * Map VS Code message role to OpenAI message role string.
  * @param message The message whose role is mapped.
+ * @deprecated use `lmcr_toString` instead
  */
-function mapRole(message: vscode.LanguageModelChatRequestMessage): Exclude<OpenAIChatRole, "tool"> {
+export function mapRole(
+    message: vscode.LanguageModelChatRequestMessage | vscode.LanguageModelChatMessage2 | vscode.LanguageModelChatMessage
+): Exclude<OpenAIChatRole, "tool"> {
     const role = message.role;
 
     // Use string comparison if possible, or fall back to numeric comparison
-    if (role === vscode.LanguageModelChatMessageRole.User) {
+    // User = 1, Assistant = 2, System = 3
+    if (role === vscode.LanguageModelChatMessageRole.User || (role as number) === 1) {
         return "user";
     }
-    if (role === vscode.LanguageModelChatMessageRole.Assistant) {
+    if (role === vscode.LanguageModelChatMessageRole.Assistant || (role as number) === 2) {
         return "assistant";
     }
 
-    // Default to system for everything else (including System role)
+    // Check for System role (Proposed API: languageModelSystem)
+    // We use the numeric value 3 as the primary check to avoid compiler errors
+    // when the proposed enum member is missing from the stable vscode namespace.
+    if ((role as number) === 3) {
+        return "system";
+    }
+
+    // Default to system for everything else
     return "system";
 }
 

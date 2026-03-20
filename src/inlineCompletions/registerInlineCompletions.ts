@@ -23,19 +23,25 @@ export class InlineCompletionsRegistrar implements vscode.Disposable {
     }
 
     public initialize(): void {
-        this.refreshRegistration();
+        // Call async refreshRegistration but don't await - fire and forget
+        this.refreshRegistration().catch((err) => {
+            Logger.error("Failed to refresh inline completions registration", err);
+        });
 
         this.context.subscriptions.push(
             vscode.workspace.onDidChangeConfiguration((e) => {
                 if (e.affectsConfiguration(INLINE_COMPLETIONS_ENABLED_KEY)) {
-                    this.refreshRegistration();
+                    this.refreshRegistration().catch((err) => {
+                        Logger.error("Failed to refresh inline completions registration after config change", err);
+                    });
                 }
             })
         );
     }
 
-    private refreshRegistration(): void {
-        const enabled = vscode.workspace.getConfiguration().get<boolean>(INLINE_COMPLETIONS_ENABLED_KEY, false);
+    private async refreshRegistration(): Promise<void> {
+        const config = await this.configManager.getConfig();
+        const enabled = config.inlineCompletionsEnabled;
         if (!enabled) {
             this.disposeRegistration();
             LiteLLMTelemetry.reportMetric({

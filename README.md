@@ -1,4 +1,4 @@
-# 🚀 LiteLLM Connector for GitHub Copilot Chat
+# 🚀 LiteLLM Connector for Copilot
 
 [![CI](https://github.com/gethnet/litellm-connector-copilot/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gethnet/litellm-connector-copilot/actions/workflows/ci.yml)
 [![Codecov](https://codecov.io/gh/gethnet/litellm-connector-copilot/branch/main/graph/badge.svg)](https://codecov.io/gh/gethnet/litellm-connector-copilot)
@@ -7,127 +7,325 @@
 [![VS Code Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/GethNet.litellm-connector-copilot)](https://marketplace.visualstudio.com/items?itemName=GethNet.litellm-connector-copilot)
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-**Unlock the full power of any LLM inside GitHub Copilot.**
+## Welcome! Choose Your Own AI Adventure 🎯
 
-Tired of being locked into a single model? The LiteLLM Connector bridges the gap between VS Code's premier chat interface and the vast universe of models supported by LiteLLM. Whether it's Claude 3.5 Sonnet, GPT-4o, DeepSeek, or your own fine-tuned Llama 3 running locally—if LiteLLM can talk to it, Copilot can now use it.
+Tired of being limited to a single AI model in Copilot Chat? **Break free.**
 
----
+The LiteLLM Connector unlocks **hundreds of models** from **any provider**—OpenAI, Anthropic, Google, Mistral, local Llama, custom fine-tunes, you name it—and brings them directly into your VS Code Copilot Chat experience.
 
-## ⭐️ Support the project
+> **If LiteLLM can talk to it, Copilot can use it.**
 
-If this extension saves you time, please consider:
-
-* **Star the repo on GitHub**: https://github.com/gethnet/litellm-connector-copilot
-* **Leave a rating/review** on the **VS Code Marketplace**: https://marketplace.visualstudio.com/items?itemName=GethNet.litellm-connector-copilot
-* **Rate it on Open VSX**: https://open-vsx.org/extension/GethNet/litellm-connector-copilot
-
-You can also support ongoing development via:
-
-* **Ko-fi**: https://ko-fi.com/amwdrizz
-* **Buy Me a Coffee**: https://buymeacoffee.com/amwdrizz
-
-## 🚨 Troubleshooting: Connection & On-boarding Issues 🚨
-
-If you encounter issues where the extension fails to connect to LiteLLM or models do not appear in the picker after configuration:
-
-1.  **Try Manual Configuration**: Open the Command Palette (`Ctrl+Shift+P` or `Cmd+Shift+P`) and run **`Manage LiteLLM Provider`**. This manually triggers the configuration workflow and often resolves state inconsistencies.
-2.  **Check Connection**: Run the **`LiteLLM: Check Connection`** command to verify your Base URL and API Key are valid.
-3.  **The "Nuke" Option**: if the extension state is completely corrupted, run **`LiteLLM: Reset All Configuration`** from the Command Palette. This will wipe all stored URLs and API keys, allowing you to start fresh.
-4.  **Avoid Reinstalling**: Reinstalling the extension usually does **not** clear the underlying `SecretStorage` where your credentials are kept. Use the commands above instead.
-
-## ⚠️ Important - Prerequisites ⚠️
-
-To use this extension, **YOU MUST** have an active GitHub Copilot plan (the Free plan works). This extension utilizes the VS Code Language Model Chat Provider API, which currently requires a Copilot subscription. For more details, see the [VS Code documentation](https://code.visualstudio.com/api/extension-guides/ai/language-model-chat-provider).
-
-## ✨ Features
-
-* **🌍 Hundreds of Models**: Access any model configured in your LiteLLM proxy (OpenAI, Anthropic, Google, Mistral, etc.) directly from the Copilot model picker.
-* **🌊 Real-time Streaming**: Experience smooth, instantaneous responses just like the native models.
-* **🛠️ Tool Calling**: Full support for function calling, allowing models to interact with your workspace.
-* **👁️ Vision Support**: Use image-capable models to analyze screenshots and diagrams directly in chat.
-* **🧠 Smart Parameter Handling**: Automatically handles provider-specific quirks (like stripping `temperature` for O1) so you don't have to.
-* **🔁 Automatic Retry on Unsupported Params**: If a model rejects a flag, the connector can strip unsupported parameters and retry.
-* **📊 Token Tracking & Usage**: Real-time monitoring of input and output tokens for improved visibility into model costs and efficiency.
-* **✍️ Git Commit Generation**: Generate structured commit messages from staged changes directly in the SCM view.
-* **🔍 Connection Diagnostics**: Quickly verify your proxy configuration with the new `Check Connection` command.
-* **⏱️ Inactivity Watchdog**: Optional timeout to keep long streams from hanging indefinitely.
-* **🚫🧠 Cache Bypass Controls**: Send `no-cache` headers to bypass LiteLLM caching (with provider-aware exceptions).
-* **🔐 Secure by Design**: Your API keys and URLs are stored safely in VS Code's `SecretStorage`.
-* **⌨️ Optional Inline Completions**: Use LiteLLM for inline completions via VS Code’s stable inline completion API.
-
-## ⚡ Quick Start
-
-1. **Install Prerequisites**: Ensure [GitHub Copilot Chat](https://marketplace.visualstudio.com/items?itemName=GitHub.copilot-chat) is installed.
-2. **Install Extension**: Install "LiteLLM Connector for Copilot" from the VS Code Marketplace.
-3. **Configure Provider**:
-   * Open the Command Palette (`Ctrl+Shift+P` or `Cmd+Shift+P`).
-   * Run the command: `Manage LiteLLM Provider`.
-   * Enter your LiteLLM **Base URL** (e.g., `http://localhost:4000`).
-   * Enter your **API Key** (if required by your proxy).
-4. **Select Model**:
-   * Open the Copilot Chat view.
-   * Click the model picker and look for the **LiteLLM** section.
-5. **Start Chatting!**
-
-### Optional: Enable Inline Completions
-
-This extension also includes an **optional** inline completions provider (disabled by default).
-
-1. Enable: `litellm-connector.inlineCompletions.enabled`
-2. Run: `LiteLLM: Select Inline Completion Model`
+Whether you're a developer who wants to experiment with different models, a team that needs cost-effective options, or an organization running private LLMs behind your firewall—this extension gives you the freedom to choose the right model for the job, without leaving your editor.
 
 ---
 
-## 🆕 Recent Highlights
+## ⭐️ Support the Project
 
-* **✍️ Git Commit Message Generation**: Stream generated commit messages directly into the SCM input box using any LiteLLM model.
-* **📊 Enhanced Token Awareness**: Real-time token counting and context window display in model tooltips (e.g., "↑128K in / ↓16K out").
-* **🔍 Connection Diagnostics**: New `LiteLLM: Check Connection` command to validate proxy settings and authentication immediately.
-* **🚀 VS Code 1.109+ settings modernization**: configuration now aligns with the Language Model provider settings UI.
-* **🧰 Improved error handling**: better behavior around quota/tooling errors and JSON parsing stability.
-* **🧱 Tool-call compatibility hardening**: tool call IDs are normalized to comply with OpenAI-compatible limits.
-* **📦 Smaller, faster package**: production builds are bundled/minified with **esbuild**.
-* **🌐 Web-ready output**: includes a browser-target bundle for VS Code Web hosts.
+If this extension saves you time or helps you work more effectively, please consider:
 
-## 🤝 Attribution & Credits
+- **⭐ Star the repo** on GitHub: https://github.com/gethnet/litellm-connector-copilot
+- **📝 Leave a review** on the VS Code Marketplace: https://marketplace.visualstudio.com/items?itemName=GethNet.litellm-connector-copilot
+- **☕ Support development** via [Ko-fi](https://ko-fi.com/amwdrizz) or [Buy Me a Coffee](https://buymeacoffee.com/amwdrizz)
 
-This project is a fork and evolution of the excellent work started by [Vivswan/litellm-vscode-chat](https://github.com/Vivswan/litellm-vscode-chat). We are grateful for their contribution to the foundation of this extension.
+Your support keeps this project alive and improving! ❤️
 
-## 🛠️ Development
+---
 
-If you want to contribute or build from source:
+## 🛠️ Getting Started (It's Easier Than You Think!)
 
 ### Prerequisites
-* [Node.js](https://nodejs.org/) (v18 or higher)
-* [npm](https://www.npmjs.com/)
+
+- ✅ **GitHub Copilot Individual** subscription (Free or Paid Individual plans work).
+  - ⚠️ **Important**: GitHub Copilot Business (Organization) and Enterprise plans are **not currently supported** due to VS Code API limitations. For technical details, see the [VS Code Language Model API documentation](https://code.visualstudio.com/api/extension-guides/ai/language-model-chat-provider) and the list of [supported individual plans](https://docs.github.com/en/copilot/concepts/billing/individual-plans).
+- 🌐 A **LiteLLM proxy** running somewhere (locally or in the cloud)
+- 🔑 Your **Base URL** and optionally an **API Key**
+
+> **New to LiteLLM?** Check out [their documentation](https://docs.litellm.ai) to learn how to set up a proxy that can route to any model provider.
+
+### Installation & Setup (60 seconds)
+
+1. **Install** the "LiteLLM Connector for Copilot" extension from the VS Code Marketplace
+2. **Open** the Command Palette: `Ctrl+Shift+P` (Windows/Linux) or `Cmd+Shift+P` (Mac)
+3. **Run**: `Manage LiteLLM Provider`
+4. **Enter** your LiteLLM proxy details:
+   - **Base URL**: e.g., `http://localhost:4000` or your cloud endpoint
+   - **API Key**: if your proxy requires authentication
+5. **Open** Copilot Chat and pick a model from the **LiteLLM** section
+6. **Start chatting!** 🎉
+
+That's it! Your models from the LiteLLM proxy will automatically appear in the model picker.
+
+---
+
+## 💡 What Makes This Special?
+
+This isn't just another AI connector—it's built with care and designed for real-world use:
+
+### 🌍 **Any Model, Any Provider**
+Access hundreds of models through your LiteLLM proxy: GPT-4, Claude 3.5, Gemini Pro, Llama 3, DeepSeek, local models, and custom fine-tunes. All in one place.
+
+### 🌊 **Smooth Streaming Experience**
+Real-time, streaming responses just like native Copilot models. No waiting for complete responses—watch as the AI thinks and types.
+
+### 🛠️ **Full Tool Calling Support**
+Models can use tools and functions to interact with your workspace. Perfect for code analysis, git operations, and complex workflows.
+
+### 👁️ **Vision Capabilities**
+Use image-capable models to analyze screenshots, diagrams, and code directly in chat. Upload images and get insights.
+
+### 🧠 **Smart, Automatic Compatibility**
+The extension automatically handles provider-specific quirks:
+- Strips unsupported parameters (like `temperature` for O1 models)
+- Retries with cleaned payloads when models reject flags
+- Normalizes tool call IDs for strict providers
+- No manual parameter tuning needed
+
+### 📊 **Token Awareness**
+See real-time token usage with context window indicators (e.g., "↑128K in / ↓16K out"). Helps you stay within limits and understand costs.
+
+### ✍️ **Git Commit Generation**
+Generate structured, conventional commit messages from your staged changes. The extension analyzes your diff and creates clear, professional commit messages.
+
+### 🧼 **Smart Sanitization**
+Automatically strips Markdown code blocks from generated commit messages for a clean SCM experience.
+
+### 🔍 **Built-in Diagnostics**
+Run `LiteLLM: Check Connection` anytime to verify your proxy configuration. Troubleshooting made easy.
+
+### ⏱️ **Reliable Timeout Handling**
+Optional inactivity watchdog prevents stuck streams. Configurable timeout keeps your workflow smooth.
+
+### 🚫🧠 **Cache Control**
+Send `no-cache` headers to bypass LiteLLM caching when you need fresh responses. Provider-aware behavior ensures compatibility.
+
+### 🔐 **Secure by Design**
+Your API keys and URLs are stored safely in VS Code's encrypted `SecretStorage`. No plaintext secrets.
+
+### ⌨️ **Optional Inline Completions**
+Enable LiteLLM-powered inline completions as an alternative to Copilot's default. Great for experimentation.
+
+---
+
+## 🎯 Who Is This For?
+
+- **Developers** who want to experiment with different AI models without switching tools
+- **Teams** that need cost-effective or specialized models for specific tasks
+- **Organizations** running private LLMs behind firewalls for security/compliance
+- **AI enthusiasts** who want to test new models as soon as they're released
+- **Researchers** comparing model performance on real code
+- **Anyone** who's thought "I wish I could use [X model] in Copilot Chat"
+
+---
+
+## 🆕 What's New?
+
+- 🚀 **V2 Provider (Experimental)** – A new, high-performance internal baseline provider with minimal transforms and full request tracking. **Hot-reloadable**: toggle it in settings without restarting!
+- 📊 **Advanced Token Counting** – Smarter budgeting with local estimation, background refinement, and short-lived caching for faster, more accurate context management.
+- 🏎️ **Optimized Model Discovery** – Intelligent discovery throttling with in-flight deduplication and TTL caching to prevent excessive proxy lookups.
+- 🧼 **SCM Message Sanitization** – Clean commit messages by automatically stripping triple backticks and Markdown artifacts.
+- ✍️ **Git Commit Generation** – Generate structured, conventional commits directly from the SCM view using any LiteLLM-supported model.
+- 🔍 **Connection Diagnostics** – Use the `LiteLLM: Check Connection` command to instantly validate your proxy and authentication setup.
+- 🧱 **Tool-call Hardening** – Improved compatibility for strict providers (like GPT-5/o1) with normalized tool call IDs.
+
+---
+
+## ⚙️ Configuration Options
+
+Fine-tune your experience with these settings (accessible via VS Code Settings):
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `litellm-connector.useV2Provider` | boolean | `false` | **(Experimental)** Use the new V2 baseline provider. Switches instantly without requiring a reload. |
+| `litellm-connector.inactivityTimeout` | number | `60` | Seconds of inactivity before the connection is considered idle. |
+| `litellm-connector.disableCaching` | boolean | `true` | Send `no-cache` headers to bypass LiteLLM caching. |
+| `litellm-connector.commitModelIdOverride` | string | `""` | Override the model used for git commit message generation. |
+| `litellm-connector.disableQuotaToolRedaction` | boolean | `false` | Disable automatic tool removal when a quota error is detected in chat history. |
+| `litellm-connector.modelOverrides` | object | `{}` | Add or override tags (e.g., `inline-completions`) for specific models. |
+| `litellm-connector.inlineCompletions.enabled` | boolean | `false` | **(Deprecated)** Enable legacy inline completions. Use VS Code's native settings instead. |
+
+> **Tip**: Most users won't need to touch these—the defaults work great out of the box!
+
+---
+
+## ⌨️ Available Commands
+
+Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and try these:
+
+| Command | What It Does |
+|---------|--------------|
+| **Manage LiteLLM Provider** | Configure your Base URL and API key. Refreshes the model list. |
+| **LiteLLM: Check Connection** | Test if your proxy is reachable and credentials are valid. |
+| **LiteLLM: Reload Models** | Manually refresh the model list from your proxy. |
+| **LiteLLM: Reset All Configuration** | ⚠️ Nuke option—clears all stored URLs and API keys. |
+| **LiteLLM: Select Commit Message Model** | Choose which model generates your commit messages. |
+| **LiteLLM: Show Available Models** | See all models currently discovered from your proxy. |
+| **LiteLLM: Test V2 Provider** | (V2) Run a smoke test on the V2 provider pipeline. |
+| **LiteLLM: Set V2 Log Level** | (V2) Adjust logging verbosity for debugging. |
+| **LiteLLM: Show V2 Logs** | (V2) View detailed internal provider logs. |
+
+---
+
+## 🐛 Troubleshooting & FAQ
+
+### "Models aren't showing up after configuration"
+
+1. Run **`LiteLLM: Check Connection`** to verify your Base URL and API key
+2. Ensure your LiteLLM proxy is running and accessible
+3. Try **`LiteLLM: Reload Models`** to force a refresh
+4. If still stuck, use **`LiteLLM: Reset All Configuration`** and start fresh
+
+### "Connection fails / timeout errors"
+
+- Check that your LiteLLM proxy is running and the Base URL is correct
+- Verify network connectivity (firewall, VPN, proxy settings)
+- If using a remote proxy, ensure CORS is configured appropriately
+- Check the proxy logs for incoming requests
+
+### "Reinstalling didn't fix the problem"
+
+VS Code stores credentials in encrypted `SecretStorage`. Reinstalling doesn't clear this. Use **`LiteLLM: Reset All Configuration`** instead.
+
+### "I get 'Quota Exceeded' errors"
+
+The extension automatically detects quota errors and can redact tools to recover. If this happens frequently:
+- Check your LiteLLM proxy's rate limits
+- Consider upgrading your plan or adding more API keys
+- The `disableQuotaToolRedaction` setting can control this behavior
+
+### "Tool calls are failing"
+
+- Ensure your model supports function calling
+- The extension normalizes tool call IDs for compatibility, but some very strict providers may still reject certain payloads
+- Check the Output panel → "LiteLLM Connector" channel for detailed logs
+
+### "Can I use this without GitHub Copilot?"
+
+No—this extension is a **provider** for the official **GitHub Copilot Chat** extension. You need an active Copilot subscription (Free plan works) and the Copilot Chat extension installed.
+
+---
+
+## 🔧 Advanced Usage
+
+### Using with a Local LiteLLM Proxy
+
+```bash
+# Start LiteLLM locally (example with OpenAI)
+export OPENAI_API_KEY=your-key
+litellm --model gpt-4o --port 4000
+```
+
+Then configure the extension with Base URL: `http://localhost:4000`
+
+### Using with Multiple Providers
+
+LiteLLM can route to multiple backends. Configure your `config.yaml` or environment to include multiple model providers, and they'll all appear in the Copilot model picker.
+
+### Enabling Inline Completions
+
+1. Set `litellm-connector.inlineCompletions.enabled` to `true` (though this is being deprecated in favor of VS Code's native inline chat model setting)
+2. Run `LiteLLM: Select Inline Completion Model` to choose your model
+3. Start typing—completions will appear automatically
+
+> **Note**: The inline completions feature is optional and disabled by default. The primary use case is Copilot Chat.
+
+---
+
+## 🧪 Testing & Quality
+
+This extension maintains **85%+ test coverage** with a comprehensive suite covering:
+- Provider orchestration and model discovery
+- Streaming and tool call handling
+- Parameter filtering and error recovery
+- Configuration and secret management
+- Token budgeting and message trimming
+
+Run tests locally:
+```bash
+npm install
+npm run test:coverage
+```
+
+---
+
+## 🛠️ Development & Contributing
+
+Interested in contributing? We'd love your help!
+
+### Prerequisites
+- Node.js 18+
+- npm
+- VS Code (for debugging)
 
 ### Setup
-1. Clone the repository.
-2. Run `npm install` to install dependencies and download the latest VS Code Chat API definitions.
-3. Press `F5` to launch the "Extension Development Host" window.
+```bash
+git clone https://github.com/gethnet/litellm-connector-copilot.git
+cd litellm-connector-copilot
+npm install
+```
 
-### Common Scripts
-* `npm run compile`: Type-check and emit TypeScript output to `out/`.
-* `npm run watch`: Build and watch for changes.
-* `npm run lint`: Run ESLint (auto-fix where possible).
-* `npm run format:check`: Verify formatting without modifying files.
-* `npm run test`: Run unit tests.
-* `npm run test:coverage`: Run tests and generate coverage reports.
-* `npm run bump-version`: Update version in `package.json`.
-* `npm run vscode:pack`: Build (esbuild) and package a VSIX.
-* `npm run package:marketplace`: Package the extension using `README.marketplace.md` for the VS Code Marketplace while preserving the GitHub README.
+Press `F5` in VS Code to launch an Extension Development Host window for testing.
+
+### Common Commands
+```bash
+npm run compile        # Type-check and build
+npm run watch          # Build and watch for changes
+npm run lint           # Run ESLint (auto-fix where possible)
+npm run format         # Format with Prettier
+npm run test           # Run unit tests
+npm run test:coverage  # Run tests with coverage report
+npm run vscode:pack    # Build and package a VSIX
+```
+
+### Code Standards
+
+This project follows strict engineering standards:
+- **TDD-first**: Write tests before implementation
+- **KISS & DRY**: Keep it simple, avoid duplication
+- **Type safety**: No `any` types—strict TypeScript throughout
+- **Modular architecture**: Small, focused files with clear responsibilities
+- **Comprehensive documentation**: Explain the "why" behind complex logic
+
+See [AGENTS.md](./AGENTS.md) for the full contribution guidelines.
+
+### Reporting Issues
+
+Found a bug or have a feature request? Please [open an issue](https://github.com/gethnet/litellm-connector-copilot/issues) with:
+
+- VS Code version
+- Extension version
+- Model ID you're using
+- LiteLLM proxy version and configuration
+- Steps to reproduce
+- Relevant logs from the "LiteLLM Connector" output channel
+
+---
 
 ## 📚 Learn More
 
-* [LiteLLM Documentation](https://docs.litellm.ai)
-* [VS Code Language Model API](https://code.visualstudio.com/api/extension-guides/ai/language-model-chat-provider)
+- [LiteLLM Documentation](https://docs.litellm.ai) – How to set up and configure your proxy
+- [VS Code Language Model API](https://code.visualstudio.com/api/extension-guides/ai/language-model-chat-provider) – The underlying extension API
+- [GitHub Copilot Chat](https://marketplace.visualstudio.com/items?itemName=GitHub.copilot-chat) – The official Copilot Chat extension
 
-## Support & Contributions
+---
 
-### Bug reports, feature requests, and contributions
+## 🙏 Acknowledgments
 
-* **Issues**: Report bugs or request features on [GitHub Issues](https://github.com/gethnet/litellm-connector-copilot/issues).
-   * Include VS Code version, extension version, model id, and (if possible) LiteLLM proxy logs.
-   * If streaming/tool-calls behave oddly, a minimal repro prompt + steps helps a lot.
-* **PRs welcome**: Small, focused changes with tests are easiest to review.
-* **License**: Apache-2.0
+This project builds on the excellent work started by [Vivswan/litellm-vscode-chat](https://github.com/Vivswan/litellm-vscode-chat). We're grateful for their pioneering work in connecting LiteLLM to VS Code.
+
+---
+
+## 📄 License
+
+Apache-2.0. See [LICENSE](./LICENSE) for details.
+
+---
+
+## 💬 Get Help & Connect
+
+- **Issues**: https://github.com/gethnet/litellm-connector-copilot/issues
+- **Discussions**: Join the conversation on GitHub Discussions
+- **Changelog**: See [CHANGELOG.md](./CHANGELOG.md) for version history
+
+---
+
+**Ready to unlock the full potential of AI in your editor?** Install the extension, connect to your LiteLLM proxy, and start exploring the vast world of language models—all without leaving VS Code. 🚀
