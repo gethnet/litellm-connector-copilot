@@ -11,7 +11,6 @@ import {
 import { showModelPicker } from "./commands/modelPicker";
 import { registerSelectInlineCompletionModelCommand } from "./commands/inlineCompletions";
 import { registerGenerateCommitMessageCommand } from "./commands/generateCommitMessage";
-import { registerSetLogLevelCommand } from "./commands/setLogLevel";
 import { LiteLLMCommitMessageProvider } from "./providers/liteLLMCommitProvider";
 import { Logger } from "./utils/logger";
 import { StructuredLogger } from "./observability";
@@ -79,9 +78,6 @@ export function activate(context: vscode.ExtensionContext) {
                     });
                 })
             );
-
-            context.subscriptions.push(registerSetLogLevelCommand());
-
             Logger.info("Config command registered.");
         } catch (cmdErr) {
             Logger.error("Failed to register commands", cmdErr);

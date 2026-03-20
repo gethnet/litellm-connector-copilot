@@ -1,4 +1,6 @@
 import * as assert from "assert";
+import * as sinon from "sinon";
+import * as vscode from "vscode";
 import { StructuredLogger } from "../structuredLogger";
 import type { LogLevel } from "../types";
 
@@ -39,5 +41,28 @@ suite("StructuredLogger", () => {
         assert.strictEqual(StructuredLogger.isEnabled("info" as LogLevel), true);
         assert.strictEqual(StructuredLogger.isEnabled("warn" as LogLevel), true);
         assert.strictEqual(StructuredLogger.isEnabled("error" as LogLevel), true);
+    });
+
+    test("initialize uses distinct structured logger output channel name", () => {
+        const mockChannel = {
+            trace: () => undefined,
+            debug: () => undefined,
+            info: () => undefined,
+            warn: () => undefined,
+            error: () => undefined,
+            show: () => undefined,
+            dispose: () => undefined,
+        } as unknown as vscode.LogOutputChannel;
+
+        const createOutputChannelStub = sinon.stub(vscode.window, "createOutputChannel").returns(mockChannel);
+
+        const context: Partial<vscode.ExtensionContext> = { subscriptions: [] };
+
+        StructuredLogger.initialize(context as vscode.ExtensionContext);
+
+        assert.ok(createOutputChannelStub.calledOnce);
+        assert.strictEqual(createOutputChannelStub.firstCall.args[0], "LiteLLM Structured");
+
+        sinon.restore();
     });
 });

@@ -17,7 +17,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "1.4.7-dev10",
+	"version": "1.5.0-dev2",
 	"preview": true,
 	"engines": {
 		"vscode": "^1.110.0"
@@ -187,7 +187,9 @@
 					"type": "boolean",
 					"default": true,
 					"description": "When enabled, LiteLLM caching will be bypassed by sending 'no-cache: true' and 'Cache-Control: no-cache' headers.",
-					"tags": ["experimental"]
+					"tags": [
+						"experimental"
+					]
 				},
 				"litellm-connector.sendDefaultParameters": {
 					"type": "boolean",

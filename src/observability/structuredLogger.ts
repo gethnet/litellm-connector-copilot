@@ -25,7 +25,9 @@ export class StructuredLogger {
      * @param context - VS Code extension context for subscription management
      */
     public static initialize(context: vscode.ExtensionContext): void {
-        this.channel = vscode.window.createOutputChannel("LiteLLM V2", { log: true });
+        // Structured logger gets a dedicated channel to avoid mixing with
+        // the legacy top-level Logger output at "LiteLLM".
+        this.channel = vscode.window.createOutputChannel("LiteLLM Structured", { log: true });
         context.subscriptions.push(this.channel);
         this.info("logger.initialized", {
             note: "Use the log level dropdown in the output panel to change verbosity",
