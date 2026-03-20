@@ -2,16 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.5.0] - 2026-03-20
 
-### Added
-- (No unreleased changes yet)
+### 🚀 Features
+* Improve model discovery and refresh behavior (c18947f)
+* Enhance diff handling and token counting (92120a8)
+* Add token counting functionality and update agent tools (2ae2ad7)
 
-### Changed
+### 🛠️ Bug Fixes
+* GPT-5.3-codex Tool Calling Failure Fixes #54 (dc32107)
+* Fix 400 Bad Request with gemini-3.1-flash-lite-preview (Invalid Role) #64
+* Fix 400 UnsupportedParamsError for gpt-5* and o1-* models #65
 
-### Fixed
-
-### Breaking Changes
+### 🏠 Internal
+* Refactor: improve logging architecture and cleanup (e8c75d2)
+* Finalize project structure and improve streaming/observability (f931652)
+* Investigate context window usage (#58) (7840e2b)
+* Update agent and skills (f00a7a2)
+* **StructuredLogger output channel renamed**: Renamed the output channel from "LiteLLM V2" to "LiteLLM Structured" to distinguish it from the legacy Logger channel and avoid confusion in the VS Code Output panel.
+  - Updated corresponding test in `src/observability/test/structuredLogger.test.ts` to verify the correct channel name.
 
 ---
 

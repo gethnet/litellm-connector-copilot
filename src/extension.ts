@@ -55,6 +55,23 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Register based on initial config
     void configManager.getConfig().then(() => {
+        // Register the LiteLLM provider under the vendor id used in package.json
+        try {
+            Logger.info("Registering LanguageModelChatProvider...");
+            const registration = vscode.lm.registerLanguageModelChatProvider(
+                "litellm-connector",
+                activeProvider as unknown as vscode.LanguageModelChatProvider
+            );
+            if (registration) {
+                context.subscriptions.push(registration);
+                Logger.info("Provider registered successfully.");
+            } else {
+                Logger.error("registerLanguageModelChatProvider returned undefined/null");
+            }
+        } catch (err) {
+            Logger.error("Failed to register provider", err);
+        }
+
         // Management commands to configure base URL and API key
         try {
             context.subscriptions.push(

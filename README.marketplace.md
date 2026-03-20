@@ -48,6 +48,10 @@ If the extension fails to connect or models don't show up:
 ## ⚡ Quick Start (60 seconds)
 
 1. Install **GitHub Copilot Chat**
+2. Open the Command Palette: `Ctrl+Shift+P` (Windows/Linux) or `Cmd+Shift+P` (Mac)
+3. Run: **`Manage LiteLLM Provider`** and enter your LiteLLM proxy details.
+
+> **Pro-Tip**: This extension supports both standard Chat and advanced V2 Chat (including thinking models and structured usage reporting) automatically based on the models enabled in your LiteLLM proxy.
 2. Install **LiteLLM Connector for Copilot**
 3. Open Command Palette: `Ctrl+Shift+P` / `Cmd+Shift+P`
 4. Run: **Manage LiteLLM Provider**

@@ -47,7 +47,9 @@ Your support keeps this project alive and improving! ❤️
 1. **Install** the "LiteLLM Connector for Copilot" extension from the VS Code Marketplace
 2. **Open** the Command Palette: `Ctrl+Shift+P` (Windows/Linux) or `Cmd+Shift+P` (Mac)
 3. **Run**: `Manage LiteLLM Provider`
-4. **Enter** your LiteLLM proxy details:
+4. **Enter** your LiteLLM proxy details.
+
+> **Pro-Tip**: This extension supports both standard Chat and advanced V2 Chat (including thinking models and structured usage reporting) automatically based on the models enabled in your LiteLLM proxy.
    - **Base URL**: e.g., `http://localhost:4000` or your cloud endpoint
    - **API Key**: if your proxy requires authentication
 5. **Open** Copilot Chat and pick a model from the **LiteLLM** section
