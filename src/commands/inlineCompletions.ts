@@ -56,9 +56,10 @@ export function registerSelectInlineCompletionModelCommand(provider: LiteLLMChat
                 .map((m) => {
                     const tags = (m as ModelWithOptionalTags).tags ?? [];
                     return {
-                        label: m.id,
+                        label: m.name,
                         description: m.name !== m.id ? m.name : undefined,
                         detail: tags.length ? `tags: ${tags.join(", ")}` : m.tooltip,
+                        modelId: m.id,
                     };
                 }),
             {
@@ -80,17 +81,22 @@ export function registerSelectInlineCompletionModelCommand(provider: LiteLLMChat
             return;
         }
 
+        if (!picked.modelId) {
+            vscode.window.showErrorMessage("Selected model could not be resolved.");
+            return;
+        }
+
         await vscode.workspace
             .getConfiguration()
-            .update(INLINE_COMPLETIONS_MODEL_ID_KEY, picked.label, vscode.ConfigurationTarget.Global);
+            .update(INLINE_COMPLETIONS_MODEL_ID_KEY, picked.modelId, vscode.ConfigurationTarget.Global);
 
         LiteLLMTelemetry.reportMetric({
             requestId,
-            model: picked.label,
+            model: picked.modelId,
             status: "success",
             caller: "inline-completions.selectModel.selected",
         });
 
-        vscode.window.showInformationMessage(`Inline completions model set to: ${picked.label}`);
+        vscode.window.showInformationMessage(`Inline completions model set to: ${picked.modelId}`);
     });
 }

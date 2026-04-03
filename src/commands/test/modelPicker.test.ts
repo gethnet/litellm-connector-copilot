@@ -35,8 +35,8 @@ suite("ModelPicker Unit Tests", () => {
 
     test("showModelPicker updates configuration on selection", async () => {
         const mockModels = [
-            { id: "model-1", name: "Model 1" },
-            { id: "model-2", name: "Model 2" },
+            { id: "model-1", name: "model-1" },
+            { id: "model-2", name: "model-2" },
         ];
         mockProvider.discoverModels.resolves(mockModels as unknown as vscode.LanguageModelChatInformation[]);
         mockProvider.getConfigManager.returns({

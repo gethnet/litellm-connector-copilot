@@ -293,4 +293,83 @@ suite("LiteLLM Client Unit Tests", () => {
         onCancel?.();
         assert.strictEqual(abortSignal?.aborted, true);
     });
+
+    test("fetchWithRetry retries on 429 with backoff", async () => {
+        const client = new LiteLLMClient(config, userAgent);
+        const fetchStub = sandbox.stub(global, "fetch");
+
+        const rateLimitResponse = {
+            ok: false,
+            status: 429,
+            statusText: "Too Many Requests",
+            clone: function () {
+                return this;
+            },
+            text: async () => "Rate limit exceeded",
+            headers: { get: () => null },
+        };
+
+        const successResponse = {
+            ok: true,
+            status: 200,
+            body: new ReadableStream(),
+            headers: { get: () => null },
+        };
+
+        fetchStub.onCall(0).resolves(rateLimitResponse as unknown as Response);
+        fetchStub.onCall(1).resolves(successResponse as unknown as Response);
+
+        await client.chat({ model: "m", messages: [] });
+
+        assert.strictEqual(fetchStub.callCount, 2);
+    });
+
+    test("fetchWithRetry retries on 5xx", async () => {
+        const client = new LiteLLMClient(config, userAgent);
+        const fetchStub = sandbox.stub(global, "fetch");
+
+        const serverErrorResponse = {
+            ok: false,
+            status: 503,
+            clone: function () {
+                return this;
+            },
+            text: async () => "Service Unavailable",
+            headers: { get: () => null },
+        };
+
+        const successResponse = {
+            ok: true,
+            status: 200,
+            body: new ReadableStream(),
+            headers: { get: () => null },
+        };
+
+        fetchStub.onCall(0).resolves(serverErrorResponse as unknown as Response);
+        fetchStub.onCall(1).resolves(successResponse as unknown as Response);
+
+        await client.chat({ model: "m", messages: [] });
+
+        assert.strictEqual(fetchStub.callCount, 2);
+    });
+
+    test("fetchWithRetry does not retry on non-429 4xx", async () => {
+        const client = new LiteLLMClient(config, userAgent);
+        const fetchStub = sandbox.stub(global, "fetch");
+
+        const badRequestResponse = {
+            ok: false,
+            status: 401,
+            clone: function () {
+                return this;
+            },
+            text: async () => "Unauthorized",
+            headers: { get: () => null },
+        };
+
+        fetchStub.resolves(badRequestResponse as unknown as Response);
+
+        await assert.rejects(() => client.chat({ model: "m", messages: [] }));
+        assert.strictEqual(fetchStub.callCount, 1);
+    });
 });

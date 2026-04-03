@@ -3,6 +3,7 @@ import { LiteLLMChatProvider } from "./providers";
 import { ConfigManager } from "./config/configManager";
 import {
     registerManageConfigCommand,
+    registerManageBackendsCommand,
     registerReloadModelsCommand,
     registerShowModelsCommand,
     registerCheckConnectionCommand,
@@ -76,6 +77,9 @@ export function activate(context: vscode.ExtensionContext) {
         try {
             context.subscriptions.push(
                 registerManageConfigCommand(context, configManager, activeProvider as unknown as LiteLLMChatProvider)
+            );
+            context.subscriptions.push(
+                registerManageBackendsCommand(configManager, activeProvider as unknown as LiteLLMChatProvider)
             );
             context.subscriptions.push(registerShowModelsCommand(activeProvider as unknown as LiteLLMChatProvider));
             context.subscriptions.push(registerReloadModelsCommand(activeProvider as unknown as LiteLLMChatProvider));

@@ -51,11 +51,50 @@ export interface LiteLLMParams {
 }
 
 /**
+ * Configuration for a single LiteLLM proxy backend.
+ * Multiple backends can be configured; each contributes models to the aggregated model list.
+ */
+export interface LiteLLMBackend {
+    /** Human-readable label (e.g., "Cloud", "Local GPU", "Team Alpha"). */
+    name: string;
+    /** Base URL of the LiteLLM proxy (e.g., "http://localhost:4000"). */
+    url: string;
+    /**
+     * Reference key into VS Code SecretStorage for the API key.
+     * The actual secret is stored under "litellm-connector.apiKey.{apiKeySecretRef}".
+     * Defaults to the backend name if not specified.
+     */
+    apiKeySecretRef?: string;
+    /** Whether this backend is enabled. Defaults to true. */
+    enabled?: boolean;
+}
+
+/**
+ * Resolved backend with its API key, used internally for routing.
+ */
+export interface ResolvedBackend {
+    name: string;
+    url: string;
+    apiKey?: string;
+    enabled: boolean;
+}
+
+/**
  * LiteLLM configuration stored in VS Code settings.
  */
 export interface LiteLLMConfig {
+    /** Legacy single-backend base URL. Kept for backward compatibility. */
     url: string;
+    /** Legacy single-backend API key. Kept for backward compatibility. */
     key?: string;
+
+    /**
+     * Multi-backend configuration. When populated, models from all enabled backends
+     * are aggregated. Model IDs are prefixed with "{backendName}/".
+     * Takes precedence over legacy url/key when non-empty.
+     */
+    backends?: LiteLLMBackend[];
+
     inactivityTimeout?: number;
     disableCaching?: boolean;
     /** Experimental: emit token usage metadata as a response data part for manual UI probing. */

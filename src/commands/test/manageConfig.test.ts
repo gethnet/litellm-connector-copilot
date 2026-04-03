@@ -6,9 +6,11 @@ import {
     registerReloadModelsCommand,
     registerShowModelsCommand,
     registerCheckConnectionCommand,
+    registerResetConfigCommand,
+    registerManageBackendsCommand,
 } from "../../commands/manageConfig";
 import { ConfigManager } from "../../config/configManager";
-import { LiteLLMClient } from "../../adapters/litellmClient";
+import { MultiBackendClient } from "../../adapters/multiBackendClient";
 import type { LiteLLMChatProvider } from "../../providers";
 
 suite("ManageConfig Command Unit Tests", () => {
@@ -34,6 +36,12 @@ suite("ManageConfig Command Unit Tests", () => {
 
     test("updates config when input is provided", async () => {
         mockConfigManager.getConfig.resolves({ url: "old-url", key: "old-key" });
+        const showQuickPickStub = sandbox.stub(vscode.window, "showQuickPick");
+        // Select "Configure Single Backend (Legacy)"
+        showQuickPickStub
+            .onFirstCall()
+            .resolves({ label: "Configure Single Backend (Legacy)" } as vscode.QuickPickItem);
+
         const showInputBoxStub = sandbox.stub(vscode.window, "showInputBox");
         showInputBoxStub.onFirstCall().resolves("new-url");
         showInputBoxStub.onSecondCall().resolves("new-key");
@@ -75,6 +83,12 @@ suite("ManageConfig Command Unit Tests", () => {
 
     test("aborts if URL input is cancelled", async () => {
         mockConfigManager.getConfig.resolves({ url: "", key: "" });
+        const showQuickPickStub = sandbox.stub(vscode.window, "showQuickPick");
+        // Select "Configure Single Backend (Legacy)"
+        showQuickPickStub
+            .onFirstCall()
+            .resolves({ label: "Configure Single Backend (Legacy)" } as vscode.QuickPickItem);
+
         const showInputBoxStub = sandbox.stub(vscode.window, "showInputBox");
         showInputBoxStub.onFirstCall().resolves(undefined);
 
@@ -97,6 +111,12 @@ suite("ManageConfig Command Unit Tests", () => {
 
     test("shows unmasked API key when 'thisisunsafe' is entered with existing key", async () => {
         mockConfigManager.getConfig.resolves({ url: "my-url", key: "secret-api-key" });
+        const showQuickPickStub = sandbox.stub(vscode.window, "showQuickPick");
+        // Select "Configure Single Backend (Legacy)"
+        showQuickPickStub
+            .onFirstCall()
+            .resolves({ label: "Configure Single Backend (Legacy)" } as vscode.QuickPickItem);
+
         const showInputBoxStub = sandbox.stub(vscode.window, "showInputBox");
         showInputBoxStub.onFirstCall().resolves("my-url"); // URL
         showInputBoxStub.onSecondCall().resolves("thisisunsafe"); // Magic string
@@ -142,6 +162,12 @@ suite("ManageConfig Command Unit Tests", () => {
 
     test("does not show unmasked key if 'thisisunsafe' is entered without existing key", async () => {
         mockConfigManager.getConfig.resolves({ url: "my-url", key: undefined });
+        const showQuickPickStub = sandbox.stub(vscode.window, "showQuickPick");
+        // Select "Configure Single Backend (Legacy)"
+        showQuickPickStub
+            .onFirstCall()
+            .resolves({ label: "Configure Single Backend (Legacy)" } as vscode.QuickPickItem);
+
         const showInputBoxStub = sandbox.stub(vscode.window, "showInputBox");
         showInputBoxStub.onFirstCall().resolves("my-url"); // URL
         showInputBoxStub.onSecondCall().resolves("thisisunsafe"); // Magic string but no existing key
@@ -177,6 +203,12 @@ suite("ManageConfig Command Unit Tests", () => {
 
     test("allows editing API key in unmasked mode", async () => {
         mockConfigManager.getConfig.resolves({ url: "my-url", key: "old-secret" });
+        const showQuickPickStub = sandbox.stub(vscode.window, "showQuickPick");
+        // Select "Configure Single Backend (Legacy)"
+        showQuickPickStub
+            .onFirstCall()
+            .resolves({ label: "Configure Single Backend (Legacy)" } as vscode.QuickPickItem);
+
         const showInputBoxStub = sandbox.stub(vscode.window, "showInputBox");
         showInputBoxStub.onFirstCall().resolves("my-url"); // URL
         showInputBoxStub.onSecondCall().resolves("thisisunsafe"); // Magic string
@@ -261,7 +293,9 @@ suite("Model Commands Unit Tests", () => {
             ],
         } as unknown as LiteLLMChatProvider;
 
-        const qpStub = sandbox.stub(vscode.window, "showQuickPick").resolves({ label: "gpt-4o" } as never);
+        const qpStub = sandbox
+            .stub(vscode.window, "showQuickPick")
+            .resolves({ label: "gpt-4o", modelId: "gpt-4o" } as never);
         const clipStub = sandbox.stub();
         sandbox.stub(vscode.env, "clipboard").value({ writeText: clipStub } as unknown as vscode.Clipboard);
         const infoStub = sandbox.stub(vscode.window, "showInformationMessage");
@@ -321,13 +355,13 @@ suite("Model Commands Unit Tests", () => {
 
     test("checkConnection: reports success on valid connection", async () => {
         const configManagerStub = sandbox.createStubInstance(ConfigManager);
-        configManagerStub.getConfig.resolves({ url: "http://localhost:4000", key: "k" });
+        configManagerStub.resolveBackends.resolves([
+            { name: "default", url: "http://localhost:4000", apiKey: "k", enabled: true },
+        ]);
 
-        const checkStub = sandbox.stub(LiteLLMClient.prototype, "checkConnection").resolves({
-            latencyMs: 100,
-            modelCount: 5,
-            sampleModelIds: ["m1", "m2"],
-        });
+        const checkStub = sandbox
+            .stub(MultiBackendClient.prototype, "checkConnectionAll")
+            .resolves([{ backendName: "default", latencyMs: 100, modelCount: 5 }]);
 
         sandbox.stub(vscode.window, "withProgress").callsFake(async (_opts, task) => {
             return task(
@@ -350,14 +384,18 @@ suite("Model Commands Unit Tests", () => {
 
         assert.strictEqual(checkStub.calledOnce, true);
         assert.strictEqual(infoStub.calledOnce, true);
-        assert.ok(String(infoStub.firstCall.args[0]).includes("Connection successful"));
+        assert.ok(String(infoStub.firstCall.args[0]).includes("connections successful"));
     });
 
     test("checkConnection: reports error on failed connection", async () => {
         const configManagerStub = sandbox.createStubInstance(ConfigManager);
-        configManagerStub.getConfig.resolves({ url: "http://localhost:4000", key: "k" });
+        configManagerStub.resolveBackends.resolves([
+            { name: "default", url: "http://localhost:4000", apiKey: "k", enabled: true },
+        ]);
 
-        sandbox.stub(LiteLLMClient.prototype, "checkConnection").rejects(new Error("Network Error"));
+        const checkStub = sandbox
+            .stub(MultiBackendClient.prototype, "checkConnectionAll")
+            .resolves([{ backendName: "default", latencyMs: -1, modelCount: 0, error: "Network Error" }]);
 
         sandbox.stub(vscode.window, "withProgress").callsFake(async (_opts, task) => {
             return task(
@@ -365,7 +403,7 @@ suite("Model Commands Unit Tests", () => {
                 new vscode.CancellationTokenSource().token
             );
         });
-        const errorStub = sandbox.stub(vscode.window, "showErrorMessage");
+        const warnStub = sandbox.stub(vscode.window, "showWarningMessage");
 
         let handler: (() => Promise<void>) | undefined;
         sandbox.stub(vscode.commands, "registerCommand").callsFake((id, cb) => {
@@ -378,7 +416,115 @@ suite("Model Commands Unit Tests", () => {
         registerCheckConnectionCommand(configManagerStub as unknown as ConfigManager);
         await handler?.();
 
-        assert.strictEqual(errorStub.calledOnce, true);
-        assert.ok(String(errorStub.firstCall.args[0]).includes("Connection failed: Network Error"));
+        assert.strictEqual(checkStub.calledOnce, true);
+        assert.strictEqual(warnStub.calledOnce, true);
+        assert.ok(String(warnStub.firstCall.args[0]).includes("0/1 connections successful"));
+    });
+
+    test("reset: cleans up config and cache upon confirmation", async () => {
+        const configManagerStub = sandbox.createStubInstance(ConfigManager);
+        const clearStub = sandbox.stub();
+        const provider = { clearModelCache: clearStub } as unknown as LiteLLMChatProvider;
+
+        sandbox.stub(vscode.window, "showWarningMessage").resolves("Reset All" as unknown as vscode.MessageItem);
+        const infoStub = sandbox.stub(vscode.window, "showInformationMessage");
+
+        let handler: (() => Promise<void>) | undefined;
+        sandbox.stub(vscode.commands, "registerCommand").callsFake((id, cb) => {
+            if (id === "litellm-connector.reset") {
+                handler = cb as () => Promise<void>;
+            }
+            return { dispose: () => {} } as vscode.Disposable;
+        });
+
+        registerResetConfigCommand(configManagerStub as unknown as ConfigManager, provider);
+        await handler?.();
+
+        assert.ok(configManagerStub.cleanupAllConfiguration.calledOnce);
+        assert.ok(clearStub.calledOnce);
+        assert.ok(infoStub.calledWith("LiteLLM configuration has been reset."));
+    });
+
+    test("manage: handles add backend flow", async () => {
+        const configManagerStub = sandbox.createStubInstance(ConfigManager);
+        configManagerStub.getConfig.resolves({ url: "", key: "" });
+        configManagerStub.listBackends.resolves([]);
+
+        const showQuickPickStub = sandbox.stub(vscode.window, "showQuickPick");
+        showQuickPickStub.onFirstCall().resolves({ label: "$(add) Add Backend" } as vscode.QuickPickItem);
+
+        const showInputBoxStub = sandbox.stub(vscode.window, "showInputBox");
+        showInputBoxStub.onCall(0).resolves("NewBackend");
+        showInputBoxStub.onCall(1).resolves("http://new-url");
+        showInputBoxStub.onCall(2).resolves("new-key");
+
+        const infoStub = sandbox.stub(vscode.window, "showInformationMessage");
+
+        let handler: (() => Promise<void>) | undefined;
+        sandbox.stub(vscode.commands, "registerCommand").callsFake((id, cb) => {
+            if (id === "litellm-connector.manageBackends") {
+                handler = cb as () => Promise<void>;
+            }
+            return { dispose: () => {} } as vscode.Disposable;
+        });
+
+        registerManageBackendsCommand(configManagerStub as unknown as ConfigManager);
+        await handler?.();
+
+        assert.ok(
+            configManagerStub.addBackend.calledWith(
+                { name: "NewBackend", url: "http://new-url", enabled: true },
+                "new-key"
+            )
+        );
+        assert.ok(infoStub.calledWith('Backend "NewBackend" added.'));
+    });
+
+    test("manage: handles remove backend flow", async () => {
+        const configManagerStub = sandbox.createStubInstance(ConfigManager);
+        const backend = { name: "ToRemove", url: "url", enabled: true };
+        configManagerStub.listBackends.resolves([backend]);
+
+        const showQuickPickStub = sandbox.stub(vscode.window, "showQuickPick");
+        showQuickPickStub.onFirstCall().resolves({ label: "ToRemove", backend } as unknown as vscode.QuickPickItem);
+        showQuickPickStub.onSecondCall().resolves({ id: "remove" } as unknown as vscode.QuickPickItem);
+
+        sandbox.stub(vscode.window, "showWarningMessage").resolves("Remove" as unknown as vscode.MessageItem);
+
+        let handler: (() => Promise<void>) | undefined;
+        sandbox.stub(vscode.commands, "registerCommand").callsFake((id, cb) => {
+            if (id === "litellm-connector.manageBackends") {
+                handler = cb as () => Promise<void>;
+            }
+            return { dispose: () => {} } as vscode.Disposable;
+        });
+
+        registerManageBackendsCommand(configManagerStub as unknown as ConfigManager);
+        await handler?.();
+
+        assert.ok(configManagerStub.removeBackend.calledWith("ToRemove"));
+    });
+
+    test("manage: handles toggle backend flow", async () => {
+        const configManagerStub = sandbox.createStubInstance(ConfigManager);
+        const backend = { name: "ToToggle", url: "url", enabled: true };
+        configManagerStub.listBackends.resolves([backend]);
+
+        const showQuickPickStub = sandbox.stub(vscode.window, "showQuickPick");
+        showQuickPickStub.onFirstCall().resolves({ label: "ToToggle", backend } as unknown as vscode.QuickPickItem);
+        showQuickPickStub.onSecondCall().resolves({ id: "toggle" } as unknown as vscode.QuickPickItem);
+
+        let handler: (() => Promise<void>) | undefined;
+        sandbox.stub(vscode.commands, "registerCommand").callsFake((id, cb) => {
+            if (id === "litellm-connector.manageBackends") {
+                handler = cb as () => Promise<void>;
+            }
+            return { dispose: () => {} } as vscode.Disposable;
+        });
+
+        registerManageBackendsCommand(configManagerStub as unknown as ConfigManager);
+        await handler?.();
+
+        assert.ok(configManagerStub.updateBackend.calledWith("ToToggle", { enabled: false }));
     });
 });

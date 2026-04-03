@@ -18,7 +18,7 @@ import {
     normalizeMessagesForV2Pipeline,
     validateV2Messages,
 } from "../utils";
-import { LiteLLMClient } from "../adapters/litellmClient";
+import { MultiBackendClient, parseNamespacedModelId } from "../adapters/multiBackendClient";
 import { ResponsesClient } from "../adapters/responsesClient";
 import { transformToResponsesFormat } from "../adapters/responsesAdapter";
 import { countTokens, trimMessagesToFitBudget } from "../adapters/tokenUtils";
@@ -74,6 +74,9 @@ export abstract class LiteLLMProviderBase {
     protected _lastModelList: LanguageModelChatInformation[] = [];
     protected _modelListFetchedAtMs = 0;
     private _inFlightDiscovery: Promise<vscode.LanguageModelChatInformation[]> | undefined;
+
+    protected _multiBackendClient: MultiBackendClient | undefined;
+    protected _activeBackendNames: string[] = [];
 
     constructor(
         protected readonly secrets: vscode.SecretStorage,
@@ -157,95 +160,96 @@ export abstract class LiteLLMProviderBase {
         Logger.trace("discoverModels called");
         try {
             const config = await this._configManager.getConfig();
-            Logger.debug(`Config URL: ${config.url ? "set" : "not set"}`);
-            if (!config.url) {
+            const backends = await this._configManager.resolveBackends();
+
+            if (backends.length === 0) {
                 // When invoked from the Language Models view with silent=false, VS Code is allowed to prompt.
                 // Use the classic configuration workflow to capture baseUrl/apiKey into canonical storage.
                 if (!options.silent) {
-                    Logger.info("No base URL configured; prompting for classic configuration (silent=false)");
+                    Logger.info("No backends configured; prompting for configuration (silent=false)");
                     await vscode.commands.executeCommand("litellm-connector.manage");
 
-                    const refreshed = await this._configManager.getConfig();
-                    if (!refreshed.url) {
-                        Logger.info("Classic configuration was not completed; returning empty model list.");
+                    const refreshedBackends = await this._configManager.resolveBackends();
+                    if (refreshedBackends.length === 0) {
+                        Logger.info("Configuration was not completed; returning empty model list.");
                         return [];
                     }
-                    Logger.debug("Classic configuration completed; continuing model discovery.");
+                    Logger.debug("Configuration completed; continuing model discovery.");
                 } else {
-                    Logger.info("No base URL configured, returning empty model list.");
+                    Logger.info("No backends configured, returning empty model list.");
                     return [];
                 }
             }
 
-            // Re-read config after potential prompt.
-            const effectiveConfig = await this._configManager.getConfig();
-            if (!effectiveConfig.url) {
-                Logger.info("No base URL configured after prompt, returning empty model list.");
+            // Re-read after potential prompt.
+            const effectiveBackends = await this._configManager.resolveBackends();
+            if (effectiveBackends.length === 0) {
+                Logger.info("No backends configured after prompt, returning empty model list.");
                 return [];
             }
 
-            const client = new LiteLLMClient(effectiveConfig, this.userAgent);
-            Logger.trace("Fetching model info from LiteLLM...");
-            const { data } = await client.getModelInfo(token);
+            // Create multi-backend client
+            this._multiBackendClient = new MultiBackendClient(effectiveBackends, this.userAgent);
+            this._activeBackendNames = effectiveBackends.map((b) => b.name);
 
-            if (!data || !Array.isArray(data)) {
-                Logger.warn("Received invalid data format from /model/info", data);
-                return [];
-            }
+            Logger.trace(`Fetching model info from ${effectiveBackends.length} backend(s)...`);
+            const aggregated = await this._multiBackendClient.getModelInfoAll(token);
 
-            Logger.info(`Found ${data.length} models`);
-            const infos: LanguageModelChatInformation[] = data.map(
-                (entry: { model_info?: LiteLLMModelInfo; model_name?: string }, index: number) => {
-                    const modelId = entry.model_info?.key ?? entry.model_name ?? `model-${index}`;
-                    // const modelId = entry.model_info?.id ?? entry.model_info?.key ?? `model-${index}`;
-                    const modelInfo = entry.model_info;
-                    this._modelInfoCache.set(modelId, modelInfo);
+            Logger.info(`Found ${aggregated.data.length} models across ${effectiveBackends.length} backend(s)`);
+            const infos: LanguageModelChatInformation[] = aggregated.data.map((entry) => {
+                const modelId = entry.namespacedId;
+                const modelInfo = entry.model_info;
+                this._modelInfoCache.set(modelId, modelInfo);
 
-                    const derived = deriveCapabilitiesFromModelInfo(modelId, modelInfo);
-                    this._derivedCapabilitiesCache.set(modelId, derived);
+                const derived = deriveCapabilitiesFromModelInfo(modelId, modelInfo);
+                this._derivedCapabilitiesCache.set(modelId, derived);
 
-                    const capabilities = capabilitiesToVSCode(derived);
-                    const tags = getDerivedModelTags(modelId, derived, effectiveConfig.modelOverrides);
+                const capabilities = capabilitiesToVSCode(derived);
+                const tags = getDerivedModelTags(modelId, derived, config.modelOverrides);
 
-                    const formatTokens = (num: number): string => {
-                        if (num >= 1000000) {
-                            return `${(num / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
-                        }
-                        if (num >= 1000) {
-                            return `${Math.floor(num / 1000)}K`;
-                        }
-                        return num.toString();
-                    };
-
-                    const inputDesc = formatTokens(derived.rawContextWindow);
-                    const outputDesc = formatTokens(derived.maxOutputTokens);
-                    const tooltip = `${modelInfo?.litellm_provider ?? "LiteLLM"} (${modelInfo?.mode ?? "responses"}) — Context: ${inputDesc} in / ${outputDesc} out`;
-
-                    // Derive family from provider to help Copilot shape requests correctly
-                    const provider = modelInfo?.litellm_provider?.toLowerCase();
-                    let family = "litellm";
-                    if (provider === "openai") {
-                        family = "gpt4";
-                    } else if (provider === "anthropic") {
-                        family = "claude";
+                const formatTokens = (num: number): string => {
+                    if (num >= 1000000) {
+                        return `${(num / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
                     }
+                    if (num >= 1000) {
+                        return `${Math.floor(num / 1000)}K`;
+                    }
+                    return num.toString();
+                };
 
-                    const info = {
-                        id: modelId,
-                        name: entry.model_name ?? modelId,
-                        tooltip,
-                        detail: `Context: ${inputDesc} | Output: ${outputDesc}`,
-                        family: family,
-                        version: "1.0.0",
-                        maxInputTokens: derived.rawContextWindow,
-                        maxOutputTokens: derived.maxOutputTokens,
-                        capabilities,
-                        tags,
-                    };
+                const inputDesc = formatTokens(derived.rawContextWindow);
+                const outputDesc = formatTokens(derived.maxOutputTokens);
+                const tooltip = `${entry.backendName} · ${modelInfo?.litellm_provider ?? "LiteLLM"} (${modelInfo?.mode ?? "responses"}) — Context: ${inputDesc} in / ${outputDesc} out`;
 
-                    return info as vscode.LanguageModelChatInformation;
+                // User-facing model label for multi-backend environments.
+                // VS Code expects `id` to be stable and routable, so we keep `id` as the namespaced id.
+                // The human-facing label is exposed via `name`.
+                const displayId = `${entry.backendName}:${entry.model_name ?? modelId}`;
+
+                // Derive family from provider to help Copilot shape requests correctly
+                const provider = modelInfo?.litellm_provider?.toLowerCase();
+                let family = "litellm";
+                if (provider === "openai") {
+                    family = "gpt4";
+                } else if (provider === "anthropic") {
+                    family = "claude";
                 }
-            );
+
+                const info = {
+                    id: modelId,
+                    name: displayId,
+                    tooltip,
+                    detail: `Backend: ${entry.backendName} | Context: ${inputDesc} | Output: ${outputDesc}`,
+                    family: family,
+                    version: "1.0.0",
+                    maxInputTokens: derived.rawContextWindow,
+                    maxOutputTokens: derived.maxOutputTokens,
+                    capabilities,
+                    tags,
+                };
+
+                return info as vscode.LanguageModelChatInformation;
+            });
 
             const hasChanged = JSON.stringify(this._lastModelList) !== JSON.stringify(infos);
             this._lastModelList = infos;
@@ -321,12 +325,10 @@ export abstract class LiteLLMProviderBase {
 
         const promise = (async () => {
             try {
-                const config = await this._configManager.getConfig();
-                if (!config.url) {
+                if (!this._multiBackendClient) {
                     return 0;
                 }
 
-                const client = new LiteLLMClient(config, this.userAgent);
                 const request: LiteLLMTokenCounterRequest = { model: model.id };
 
                 if (typeof text === "string") {
@@ -335,7 +337,7 @@ export abstract class LiteLLMProviderBase {
                     request.messages = convertMessages([text]);
                 }
 
-                const response = await client.countTokens(request, token);
+                const response = await this._multiBackendClient.countTokens(model.id, request, token);
                 tokenCountCache.set(cacheKey, { count: response.token_count, timestamp: Date.now() });
 
                 // Cleanup cache if it grows too large
@@ -355,7 +357,7 @@ export abstract class LiteLLMProviderBase {
     }
 
     /**
-     * Determines the tags for a model based on its info and user overrides.
+     * Returns the tags for a model based on its info and user overrides.
      *
      * Tags are used by VS Code to decide which models to surface for specific features
      * (e.g. inline completions).
@@ -398,6 +400,24 @@ export abstract class LiteLLMProviderBase {
         }
 
         return Array.from(tags);
+    }
+
+    /**
+     * Returns the MultiBackendClient if available, or undefined if not yet initialized.
+     */
+    protected getMultiBackendClient(): MultiBackendClient | undefined {
+        return this._multiBackendClient;
+    }
+
+    /**
+     * Resolves which backend a model ID belongs to.
+     * Returns the backend name and original (un-namespaced) model ID.
+     */
+    protected resolveModelBackend(modelId: string): { backendName: string; originalModelId: string } | undefined {
+        if (!this._multiBackendClient) {
+            return undefined;
+        }
+        return parseNamespacedModelId(modelId, this._activeBackendNames);
     }
 
     /**
@@ -623,35 +643,54 @@ export abstract class LiteLLMProviderBase {
         caller?: string,
         modelInfo?: LiteLLMModelInfo
     ): Promise<ReadableStream<Uint8Array>> {
-        const config = await this._configManager.getConfig();
-        if (!config.url) {
-            throw new Error("LiteLLM configuration not found. Please configure the LiteLLM base URL.");
+        let multiClient = this.getMultiBackendClient();
+        if (!multiClient) {
+            const backends = await this._configManager.resolveBackends();
+            if (backends.length === 0) {
+                throw new Error("LiteLLM configuration not found. Please configure at least one backend.");
+            }
+            multiClient = new MultiBackendClient(backends, this.userAgent);
+            this._multiBackendClient = multiClient;
+            this._activeBackendNames = backends.map((b) => b.name);
         }
 
-        const client = new LiteLLMClient(config, this.userAgent);
+        const backend = this.resolveModelBackend(request.model);
 
         if (modelInfo?.mode === "responses") {
             try {
-                const responsesClient = new ResponsesClient(config, this.userAgent);
-                const responsesRequest = transformToResponsesFormat(request);
-                await responsesClient.sendResponsesRequest(responsesRequest, progress, token, modelInfo);
-                LiteLLMTelemetry.reportMetric({
-                    requestId: `resp-${Math.random().toString(36).slice(2, 10)}`,
-                    model: request.model,
-                    status: "success",
-                    ...(caller && { caller }),
-                });
-                return new ReadableStream<Uint8Array>({
-                    start(controller) {
-                        controller.close();
-                    },
-                });
+                // To support /responses with multiple backends, we need the specific backend's URL/Key
+                const backends = await this._configManager.resolveBackends();
+                const targetBackend = backends.find((b) => b.name === (backend?.backendName ?? "default"));
+
+                if (targetBackend) {
+                    const responsesClient = new ResponsesClient(
+                        { url: targetBackend.url, key: targetBackend.apiKey },
+                        this.userAgent
+                    );
+                    const responsesRequest = transformToResponsesFormat(request);
+                    // Strip prefix for /responses request if needed
+                    if (backend) {
+                        responsesRequest.model = backend.originalModelId;
+                    }
+                    await responsesClient.sendResponsesRequest(responsesRequest, progress, token, modelInfo);
+                    LiteLLMTelemetry.reportMetric({
+                        requestId: `resp-${Math.random().toString(36).slice(2, 10)}`,
+                        model: request.model,
+                        status: "success",
+                        ...(caller && { caller }),
+                    });
+                    return new ReadableStream<Uint8Array>({
+                        start(controller) {
+                            controller.close();
+                        },
+                    });
+                }
             } catch (err) {
                 Logger.warn(`/responses failed, falling back to /chat/completions: ${err}`);
             }
         }
 
-        return client.chat(request, modelInfo?.mode, token, modelInfo);
+        return multiClient.chat(request.model, request, modelInfo?.mode, token, modelInfo);
     }
 
     protected isParameterSupported(param: string, modelInfo: LiteLLMModelInfo | undefined, modelId?: string): boolean {

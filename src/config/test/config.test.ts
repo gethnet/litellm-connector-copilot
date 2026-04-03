@@ -102,7 +102,7 @@ suite("ConfigManager Unit Tests", () => {
         assert.strictEqual(secretsMap.size, 0);
     });
 
-    test("isConfigured returns true only when url is present", async () => {
+    test("isConfigured returns true when url or backends are present", async () => {
         const manager = new ConfigManager(mockSecrets);
 
         assert.strictEqual(await manager.isConfigured(), false);
@@ -112,6 +112,97 @@ suite("ConfigManager Unit Tests", () => {
 
         await manager.setConfig({ url: "" });
         assert.strictEqual(await manager.isConfigured(), false);
+
+        settingsMap.set("litellm-connector.backends", [{ name: "cloud", url: "http://cloud:4000" }]);
+        assert.strictEqual(await manager.isConfigured(), true);
+    });
+
+    test("getConfig migrates legacy url to backends[0]", async () => {
+        settingsMap.set("litellm-connector.baseUrl", "http://localhost:4000");
+        secretsMap.set("litellm-connector.apiKey.default", "sk-test");
+
+        const manager = new ConfigManager(mockSecrets);
+        const config = await manager.getConfig();
+
+        assert.strictEqual(config.url, "http://localhost:4000");
+        assert.ok(config.backends);
+        assert.strictEqual(config.backends.length, 1);
+        assert.strictEqual(config.backends[0].name, "default");
+        assert.strictEqual(config.backends[0].url, "http://localhost:4000");
+    });
+
+    test("getConfig uses backends array when configured", async () => {
+        settingsMap.set("litellm-connector.baseUrl", "http://old:4000");
+        settingsMap.set("litellm-connector.backends", [
+            { name: "cloud", url: "http://cloud:4000" },
+            { name: "local", url: "http://local:4000" },
+        ]);
+
+        const manager = new ConfigManager(mockSecrets);
+        const config = await manager.getConfig();
+
+        assert.ok(config.backends);
+        assert.strictEqual(config.backends.length, 2);
+        assert.strictEqual(config.backends[0].name, "cloud");
+        assert.strictEqual(config.backends[1].name, "local");
+    });
+
+    test("resolveBackends returns resolved backends with API keys", async () => {
+        settingsMap.set("litellm-connector.backends", [
+            { name: "cloud", url: "http://cloud:4000", apiKeySecretRef: "cloud" },
+        ]);
+        secretsMap.set("litellm-connector.apiKey.cloud", "sk-cloud");
+
+        const manager = new ConfigManager(mockSecrets);
+        const resolved = await manager.resolveBackends();
+
+        assert.strictEqual(resolved.length, 1);
+        assert.strictEqual(resolved[0].name, "cloud");
+        assert.strictEqual(resolved[0].apiKey, "sk-cloud");
+    });
+
+    test("resolveBackends skips disabled backends", async () => {
+        settingsMap.set("litellm-connector.backends", [
+            { name: "cloud", url: "http://cloud:4000", enabled: true },
+            { name: "local", url: "http://local:4000", enabled: false },
+        ]);
+
+        const manager = new ConfigManager(mockSecrets);
+        const resolved = await manager.resolveBackends();
+
+        assert.strictEqual(resolved.length, 1);
+        assert.strictEqual(resolved[0].name, "cloud");
+    });
+
+    test("addBackend stores backend and API key", async () => {
+        const manager = new ConfigManager(mockSecrets);
+        await manager.addBackend({ name: "new-backend", url: "http://new:4000" }, "sk-new");
+
+        const backends = await manager.listBackends();
+        assert.ok(backends.some((b) => b.name === "new-backend"));
+        assert.strictEqual(secretsMap.get("litellm-connector.apiKey.new-backend"), "sk-new");
+    });
+
+    test("addBackend throws on duplicate name", async () => {
+        settingsMap.set("litellm-connector.backends", [{ name: "existing", url: "http://existing:4000" }]);
+
+        const manager = new ConfigManager(mockSecrets);
+        await assert.rejects(
+            () => manager.addBackend({ name: "existing", url: "http://other:4000" }),
+            /already exists/
+        );
+    });
+
+    test("removeBackend removes backend and cleans up secret", async () => {
+        settingsMap.set("litellm-connector.backends", [{ name: "to-remove", url: "http://remove:4000" }]);
+        secretsMap.set("litellm-connector.apiKey.to-remove", "sk-remove");
+
+        const manager = new ConfigManager(mockSecrets);
+        await manager.removeBackend("to-remove");
+
+        const backends = await manager.listBackends();
+        assert.strictEqual(backends.length, 0);
+        assert.strictEqual(secretsMap.has("litellm-connector.apiKey.to-remove"), false);
     });
 
     test("getConfig reads modelIdOverride and trims whitespace", async () => {

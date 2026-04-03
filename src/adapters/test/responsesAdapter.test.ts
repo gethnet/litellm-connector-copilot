@@ -1,6 +1,7 @@
 import * as assert from "assert";
 import { transformToResponsesFormat } from "../responsesAdapter";
 import { normalizeToolCallId } from "../../utils";
+import type { OpenAIFunctionToolDef } from "../../types";
 
 suite("Responses Adapter Unit Tests", () => {
     test("transformToResponsesFormat normalizes tool call IDs", () => {
@@ -115,5 +116,80 @@ suite("Responses Adapter Unit Tests", () => {
 
         assert.ok(allIds.includes(expected));
         assert.ok(allIds.every((x) => x.length <= 40));
+    });
+
+    test("transformToResponsesFormat handles tool call with missing id field", () => {
+        // Since we map tool call IDs from assistant messages, we need to test how it handles a missing/undefined ID
+        // Although the type says ID is required, runtime could be different.
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [
+                {
+                    role: "assistant",
+                    tool_calls: [
+                        {
+                            id: undefined as unknown as string,
+                            type: "function",
+                            function: { name: "do", arguments: "{}" },
+                        },
+                    ],
+                },
+            ],
+        });
+
+        const input = body.input as Record<string, unknown>[];
+        // find function_call item
+        const fc = input.find((i) => i.type === "function_call");
+        assert.ok(
+            fc && typeof fc.id === "string" && fc.id.startsWith("fc_"),
+            "Should generate a fallback ID starting with fc_"
+        );
+    });
+
+    test("transformToResponsesFormat wraps non-string tool content", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [{ role: "tool", tool_call_id: "c1", content: { result: "ok" } as unknown as string }],
+        });
+
+        const input = body.input as { output?: string }[];
+        assert.strictEqual(input[1].output, JSON.stringify({ result: "ok" }));
+    });
+
+    test("transformToResponsesFormat handles system message as instructions", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [
+                { role: "system", content: "You are helpful" },
+                { role: "user", content: "hi" },
+            ],
+        });
+
+        assert.strictEqual(body.instructions, "You are helpful");
+        assert.strictEqual(body.input.length, 1);
+    });
+
+    test("transformToResponsesFormat handles array content in user messages", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [{ role: "user", content: [{ type: "text", text: "hello" }] as unknown as string }],
+        });
+
+        const item = body.input[0] as { content?: string };
+        assert.strictEqual(item.content, "hello");
+    });
+
+    test("transformToResponsesFormat filters out invalid tools", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [],
+            tools: [
+                { type: "function", function: { name: "", parameters: {} } }, // invalid name
+                { type: "function", function: { name: "valid", parameters: {} } },
+            ] as unknown as OpenAIFunctionToolDef[],
+        });
+
+        assert.strictEqual(body.tools?.length, 1);
+        assert.strictEqual(body.tools?.[0].name, "valid");
     });
 });

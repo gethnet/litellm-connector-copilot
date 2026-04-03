@@ -3,8 +3,10 @@ import * as vscode from "vscode";
 import * as sinon from "sinon";
 import { LiteLLMChatProvider } from "../";
 import { LiteLLMClient } from "../../adapters/litellmClient";
+import { MultiBackendClient } from "../../adapters/multiBackendClient";
 import { ResponsesClient } from "../../adapters/responsesClient";
-import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../../types";
+import type { ConfigManager } from "../../config/configManager";
+import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, ResolvedBackend } from "../../types";
 
 suite("LiteLLM Provider Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -651,22 +653,27 @@ suite("LiteLLM Provider Unit Tests", () => {
             },
         ];
 
+        // The provider now uses MultiBackendClient which calls getModelInfo on each backend
         sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({ data: mockData });
 
-        // Stub config manager to return model overrides
+        // Stub config manager to return model overrides with namespaced ID
         interface ConfigManager {
             getConfig: () => Promise<{ url: string; modelOverrides: Record<string, string[]> }>;
+            resolveBackends: () => Promise<ResolvedBackend[]>;
         }
         interface ProviderWithConfigManager {
             _configManager: ConfigManager;
         }
         const providerWithConfig = provider as unknown as ProviderWithConfigManager;
+        sandbox
+            .stub(providerWithConfig._configManager, "resolveBackends")
+            .resolves([{ name: "default", url: "http://localhost:4000", apiKey: "test-key", enabled: true }]);
         sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
             url: "http://localhost:4000",
             modelOverrides: {
-                "gpt-4": ["scm-generator", "custom-tag"],
+                "default/gpt-4": ["scm-generator", "custom-tag"],
             },
-        });
+        } as unknown as { url: string; modelOverrides: Record<string, string[]> });
 
         const infos = await provider.provideLanguageModelChatInformation({ silent: true }, {
             isCancellationRequested: false,
@@ -674,6 +681,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         } as vscode.CancellationToken);
 
         assert.strictEqual(infos.length, 1);
+        assert.strictEqual(infos[0].id, "default/gpt-4");
 
         interface ModelInfoWithTags {
             tags?: string[];
@@ -935,16 +943,26 @@ suite("LiteLLM Provider Unit Tests", () => {
     test("provideTokenCount kicks off background refinement for large strings", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
-        sandbox.stub(provider as unknown as { _configManager: unknown }, "_configManager").value({
-            getConfig: async () => ({ url: "http://localhost:4000" }),
+        sandbox.stub(provider as unknown as { _configManager: ConfigManager }, "_configManager").value({
+            getConfig: async () => ({ url: "http://localhost:4000", modelOverrides: {} }),
+            resolveBackends: async () => [
+                { name: "default", url: "http://localhost:4000", apiKey: "test-key", enabled: true },
+            ],
         });
+
+        // Initialize multiBackendClient by calling discoverModels
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({ data: [] });
+        await provider.provideLanguageModelChatInformation({ silent: true }, {
+            isCancellationRequested: false,
+            onCancellationRequested: () => ({ dispose() {} }),
+        } as vscode.CancellationToken);
 
         const remoteCount = 123;
         const countTokensStub = sandbox
-            .stub(LiteLLMClient.prototype, "countTokens")
+            .stub(MultiBackendClient.prototype, "countTokens")
             .resolves({ token_count: remoteCount });
 
-        const model = { id: "test-model" } as vscode.LanguageModelChatInformation;
+        const model = { id: "default/test-model" } as vscode.LanguageModelChatInformation;
         const largeText = "a".repeat(600);
         const token = { isCancellationRequested: false } as vscode.CancellationToken;
 
@@ -953,7 +971,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.notStrictEqual(count1, remoteCount, "Should return local count immediately");
 
         // Wait for background debounce and execution
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, 600));
 
         assert.strictEqual(countTokensStub.callCount, 1, "Should have called remote counter in background");
 

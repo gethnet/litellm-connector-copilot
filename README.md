@@ -47,13 +47,13 @@ Your support keeps this project alive and improving! ❤️
 1. **Install** the "LiteLLM Connector for Copilot" extension from the VS Code Marketplace
 2. **Open** the Command Palette: `Ctrl+Shift+P` (Windows/Linux) or `Cmd+Shift+P` (Mac)
 3. **Run**: `Manage LiteLLM Provider`
-4. **Enter** your LiteLLM proxy details.
+4. **Choose** between **Configure Single Backend (Legacy)** for a quick setup or **Manage Multiple Backends** to aggregate models from several LiteLLM proxy instances.
 
-> **Pro-Tip**: This extension supports both standard Chat and advanced V2 Chat (including thinking models and structured usage reporting) automatically based on the models enabled in your LiteLLM proxy.
-   - **Base URL**: e.g., `http://localhost:4000` or your cloud endpoint
-   - **API Key**: if your proxy requires authentication
-5. **Open** Copilot Chat and pick a model from the **LiteLLM** section
-6. **Start chatting!** 🎉
+> **Multi-Backend Power**: You can now connect to multiple LiteLLM instances simultaneously (e.g., Local Llama + Cloud GPT-4 + Internal Proxy). Models are automatically namespaced (e.g., `local/llama-3`) to prevent conflicts.
+
+5. **Enter** your LiteLLM proxy details (Base URL and API Key).
+6. **Open** Copilot Chat and pick a model from the **LiteLLM** section.
+7. **Start chatting!** 🎉
 
 That's it! Your models from the LiteLLM proxy will automatically appear in the model picker.
 
@@ -65,6 +65,9 @@ This isn't just another AI connector—it's built with care and designed for rea
 
 ### 🌍 **Any Model, Any Provider**
 Access hundreds of models through your LiteLLM proxy: GPT-4, Claude 3.5, Gemini Pro, Llama 3, DeepSeek, local models, and custom fine-tunes. All in one place.
+
+### ⛓️ **Multi-Backend Aggregation**
+Connect to multiple LiteLLM instances at once. Mix and match local, cloud, and team proxies seamlessly. Models from different backends are clearly labeled and ready for use.
 
 ### 🌊 **Smooth Streaming Experience**
 Real-time, streaming responses just like native Copilot models. No waiting for complete responses—watch as the AI thinks and types.

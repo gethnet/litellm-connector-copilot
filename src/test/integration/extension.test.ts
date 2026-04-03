@@ -19,9 +19,16 @@ suite("Extension Activation Unit Tests", () => {
     });
 
     test("activate registers providers and commands", async () => {
+        const mockSecrets = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
+        } as unknown as vscode.SecretStorage;
+
         const context = {
             subscriptions: [],
-            secrets: {} as vscode.SecretStorage,
+            secrets: mockSecrets,
         } as unknown as vscode.ExtensionContext;
 
         // Avoid touching real output channels.
@@ -66,9 +73,16 @@ suite("Extension Activation Unit Tests", () => {
     });
 
     test("activate prompts classic config flow when not configured", async () => {
+        const mockSecrets = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
+        } as unknown as vscode.SecretStorage;
+
         const context = {
             subscriptions: [],
-            secrets: {} as vscode.SecretStorage,
+            secrets: mockSecrets,
         } as unknown as vscode.ExtensionContext;
 
         sandbox.stub(vscode.window, "createOutputChannel").returns({
