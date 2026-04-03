@@ -164,6 +164,7 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
 
 - **Adapters**:
   - `src/adapters/litellmClient.ts` — HTTP client and endpoint routing integration
+  - `src/adapters/multiBackendClient.ts` — Multi-backend orchestrator and model namespacing
   - `src/adapters/responsesClient.ts` & `src/adapters/responsesAdapter.ts` — LiteLLM `/responses` endpoint support and payload translation
   - `src/adapters/tokenUtils.ts` — token budgeting, trimming, and related helpers
 

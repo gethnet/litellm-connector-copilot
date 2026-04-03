@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import * as sinon from "sinon";
 import { LiteLLMCommitMessageProvider } from "../liteLLMCommitProvider";
 import { LiteLLMClient } from "../../adapters/litellmClient";
+import type { ConfigManager } from "../../config/configManager";
 
 suite("LiteLLMCommitMessageProvider Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -191,5 +192,56 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
 
         // The expected result should have the backticks and "markdown" language tag stripped
         assert.strictEqual(result, "feat: add thing");
+    });
+
+    test("provideCommitMessage handles API error during generation", async () => {
+        const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
+        const providerAny = provider as unknown as {
+            _lastModelList: vscode.LanguageModelChatInformation[];
+            _configManager: ConfigManager;
+        };
+        providerAny._lastModelList = [
+            { id: "m1", tags: ["scm-generator"] } as unknown as vscode.LanguageModelChatInformation,
+        ];
+
+        sandbox.stub(providerAny._configManager, "getConfig").resolves({ url: "u", key: "k" });
+        sandbox.stub(LiteLLMClient.prototype, "chat").rejects(new Error("API failure"));
+
+        await assert.rejects(
+            () =>
+                provider.provideCommitMessage(
+                    "diff",
+                    {} as unknown as vscode.LanguageModelChatRequestOptions,
+                    new vscode.CancellationTokenSource().token
+                ),
+            /API failure/
+        );
+    });
+
+    test("provideCommitMessage handles empty stream response", async () => {
+        const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
+        const providerAny = provider as unknown as {
+            _lastModelList: vscode.LanguageModelChatInformation[];
+            _configManager: ConfigManager;
+        };
+        providerAny._lastModelList = [
+            { id: "m1", tags: ["scm-generator"] } as unknown as vscode.LanguageModelChatInformation,
+        ];
+
+        sandbox.stub(providerAny._configManager, "getConfig").resolves({ url: "u", key: "k" });
+        sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
+            new ReadableStream({
+                start(controller) {
+                    controller.close();
+                },
+            })
+        );
+
+        const result = await provider.provideCommitMessage(
+            "diff",
+            {} as unknown as vscode.LanguageModelChatRequestOptions,
+            new vscode.CancellationTokenSource().token
+        );
+        assert.strictEqual(result, "");
     });
 });

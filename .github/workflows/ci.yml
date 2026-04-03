@@ -51,7 +51,7 @@ jobs:
         run: npm run test:coverage
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: ${{ github.workspace }}/coverage/lcov.info
           fail_ci_if_error: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' }}
@@ -59,7 +59,7 @@ jobs:
 
       - name: Upload test results to Codecov
         if: always()
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: ${{ github.workspace }}/test-results/test-results.xml
           report_type: test_results

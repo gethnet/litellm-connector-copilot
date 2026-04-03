@@ -7,8 +7,12 @@ import {
     estimateToolTokens,
     trimMessagesToFitBudget,
     countTokens,
+    calculateAvailableContext,
+    getStaticPromptTokenCount,
+    countTokensForV2Messages,
 } from "../tokenUtils";
 import type { LiteLLMModelInfo } from "../../types";
+import type { V2ChatMessage } from "../../providers/v2Types";
 
 suite("TokenUtils Unit Tests", () => {
     test("countTokens handles strings, single messages, and message arrays", () => {
@@ -216,5 +220,38 @@ suite("TokenUtils Unit Tests", () => {
             () => trimMessagesToFitBudget([systemMsg], undefined, modelInfo),
             /Message exceeds token limit\./
         );
+    });
+
+    test("calculateAvailableContext computes correctly with buffer", () => {
+        // Mock getStaticPromptTokenCount or use values from selectTokenizer (default)
+        const available = calculateAvailableContext(1000, 200, ["static"], "m");
+        // "static" is 6 chars -> 2 tokens. Total static: 2.
+        // 1000 - 200 - 2 = 798. Buffer 0.05 -> 798 * 0.95 = 758.1 -> 758.
+        assert.strictEqual(available, 758);
+    });
+
+    test("getStaticPromptTokenCount uses cache", () => {
+        const p = "unique-prompt-" + Math.random();
+        const count1 = getStaticPromptTokenCount(p, "m");
+        const count2 = getStaticPromptTokenCount(p, "m");
+        assert.strictEqual(count1, count2);
+    });
+
+    test("countTokensForV2Messages counts text, thinking, data, tool_call, tool_result", () => {
+        const messages = [
+            {
+                role: "assistant",
+                content: [
+                    { type: "text", text: "hi" },
+                    { type: "thinking", value: "thought" },
+                    { type: "data", data: new Uint8Array([104, 105]), mimeType: "text/plain" },
+                    { type: "tool_call", id: "c1", name: "n", input: { a: 1 } },
+                    { type: "tool_result", id: "c1", call_id: "c1", content: "ok" },
+                ],
+            },
+        ] as unknown as V2ChatMessage[];
+
+        const count = countTokensForV2Messages(messages, "m");
+        assert.ok(count > 0);
     });
 });

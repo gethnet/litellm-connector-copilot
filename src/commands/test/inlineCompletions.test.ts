@@ -99,7 +99,7 @@ suite("InlineCompletions Command Unit Tests", () => {
     test("handler updates configuration when model is selected", async () => {
         const updateStub = sandbox.stub().resolves();
         sandbox.stub(vscode.workspace, "getConfiguration").returns({ update: updateStub } as never);
-        sandbox.stub(vscode.window, "showQuickPick").resolves({ label: "m2" } as never);
+        sandbox.stub(vscode.window, "showQuickPick").resolves({ label: "m2", modelId: "m2" } as never);
         sandbox.stub(vscode.window, "showInformationMessage");
         const metricStub = sandbox.stub(LiteLLMTelemetry, "reportMetric");
 
@@ -142,5 +142,31 @@ suite("InlineCompletions Command Unit Tests", () => {
             ),
             true
         );
+    });
+
+    test("handler filters models by inline-completions tag if available", async () => {
+        const provider = {
+            getLastKnownModels: () => [
+                { id: "m1", tags: [] as string[] },
+                { id: "m2", tags: ["inline-completions"] },
+            ],
+        } as unknown as LiteLLMChatProvider;
+
+        const showQuickPickStub = sandbox.stub(vscode.window, "showQuickPick").resolves(undefined);
+
+        let handler: (() => Promise<void>) | undefined;
+        sandbox.stub(vscode.commands, "registerCommand").callsFake((id, cb) => {
+            if (id === "litellm-connector.inlineCompletions.selectModel") {
+                handler = cb as () => Promise<void>;
+            }
+            return { dispose() {} } as vscode.Disposable;
+        });
+
+        registerSelectInlineCompletionModelCommand(provider);
+        await handler?.();
+
+        const pickedList = showQuickPickStub.firstCall.args[0] as unknown as { modelId: string }[];
+        assert.strictEqual(pickedList.length, 1);
+        assert.strictEqual(pickedList[0].modelId, "m2");
     });
 });

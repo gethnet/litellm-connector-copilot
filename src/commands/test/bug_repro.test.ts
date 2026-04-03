@@ -33,10 +33,12 @@ suite("Regression: Model ID Copy Bug", () => {
             ],
         } as unknown as LiteLLMChatProvider;
 
-        // Stub showQuickPick to return the item with the full ID
+        // Stub showQuickPick to return the item with modelId property
+        // The quick pick item has label=m.name and modelId=m.id
         const qpStub = sandbox.stub(vscode.window, "showQuickPick").resolves({
-            label: fullModelId,
-        } as vscode.QuickPickItem);
+            label: "gemini-3-flash-preview",
+            modelId: fullModelId,
+        } as unknown as vscode.QuickPickItem);
 
         const clipStub = sandbox.stub();
         sandbox.stub(vscode.env, "clipboard").value({ writeText: clipStub } as unknown as vscode.Clipboard);
