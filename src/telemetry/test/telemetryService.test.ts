@@ -16,6 +16,7 @@ suite("TelemetryService", () => {
         // Mock vscode.env.isTelemetryEnabled
         sandbox.stub(vscode.env, "isTelemetryEnabled").get(() => true);
         sandbox.stub(vscode.env, "machineId").get(() => "test-machine-id");
+        sandbox.stub(vscode.env, "sessionId").get(() => "test-crash-reporter-id");
 
         telemetryService = new TelemetryService();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -69,7 +70,7 @@ suite("TelemetryService", () => {
         assert.strictEqual(event.event, "chat_request");
         assert.strictEqual(event.properties.caller, "test-caller");
         assert.strictEqual(event.properties.model, "test-model");
-        assert.strictEqual(event.properties.distinctId, "test-machine-id");
+        assert.strictEqual(event.properties.distinctId, "test-crash-reporter-id");
         assert.strictEqual(event.properties.extension_version, "1.0.0");
     });
 
@@ -96,7 +97,7 @@ suite("TelemetryService", () => {
         assert.strictEqual(capturedError, error);
         assert.strictEqual(options?.caller, "scm-generator");
         assert.strictEqual(options?.properties?.feature, "test-feature");
-        assert.strictEqual(options?.properties?.distinctId, "test-machine-id");
+        assert.strictEqual(options?.properties?.distinctId, "test-crash-reporter-id");
         assert.strictEqual(options?.properties?.extension_version, "1.0.0");
     });
 
@@ -109,10 +110,6 @@ suite("TelemetryService", () => {
             },
         } as unknown as vscode.ExtensionContext;
 
-        sandbox.stub(vscode.env, "machineId").get(() => "test-machine-id");
-        sandbox.stub(vscode.env, "isTelemetryEnabled").get(() => true);
-        sandbox.stub(vscode.env, "sessionId").get(() => "test-crash-reporter-id");
-
         telemetryService.initialize(mockContext);
         telemetryService.identify("user-123", { email: "test@example.com" });
 
@@ -121,11 +118,6 @@ suite("TelemetryService", () => {
         assert.strictEqual(distinctId, "test-crash-reporter-id");
         assert.strictEqual(properties?.email, "test@example.com");
         assert.strictEqual(properties?.extension_version, "1.0.0");
-    });
-
-    test("should identify users", () => {
-        telemetryService.identify("user-123", { email: "test@example.com" });
-        assert.strictEqual(adapterMock.identify.calledWith("user-123", { email: "test@example.com" }), true);
     });
 
     test("should check feature flags", async () => {
@@ -141,7 +133,7 @@ suite("TelemetryService", () => {
         adapterMock.isFeatureEnabled.resolves(true);
         const enabled = await telemetryService.isFeatureEnabled("test-flag");
         assert.strictEqual(enabled, true);
-        assert.strictEqual(adapterMock.isFeatureEnabled.calledWith("test-flag", "test-machine-id"), true);
+        assert.strictEqual(adapterMock.isFeatureEnabled.calledWith("test-flag", "test-crash-reporter-id"), true);
     });
 
     test("should respect telemetry enabled setting changes", () => {
@@ -187,7 +179,7 @@ suite("TelemetryService", () => {
         assert.strictEqual(event.properties["inline-completions"], true);
         assert.strictEqual(event.properties["responses-api"], false);
         assert.strictEqual(event.properties["commit-message"], true);
-        assert.strictEqual(event.properties.distinctId, "test-machine-id");
+        assert.strictEqual(event.properties.distinctId, "test-crash-reporter-id");
     });
 
     test("captureFeatureToggled sends correct event", () => {
