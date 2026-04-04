@@ -1,7 +1,8 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import * as sinon from "sinon";
-import { ConfigManager } from "..//configManager";
+import { ConfigManager } from "../configManager";
+import type { TelemetryService } from "../../telemetry/telemetryService";
 
 suite("ConfigManager Unit Tests", () => {
     let mockSecrets: vscode.SecretStorage;
@@ -203,6 +204,32 @@ suite("ConfigManager Unit Tests", () => {
         const backends = await manager.listBackends();
         assert.strictEqual(backends.length, 0);
         assert.strictEqual(secretsMap.has("litellm-connector.apiKey.to-remove"), false);
+    });
+
+    test("reportFeatureToggles calls telemetry service with correct toggles", async () => {
+        const manager = new ConfigManager(mockSecrets);
+        const captureStub = sinon.stub();
+        const telemetryMock = {
+            captureFeatureToggled: captureStub,
+        } as unknown as TelemetryService;
+        manager.setTelemetryService(telemetryMock);
+
+        settingsMap.set("litellm-connector.inlineCompletions.enabled", true);
+        settingsMap.set("litellm-connector.enableResponsesApi", true);
+        settingsMap.set("litellm-connector.commitModelIdOverride", "gpt-4");
+        settingsMap.set("litellm-connector.emitUsageData", true);
+        settingsMap.set("litellm-connector.disableCaching", false);
+        settingsMap.set("litellm-connector.disableQuotaToolRedaction", false);
+
+        await manager.reportFeatureToggles("test_source");
+
+        assert.strictEqual(captureStub.callCount, 6);
+        assert.ok(captureStub.calledWith("inline-completions", true, "test_source"));
+        assert.ok(captureStub.calledWith("responses-api", true, "test_source"));
+        assert.ok(captureStub.calledWith("commit-message", true, "test_source"));
+        assert.ok(captureStub.calledWith("usage-data", true, "test_source"));
+        assert.ok(captureStub.calledWith("caching", true, "test_source"));
+        assert.ok(captureStub.calledWith("quota-tool-redaction", true, "test_source"));
     });
 
     test("getConfig reads modelIdOverride and trims whitespace", async () => {

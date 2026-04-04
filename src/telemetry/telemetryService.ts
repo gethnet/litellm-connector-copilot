@@ -72,6 +72,7 @@ export class TelemetryService implements vscode.Disposable {
 
         this.adapter.captureException(error, {
             ...options,
+            caller: options?.caller,
             distinctId: options?.distinctId ?? this.distinctId,
             properties: fullProperties,
         });
@@ -203,6 +204,26 @@ export class TelemetryService implements vscode.Disposable {
 
     captureModelsCacheHit(modelCount: number): void {
         this.capture("models_cache_hit", { model_count: modelCount });
+    }
+
+    // Feature usage reporting
+    captureFeatureUsageSnapshot(features: Record<string, boolean>): void {
+        this.capture("feature_usage_snapshot", features);
+    }
+
+    captureFeatureToggled(featureName: string, enabled: boolean, source: string): void {
+        this.capture("feature_toggled", {
+            feature_name: featureName,
+            enabled,
+            source,
+        });
+    }
+
+    captureFeatureUsed(featureName: string, caller: string): void {
+        this.capture("feature_used", {
+            feature_name: featureName,
+            caller,
+        });
     }
 
     async shutdown(): Promise<void> {

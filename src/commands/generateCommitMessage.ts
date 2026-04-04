@@ -20,6 +20,7 @@ export function registerGenerateCommitMessageCommand(
         const startTime = Date.now();
         if (telemetryService) {
             telemetryService.captureCommandExecuted("generateCommitMessage");
+            telemetryService.captureFeatureUsed("commit-message", "commit-message");
         }
         try {
             // Check if model is configured, if not, show picker
@@ -140,13 +141,13 @@ export function registerGenerateCommitMessageCommand(
                         // Ensure final value is fully sanitized
                         inputBox.value = stripMarkdownCodeBlocks(accumulatedText);
 
-                        if (telemetryService) {
+                        /* if (telemetryService) {
                             telemetryService.captureCommitMessageGenerated({
                                 model: modelId,
                                 durationMs: Date.now() - startTime,
                                 status: "success",
                             });
-                        }
+                        } */
                     } catch (err) {
                         Logger.error("Failed to generate commit message", err);
                         vscode.window.showErrorMessage(

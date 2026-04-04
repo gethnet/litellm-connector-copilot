@@ -85,6 +85,7 @@ suite("TelemetryService", () => {
         telemetryService.initialize(mockContext);
         const error = new Error("test-error");
         telemetryService.captureException(error, {
+            caller: "scm-generator",
             properties: {
                 feature: "test-feature",
             },
@@ -93,6 +94,7 @@ suite("TelemetryService", () => {
         assert.strictEqual(adapterMock.captureException.calledOnce, true);
         const [capturedError, options] = adapterMock.captureException.firstCall.args;
         assert.strictEqual(capturedError, error);
+        assert.strictEqual(options?.caller, "scm-generator");
         assert.strictEqual(options?.properties?.feature, "test-feature");
         assert.strictEqual(options?.properties?.distinctId, "test-machine-id");
         assert.strictEqual(options?.properties?.extension_version, "1.0.0");
@@ -138,5 +140,61 @@ suite("TelemetryService", () => {
 
         onDidChangeEmitter.fire(true);
         assert.strictEqual(adapterMock.setEnabled.calledWith(true), true);
+    });
+
+    test("captureFeatureUsageSnapshot sends correct event", () => {
+        const mockContext = {
+            extension: { packageJSON: { version: "1.0.0" } },
+        } as unknown as vscode.ExtensionContext;
+        telemetryService.initialize(mockContext);
+
+        const features = {
+            "inline-completions": true,
+            "responses-api": false,
+            "commit-message": true,
+            "usage-data": false,
+            caching: true,
+            "quota-tool-redaction": true,
+        };
+        telemetryService.captureFeatureUsageSnapshot(features);
+
+        assert.strictEqual(adapterMock.capture.calledOnce, true);
+        const event = adapterMock.capture.firstCall.args[0];
+        assert.strictEqual(event.event, "feature_usage_snapshot");
+        assert.strictEqual(event.properties["inline-completions"], true);
+        assert.strictEqual(event.properties["responses-api"], false);
+        assert.strictEqual(event.properties["commit-message"], true);
+        assert.strictEqual(event.properties.distinctId, "test-machine-id");
+    });
+
+    test("captureFeatureToggled sends correct event", () => {
+        const mockContext = {
+            extension: { packageJSON: { version: "1.0.0" } },
+        } as unknown as vscode.ExtensionContext;
+        telemetryService.initialize(mockContext);
+
+        telemetryService.captureFeatureToggled("inline-completions", true, "config_change");
+
+        assert.strictEqual(adapterMock.capture.calledOnce, true);
+        const event = adapterMock.capture.firstCall.args[0];
+        assert.strictEqual(event.event, "feature_toggled");
+        assert.strictEqual(event.properties.feature_name, "inline-completions");
+        assert.strictEqual(event.properties.enabled, true);
+        assert.strictEqual(event.properties.source, "config_change");
+    });
+
+    test("captureFeatureUsed sends correct event", () => {
+        const mockContext = {
+            extension: { packageJSON: { version: "1.0.0" } },
+        } as unknown as vscode.ExtensionContext;
+        telemetryService.initialize(mockContext);
+
+        telemetryService.captureFeatureUsed("chat", "inline-edit");
+
+        assert.strictEqual(adapterMock.capture.calledOnce, true);
+        const event = adapterMock.capture.firstCall.args[0];
+        assert.strictEqual(event.event, "feature_used");
+        assert.strictEqual(event.properties.feature_name, "chat");
+        assert.strictEqual(event.properties.caller, "inline-edit");
     });
 });

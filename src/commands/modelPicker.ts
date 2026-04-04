@@ -41,6 +41,7 @@ export interface ModelPickerOptions {
 export async function showModelPicker(provider: LiteLLMProviderBase, options: ModelPickerOptions): Promise<void> {
     if (options.telemetryService) {
         options.telemetryService.captureModelPickerOpened(options.caller || "unknown");
+        options.telemetryService.captureFeatureUsed("model-picker", options.caller || "unknown");
     }
     try {
         // Ensure models are discovered

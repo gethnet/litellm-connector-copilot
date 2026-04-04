@@ -333,24 +333,4 @@ Apache-2.0. See [LICENSE](./LICENSE) for details.
 
 ---
 
-## 📊 PostHog Error Tracking / Source Maps
-
-This repository supports PostHog exception capture and source map upload for error tracking.
-
-Required environment variables for source map upload:
-
-- `POSTHOG_HOST`
-- `POSTHOG_PROJECT_API_KEY`
-- `POSTHOG_PERSONAL_API_KEY`
-- `POSTHOG_RELEASE` (optional, defaults to `npm_package_version`)
-- `POSTHOG_BUILD_DIR` (optional, defaults to `dist`)
-
-Build and upload source maps:
-
-```bash
-npm run posthog:sourcemaps
-```
-
----
-
 **Ready to unlock the full potential of AI in your editor?** Install the extension, connect to your LiteLLM proxy, and start exploring the vast world of language models—all without leaving VS Code. 🚀

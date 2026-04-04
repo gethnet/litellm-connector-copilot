@@ -54,6 +54,10 @@ export class LiteLLMInlineCompletionProvider implements vscode.InlineCompletionI
         const requestId = `ic_${Math.random().toString(36).slice(2, 10)}`;
         const startTime = LiteLLMTelemetry.startTimer();
 
+        if (this._telemetryService) {
+            this._telemetryService.captureFeatureUsed("inline-completions", "inline-completions");
+        }
+
         LiteLLMTelemetry.reportMetric({
             requestId,
             model: "n/a",
@@ -185,13 +189,14 @@ export class LiteLLMInlineCompletionProvider implements vscode.InlineCompletionI
                     tokensOut: 0,
                     caller: "inline-completions.request.result",
                 });
-                if (this._telemetryService) {
+
+                /* if (this._telemetryService) {
                     this._telemetryService.captureInlineCompletionRequest({
                         status: "empty",
                         durationMs,
                         model: modelId,
                     });
-                }
+                } */
                 return null;
             }
 
@@ -205,13 +210,13 @@ export class LiteLLMInlineCompletionProvider implements vscode.InlineCompletionI
                 caller: "inline-completions.request.result",
             });
 
-            if (this._telemetryService) {
+            /*  if (this._telemetryService) {
                 this._telemetryService.captureInlineCompletionRequest({
                     status: "success",
                     durationMs,
                     model: modelId,
                 });
-            }
+            } */
 
             const range = new vscode.Range(position, position);
             const item = new vscode.InlineCompletionItem(insertText, range);

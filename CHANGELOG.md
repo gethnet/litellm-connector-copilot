@@ -3,31 +3,24 @@
 All notable changes to this project will be documented in this file.
 
 
-## [1.6.0-dev7] - 2026-04-04
+## [1.6.0-dev10] - 2026-04-04
 
-### 🚧 Development (pre-release)
-* Consolidate the current 1.6 pre-release snapshot on dev7.
-
-### 🧩 Changes so far
-* ✨ Multi-backend support: configure and aggregate models from multiple LiteLLM proxy instances with backend namespacing (e.g., cloud/gpt-4o)
-* 🛠️ New multi-backend management UX and routing (LiteLLM: Manage Multiple Backends)
-* 🏗️ Introduce `MultiBackendClient` to route chat/token counting requests to the correct backend
-* ✅ Update model picker, model discovery, and connection checks for multi-backend mode
-* 🧪 Add unit tests for multi-backend model routing and aggregation
+### 🚧 Development snapshot
+* Consolidate the current 1.6 pre-release work on dev10.
 
 ### 📊 Telemetry & observability
-* 🛰️ Add centralized `TelemetryService` initialization in the extension entrypoint so activation, commands, model usage, and request outcomes can be captured consistently.
-* 🔗 Wire telemetry into chat, completion, inline completion, commit-message, and token/counting paths to report request duration, token usage, completion status, and error categories.
-* 🧭 Add v2 observability plumbing with `AuditTrail` and `PostHogHook` so request lifecycle events can be correlated with structured logs and PostHog events.
-* 🧼 Include richer telemetry dimensions such as caller, endpoint, extension version, VS Code version, UI kind, and OS to improve analysis of request behavior.
-* 🧪 Expand telemetry-focused tests around `TelemetryService`, `PostHogHook`, and provider-side telemetry capture paths.
+* 🛰️ Add telemetry feature-usage reporting for chat, completions, inline completions, commit generation, and model picker usage.
+* 🔔 Capture feature toggle snapshots and toggle-change events from config changes so opt-in behavior is visible in telemetry.
+* 🧭 Extend telemetry exception capture with caller context and add tests for the new feature-usage events.
 
-### 🧪 Testing & Coverage
-* 📈 **Major Coverage Expansion**: Increased project-wide test coverage to meet aggregate targets (Statements ≥ 90%, Lines ≥ 85%).
-* 🛡️ **New Observability Tests**: Implemented comprehensive test suites for `AuditTrail` and `HookSystem` to ensure request tracking and lifecycle hooks are reliable.
-* 🛠️ **Command & Adapter Validation**: Expanded coverage for `manageConfig`, `generateCommitMessage`, and `multiBackendClient` to protect critical UX and routing logic.
-* 🧪 **Role Mapping & Edge Cases**: Added tests for chat role conversion (`mapChatRoles`) and handled edge cases in the `/responses` adapter (orphaned tool outputs, missing IDs).
-* ✅ **Strict Type Safety**: All new and existing tests now strictly follow the `typescript-no-any` standard using `unknown` and proper assertions.
+### 🧩 Configuration & commands
+* ⚙️ Teach `ConfigManager` to report feature-toggle state after config changes.
+* 🚦 Wire telemetry into model-management and reset/check commands so command execution is tracked consistently.
+* 📝 Emit a feature-usage snapshot during extension activation after configuration loads.
+
+### 🧪 Testing & validation
+* ✅ Add coverage for `ConfigManager` feature-toggle reporting and `TelemetryService` feature event helpers.
+* 🛠️ Update telemetry and config tests to verify caller metadata and new event payloads.
 
 
 ## [1.5.0] - 2026-03-20
@@ -241,7 +234,8 @@ There have been a tremendous amount of backend work done with this update to mak
 
 ---
 
-[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v1.4.6...HEAD
+[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v1.6.0-dev10...HEAD
+[1.6.0-dev10]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.6.0-dev10
 [1.4.6]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.4.6
 [1.4.4]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.4.4
 [1.4.2]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.4.2

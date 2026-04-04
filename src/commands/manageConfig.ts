@@ -92,6 +92,7 @@ function createConfigHandler(
             url: baseUrl.trim(),
             key: finalKey,
         });
+        await configManager.reportFeatureToggles("config_change");
 
         if (telemetryService) {
             telemetryService.captureConfigChanged("baseUrl", "legacy-manage");
@@ -291,8 +292,11 @@ async function manageExistingBackend(
     }
 }
 
-export function registerShowModelsCommand(provider: LiteLLMChatProvider) {
+export function registerShowModelsCommand(provider: LiteLLMChatProvider, telemetryService?: TelemetryService) {
     return vscode.commands.registerCommand("litellm-connector.showModels", async () => {
+        if (telemetryService) {
+            telemetryService.captureCommandExecuted("litellm-connector.showModels");
+        }
         const models = provider.getLastKnownModels();
         if (!models.length) {
             vscode.window.showInformationMessage(
@@ -332,8 +336,11 @@ export function registerShowModelsCommand(provider: LiteLLMChatProvider) {
     });
 }
 
-export function registerReloadModelsCommand(provider: LiteLLMChatProvider) {
+export function registerReloadModelsCommand(provider: LiteLLMChatProvider, telemetryService?: TelemetryService) {
     return vscode.commands.registerCommand("litellm-connector.reloadModels", async () => {
+        if (telemetryService) {
+            telemetryService.captureCommandExecuted("litellm-connector.reloadModels");
+        }
         provider.clearModelCache();
         await vscode.window.withProgress(
             {
@@ -356,8 +363,11 @@ export function registerReloadModelsCommand(provider: LiteLLMChatProvider) {
     });
 }
 
-export function registerCheckConnectionCommand(configManager: ConfigManager) {
+export function registerCheckConnectionCommand(configManager: ConfigManager, telemetryService?: TelemetryService) {
     return vscode.commands.registerCommand("litellm-connector.checkConnection", async () => {
+        if (telemetryService) {
+            telemetryService.captureCommandExecuted("litellm-connector.checkConnection");
+        }
         const backends = await configManager.resolveBackends();
         if (backends.length === 0) {
             vscode.window.showErrorMessage("No LiteLLM backends configured.");
@@ -397,8 +407,15 @@ export function registerCheckConnectionCommand(configManager: ConfigManager) {
     });
 }
 
-export function registerResetConfigCommand(configManager: ConfigManager, provider?: LiteLLMChatProvider) {
+export function registerResetConfigCommand(
+    configManager: ConfigManager,
+    provider?: LiteLLMChatProvider,
+    telemetryService?: TelemetryService
+) {
     return vscode.commands.registerCommand("litellm-connector.reset", async () => {
+        if (telemetryService) {
+            telemetryService.captureCommandExecuted("litellm-connector.reset");
+        }
         const confirmed = await vscode.window.showWarningMessage(
             "Are you sure you want to reset ALL LiteLLM configuration? This will clear your Base URL, API Key, and all custom settings.",
             { modal: true },

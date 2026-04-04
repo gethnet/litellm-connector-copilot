@@ -67,7 +67,7 @@ fi
 # All checks passed
 cat <<EOF
 {
-  "decision": "continue",
+  "decision": "pass",
   "systemMessage": "✅ All post-session validation checks passed: format, lint, test coverage."
 }
 EOF

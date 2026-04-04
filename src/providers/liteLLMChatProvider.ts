@@ -98,6 +98,11 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         this.resetStreamingState();
         const startTime = LiteLLMTelemetry.startTimer();
         const requestId = Math.random().toString(36).substring(7);
+
+        if (this._telemetryService) {
+            this._telemetryService.captureFeatureUsed("chat", "chat");
+        }
+
         let tokensIn: number | undefined;
 
         // Extract caller/justification from options or model tags
@@ -211,7 +216,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                             };
                             LiteLLMTelemetry.reportMetric(metric);
 
-                            if (this._telemetryService) {
+                            // Disabling this to reduce noise / unecessary logging
+                            // TODO: look into potentially removing this in the future if don't need it.
+                            /* if (this._telemetryService) {
                                 this._telemetryService.captureChatRequest({
                                     caller,
                                     model: modelToUse.id,
@@ -221,7 +228,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                                     tokensOut,
                                     status: "success",
                                 });
-                            }
+                            } */
                         } catch (retryErr: unknown) {
                             // If retry fails, throw a more descriptive error
                             let retryErrorMessage = retryErr instanceof Error ? retryErr.message : String(retryErr);

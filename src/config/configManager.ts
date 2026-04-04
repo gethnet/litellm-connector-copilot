@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import type { LiteLLMBackend, LiteLLMConfig, ResolvedBackend } from "../types";
+import type { TelemetryService } from "../telemetry/telemetryService";
 
 export class ConfigManager {
     private static readonly BASE_URL_KEY = "litellm-connector.baseUrl";
@@ -18,7 +19,13 @@ export class ConfigManager {
     private static readonly SCM_COMMIT_MSG_MODEL_ID_KEY = "litellm-connector.commitModelIdOverride";
     private static readonly ENABLE_RESPONSES_API = "litellm-connector.enableResponsesApi";
 
+    private _telemetryService?: TelemetryService;
+
     constructor(private readonly secrets: vscode.SecretStorage) {}
+
+    public setTelemetryService(service: TelemetryService): void {
+        this._telemetryService = service;
+    }
 
     private getApiKeySecretStorageKey(ref: string): string {
         // Namespace secret storage keys so we can support multiple keys in the future.
@@ -152,6 +159,28 @@ export class ConfigManager {
             await vscode.workspace
                 .getConfiguration()
                 .update(ConfigManager.BACKENDS_KEY, config.backends, vscode.ConfigurationTarget.Global);
+        }
+    }
+
+    /**
+     * Reports current feature toggle states to telemetry.
+     * Call after config changes that may affect feature toggles.
+     */
+    async reportFeatureToggles(source: string): Promise<void> {
+        if (!this._telemetryService) {
+            return;
+        }
+        const config = await this.getConfig();
+        const toggles: Array<[string, boolean]> = [
+            ["inline-completions", config.inlineCompletionsEnabled ?? false],
+            ["responses-api", config.v2ApiEnabled ?? false],
+            ["commit-message", !!(config.commitModelIdOverride && config.commitModelIdOverride.length > 0)],
+            ["usage-data", config.experimentalEmitUsageData ?? false],
+            ["caching", !config.disableCaching],
+            ["quota-tool-redaction", !config.disableQuotaToolRedaction],
+        ];
+        for (const [name, enabled] of toggles) {
+            this._telemetryService.captureFeatureToggled(name, enabled, source);
         }
     }
 

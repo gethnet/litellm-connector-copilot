@@ -29,6 +29,10 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
         const caller = options.modelId?.includes("inline") ? "inline-completions" : "text-completion";
         const justification = (options as { justification?: string }).justification;
 
+        if (this._telemetryService) {
+            this._telemetryService.captureFeatureUsed("completions", caller);
+        }
+
         Logger.info(
             `Completion request started | RequestID: ${requestId} | Model: ${options.modelId || "auto"} | Caller: ${caller} | Justification: ${justification || "none"}`
         );

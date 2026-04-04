@@ -24,6 +24,7 @@ export interface TelemetryCaptureOptions {
 
 export interface TelemetryCaptureExceptionOptions extends TelemetryCaptureOptions {
     level?: "error" | "warning" | "info";
+    caller?: string;
 }
 
 export interface IPostHogAdapter {

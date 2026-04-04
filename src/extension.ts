@@ -69,6 +69,19 @@ export function activate(context: vscode.ExtensionContext) {
 
     configManagerInstance = new ConfigManager(context.secrets);
     const configManager = configManagerInstance;
+    configManager.setTelemetryService(telemetryService);
+
+    // Emit feature usage snapshot after config is loaded
+    void configManager.getConfig().then((config) => {
+        telemetryService.captureFeatureUsageSnapshot({
+            "inline-completions": config.inlineCompletionsEnabled ?? false,
+            "responses-api": config.v2ApiEnabled ?? false,
+            "commit-message": !!(config.commitModelIdOverride && config.commitModelIdOverride.length > 0),
+            "usage-data": config.experimentalEmitUsageData ?? false,
+            caching: !config.disableCaching,
+            "quota-tool-redaction": !config.disableQuotaToolRedaction,
+        });
+    });
 
     // Legacy providers (will be removed after v2 migration)
     // @deprecated - Will be replaced by v2 baseline providers
@@ -119,11 +132,19 @@ export function activate(context: vscode.ExtensionContext) {
                     telemetryService
                 )
             );
-            context.subscriptions.push(registerShowModelsCommand(activeProvider as unknown as LiteLLMChatProvider));
-            context.subscriptions.push(registerReloadModelsCommand(activeProvider as unknown as LiteLLMChatProvider));
-            context.subscriptions.push(registerCheckConnectionCommand(configManager));
             context.subscriptions.push(
-                registerResetConfigCommand(configManager, activeProvider as unknown as LiteLLMChatProvider)
+                registerShowModelsCommand(activeProvider as unknown as LiteLLMChatProvider, telemetryService)
+            );
+            context.subscriptions.push(
+                registerReloadModelsCommand(activeProvider as unknown as LiteLLMChatProvider, telemetryService)
+            );
+            context.subscriptions.push(registerCheckConnectionCommand(configManager, telemetryService));
+            context.subscriptions.push(
+                registerResetConfigCommand(
+                    configManager,
+                    activeProvider as unknown as LiteLLMChatProvider,
+                    telemetryService
+                )
             );
             context.subscriptions.push(
                 registerSelectInlineCompletionModelCommand(activeProvider as unknown as LiteLLMChatProvider)
