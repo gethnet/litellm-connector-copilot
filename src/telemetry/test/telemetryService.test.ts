@@ -73,6 +73,52 @@ suite("TelemetryService", () => {
         assert.strictEqual(event.properties.extension_version, "1.0.0");
     });
 
+    test("should capture exceptions with correct properties", () => {
+        const mockContext = {
+            extension: {
+                packageJSON: {
+                    version: "1.0.0",
+                },
+            },
+        } as unknown as vscode.ExtensionContext;
+
+        telemetryService.initialize(mockContext);
+        const error = new Error("test-error");
+        telemetryService.captureException(error, {
+            properties: {
+                feature: "test-feature",
+            },
+        });
+
+        assert.strictEqual(adapterMock.captureException.calledOnce, true);
+        const [capturedError, options] = adapterMock.captureException.firstCall.args;
+        assert.strictEqual(capturedError, error);
+        assert.strictEqual(options?.properties?.feature, "test-feature");
+        assert.strictEqual(options?.properties?.distinctId, "test-machine-id");
+        assert.strictEqual(options?.properties?.extension_version, "1.0.0");
+    });
+
+    test("should identify users", () => {
+        telemetryService.identify("user-123", { email: "test@example.com" });
+        assert.strictEqual(adapterMock.identify.calledWith("user-123", { email: "test@example.com" }), true);
+    });
+
+    test("should check feature flags", async () => {
+        const mockContext = {
+            extension: {
+                packageJSON: {
+                    version: "1.0.0",
+                },
+            },
+        } as unknown as vscode.ExtensionContext;
+
+        telemetryService.initialize(mockContext);
+        adapterMock.isFeatureEnabled.resolves(true);
+        const enabled = await telemetryService.isFeatureEnabled("test-flag");
+        assert.strictEqual(enabled, true);
+        assert.strictEqual(adapterMock.isFeatureEnabled.calledWith("test-flag", "test-machine-id"), true);
+    });
+
     test("should respect telemetry enabled setting changes", () => {
         const mockContext = {
             extension: {

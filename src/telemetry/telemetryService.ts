@@ -1,6 +1,11 @@
 import * as vscode from "vscode";
-import { PostHogAdapter } from "posthog-adapter";
-import type { TelemetryEvent } from "./types";
+import { PostHogAdapter } from "./posthogAdapter";
+import type {
+    TelemetryEvent,
+    TelemetryCaptureExceptionOptions,
+    TelemetryEventProperties,
+    TelemetryPersonProperties,
+} from "./types";
 
 export class TelemetryService implements vscode.Disposable {
     private adapter: PostHogAdapter;
@@ -17,7 +22,11 @@ export class TelemetryService implements vscode.Disposable {
 
     initialize(context: vscode.ExtensionContext): void {
         this.distinctId = vscode.env.machineId;
-        this.extensionVersion = context.extension.packageJSON.version;
+        const extensionVersion =
+            context.extension?.packageJSON?.version ??
+            vscode.extensions.getExtension("GethNet.litellm-connector-copilot")?.packageJSON?.version ??
+            "unknown";
+        this.extensionVersion = extensionVersion;
 
         this.adapter.initialize({
             apiKey: TelemetryService.POSTHOG_API_KEY,
@@ -32,8 +41,8 @@ export class TelemetryService implements vscode.Disposable {
         );
     }
 
-    private capture(event: string, properties: Record<string, string | number | boolean> = {}): void {
-        const fullProperties = {
+    private capture(event: string, properties: TelemetryEventProperties = {}): void {
+        const fullProperties: TelemetryEventProperties = {
             ...properties,
             distinctId: this.distinctId,
             extension_version: this.extensionVersion,
@@ -49,6 +58,35 @@ export class TelemetryService implements vscode.Disposable {
         };
 
         this.adapter.capture(telemetryEvent);
+    }
+
+    public captureException(error: Error, options?: TelemetryCaptureExceptionOptions): void {
+        const fullProperties: TelemetryEventProperties = {
+            ...options?.properties,
+            distinctId: options?.distinctId ?? this.distinctId,
+            extension_version: this.extensionVersion,
+            vscode_version: vscode.version,
+            ui_kind: vscode.UIKind[vscode.env.uiKind],
+            os: process.platform || "web",
+        };
+
+        this.adapter.captureException(error, {
+            ...options,
+            distinctId: options?.distinctId ?? this.distinctId,
+            properties: fullProperties,
+        });
+    }
+
+    public identify(distinctId: string, properties?: TelemetryPersonProperties): void {
+        this.adapter.identify(distinctId, properties);
+    }
+
+    public isFeatureEnabled(flagKey: string, distinctId?: string): Promise<boolean> | boolean {
+        return this.adapter.isFeatureEnabled(flagKey, distinctId ?? this.distinctId);
+    }
+
+    public reloadFeatureFlags(): Promise<void> | void {
+        return this.adapter.reloadFeatureFlags();
     }
 
     // Lifecycle
@@ -82,6 +120,8 @@ export class TelemetryService implements vscode.Disposable {
         tokensIn: number;
         tokensOut: number;
         status: string;
+        error?: string;
+        stack?: string;
     }): void {
         this.capture("chat_request", props);
     }

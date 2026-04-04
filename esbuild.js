@@ -1,61 +1,3 @@
-const esbuild = require("esbuild");
-
-const production = (process.argv.includes("--production") || process.env.NODE_ENV === "production") ? true : false;
-const watch = process.argv.includes("--watch");
-
-/** @type {esbuild.BuildOptions} */
-const shared = {
-    entryPoints: ["src/extension.ts"],
-    bundle: true,
-    minify: production,
-    sourcemap: !production,
-    sourcesContent: false,
-    logLevel: "warning",
-    treeShaking: true,
-    define: {
-        "process.env.NODE_ENV": JSON.stringify(production ? "production" : "development"),
-    },
-    external: ["vscode"],
-};
-
-/** @type {esbuild.BuildOptions[]} */
-const buildTargets = [
-    {
-        ...shared,
-        platform: "node",
-        format: "cjs",
-        target: "node20",
-        outfile: "dist/extension.js",
-        plugins: [createProblemMatcherPlugin("node")],
-        alias: {
-            "posthog-adapter": "./src/telemetry/posthogAdapter",
-        },
-    },
-    {
-        ...shared,
-        platform: "browser",
-        format: "esm",
-        target: ["chrome120", "firefox120", "safari17"],
-        outfile: "dist/web/extension.js",
-        plugins: [createProblemMatcherPlugin("web")],
-        conditions: ["browser"],
-        alias: {
-            "posthog-adapter": "./src/telemetry/posthogAdapter.web",
-        },
-    },
-];
-
-async function main() {
-    const contexts = await Promise.all(buildTargets.map((opts) => esbuild.context(opts)));
-
-    if (watch) {
-        await Promise.all(contexts.map((ctx) => ctx.watch()));
-    } else {
-        await Promise.all(contexts.map((ctx) => ctx.rebuild()));
-        await Promise.all(contexts.map((ctx) => ctx.dispose()));
-    }
-}
-
 /**
  * @type {import('esbuild').Plugin}
  */
@@ -77,6 +19,81 @@ function createProblemMatcherPlugin(label) {
             });
         },
     };
+}
+
+const esbuild = require("esbuild");
+const path = require("path");
+
+const production = (process.argv.includes("--production") || process.env.NODE_ENV === "production") ? true : false;
+const watch = process.argv.includes("--watch");
+const generateSourceMaps = process.env.POSTHOG_SOURCEMAPS === "true" || !production;
+
+/** @type {esbuild.BuildOptions} */
+const shared = {
+    entryPoints: ["src/extension.ts"],
+    bundle: true,
+    minify: production,
+    sourcemap: generateSourceMaps ? "external" : false,
+    sourcesContent: true,
+    logLevel: "warning",
+    treeShaking: true,
+    define: {
+        "process.env.NODE_ENV": JSON.stringify(production ? "production" : "development"),
+    },
+    external: ["vscode"],
+    metafile: true,
+};
+
+/** @type {esbuild.BuildOptions[]} */
+const buildTargets = [
+    {
+        ...shared,
+        platform: "node",
+        format: "cjs",
+        target: "node20",
+        outfile: "dist/extension.js",
+        plugins: [createProblemMatcherPlugin("node")],
+    },
+    {
+        ...shared,
+        platform: "browser",
+        format: "esm",
+        target: ["chrome120", "firefox120", "safari17"],
+        outfile: "dist/web/extension.js",
+        plugins: [
+            createProblemMatcherPlugin("web"),
+            {
+                name: "telemetry-web-swap",
+                setup(build) {
+                    build.onResolve({ filter: /\/posthogAdapter$/ }, (args) => {
+                        if (args.path.endsWith("./posthogAdapter")) {
+                            return {
+                                path: path.join(args.resolveDir, "posthogAdapter.web.ts"),
+                                external: false
+                            };
+                        }
+                    });
+                },
+            },
+        ],
+        conditions: ["browser"],
+    },
+];
+
+async function main() {
+    console.log("Starting build targets...");
+    const contexts = await Promise.all(buildTargets.map((opts) => esbuild.context(opts)));
+
+    if (watch) {
+        console.log("Watching for changes...");
+        await Promise.all(contexts.map((ctx) => ctx.watch()));
+    } else {
+        console.log("Running rebuild...");
+        await Promise.all(contexts.map((ctx) => ctx.rebuild()));
+        console.log("Rebuild complete, disposing contexts...");
+        await Promise.all(contexts.map((ctx) => ctx.dispose()));
+        console.log("Done.");
+    }
 }
 
 main().catch((e) => {

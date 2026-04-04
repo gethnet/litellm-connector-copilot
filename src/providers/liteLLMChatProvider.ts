@@ -259,6 +259,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             };
             LiteLLMTelemetry.reportMetric(metric);
 
+            // Disabling this to reduce noise / unecessary logging
+            // TODO: look into potentially removing this in the future if don't need it.
+            /*
             if (this._telemetryService) {
                 this._telemetryService.captureChatRequest({
                     caller,
@@ -270,6 +273,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                     status: "success",
                 });
             }
+            */
 
             if (config.experimentalEmitUsageData && typeof tokensIn === "number") {
                 this.emitExperimentalUsageData(trackingProgress, tokensIn, tokensOut);
@@ -313,6 +317,8 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                     tokensIn: tokensIn ?? 0,
                     tokensOut: 0,
                     status: "failure",
+                    error: errorMessage,
+                    stack: err instanceof Error ? err.stack : undefined,
                 });
             }
             throw new Error(errorMessage, { cause: err });

@@ -17,7 +17,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "1.6.0-dev4",
+	"version": "1.6.0-dev7",
 	"preview": false,
 	"engines": {
 		"vscode": "^1.110.0"
@@ -116,6 +116,37 @@
 					"type": "string",
 					"default": "",
 					"description": "Base URL for the LiteLLM proxy server (used for model discovery and requests)."
+				},
+				"litellm-connector.backends": {
+					"type": "array",
+					"default": [],
+					"description": "List of LiteLLM backends to connect to. Each backend requires a unique name and a base URL.",
+					"items": {
+						"type": "object",
+						"required": [
+							"name",
+							"url"
+						],
+						"properties": {
+							"name": {
+								"type": "string",
+								"description": "Unique name for the backend."
+							},
+							"url": {
+								"type": "string",
+								"description": "Base URL for the LiteLLM proxy server."
+							},
+							"apiKeySecretRef": {
+								"type": "string",
+								"description": "Reference name for the API key in SecretStorage."
+							},
+							"enabled": {
+								"type": "boolean",
+								"default": true,
+								"description": "Whether this backend is currently enabled."
+							}
+						}
+					}
 				},
 				"litellm-connector.apiKeySecretRef": {
 					"type": "string",
@@ -224,6 +255,9 @@
 		"postinstall": "npm run download-api",
 		"lint": "eslint --fix",
 		"lint:check": "eslint",
+		"build:posthog-sourcemaps": "POSTHOG_SOURCEMAPS=true node esbuild.js --production",
+		"posthog:sourcemaps:upload": "node scripts/upload-posthog-sourcemaps.mjs",
+		"posthog:sourcemaps": "npm run build:posthog-sourcemaps && npm run posthog:sourcemaps:upload",
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
 		"watch": "tsc -watch -p ./",
@@ -253,7 +287,9 @@
 		"rimraf": "^6.0.1",
 		"sinon": "^21.0.1",
 		"typescript": "^5.9.2",
-		"typescript-eslint": "^8.39.0"
+		"typescript-eslint": "^8.39.0",
+		"posthog-js": "^1.364.7",
+		"posthog-node": "^5.28.11"
 	},
 	"dependencies": {
 		"posthog-js": "^1.364.7",

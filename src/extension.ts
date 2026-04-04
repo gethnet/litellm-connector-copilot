@@ -26,14 +26,14 @@ let configManagerInstance: ConfigManager | undefined;
 let telemetryServiceInstance: TelemetryService | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
-    Logger.initialize(context);
-    Logger.info("Activating extension...");
-
-    // Initialize telemetry
+    // Initialize telemetry first so logger can use it
     telemetryServiceInstance = new TelemetryService();
     const telemetryService = telemetryServiceInstance;
     telemetryService.initialize(context);
     context.subscriptions.push(telemetryService);
+
+    Logger.initialize(context, telemetryService);
+    Logger.info("Activating extension...");
 
     // Bridge to static telemetry class
     LiteLLMTelemetry.setTelemetryService(telemetryService);
