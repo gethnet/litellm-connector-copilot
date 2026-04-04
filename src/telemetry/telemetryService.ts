@@ -13,6 +13,8 @@ export class TelemetryService implements vscode.Disposable {
     private extensionVersion = "";
     private disposables: vscode.Disposable[] = [];
 
+    private static readonly EXTENSION_VERSION_PROPERTY = "extension_version";
+
     static readonly POSTHOG_API_KEY = "phc_OJr5j3sxq9AX6YglCd9NMP4HlwchYwBa53n8Jz44jkp";
     static readonly POSTHOG_HOST = "https://us.i.posthog.com";
 
@@ -21,7 +23,7 @@ export class TelemetryService implements vscode.Disposable {
     }
 
     initialize(context: vscode.ExtensionContext): void {
-        this.distinctId = vscode.env.machineId;
+        this.distinctId = vscode.env.sessionId || vscode.env.machineId;
         const extensionVersion =
             context.extension?.packageJSON?.version ??
             vscode.extensions.getExtension("GethNet.litellm-connector-copilot")?.packageJSON?.version ??
@@ -45,7 +47,7 @@ export class TelemetryService implements vscode.Disposable {
         const fullProperties: TelemetryEventProperties = {
             ...properties,
             distinctId: this.distinctId,
-            extension_version: this.extensionVersion,
+            [TelemetryService.EXTENSION_VERSION_PROPERTY]: this.extensionVersion,
             vscode_version: vscode.version,
             ui_kind: vscode.UIKind[vscode.env.uiKind],
             os: process.platform || "web",
@@ -64,7 +66,7 @@ export class TelemetryService implements vscode.Disposable {
         const fullProperties: TelemetryEventProperties = {
             ...options?.properties,
             distinctId: options?.distinctId ?? this.distinctId,
-            extension_version: this.extensionVersion,
+            [TelemetryService.EXTENSION_VERSION_PROPERTY]: this.extensionVersion,
             vscode_version: vscode.version,
             ui_kind: vscode.UIKind[vscode.env.uiKind],
             os: process.platform || "web",
@@ -79,7 +81,10 @@ export class TelemetryService implements vscode.Disposable {
     }
 
     public identify(distinctId: string, properties?: TelemetryPersonProperties): void {
-        this.adapter.identify(distinctId, properties);
+        this.adapter.identify(this.distinctId, {
+            ...properties,
+            [TelemetryService.EXTENSION_VERSION_PROPERTY]: this.extensionVersion,
+        });
     }
 
     public isFeatureEnabled(flagKey: string, distinctId?: string): Promise<boolean> | boolean {

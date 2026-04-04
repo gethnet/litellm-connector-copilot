@@ -100,6 +100,29 @@ suite("TelemetryService", () => {
         assert.strictEqual(options?.properties?.extension_version, "1.0.0");
     });
 
+    test("should identify users with crash reporter id and extension version", () => {
+        const mockContext = {
+            extension: {
+                packageJSON: {
+                    version: "1.0.0",
+                },
+            },
+        } as unknown as vscode.ExtensionContext;
+
+        sandbox.stub(vscode.env, "machineId").get(() => "test-machine-id");
+        sandbox.stub(vscode.env, "isTelemetryEnabled").get(() => true);
+        sandbox.stub(vscode.env, "sessionId").get(() => "test-crash-reporter-id");
+
+        telemetryService.initialize(mockContext);
+        telemetryService.identify("user-123", { email: "test@example.com" });
+
+        assert.strictEqual(adapterMock.identify.calledOnce, true);
+        const [distinctId, properties] = adapterMock.identify.firstCall.args;
+        assert.strictEqual(distinctId, "test-crash-reporter-id");
+        assert.strictEqual(properties?.email, "test@example.com");
+        assert.strictEqual(properties?.extension_version, "1.0.0");
+    });
+
     test("should identify users", () => {
         telemetryService.identify("user-123", { email: "test@example.com" });
         assert.strictEqual(adapterMock.identify.calledWith("user-123", { email: "test@example.com" }), true);
