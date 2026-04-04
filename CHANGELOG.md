@@ -3,10 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 
-## [1.6.0-dev] - 2026-04-03
+## [1.6.0-dev7] - 2026-04-04
 
 ### 🚧 Development (pre-release)
-* Consolidate in-progress improvements and fixes into the 1.6 pre-release.
+* Consolidate the current 1.6 pre-release snapshot on dev7.
 
 ### 🧩 Changes so far
 * ✨ Multi-backend support: configure and aggregate models from multiple LiteLLM proxy instances with backend namespacing (e.g., cloud/gpt-4o)
@@ -14,6 +14,13 @@ All notable changes to this project will be documented in this file.
 * 🏗️ Introduce `MultiBackendClient` to route chat/token counting requests to the correct backend
 * ✅ Update model picker, model discovery, and connection checks for multi-backend mode
 * 🧪 Add unit tests for multi-backend model routing and aggregation
+
+### 📊 Telemetry & observability
+* 🛰️ Add centralized `TelemetryService` initialization in the extension entrypoint so activation, commands, model usage, and request outcomes can be captured consistently.
+* 🔗 Wire telemetry into chat, completion, inline completion, commit-message, and token/counting paths to report request duration, token usage, completion status, and error categories.
+* 🧭 Add v2 observability plumbing with `AuditTrail` and `PostHogHook` so request lifecycle events can be correlated with structured logs and PostHog events.
+* 🧼 Include richer telemetry dimensions such as caller, endpoint, extension version, VS Code version, UI kind, and OS to improve analysis of request behavior.
+* 🧪 Expand telemetry-focused tests around `TelemetryService`, `PostHogHook`, and provider-side telemetry capture paths.
 
 ### 🧪 Testing & Coverage
 * 📈 **Major Coverage Expansion**: Increased project-wide test coverage to meet aggregate targets (Statements ≥ 90%, Lines ≥ 85%).
