@@ -3,9 +3,16 @@ import type { LiteLLMModelInfo } from "../types";
 import { isAnthropicModel } from "../utils/modelUtils";
 import { selectTokenizer } from "./tokenizers/selectTokenizer";
 import type { V2ChatMessage } from "../providers/v2Types";
+import type { TelemetryService } from "../telemetry/telemetryService";
 
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16000;
 export const DEFAULT_CONTEXT_LENGTH = 128000;
+
+let telemetryServiceInstance: TelemetryService | undefined;
+
+export function setTelemetryService(service: TelemetryService): void {
+    telemetryServiceInstance = service;
+}
 
 /**
  * Cache for static prompt token counts to avoid redundant calculations.
@@ -185,6 +192,8 @@ export function trimMessagesToFitBudget(
         throw new Error("Message exceeds token limit.");
     }
 
+    const originalTokens = countTokens(messages, model.id, modelInfo);
+
     let systemMessage: vscode.LanguageModelChatRequestMessage | undefined;
     const remaining: vscode.LanguageModelChatRequestMessage[] = [];
     const userRole = vscode.LanguageModelChatMessageRole.User as unknown as number;
@@ -239,6 +248,10 @@ export function trimMessagesToFitBudget(
         }
     }
 
+    if (telemetryServiceInstance && selected.length < messageArray.length) {
+        telemetryServiceInstance.captureTrimExecuted(model.id, "chat", originalTokens, used, budget);
+    }
+
     return selected;
 }
 
@@ -258,6 +271,8 @@ export function trimV2MessagesForBudget(
     if (budget <= 0) {
         throw new Error("Message exceeds token limit.");
     }
+
+    const originalTokens = countTokensForV2Messages(messages, model.id, modelInfo);
 
     let systemMessage: V2ChatMessage | undefined;
     const remaining: V2ChatMessage[] = [];
@@ -307,6 +322,10 @@ export function trimV2MessagesForBudget(
         } else {
             break;
         }
+    }
+
+    if (telemetryServiceInstance && selected.length < messageArray.length) {
+        telemetryServiceInstance.captureTrimExecuted(model.id, "v2-chat", originalTokens, used, budget);
     }
 
     return selected;

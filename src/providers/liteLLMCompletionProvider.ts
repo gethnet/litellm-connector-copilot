@@ -81,15 +81,27 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
             // Estimate tokensOut from the completion text
             const tokensOut = countTokens(completionText, model.id, modelInfo);
 
+            const durationMs = LiteLLMTelemetry.endTimer(startTime);
             LiteLLMTelemetry.reportMetric({
                 requestId,
                 model: model.id,
-                durationMs: LiteLLMTelemetry.endTimer(startTime),
+                durationMs,
                 tokensIn,
                 tokensOut,
                 status: "success",
                 caller: "inline-completions",
             });
+
+            if (this._telemetryService) {
+                this._telemetryService.captureRequestCompleted({
+                    caller: "inline-completions",
+                    model: model.id,
+                    endpoint: modelInfo?.mode ?? "chat",
+                    durationMs,
+                    tokensIn: tokensIn ?? 0,
+                    tokensOut,
+                });
+            }
 
             return {
                 insertText: completionText,
@@ -98,15 +110,26 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
             const errorMsg = err instanceof Error ? err.message : String(err);
             Logger.error(`Completions failed: ${errorMsg}`, err);
 
+            const durationMs = LiteLLMTelemetry.endTimer(startTime);
             LiteLLMTelemetry.reportMetric({
                 requestId,
                 model: options.modelId ?? "unknown",
-                durationMs: LiteLLMTelemetry.endTimer(startTime),
+                durationMs,
                 tokensIn,
                 status: "failure",
                 error: errorMsg,
                 caller: "inline-completions",
             });
+
+            if (this._telemetryService) {
+                this._telemetryService.captureRequestFailed({
+                    caller: "inline-completions",
+                    model: options.modelId ?? "unknown",
+                    endpoint: "unknown",
+                    durationMs,
+                    errorType: errorMsg,
+                });
+            }
 
             throw err;
         }

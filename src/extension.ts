@@ -15,17 +15,39 @@ import { registerGenerateCommitMessageCommand } from "./commands/generateCommitM
 import { LiteLLMCommitMessageProvider } from "./providers/liteLLMCommitProvider";
 import { Logger } from "./utils/logger";
 import { StructuredLogger } from "./observability";
+import { PostHogHook } from "./observability/posthogHook";
 import { InlineCompletionsRegistrar } from "./inlineCompletions/registerInlineCompletions";
+import { TelemetryService } from "./telemetry/telemetryService";
+import { LiteLLMTelemetry } from "./utils/telemetry";
+import { setTelemetryService as setTokenUtilsTelemetryService } from "./adapters/tokenUtils";
 
 // Store the config manager for cleanup on deactivation
 let configManagerInstance: ConfigManager | undefined;
+let telemetryServiceInstance: TelemetryService | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
     Logger.initialize(context);
     Logger.info("Activating extension...");
 
+    // Initialize telemetry
+    telemetryServiceInstance = new TelemetryService();
+    const telemetryService = telemetryServiceInstance;
+    telemetryService.initialize(context);
+    context.subscriptions.push(telemetryService);
+
+    // Bridge to static telemetry class
+    LiteLLMTelemetry.setTelemetryService(telemetryService);
+
+    // Bridge to token utils
+    setTokenUtilsTelemetryService(telemetryService);
+
     // Initialize v2 structured logger
     StructuredLogger.initialize(context);
+
+    // Initialize PostHog hook for v2 observability
+    const postHogHook = new PostHogHook(telemetryService);
+    postHogHook.initialize();
+    context.subscriptions.push(postHogHook);
 
     let ua = "litellm-vscode-chat/unknown VSCode/unknown";
     try {
@@ -36,6 +58,9 @@ export function activate(context: vscode.ExtensionContext) {
         const vscodeVersion = vscode.version;
         // Keep UA minimal: only extension version and VS Code version
         ua = `litellm-vscode-chat/${extVersion} VSCode/${vscodeVersion}`;
+
+        // Capture activation
+        telemetryService.captureExtensionActivated(extVersion, vscodeVersion);
     } catch (uaErr) {
         Logger.error("Failed to build UA", uaErr);
     }
@@ -50,6 +75,10 @@ export function activate(context: vscode.ExtensionContext) {
     const chatProviderV1 = new LiteLLMChatProvider(context.secrets, ua);
     // @deprecated - Will be replaced by v2 baseline providers
     const commitProvider = new LiteLLMCommitMessageProvider(context.secrets, ua);
+
+    // Bridge to providers
+    chatProviderV1.setTelemetryService(telemetryService);
+    commitProvider.setTelemetryService(telemetryService);
 
     // Track active provider registration for hot-swap
     const activeProvider: LiteLLMChatProvider = chatProviderV1;
@@ -76,10 +105,19 @@ export function activate(context: vscode.ExtensionContext) {
         // Management commands to configure base URL and API key
         try {
             context.subscriptions.push(
-                registerManageConfigCommand(context, configManager, activeProvider as unknown as LiteLLMChatProvider)
+                registerManageConfigCommand(
+                    context,
+                    configManager,
+                    activeProvider as unknown as LiteLLMChatProvider,
+                    telemetryService
+                )
             );
             context.subscriptions.push(
-                registerManageBackendsCommand(configManager, activeProvider as unknown as LiteLLMChatProvider)
+                registerManageBackendsCommand(
+                    configManager,
+                    activeProvider as unknown as LiteLLMChatProvider,
+                    telemetryService
+                )
             );
             context.subscriptions.push(registerShowModelsCommand(activeProvider as unknown as LiteLLMChatProvider));
             context.subscriptions.push(registerReloadModelsCommand(activeProvider as unknown as LiteLLMChatProvider));
@@ -90,12 +128,14 @@ export function activate(context: vscode.ExtensionContext) {
             context.subscriptions.push(
                 registerSelectInlineCompletionModelCommand(activeProvider as unknown as LiteLLMChatProvider)
             );
-            context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider));
+            context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider, telemetryService));
             context.subscriptions.push(
                 vscode.commands.registerCommand("litellm-connector.generateCommitMessage.selectModel", async () => {
                     await showModelPicker(commitProvider, {
                         title: "Select Commit Message Model",
                         settingKey: "commitModelIdOverride",
+                        telemetryService: telemetryService,
+                        caller: "commit-message",
                     });
                 })
             );
@@ -107,6 +147,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Stable inline completions (optional; disabled by default)
     const inlineRegistrar = new InlineCompletionsRegistrar(context.secrets, ua, context);
+    inlineRegistrar.setTelemetryService(telemetryService);
     inlineRegistrar.initialize();
     context.subscriptions.push(inlineRegistrar);
 

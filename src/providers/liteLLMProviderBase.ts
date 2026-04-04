@@ -26,6 +26,7 @@ import { countTokensForV2Messages, trimV2MessagesForBudget } from "../adapters/t
 import { ConfigManager } from "../config/configManager";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
+import type { TelemetryService } from "../telemetry/telemetryService";
 import {
     deriveCapabilitiesFromModelInfo,
     capabilitiesToVSCode,
@@ -78,11 +79,17 @@ export abstract class LiteLLMProviderBase {
     protected _multiBackendClient: MultiBackendClient | undefined;
     protected _activeBackendNames: string[] = [];
 
+    protected _telemetryService?: TelemetryService;
+
     constructor(
         protected readonly secrets: vscode.SecretStorage,
         protected readonly userAgent: string
     ) {
         this._configManager = new ConfigManager(secrets);
+    }
+
+    public setTelemetryService(service: TelemetryService): void {
+        this._telemetryService = service;
     }
 
     /** Exposes the ConfigManager for external access (e.g., commands that need configuration). */
@@ -139,6 +146,9 @@ export abstract class LiteLLMProviderBase {
         const now = Date.now();
         if (options.silent && this._lastModelList.length > 0 && now - this._modelListFetchedAtMs < TTL_MS) {
             Logger.trace("Returning cached models (within TTL)");
+            if (this._telemetryService) {
+                this._telemetryService.captureModelsCacheHit(this._lastModelList.length);
+            }
             return this._lastModelList;
         }
 
@@ -190,12 +200,18 @@ export abstract class LiteLLMProviderBase {
 
             // Create multi-backend client
             this._multiBackendClient = new MultiBackendClient(effectiveBackends, this.userAgent);
+            if (this._telemetryService) {
+                this._multiBackendClient.setTelemetryService(this._telemetryService);
+            }
             this._activeBackendNames = effectiveBackends.map((b) => b.name);
 
             Logger.trace(`Fetching model info from ${effectiveBackends.length} backend(s)...`);
             const aggregated = await this._multiBackendClient.getModelInfoAll(token);
 
             Logger.info(`Found ${aggregated.data.length} models across ${effectiveBackends.length} backend(s)`);
+            if (this._telemetryService) {
+                this._telemetryService.captureModelsDiscovered(aggregated.data.length, effectiveBackends.length);
+            }
             const infos: LanguageModelChatInformation[] = aggregated.data.map((entry) => {
                 const modelId = entry.namespacedId;
                 const modelInfo = entry.model_info;

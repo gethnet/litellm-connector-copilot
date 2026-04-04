@@ -200,19 +200,28 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                             // Estimate tokensOut from the accumulated assistant text
                             const tokensOut = countTokens(this._partialAssistantText, modelToUse.id, modelInfo);
 
-                            LiteLLMTelemetry.reportMetric({
+                            const metric = {
                                 requestId,
                                 model: modelToUse.id,
                                 durationMs: LiteLLMTelemetry.endTimer(startTime),
                                 tokensIn,
                                 tokensOut,
-                                status: "success",
+                                status: "success" as const,
                                 caller,
-                            });
-                            if (config.experimentalEmitUsageData && typeof tokensIn === "number") {
-                                this.emitExperimentalUsageData(trackingProgress, tokensIn, tokensOut);
+                            };
+                            LiteLLMTelemetry.reportMetric(metric);
+
+                            if (this._telemetryService) {
+                                this._telemetryService.captureChatRequest({
+                                    caller,
+                                    model: modelToUse.id,
+                                    endpoint: modelInfo?.mode ?? "chat",
+                                    durationMs: metric.durationMs,
+                                    tokensIn: tokensIn ?? 0,
+                                    tokensOut,
+                                    status: "success",
+                                });
                             }
-                            return;
                         } catch (retryErr: unknown) {
                             // If retry fails, throw a more descriptive error
                             let retryErrorMessage = retryErr instanceof Error ? retryErr.message : String(retryErr);
@@ -239,15 +248,29 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             // Estimate tokensOut from the accumulated assistant text
             const tokensOut = countTokens(this._partialAssistantText, modelToUse.id, modelInfo);
 
-            LiteLLMTelemetry.reportMetric({
+            const metric = {
                 requestId,
                 model: modelToUse.id,
                 durationMs: LiteLLMTelemetry.endTimer(startTime),
                 tokensIn,
                 tokensOut,
-                status: "success",
+                status: "success" as const,
                 caller,
-            });
+            };
+            LiteLLMTelemetry.reportMetric(metric);
+
+            if (this._telemetryService) {
+                this._telemetryService.captureChatRequest({
+                    caller,
+                    model: modelToUse.id,
+                    endpoint: modelInfo?.mode ?? "chat",
+                    durationMs: metric.durationMs,
+                    tokensIn: tokensIn ?? 0,
+                    tokensOut,
+                    status: "success",
+                });
+            }
+
             if (config.experimentalEmitUsageData && typeof tokensIn === "number") {
                 this.emitExperimentalUsageData(trackingProgress, tokensIn, tokensOut);
             }
@@ -269,15 +292,29 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 }
             }
             Logger.error("Chat request failed", err);
-            LiteLLMTelemetry.reportMetric({
+
+            const metric = {
                 requestId,
                 model: model.id,
                 durationMs: LiteLLMTelemetry.endTimer(startTime),
                 tokensIn,
-                status: "failure",
+                status: "failure" as const,
                 error: errorMessage,
                 caller,
-            });
+            };
+            LiteLLMTelemetry.reportMetric(metric);
+
+            if (this._telemetryService) {
+                this._telemetryService.captureChatRequest({
+                    caller,
+                    model: model.id,
+                    endpoint: "unknown",
+                    durationMs: metric.durationMs,
+                    tokensIn: tokensIn ?? 0,
+                    tokensOut: 0,
+                    status: "failure",
+                });
+            }
             throw new Error(errorMessage, { cause: err });
         }
     }

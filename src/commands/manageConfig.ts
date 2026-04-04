@@ -3,8 +3,13 @@ import type { ConfigManager } from "../config/configManager";
 import type { LiteLLMChatProvider } from "../providers";
 import { MultiBackendClient } from "../adapters";
 import type { LiteLLMBackend } from "../types";
+import type { TelemetryService } from "../telemetry/telemetryService";
 
-function createConfigHandler(configManager: ConfigManager, provider?: LiteLLMChatProvider) {
+function createConfigHandler(
+    configManager: ConfigManager,
+    provider?: LiteLLMChatProvider,
+    telemetryService?: TelemetryService
+) {
     return async () => {
         const config = await configManager.getConfig();
 
@@ -88,6 +93,13 @@ function createConfigHandler(configManager: ConfigManager, provider?: LiteLLMCha
             key: finalKey,
         });
 
+        if (telemetryService) {
+            telemetryService.captureConfigChanged("baseUrl", "legacy-manage");
+            if (finalKey) {
+                telemetryService.captureConfigChanged("apiKey", "legacy-manage");
+            }
+        }
+
         // Trigger a model discovery refresh if a provider is available
         if (provider) {
             try {
@@ -106,12 +118,20 @@ function createConfigHandler(configManager: ConfigManager, provider?: LiteLLMCha
 export function registerManageConfigCommand(
     context: vscode.ExtensionContext,
     configManager: ConfigManager,
-    provider?: LiteLLMChatProvider
+    provider?: LiteLLMChatProvider,
+    telemetryService?: TelemetryService
 ) {
-    return vscode.commands.registerCommand("litellm-connector.manage", createConfigHandler(configManager, provider));
+    return vscode.commands.registerCommand(
+        "litellm-connector.manage",
+        createConfigHandler(configManager, provider, telemetryService)
+    );
 }
 
-export function registerManageBackendsCommand(configManager: ConfigManager, provider?: LiteLLMChatProvider) {
+export function registerManageBackendsCommand(
+    configManager: ConfigManager,
+    provider?: LiteLLMChatProvider,
+    telemetryService?: TelemetryService
+) {
     return vscode.commands.registerCommand("litellm-connector.manageBackends", async () => {
         const backends = await configManager.listBackends();
 
@@ -136,17 +156,21 @@ export function registerManageBackendsCommand(configManager: ConfigManager, prov
         }
 
         if (picked.label.includes("Add Backend")) {
-            await addNewBackend(configManager, provider);
+            await addNewBackend(configManager, provider, telemetryService);
         } else if (picked.label.includes("Check All Connections")) {
             await vscode.commands.executeCommand("litellm-connector.checkConnection");
         } else {
             const backend = (picked as vscode.QuickPickItem & { backend: LiteLLMBackend }).backend;
-            await manageExistingBackend(configManager, backend, provider);
+            await manageExistingBackend(configManager, backend, provider, telemetryService);
         }
     });
 }
 
-async function addNewBackend(configManager: ConfigManager, provider?: LiteLLMChatProvider) {
+async function addNewBackend(
+    configManager: ConfigManager,
+    provider?: LiteLLMChatProvider,
+    telemetryService?: TelemetryService
+) {
     const name = await vscode.window.showInputBox({
         title: "Add LiteLLM Backend",
         prompt: "Enter a unique name for this backend (e.g., Cloud, Local)",
@@ -178,6 +202,12 @@ async function addNewBackend(configManager: ConfigManager, provider?: LiteLLMCha
     try {
         await configManager.addBackend({ name: name.trim(), url: url.trim(), enabled: true }, apiKey?.trim());
         vscode.window.showInformationMessage(`Backend "${name}" added.`);
+
+        if (telemetryService) {
+            const currentBackends = await configManager.listBackends();
+            telemetryService.captureBackendAdded(currentBackends.length);
+        }
+
         if (provider) {
             provider.clearModelCache();
             await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
@@ -190,7 +220,8 @@ async function addNewBackend(configManager: ConfigManager, provider?: LiteLLMCha
 async function manageExistingBackend(
     configManager: ConfigManager,
     backend: LiteLLMBackend,
-    provider?: LiteLLMChatProvider
+    provider?: LiteLLMChatProvider,
+    telemetryService?: TelemetryService
 ) {
     const items: (vscode.QuickPickItem & { id: string })[] = [
         {
@@ -214,6 +245,9 @@ async function manageExistingBackend(
 
     if (action === "toggle") {
         await configManager.updateBackend(backend.name, { enabled: backend.enabled === false });
+        if (telemetryService) {
+            telemetryService.captureConfigChanged("backend.enabled", "manage-backends");
+        }
     } else if (action === "edit_url") {
         const newUrl = await vscode.window.showInputBox({
             title: `Update URL for "${backend.name}"`,
@@ -221,6 +255,9 @@ async function manageExistingBackend(
         });
         if (newUrl) {
             await configManager.updateBackend(backend.name, { url: newUrl.trim() });
+            if (telemetryService) {
+                telemetryService.captureConfigChanged("backend.url", "manage-backends");
+            }
         }
     } else if (action === "edit_key") {
         const newKey = await vscode.window.showInputBox({
@@ -229,6 +266,9 @@ async function manageExistingBackend(
         });
         if (newKey !== undefined) {
             await configManager.updateBackend(backend.name, {}, newKey.trim());
+            if (telemetryService) {
+                telemetryService.captureConfigChanged("backend.apiKey", "manage-backends");
+            }
         }
     } else if (action === "remove") {
         const confirm = await vscode.window.showWarningMessage(
@@ -238,6 +278,10 @@ async function manageExistingBackend(
         );
         if (confirm === "Remove") {
             await configManager.removeBackend(backend.name);
+            if (telemetryService) {
+                const currentBackends = await configManager.listBackends();
+                telemetryService.captureBackendRemoved(currentBackends.length);
+            }
         }
     }
 

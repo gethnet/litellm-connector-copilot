@@ -8,6 +8,7 @@ import type {
 } from "../types";
 import { LiteLLMClient } from "./litellmClient";
 import { Logger } from "../utils/logger";
+import type { TelemetryService } from "../telemetry/telemetryService";
 
 /**
  * Separator between backend name and original model ID in namespaced model IDs.
@@ -62,6 +63,7 @@ export interface AggregatedModelInfoResponse {
 export class MultiBackendClient {
     private readonly clients = new Map<string, LiteLLMClient>();
     private readonly backendNames: string[] = [];
+    private _telemetryService?: TelemetryService;
 
     constructor(
         backends: ResolvedBackend[],
@@ -71,6 +73,13 @@ export class MultiBackendClient {
             const client = new LiteLLMClient({ url: backend.url, key: backend.apiKey }, userAgent);
             this.clients.set(backend.name, client);
             this.backendNames.push(backend.name);
+        }
+    }
+
+    public setTelemetryService(service: TelemetryService): void {
+        this._telemetryService = service;
+        for (const client of this.clients.values()) {
+            client.setTelemetryService(service);
         }
     }
 

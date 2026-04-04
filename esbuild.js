@@ -26,7 +26,10 @@ const buildTargets = [
         format: "cjs",
         target: "node20",
         outfile: "dist/extension.js",
-        plugins: [createProblemMatcherPlugin("node")]
+        plugins: [createProblemMatcherPlugin("node")],
+        alias: {
+            "posthog-adapter": "./src/telemetry/posthogAdapter",
+        },
     },
     {
         ...shared,
@@ -36,6 +39,9 @@ const buildTargets = [
         outfile: "dist/web/extension.js",
         plugins: [createProblemMatcherPlugin("web")],
         conditions: ["browser"],
+        alias: {
+            "posthog-adapter": "./src/telemetry/posthogAdapter.web",
+        },
     },
 ];
 
