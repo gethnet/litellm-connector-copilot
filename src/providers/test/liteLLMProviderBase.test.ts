@@ -54,18 +54,11 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     test("buildOpenAIChatRequest respects sendDefaultParameters = false (default)", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        const build = (
-            provider as unknown as {
-                buildOpenAIChatRequest: (
-                    messages: readonly vscode.LanguageModelChatRequestMessage[],
-                    model: vscode.LanguageModelChatInformation,
-                    options: vscode.ProvideLanguageModelChatResponseOptions
-                ) => Promise<OpenAIChatCompletionRequest>;
-            }
-        ).buildOpenAIChatRequest.bind(provider);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const build = (provider as any).buildOpenAIChatRequest.bind(provider);
 
-        const configManager = (provider as unknown as { _configManager: { getConfig: () => Promise<unknown> } })
-            ._configManager;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const configManager = (provider as any)._configManager;
         sandbox.stub(configManager, "getConfig").resolves({
             url: "http://localhost:4000",
             sendDefaultParameters: false,
@@ -107,18 +100,11 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     test("buildOpenAIChatRequest respects sendDefaultParameters = true", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        const build = (
-            provider as unknown as {
-                buildOpenAIChatRequest: (
-                    messages: readonly vscode.LanguageModelChatRequestMessage[],
-                    model: vscode.LanguageModelChatInformation,
-                    options: vscode.ProvideLanguageModelChatResponseOptions
-                ) => Promise<OpenAIChatCompletionRequest>;
-            }
-        ).buildOpenAIChatRequest.bind(provider);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const build = (provider as any).buildOpenAIChatRequest.bind(provider);
 
-        const configManager = (provider as unknown as { _configManager: { getConfig: () => Promise<unknown> } })
-            ._configManager;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const configManager = (provider as any)._configManager;
         sandbox.stub(configManager, "getConfig").resolves({
             url: "http://localhost:4000",
             sendDefaultParameters: true,
@@ -156,18 +142,11 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     test("buildOpenAIChatRequest prefers modelOptions over defaults", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        const build = (
-            provider as unknown as {
-                buildOpenAIChatRequest: (
-                    messages: readonly vscode.LanguageModelChatRequestMessage[],
-                    model: vscode.LanguageModelChatInformation,
-                    options: vscode.ProvideLanguageModelChatResponseOptions
-                ) => Promise<OpenAIChatCompletionRequest>;
-            }
-        ).buildOpenAIChatRequest.bind(provider);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const build = (provider as any).buildOpenAIChatRequest.bind(provider);
 
-        const configManager = (provider as unknown as { _configManager: { getConfig: () => Promise<unknown> } })
-            ._configManager;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const configManager = (provider as any)._configManager;
         sandbox.stub(configManager, "getConfig").resolves({
             url: "http://localhost:4000",
             sendDefaultParameters: true,
@@ -978,5 +957,246 @@ suite("LiteLLM Provider Unit Tests", () => {
         // Second call - should now return cached remote count
         const count2 = await provider.provideTokenCount(model, largeText, token);
         assert.strictEqual(count2, remoteCount, "Should return cached remote count on second call");
+    });
+
+    test("isParameterSupported returns true when parameter is explicitly supported and not blocked", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const isSupported = (
+            provider as unknown as {
+                isParameterSupported: (param: string, modelInfo: unknown, modelId?: string) => boolean;
+            }
+        ).isParameterSupported.bind(provider);
+
+        const supported = isSupported("temperature", { supported_openai_params: ["temperature", "top_p"] }, "gpt-4.1");
+
+        assert.strictEqual(supported, true);
+    });
+
+    test("stripUnsupportedParametersFromRequest preserves supported fields when model has no limitations", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const strip = (
+            provider as unknown as {
+                stripUnsupportedParametersFromRequest: (
+                    requestBody: Record<string, unknown>,
+                    modelInfo: unknown,
+                    modelId?: string
+                ) => void;
+            }
+        ).stripUnsupportedParametersFromRequest.bind(provider);
+
+        const requestBody: Record<string, unknown> = {
+            temperature: 0.4,
+            top_p: 0.9,
+            frequency_penalty: 0.2,
+        };
+
+        strip(requestBody, { supported_openai_params: ["temperature", "top_p", "frequency_penalty"] }, "gpt-4.1");
+
+        assert.deepStrictEqual(requestBody, {
+            temperature: 0.4,
+            top_p: 0.9,
+            frequency_penalty: 0.2,
+        });
+    });
+
+    test("provideTokenCount returns local estimate when cancellation is already requested", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const countTokensStub = sandbox.stub(MultiBackendClient.prototype, "countTokens");
+
+        const token = {
+            isCancellationRequested: true,
+            onCancellationRequested: () => ({ dispose() {} }),
+        } as vscode.CancellationToken;
+
+        const count = await provider.provideTokenCount(
+            { id: "default/test-model" } as vscode.LanguageModelChatInformation,
+            "a".repeat(800),
+            token
+        );
+
+        assert.ok(count > 0);
+        assert.strictEqual(countTokensStub.called, false);
+    });
+
+    test("provideLanguageModelChatInformation returns empty when all resolved backends are disabled", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        interface ProviderWithConfigManager {
+            _configManager: {
+                getConfig: () => Promise<{ url: string; modelOverrides: Record<string, string[]> }>;
+                resolveBackends: () => Promise<ResolvedBackend[]>;
+            };
+        }
+        const providerWithConfig = provider as unknown as ProviderWithConfigManager;
+        sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            modelOverrides: {},
+        } as unknown as { url: string; modelOverrides: Record<string, string[]> });
+        sandbox.stub(providerWithConfig._configManager, "resolveBackends").resolves([]);
+
+        const infos = await provider.provideLanguageModelChatInformation(
+            { silent: true },
+            new vscode.CancellationTokenSource().token
+        );
+
+        assert.deepStrictEqual(infos, []);
+    });
+
+    test("getModelTags does not add inline-completions when streaming is unsupported", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        interface ProviderForTagTesting {
+            getModelTags: (
+                modelId: string,
+                modelInfo?: LiteLLMModelInfo,
+                overrides?: Record<string, string[]>
+            ) => string[];
+        }
+        const getModelTags = (provider as unknown as ProviderForTagTesting).getModelTags.bind(provider);
+
+        const tags = getModelTags("plain-model", {
+            mode: "chat",
+            supports_native_streaming: false,
+        });
+
+        assert.strictEqual(tags.includes("inline-completions"), false);
+    });
+
+    test("discoverModels deduplicates in-flight requests", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        // Stub _doDiscoverModels to take some time
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const doDiscoverStub = sandbox.stub(provider as any, "_doDiscoverModels").callsFake(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            return [];
+        });
+
+        const p1 = provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
+        const p2 = provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
+
+        await Promise.all([p1, p2]);
+        assert.strictEqual(doDiscoverStub.callCount, 1);
+    });
+
+    test("discoverModels respects TTL for silent requests", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (provider as any)._lastModelList = [{ id: "m1" }];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (provider as any)._modelListFetchedAtMs = Date.now();
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const doDiscoverStub = sandbox.stub(provider as any, "_doDiscoverModels");
+
+        const models = await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
+        assert.strictEqual(models.length, 1);
+        assert.strictEqual(doDiscoverStub.called, false);
+    });
+
+    test("discoverModels bypasses TTL for non-silent requests", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (provider as any)._lastModelList = [{ id: "m1" }];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (provider as any)._modelListFetchedAtMs = Date.now();
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const doDiscoverStub = sandbox.stub(provider as any, "_doDiscoverModels").resolves([{ id: "m2" } as any]);
+
+        const models = await provider.discoverModels({ silent: false }, new vscode.CancellationTokenSource().token);
+        assert.strictEqual(models[0].id, "m2");
+        assert.strictEqual(doDiscoverStub.calledOnce, true);
+    });
+
+    test("_doDiscoverModels triggers config flow when no backends configured and not silent", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const configManager = (provider as any)._configManager;
+        sandbox.stub(configManager, "resolveBackends").resolves([]);
+        const execStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const models = await (provider as any)._doDiscoverModels(
+            { silent: false },
+            new vscode.CancellationTokenSource().token
+        );
+        assert.strictEqual(execStub.calledWith("litellm-connector.manage"), true);
+        assert.strictEqual(models.length, 0);
+    });
+
+    test("_doDiscoverModels handles error gracefully", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const configManager = (provider as any)._configManager;
+        sandbox.stub(configManager, "getConfig").rejects(new Error("boom"));
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const models = await (provider as any)._doDiscoverModels(
+            { silent: true },
+            new vscode.CancellationTokenSource().token
+        );
+        assert.strictEqual(models.length, 0);
+    });
+
+    test("getModelTags adds inline-edit for models containing 'coder' or 'code'", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const getModelTags = (provider as any).getModelTags.bind(provider);
+
+        assert.ok(getModelTags("my-coder-model").includes("inline-edit"));
+        assert.ok(getModelTags("cool-code-model").includes("inline-edit"));
+    });
+
+    test("getModelTags adds tools tag for function-calling or vision models", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const getModelTags = (provider as any).getModelTags.bind(provider);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        assert.ok(getModelTags("m1", { supports_function_calling: true } as any).includes("tools"));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        assert.ok(getModelTags("m2", { supports_vision: true } as any).includes("vision"));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        assert.ok(getModelTags("m3", { supported_openai_params: ["tools"] } as any).includes("tools"));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        assert.ok(getModelTags("m4", { supported_openai_params: ["tool_choice"] } as any).includes("tools"));
+    });
+
+    test("sanitizeErrorTextForLogs caps long text and removes prompt wrappers", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sanitize = (provider as any).sanitizeErrorTextForLogs.bind(provider);
+
+        const input = "<context>Secret</context><editorContext>Code</editorContext>Some error";
+        const output = sanitize(input);
+        assert.ok(output.includes("<context>…</context>"));
+        assert.ok(output.includes("<editorContext>…</editorContext>"));
+        assert.ok(output.includes("Some error"));
+
+        const longInput = "a".repeat(600);
+        assert.strictEqual(sanitize(longInput).length, 501); // 500 chars + ellipsis
+    });
+
+    test("collectMessageText handles string content parts", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const collect = (
+            provider as unknown as { collectMessageText: (m: vscode.LanguageModelChatRequestMessage) => string }
+        ).collectMessageText.bind(provider);
+
+        const msg = {
+            role: vscode.LanguageModelChatMessageRole.User,
+            content: ["hello", new vscode.LanguageModelTextPart(" world")] as unknown as vscode.LanguageModelTextPart[],
+        } as unknown as vscode.LanguageModelChatRequestMessage;
+
+        assert.strictEqual(collect(msg), "hello world");
+    });
+
+    test("parseApiError handles non-JSON error text", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const parse = (provider as any).parseApiError.bind(provider);
+
+        assert.strictEqual(parse(500, "Raw error message"), "Raw error message");
+        assert.strictEqual(parse(500, ""), "API request failed with status 500");
     });
 });

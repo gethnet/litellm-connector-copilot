@@ -262,4 +262,66 @@ suite("LiteLLMCompletionProvider Unit Tests", () => {
         ).extractCompletionTextFromStream(stream2, tokenSource.token);
         assert.strictEqual(res2, "");
     });
+
+    test("resolveCompletionModel falls back to first inline-completions tagged model", async () => {
+        const provider = new LiteLLMCompletionProvider(mockSecrets, userAgent);
+
+        (provider as unknown as { _lastModelList: vscode.LanguageModelChatInformation[] })._lastModelList = [
+            {
+                id: "chat-only",
+                name: "chat-only",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 100,
+                maxOutputTokens: 100,
+                capabilities: { toolCalling: true, imageInput: false },
+                tags: [],
+            } as unknown as vscode.LanguageModelChatInformation,
+            {
+                id: "inline-model",
+                name: "inline-model",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 100,
+                maxOutputTokens: 100,
+                capabilities: { toolCalling: true, imageInput: false },
+                tags: ["inline-completions"],
+            } as unknown as vscode.LanguageModelChatInformation,
+        ];
+
+        const resolved = await (
+            provider as unknown as {
+                resolveCompletionModel: (
+                    cfg: unknown,
+                    token: vscode.CancellationToken
+                ) => Promise<vscode.LanguageModelChatInformation | undefined>;
+            }
+        ).resolveCompletionModel({}, new vscode.CancellationTokenSource().token);
+
+        assert.strictEqual(resolved?.id, "inline-model");
+    });
+
+    test("extractCompletionTextFromStream returns empty string for DONE-only stream", async () => {
+        const provider = new LiteLLMCompletionProvider(mockSecrets, userAgent);
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                controller.close();
+            },
+        });
+
+        const result = await (
+            provider as unknown as {
+                extractCompletionTextFromStream: (
+                    stream: ReadableStream<Uint8Array>,
+                    token: vscode.CancellationToken
+                ) => Promise<string>;
+            }
+        ).extractCompletionTextFromStream(stream, new vscode.CancellationTokenSource().token);
+
+        assert.strictEqual(result, "");
+    });
 });

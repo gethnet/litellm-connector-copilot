@@ -26,6 +26,7 @@ export class TelemetryService implements vscode.Disposable {
         this.distinctId = vscode.env.sessionId || vscode.env.machineId;
         const extensionVersion =
             context.extension?.packageJSON?.version ??
+            vscode.extensions.getExtension("litellm-connector")?.packageJSON?.version ??
             vscode.extensions.getExtension("GethNet.litellm-connector-copilot")?.packageJSON?.version ??
             "unknown";
         this.extensionVersion = extensionVersion;

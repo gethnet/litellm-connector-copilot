@@ -1,7 +1,7 @@
 import * as assert from "assert";
 import { transformToResponsesFormat } from "../responsesAdapter";
 import { normalizeToolCallId } from "../../utils";
-import type { OpenAIFunctionToolDef } from "../../types";
+import type { OpenAIFunctionToolDef, OpenAIChatMessage } from "../../types";
 
 suite("Responses Adapter Unit Tests", () => {
     test("transformToResponsesFormat normalizes tool call IDs", () => {
@@ -191,5 +191,71 @@ suite("Responses Adapter Unit Tests", () => {
 
         assert.strictEqual(body.tools?.length, 1);
         assert.strictEqual(body.tools?.[0].name, "valid");
+    });
+
+    test("transformToResponsesFormat handles assistant with both text and tool calls", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [
+                {
+                    role: "assistant",
+                    content: "Thought: I should use a tool.",
+                    tool_calls: [{ id: "c1", type: "function", function: { name: "t1", arguments: "{}" } }],
+                },
+            ],
+        });
+
+        const input = body.input as Record<string, unknown>[];
+        assert.strictEqual(input.length, 2);
+        assert.strictEqual(input[0].type, "message");
+        assert.strictEqual(input[0].content, "Thought: I should use a tool.");
+        assert.strictEqual(input[1].type, "function_call");
+    });
+
+    test("transformToResponsesFormat synthesizes name from tool definitions", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [{ role: "tool", tool_call_id: "orphaned", content: "ok" }],
+            tools: [{ type: "function", function: { name: "my_tool", parameters: {} } }],
+        });
+
+        const input = body.input as Record<string, unknown>[];
+        assert.strictEqual(input[0].type, "function_call");
+        assert.strictEqual(input[0].name, "my_tool");
+    });
+
+    test("transformToResponsesFormat handles system message with array content", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [{ role: "system", content: [{ type: "text", text: "sys" }] as unknown as string }],
+        });
+        assert.strictEqual(body.instructions, undefined);
+    });
+
+    test("transformToResponsesFormat handles user message with mixed array content", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "  " }, // whitespace only
+                        { type: "text", text: "hello" },
+                        { type: "image_url", image_url: { url: "..." } }, // not text
+                    ] as unknown as string,
+                },
+            ],
+        });
+        assert.strictEqual(body.input.length, 1);
+        assert.strictEqual((body.input[0] as Record<string, unknown>).content, "hello");
+    });
+
+    test("transformToResponsesFormat handles tool message with missing id", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [{ role: "tool", content: "ok" } as unknown as OpenAIChatMessage],
+        });
+        // inputArray should be empty for this message
+        assert.strictEqual(body.input.length, 0);
     });
 });

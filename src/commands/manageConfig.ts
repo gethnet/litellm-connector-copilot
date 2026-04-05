@@ -342,24 +342,29 @@ export function registerReloadModelsCommand(provider: LiteLLMChatProvider, telem
             telemetryService.captureCommandExecuted("litellm-connector.reloadModels");
         }
         provider.clearModelCache();
-        await vscode.window.withProgress(
-            {
-                location: vscode.ProgressLocation.Notification,
-                title: "LiteLLM: Reloading models",
-                cancellable: false,
-            },
-            async () => {
-                // Trigger a fresh discovery request. VS Code will call discovery when it needs it,
-                // but we do it proactively so completions pick up new models immediately.
-                await provider.provideLanguageModelChatInformation(
-                    { silent: true },
-                    new vscode.CancellationTokenSource().token
-                );
-            }
-        );
+        try {
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: "LiteLLM: Reloading models",
+                    cancellable: false,
+                },
+                async () => {
+                    // Trigger a fresh discovery request. VS Code will call discovery when it needs it,
+                    // but we do it proactively so completions pick up new models immediately.
+                    await provider.provideLanguageModelChatInformation(
+                        { silent: true },
+                        new vscode.CancellationTokenSource().token
+                    );
+                }
+            );
 
-        const count = provider.getLastKnownModels().length;
-        vscode.window.showInformationMessage(`LiteLLM: Reloaded ${count} models.`);
+            const count = provider.getLastKnownModels().length;
+            vscode.window.showInformationMessage(`LiteLLM: Reloaded ${count} models.`);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            vscode.window.showWarningMessage(`LiteLLM: Model reload failed: ${msg}`);
+        }
     });
 }
 
@@ -370,7 +375,7 @@ export function registerCheckConnectionCommand(configManager: ConfigManager, tel
         }
         const backends = await configManager.resolveBackends();
         if (backends.length === 0) {
-            vscode.window.showErrorMessage("No LiteLLM backends configured.");
+            vscode.window.showWarningMessage("No enabled backends configured.");
             return;
         }
 

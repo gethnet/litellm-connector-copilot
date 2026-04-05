@@ -143,4 +143,191 @@ suite("Extension Activation Unit Tests", () => {
         await extension.deactivate();
         // No cleanup should be triggered on deactivate; settings/secrets should persist.
     });
+
+    test("activate skips classic configuration prompt when provider is already configured", async () => {
+        const mockSecrets = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
+        } as unknown as vscode.SecretStorage;
+
+        const context = {
+            subscriptions: [],
+            secrets: mockSecrets,
+        } as unknown as vscode.ExtensionContext;
+
+        sandbox.stub(vscode.window, "createOutputChannel").returns({
+            info() {},
+            warn() {},
+            error() {},
+            debug() {},
+            trace() {},
+            show() {},
+            dispose() {},
+        } as unknown as vscode.LogOutputChannel);
+
+        sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
+        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
+
+        const executeCommandStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
+        const isConfiguredStub = sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
+
+        sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
+        sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
+
+        extension.activate(context);
+
+        // Wait a tick
+        await new Promise((r) => setTimeout(r, 0));
+
+        assert.strictEqual(isConfiguredStub.called, true);
+        assert.strictEqual(executeCommandStub.calledWith("litellm-connector.manage"), false);
+    });
+
+    test("deactivate tolerates repeated disposal", async () => {
+        const mockSecrets = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
+        } as unknown as vscode.SecretStorage;
+
+        const context = {
+            subscriptions: [],
+            secrets: mockSecrets,
+        } as unknown as vscode.ExtensionContext;
+
+        sandbox.stub(vscode.window, "createOutputChannel").returns({
+            info() {},
+            warn() {},
+            error() {},
+            debug() {},
+            trace() {},
+            show() {},
+            dispose() {},
+        } as unknown as vscode.LogOutputChannel);
+
+        sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
+        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
+        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
+        sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
+        sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
+
+        extension.activate(context);
+        await extension.deactivate();
+        await extension.deactivate();
+        assert.ok(true, "Repeated deactivate should not throw");
+    });
+
+    test("activate handles missing extension object gracefully", async () => {
+        const mockSecrets = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
+        } as unknown as vscode.SecretStorage;
+
+        const context = {
+            subscriptions: [],
+            secrets: mockSecrets,
+        } as unknown as vscode.ExtensionContext;
+
+        sandbox.stub(vscode.window, "createOutputChannel").returns({
+            info() {},
+            warn() {},
+            error() {},
+            debug() {},
+            trace() {},
+            show() {},
+            dispose() {},
+        } as unknown as vscode.LogOutputChannel);
+
+        // Extension not found.
+        sandbox.stub(vscode.extensions, "getExtension").returns(undefined);
+        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
+        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
+        sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
+        sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
+
+        extension.activate(context);
+        assert.ok(context.subscriptions.length > 0);
+    });
+
+    test("activate handles registration failure gracefully", async () => {
+        const mockSecrets = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
+        } as unknown as vscode.SecretStorage;
+
+        const context = {
+            subscriptions: [],
+            secrets: mockSecrets,
+        } as unknown as vscode.ExtensionContext;
+
+        sandbox.stub(vscode.window, "createOutputChannel").returns({
+            info() {},
+            warn() {},
+            error() {},
+            debug() {},
+            trace() {},
+            show() {},
+            dispose() {},
+        } as unknown as vscode.LogOutputChannel);
+
+        sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
+        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
+        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
+
+        // Throw during registration.
+        sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").throws(new Error("reg failed"));
+        sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
+
+        extension.activate(context);
+        // Should not throw and continue activation.
+        assert.ok(context.subscriptions.length > 0);
+    });
+
+    test("activate handles configuration prompt dismissal", async () => {
+        const mockSecrets = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
+        } as unknown as vscode.SecretStorage;
+
+        const context = {
+            subscriptions: [],
+            secrets: mockSecrets,
+        } as unknown as vscode.ExtensionContext;
+
+        sandbox.stub(vscode.window, "createOutputChannel").returns({
+            info() {},
+            warn() {},
+            error() {},
+            debug() {},
+            trace() {},
+            show() {},
+            dispose() {},
+        } as unknown as vscode.LogOutputChannel);
+
+        sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
+        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
+
+        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(false);
+        sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
+        sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
+
+        const execStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
+        // Dismiss prompt.
+        sandbox.stub(vscode.window, "showInformationMessage").resolves(undefined);
+
+        extension.activate(context);
+
+        await new Promise((r) => setTimeout(r, 0));
+
+        assert.strictEqual(execStub.calledWith("litellm-connector.manage"), false);
+    });
 });

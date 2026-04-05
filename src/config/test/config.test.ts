@@ -321,4 +321,26 @@ suite("ConfigManager Unit Tests", () => {
         assert.strictEqual(clearedConfig.url, "");
         assert.strictEqual(clearedConfig.key, undefined);
     });
+
+    test("updateBackend updates existing entry and key", async () => {
+        settingsMap.set("litellm-connector.backends", [{ name: "b1", url: "u1", enabled: true }]);
+        const manager = new ConfigManager(mockSecrets);
+
+        await manager.updateBackend("b1", { url: "u2" }, "new-key");
+        const backends = await manager.listBackends();
+        assert.strictEqual(backends[0].url, "u2");
+        assert.strictEqual(secretsMap.get("litellm-connector.apiKey.b1"), "new-key");
+    });
+
+    test("updateBackend and removeBackend throw if not found", async () => {
+        const manager = new ConfigManager(mockSecrets);
+        await assert.rejects(() => manager.updateBackend("none", {}), /not found/);
+        await assert.rejects(() => manager.removeBackend("none"), /not found/);
+    });
+
+    test("reportFeatureToggles is a no-op without telemetry service", async () => {
+        const manager = new ConfigManager(mockSecrets);
+        // This should not throw
+        await manager.reportFeatureToggles("test");
+    });
 });

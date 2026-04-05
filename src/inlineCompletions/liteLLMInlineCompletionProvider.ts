@@ -51,6 +51,10 @@ export class LiteLLMInlineCompletionProvider implements vscode.InlineCompletionI
         _context: vscode.InlineCompletionContext,
         token: vscode.CancellationToken
     ): Promise<vscode.InlineCompletionList | vscode.InlineCompletionItem[] | null> {
+        if (token.isCancellationRequested) {
+            return null;
+        }
+
         const requestId = `ic_${Math.random().toString(36).slice(2, 10)}`;
         const startTime = LiteLLMTelemetry.startTimer();
 

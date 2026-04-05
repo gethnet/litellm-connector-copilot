@@ -120,4 +120,26 @@ suite("ModelPicker Unit Tests", () => {
 
         assert.strictEqual(configUpdateStub.called, false);
     });
+
+    test("showModelPicker handles unresolved model", async () => {
+        mockProvider.discoverModels.resolves([
+            { id: "m1", name: "m1" },
+        ] as unknown as vscode.LanguageModelChatInformation[]);
+        mockProvider.getConfigManager.returns({
+            getConfig: async () => ({}) as unknown as LiteLLMConfig,
+        } as unknown as ConfigManager);
+        sandbox.stub(vscode.window, "showQuickPick").resolves({ label: "unknown" } as unknown as vscode.QuickPickItem);
+        const errorStub = sandbox.stub(vscode.window, "showErrorMessage");
+
+        await showModelPicker(mockProvider as unknown as LiteLLMProviderBase, { title: "T", settingKey: "k" });
+        assert.ok(errorStub.calledWith(sinon.match("could not be resolved")));
+    });
+
+    test("showModelPicker handles errors gracefully", async () => {
+        mockProvider.discoverModels.rejects(new Error("fail"));
+        const errorStub = sandbox.stub(vscode.window, "showErrorMessage");
+
+        await showModelPicker(mockProvider as unknown as LiteLLMProviderBase, { title: "T", settingKey: "k" });
+        assert.ok(errorStub.calledWith(sinon.match("Failed to load models")));
+    });
 });

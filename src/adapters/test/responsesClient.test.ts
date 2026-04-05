@@ -276,4 +276,60 @@ suite("ResponsesClient sendResponsesRequest", () => {
         assert.strictEqual(reported.length, 1);
         assert.strictEqual((reported[0] as vscode.LanguageModelTextPart).value, "Hi");
     });
+
+    test("handles anonymous tool calls (missing call_id)", async () => {
+        const client = makeClient();
+        const sse = [
+            'data: {"type":"response.output_item.delta","item":{"type":"function_call","name":"tool1","arguments":"{\\"a\\":1}"}}\n\n',
+            'data: {"type":"response.output_item.done","item":{"type":"function_call"}}\n\n',
+            "data: [DONE]\n\n",
+        ];
+        fetchStub.resolves(new Response(readableFromStrings(sse), { status: 200 }));
+        const { progress, reported } = makeProgress();
+
+        await client.sendResponsesRequest(makeRequest(), progress, new vscode.CancellationTokenSource().token);
+
+        const toolCall = reported.find(
+            (p) => p instanceof vscode.LanguageModelToolCallPart
+        ) as vscode.LanguageModelToolCallPart;
+        assert.ok(toolCall);
+        assert.strictEqual(toolCall.callId, "anonymous");
+        assert.strictEqual(toolCall.name, "tool1");
+    });
+
+    test("handles delta with text or chunk fields", async () => {
+        const client = makeClient();
+        const sse = [
+            'data: {"type":"response.output_text.delta","text":"A"}\n\n',
+            'data: {"type":"response.output_text.delta","chunk":"B"}\n\n',
+            "data: [DONE]\n\n",
+        ];
+        fetchStub.resolves(new Response(readableFromStrings(sse), { status: 200 }));
+        const { progress, reported } = makeProgress();
+
+        await client.sendResponsesRequest(makeRequest(), progress, new vscode.CancellationTokenSource().token);
+
+        assert.strictEqual(reported.length, 2);
+        assert.strictEqual((reported[0] as vscode.LanguageModelTextPart).value, "A");
+        assert.strictEqual((reported[1] as vscode.LanguageModelTextPart).value, "B");
+    });
+
+    test("emitExperimentalUsageData handles report failure", async () => {
+        const client = makeClient();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (client as any).config.experimentalEmitUsageData = true;
+
+        const progress = {
+            report: sinon.stub().throws(new Error("crash")),
+        };
+
+        // This should not throw
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (client as any).emitExperimentalUsageData(
+            progress as unknown as vscode.Progress<vscode.LanguageModelResponsePart>,
+            10,
+            20
+        );
+        assert.ok(progress.report.calledOnce);
+    });
 });
