@@ -25,7 +25,7 @@ export class LiteLLMTelemetry {
         Logger.debug(`[Telemetry] ${JSON.stringify(metric)}`);
 
         if (this._telemetryService) {
-            if (metric.status === "success") {
+            /* if (metric.status === "success") {
                 this._telemetryService.captureRequestCompleted({
                     caller: metric.caller ?? "unknown",
                     model: metric.model,
@@ -34,7 +34,8 @@ export class LiteLLMTelemetry {
                     tokensIn: metric.tokensIn ?? 0,
                     tokensOut: metric.tokensOut ?? 0,
                 });
-            } else if (metric.status === "failure") {
+            } else */
+            if (metric.status === "failure") {
                 this._telemetryService.captureRequestFailed({
                     caller: metric.caller ?? "unknown",
                     model: metric.model,

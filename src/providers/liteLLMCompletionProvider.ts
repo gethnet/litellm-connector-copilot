@@ -30,7 +30,8 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
         const justification = (options as { justification?: string }).justification;
 
         if (this._telemetryService) {
-            this._telemetryService.captureFeatureUsed("completions", caller);
+            // this may be chatty, but saving
+            // this._telemetryService.captureFeatureUsed("completions", caller);
         }
 
         Logger.info(
@@ -95,8 +96,8 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
                 status: "success",
                 caller: "inline-completions",
             });
-
-            if (this._telemetryService) {
+            // todo: remove this as it is too chatty
+            /*            if (this._telemetryService) {
                 this._telemetryService.captureRequestCompleted({
                     caller: "inline-completions",
                     model: model.id,
@@ -105,7 +106,7 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
                     tokensIn: tokensIn ?? 0,
                     tokensOut,
                 });
-            }
+            } */
 
             return {
                 insertText: completionText,

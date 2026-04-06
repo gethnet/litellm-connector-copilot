@@ -48,7 +48,8 @@ export class LiteLLMChatProviderV2 extends LiteLLMProviderBase implements vscode
         const caller = "chat-v2";
 
         if (this._telemetryService) {
-            this._telemetryService.captureFeatureUsed("chat-v2", caller);
+            // This will be chatty, but a good point for other things.
+            // this._telemetryService.captureFeatureUsed("chat-v2", caller);
         }
 
         Logger.info(`V2 Chat request started | RequestID: ${requestId} | Model: ${model.id}`);

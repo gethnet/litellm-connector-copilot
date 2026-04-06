@@ -100,7 +100,8 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         const requestId = Math.random().toString(36).substring(7);
 
         if (this._telemetryService) {
-            this._telemetryService.captureFeatureUsed("chat", "chat");
+            // We do not need the excess noise here.  But this block is useful...
+            // this._telemetryService.captureFeatureUsed("chat", "chat");
         }
 
         let tokensIn: number | undefined;
