@@ -314,12 +314,13 @@ export function trimV2MessagesForBudget(
         const isProtectedAssistantMessage =
             isContinuation &&
             i === remaining.length - 2 &&
-            msg.role === (vscode.LanguageModelChatMessageRole.Assistant as unknown as number);
+            (msg.role === (vscode.LanguageModelChatMessageRole.Assistant as unknown as number) ||
+                msg.role === "assistant");
 
         if (used + msgTokens <= budget || selected.length === (systemMessage ? 1 : 0) || isProtectedAssistantMessage) {
             selected.splice(systemMessage ? 1 : 0, 0, msg);
             used += msgTokens;
-        } else {
+        } else if (!isContinuation) {
             break;
         }
     }

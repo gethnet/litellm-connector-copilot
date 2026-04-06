@@ -46,7 +46,7 @@ suite("Utility Unit Tests", () => {
         assert.strictEqual(stripMarkdownCodeBlocks("```\na\n```\n\n```\nb\n```"), "a\n\nb");
 
         // Backticks but no complete block
-        assert.strictEqual(stripMarkdownCodeBlocks("text with `backticks`"), "text with backticks");
+        assert.strictEqual(stripMarkdownCodeBlocks("text with `backticks`"), "text with `backticks`");
     });
 
     test("convertMessages handles text and images", () => {

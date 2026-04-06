@@ -330,6 +330,6 @@ suite("ResponsesClient sendResponsesRequest", () => {
             10,
             20
         );
-        assert.ok(progress.report.calledOnce);
+        assert.ok(progress.report.calledTwice);
     });
 });

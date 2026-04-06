@@ -393,10 +393,18 @@ export abstract class LiteLLMProviderBase {
         if (
             modelInfo?.supports_function_calling ||
             modelInfo?.supports_vision ||
+            modelInfo?.supports_native_streaming ||
             modelInfo?.supported_openai_params?.includes("tools") ||
             modelInfo?.supported_openai_params?.includes("tool_choice")
         ) {
             tags.add("tools");
+        }
+
+        if (
+            modelInfo?.supports_vision ||
+            (Array.isArray(modelInfo?.modalities) && (modelInfo.modalities as string[]).includes("vision"))
+        ) {
+            tags.add("vision");
         }
 
         if (modelInfo?.mode === "chat") {

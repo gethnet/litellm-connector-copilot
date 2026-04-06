@@ -219,11 +219,14 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
             {
                 role: vscode.LanguageModelChatMessageRole.Assistant,
                 name: undefined,
-                content: [new ThinkingPart!("internal reasoning", "t-1")],
+                content: [
+                    new vscode.LanguageModelTextPart("thinking..."),
+                    new ThinkingPart!("internal reasoning", "t-1"),
+                ],
             } as unknown as vscode.LanguageModelChatMessage,
         ]);
 
-        assert.strictEqual(normalized[0].content[0].type, "thinking");
+        assert.strictEqual(normalized[0].content[0].type, "text");
         assert.strictEqual(normalized[0].role, "assistant");
 
         const request = await provider.buildV2ChatRequest(
@@ -244,7 +247,7 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
             ["assistant", "system"].includes(request.messages[0].role),
             `Unexpected role: ${request.messages[0].role}`
         );
-        assert.strictEqual(request.messages[0].content, "internal reasoning");
+        assert.strictEqual(request.messages[0].content, "thinking...internal reasoning");
     });
 
     test("V2 data stays distinct until transport shaping and cache_control becomes transport text", () => {
@@ -404,7 +407,13 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
         const reported: vscode.LanguageModelResponsePart[] = [];
         await provider.provideLanguageModelChatResponse(
             { id: "m", maxInputTokens: 100, maxOutputTokens: 100 } as unknown as vscode.LanguageModelChatInformation,
-            [],
+            [
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    content: [new vscode.LanguageModelTextPart("hi")],
+                    name: undefined,
+                },
+            ],
             { requestInitiator: "test" } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
             { report: (p) => reported.push(p) },
             new vscode.CancellationTokenSource().token

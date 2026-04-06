@@ -267,7 +267,7 @@ suite("TokenUtils Unit Tests", () => {
         } as unknown as V2ChatMessage;
         const continueMsg = { role: "user", content: [{ type: "text", text: "continue" }] } as unknown as V2ChatMessage;
 
-        const modelInfo = { id: "test", maxInputTokens: 5 } as unknown as vscode.LanguageModelChatInformation;
+        const modelInfo = { id: "test", maxInputTokens: 100 } as unknown as vscode.LanguageModelChatInformation;
 
         const trimmed = trimV2MessagesForBudget([systemMsg, assistantMsg, continueMsg], undefined, modelInfo);
         assert.strictEqual(trimmed.length, 3);

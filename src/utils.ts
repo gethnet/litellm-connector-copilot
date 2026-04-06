@@ -147,9 +147,13 @@ export function stripMarkdownCodeBlocks(text: string): string {
             .join("\n\n");
     }
 
-    // Fallback: if there are backticks but no complete block match,
+    // Fallback: if there are TRIPLE backticks but no complete block match,
     // just strip the backticks themselves as a safety measure.
-    return trimmed.replace(/```/g, "").trim();
+    if (trimmed.includes("```")) {
+        return trimmed.replace(/```/g, "").trim();
+    }
+
+    return trimmed;
 }
 
 function sanitizeSchema(input: unknown, propName?: string): Record<string, unknown> {
@@ -646,13 +650,23 @@ export function validateTools(tools: readonly vscode.LanguageModelChatTool[]): v
  * @param messages The full request message list.
  */
 export function validateRequest(messages: readonly vscode.LanguageModelChatRequestMessage[]): void {
-    const lastMessage = messages[messages.length - 1];
-    if (!lastMessage) {
+    if (messages.length === 0) {
         Logger.error("No messages in request");
         throw new Error("Invalid request: no messages.");
     }
 
+    for (const message of messages) {
+        if (!message.content || message.content.length === 0) {
+            Logger.error("Empty message content in request");
+            throw new Error("Invalid request: empty message content.");
+        }
+    }
+
     messages.forEach((message, i) => {
+        if (message.content.length === 0) {
+            Logger.error(`Validation failed: message at index ${i} has empty content`);
+            throw new Error("Invalid request: empty message content.");
+        }
         if (message.role === vscode.LanguageModelChatMessageRole.Assistant) {
             const toolCallIds = new Set(
                 message.content
