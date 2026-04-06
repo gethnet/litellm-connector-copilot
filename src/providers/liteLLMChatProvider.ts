@@ -99,18 +99,19 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         const startTime = LiteLLMTelemetry.startTimer();
         const requestId = Math.random().toString(36).substring(7);
 
-        if (this._telemetryService) {
-            // We do not need the excess noise here.  But this block is useful...
-            // this._telemetryService.captureFeatureUsed("chat", "chat");
-        }
-
-        let tokensIn: number | undefined;
-
         // Extract caller/justification from options or model tags
         const telemetry = this.getTelemetryOptions(options);
         const modelWithTags = model as vscode.LanguageModelChatInformation & { tags?: string[] };
         const caller = telemetry.caller || modelWithTags.tags?.[0] || "chat";
         const justification = telemetry.justification;
+
+        if (this._telemetryService) {
+            // We do not need the excess noise here.  But this block is useful...
+            // this._telemetryService.captureFeatureUsed("chat", "chat");
+            this._telemetryService.captureModelUsed(model.id, caller);
+        }
+
+        let tokensIn: number | undefined;
 
         Logger.info(
             `Chat request started | RequestID: ${requestId} | Model: ${model.id} | Caller: ${caller} | Justification: ${

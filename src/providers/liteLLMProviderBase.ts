@@ -217,6 +217,10 @@ export abstract class LiteLLMProviderBase {
                 const modelInfo = entry.model_info;
                 this._modelInfoCache.set(modelId, modelInfo);
 
+                if (this._telemetryService) {
+                    this._telemetryService.captureModelUsed(modelId, "discovery");
+                }
+
                 const derived = deriveCapabilitiesFromModelInfo(modelId, modelInfo);
                 this._derivedCapabilitiesCache.set(modelId, derived);
 

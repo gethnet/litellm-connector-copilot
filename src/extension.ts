@@ -71,6 +71,12 @@ export function activate(context: vscode.ExtensionContext) {
     const configManager = configManagerInstance;
     configManager.setTelemetryService(telemetryService);
 
+    // Track feature adoption
+    telemetryService.captureFeatureAdoption("chat");
+    telemetryService.captureFeatureAdoption("inline-completions");
+    telemetryService.captureFeatureAdoption("commit-generation");
+    telemetryService.captureFeatureAdoption("model-picker");
+
     // Emit feature usage snapshot after config is loaded
     void configManager.getConfig().then((config) => {
         telemetryService.captureFeatureUsageSnapshot({

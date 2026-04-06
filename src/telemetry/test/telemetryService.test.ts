@@ -198,7 +198,7 @@ suite("TelemetryService", () => {
         assert.strictEqual(event.properties.source, "config_change");
     });
 
-    test("captureFeatureUsed sends correct event", () => {
+    test("captureFeatureUsed aggregates events", () => {
         const mockContext = {
             extension: { packageJSON: { version: "1.0.0" } },
         } as unknown as vscode.ExtensionContext;
@@ -206,10 +206,105 @@ suite("TelemetryService", () => {
 
         telemetryService.captureFeatureUsed("chat", "inline-edit");
 
-        assert.strictEqual(adapterMock.capture.calledOnce, true);
-        const event = adapterMock.capture.firstCall.args[0];
-        assert.strictEqual(event.event, "feature_used");
-        assert.strictEqual(event.properties.feature_name, "chat");
-        assert.strictEqual(event.properties.caller, "inline-edit");
+        // Should be aggregated, not captured yet
+        assert.strictEqual(adapterMock.capture.called, false);
+    });
+
+    suite("Aggregated Feature Usage", () => {
+        let clock: sinon.SinonFakeTimers;
+
+        setup(() => {
+            clock = sandbox.useFakeTimers();
+            // Re-create service AFTER fake timers started
+            telemetryService = new TelemetryService();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (telemetryService as any).adapter = adapterMock;
+        });
+
+        teardown(() => {
+            clock.restore();
+        });
+
+        test("should aggregate feature usage events and flush after interval", () => {
+            const mockContext = { packageJSON: { version: "1.0.0" } } as unknown as vscode.ExtensionContext;
+            telemetryService.initialize(mockContext);
+
+            // Trigger some feature usage
+            telemetryService.captureFeatureUsed("chat", "test");
+            telemetryService.captureFeatureUsed("chat", "test");
+            telemetryService.captureFeatureUsed("inline-completions", "test");
+
+            // Should not have captured anything yet (aggregated)
+            assert.strictEqual(adapterMock.capture.called, false);
+
+            // Tick forward 15 minutes
+            clock.tick(15 * 60 * 1000);
+            telemetryService.captureFeatureUsed("other", "test"); // This call should trigger flush of PRIOR aggregation
+
+            assert.strictEqual(adapterMock.capture.calledOnce, true);
+            const event = adapterMock.capture.firstCall.args[0];
+            assert.strictEqual(event.event, "feature_used_aggregated");
+            const features = JSON.parse(event.properties.features as string);
+            assert.strictEqual(features["chat"], 2);
+            assert.strictEqual(features["inline-completions"], 1);
+            assert.strictEqual(features["other"], undefined); // "other" is in the NEXT aggregation
+            assert.strictEqual(event.properties.period_minutes, 15);
+        });
+
+        test("should not flush if no features used", () => {
+            const mockContext = { packageJSON: { version: "1.0.0" } } as unknown as vscode.ExtensionContext;
+            telemetryService.initialize(mockContext);
+
+            clock.tick(15 * 60 * 1000);
+            telemetryService.captureFeatureUsed("chat", "test");
+
+            // First one after interval flushes PRIOR state. Since PRIOR was empty, should NOT have flushed yet.
+            assert.strictEqual(adapterMock.capture.called, false);
+        });
+    });
+
+    suite("Model Usage Tracking", () => {
+        test("should capture model_used and provider_used events", () => {
+            const mockContext = { packageJSON: { version: "1.0.0" } } as unknown as vscode.ExtensionContext;
+            telemetryService.initialize(mockContext);
+
+            telemetryService.captureModelUsed("openai/gpt-4o", "chat");
+
+            assert.strictEqual(adapterMock.capture.calledTwice, true);
+
+            const modelEvent = adapterMock.capture.firstCall.args[0];
+            assert.strictEqual(modelEvent.event, "model_used");
+            assert.strictEqual(modelEvent.properties.model_id, "openai/gpt-4o");
+            assert.strictEqual(modelEvent.properties.caller, "chat");
+
+            const providerEvent = adapterMock.capture.secondCall.args[0];
+            assert.strictEqual(providerEvent.event, "provider_used");
+            assert.strictEqual(providerEvent.properties.provider, "openai");
+            assert.strictEqual(providerEvent.properties.caller, "chat");
+        });
+
+        test("should handle modelId without provider prefix", () => {
+            const mockContext = { packageJSON: { version: "1.0.0" } } as unknown as vscode.ExtensionContext;
+            telemetryService.initialize(mockContext);
+
+            telemetryService.captureModelUsed("gpt-4o", "chat");
+
+            const providerEvent = adapterMock.capture.secondCall.args[0];
+            assert.strictEqual(providerEvent.properties.provider, "gpt-4o"); // Fallback to full id if no /
+        });
+    });
+
+    suite("Feature Adoption Tracking", () => {
+        test("should capture feature_adoption events", () => {
+            const mockContext = { packageJSON: { version: "1.0.0" } } as unknown as vscode.ExtensionContext;
+            telemetryService.initialize(mockContext);
+
+            telemetryService.captureFeatureAdoption("chat");
+
+            assert.strictEqual(adapterMock.capture.calledOnce, true);
+            const event = adapterMock.capture.firstCall.args[0];
+            assert.strictEqual(event.event, "feature_adoption");
+            assert.strictEqual(event.properties.feature, "chat");
+        });
     });
 });

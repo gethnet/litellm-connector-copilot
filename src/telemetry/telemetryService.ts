@@ -13,6 +13,9 @@ export class TelemetryService implements vscode.Disposable {
     private extensionVersion = "";
     private disposables: vscode.Disposable[] = [];
 
+    private _featureUsageCounter = new Map<string, number>();
+    private _lastFeatureUsageFlush: number = Date.now();
+
     private static readonly EXTENSION_VERSION_PROPERTY = "extension_version";
 
     static readonly POSTHOG_API_KEY = "phc_OJr5j3sxq9AX6YglCd9NMP4HlwchYwBa53n8Jz44jkp";
@@ -225,14 +228,55 @@ export class TelemetryService implements vscode.Disposable {
         });
     }
 
-    captureFeatureUsed(featureName: string, caller: string): void {
-        this.capture("feature_used", {
-            feature_name: featureName,
-            caller,
+    captureFeatureUsed(featureName: string, _caller: string): void {
+        this._captureAggregatedFeatureUsage(featureName);
+    }
+
+    private _captureAggregatedFeatureUsage(featureName: string): void {
+        const now = Date.now();
+        const flushIntervalMs = 15 * 60 * 1000; // 15 minutes
+
+        if (now - this._lastFeatureUsageFlush >= flushIntervalMs) {
+            this._flushAggregatedFeatureUsage();
+            this._lastFeatureUsageFlush = now;
+        }
+
+        const count = this._featureUsageCounter.get(featureName) || 0;
+        this._featureUsageCounter.set(featureName, count + 1);
+    }
+
+    private _flushAggregatedFeatureUsage(): void {
+        if (this._featureUsageCounter.size === 0) {
+            return;
+        }
+
+        const features: Record<string, number> = {};
+        for (const [feature, count] of this._featureUsageCounter) {
+            features[feature] = count;
+        }
+
+        this.capture("feature_used_aggregated", {
+            features: JSON.stringify(features),
+            period_minutes: 15,
         });
+
+        this._featureUsageCounter.clear();
+    }
+
+    public captureModelUsed(modelId: string, caller: string): void {
+        this.capture("model_used", { model_id: modelId, caller });
+
+        // Also track provider
+        const provider = modelId.includes("/") ? modelId.split("/")[0] : modelId;
+        this.capture("provider_used", { provider, caller });
+    }
+
+    public captureFeatureAdoption(feature: string): void {
+        this.capture("feature_adoption", { feature });
     }
 
     async shutdown(): Promise<void> {
+        this._flushAggregatedFeatureUsage();
         await this.adapter.flush();
         await this.adapter.shutdown();
     }
