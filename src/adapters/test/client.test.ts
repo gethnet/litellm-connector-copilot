@@ -317,8 +317,11 @@ suite("LiteLLM Client Unit Tests", () => {
             headers: { get: () => null },
         };
 
-        fetchStub.onCall(0).resolves(rateLimitResponse as unknown as Response);
-        fetchStub.onCall(1).resolves(successResponse as unknown as Response);
+        const firstAttempt = Promise.resolve(rateLimitResponse as unknown as Response);
+        const secondAttempt = Promise.resolve(successResponse as unknown as Response);
+
+        fetchStub.onCall(0).returns(firstAttempt);
+        fetchStub.onCall(1).returns(secondAttempt);
 
         await client.chat({ model: "m", messages: [] });
 
