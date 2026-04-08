@@ -8,9 +8,16 @@ All notable changes to this project will be documented in this file.
 ### 🚧 Development snapshot
 * Consolidate the current 1.6 pre-release work on dev17.
 
+### 🎊 New Features
+* Telemetry / Non-identifable data collection & reporting.
+* Multiple Backend / LiteLLM instances supported - Legacy Method.
+
 ### 🛠️ Bug Fixes
 * �️ Keep commit-message generation failures visible in both local logs and telemetry.
 * 🧭 Propagate request IDs through PostHog request telemetry for better event correlation.
+* ⚙️ Fixed undefined silent flag which blocked the ability to configure litellm as a new instance.
+* 🛠️ Fixed issues with the nuke command leaving stale models behind when resetting the users configuration.
+* 🛠️ Stablized telemetry id and re-scoped unhandled exception detection and handling to be properly aligned with best practices.
 
 ### 📊 Telemetry & observability
 * �️ Add telemetry feature-usage reporting for chat, completions, inline completions, commit generation, and model picker usage.

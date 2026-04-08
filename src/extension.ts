@@ -49,6 +49,39 @@ export function activate(context: vscode.ExtensionContext) {
     postHogHook.initialize();
     context.subscriptions.push(postHogHook);
 
+    // Scoped unhandled exception capture (Extension-specific)
+    const uncaughtExceptionListener = (error: Error) => {
+        if (error?.stack?.includes("litellm-connector-copilot") || error?.stack?.includes("litellm-connector")) {
+            telemetryService.captureException(error, {
+                caller: "uncaughtException",
+                level: "error",
+            });
+        }
+    };
+
+    const unhandledRejectionListener = (reason: unknown) => {
+        if (
+            reason instanceof Error &&
+            (reason?.stack?.includes("litellm-connector-copilot") || reason?.stack?.includes("litellm-connector"))
+        ) {
+            telemetryService.captureException(reason, {
+                caller: "unhandledRejection",
+                level: "error",
+            });
+        }
+    };
+
+    process.on("uncaughtException", uncaughtExceptionListener);
+    process.on("unhandledRejection", unhandledRejectionListener);
+
+    // Cleanup listeners on deactivation
+    context.subscriptions.push({
+        dispose: () => {
+            process.off("uncaughtException", uncaughtExceptionListener);
+            process.off("unhandledRejection", unhandledRejectionListener);
+        },
+    });
+
     let ua = "litellm-vscode-chat/unknown VSCode/unknown";
     try {
         // Build a descriptive User-Agent to help quantify API usage
@@ -101,18 +134,23 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Track active provider registration for hot-swap
     const activeProvider: LiteLLMChatProvider = chatProviderV1;
+    let chatProviderRegistration: vscode.Disposable | undefined;
 
-    // Register based on initial config
-    void configManager.getConfig().then(() => {
-        // Register the LiteLLM provider under the vendor id used in package.json
+    const registerProvider = () => {
         try {
+            if (chatProviderRegistration) {
+                Logger.info("Disposing existing LanguageModelChatProvider registration...");
+                chatProviderRegistration.dispose();
+                chatProviderRegistration = undefined;
+            }
+
             Logger.info("Registering LanguageModelChatProvider...");
-            const registration = vscode.lm.registerLanguageModelChatProvider(
+            chatProviderRegistration = vscode.lm.registerLanguageModelChatProvider(
                 "litellm-connector",
                 activeProvider as unknown as vscode.LanguageModelChatProvider
             );
-            if (registration) {
-                context.subscriptions.push(registration);
+            if (chatProviderRegistration) {
+                context.subscriptions.push(chatProviderRegistration);
                 Logger.info("Provider registered successfully.");
             } else {
                 Logger.error("registerLanguageModelChatProvider returned undefined/null");
@@ -120,6 +158,12 @@ export function activate(context: vscode.ExtensionContext) {
         } catch (err) {
             Logger.error("Failed to register provider", err);
         }
+    };
+
+    // Register based on initial config
+    void configManager.getConfig().then(() => {
+        // Register the LiteLLM provider under the vendor id used in package.json
+        registerProvider();
 
         // Management commands to configure base URL and API key
         try {
@@ -149,7 +193,8 @@ export function activate(context: vscode.ExtensionContext) {
                 registerResetConfigCommand(
                     configManager,
                     activeProvider as unknown as LiteLLMChatProvider,
-                    telemetryService
+                    telemetryService,
+                    registerProvider
                 )
             );
             context.subscriptions.push(

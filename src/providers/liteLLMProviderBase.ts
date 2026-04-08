@@ -134,9 +134,11 @@ export abstract class LiteLLMProviderBase {
      * the same discovery + tag logic.
      */
     public async discoverModels(
-        options: { silent: boolean },
+        options: { silent?: boolean },
         token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelChatInformation[]> {
+        const silent = options.silent ?? false;
+
         if (this._inFlightDiscovery) {
             Logger.trace("Returning in-flight discovery promise");
             return this._inFlightDiscovery;
@@ -144,7 +146,7 @@ export abstract class LiteLLMProviderBase {
 
         const TTL_MS = 30000; // 30 seconds
         const now = Date.now();
-        if (options.silent && this._lastModelList.length > 0 && now - this._modelListFetchedAtMs < TTL_MS) {
+        if (silent && this._lastModelList.length > 0 && now - this._modelListFetchedAtMs < TTL_MS) {
             Logger.trace("Returning cached models (within TTL)");
             if (this._telemetryService) {
                 this._telemetryService.captureModelsCacheHit(this._lastModelList.length);
@@ -154,7 +156,7 @@ export abstract class LiteLLMProviderBase {
 
         this._inFlightDiscovery = (async () => {
             try {
-                return await this._doDiscoverModels(options, token);
+                return await this._doDiscoverModels({ silent }, token);
             } finally {
                 this._inFlightDiscovery = undefined;
             }

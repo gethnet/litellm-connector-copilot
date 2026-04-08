@@ -14,7 +14,7 @@ export class PostHogAdapter implements IPostHogAdapter {
     initialize(config: PostHogConfig): void {
         this.client = new PostHog(config.apiKey, {
             host: config.host,
-            enableExceptionAutocapture: true,
+            enableExceptionAutocapture: false, // Must be false to prevent GUIDs and capturing other extension's errors
             flushAt: 20,
             flushInterval: 10000,
         });

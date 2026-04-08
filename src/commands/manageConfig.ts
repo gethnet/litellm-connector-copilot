@@ -415,7 +415,8 @@ export function registerCheckConnectionCommand(configManager: ConfigManager, tel
 export function registerResetConfigCommand(
     configManager: ConfigManager,
     provider?: LiteLLMChatProvider,
-    telemetryService?: TelemetryService
+    telemetryService?: TelemetryService,
+    reRegisterProvider?: () => void
 ) {
     return vscode.commands.registerCommand("litellm-connector.reset", async () => {
         if (telemetryService) {
@@ -434,6 +435,12 @@ export function registerResetConfigCommand(
                     provider.clearModelCache();
                     //provider.refreshModelInformation();
                 }
+
+                // Hard reset the provider registration to force VS Code to drop cached models
+                if (reRegisterProvider) {
+                    reRegisterProvider();
+                }
+
                 vscode.window.showInformationMessage("LiteLLM configuration has been reset.");
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);

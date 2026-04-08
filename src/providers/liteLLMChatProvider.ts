@@ -74,10 +74,10 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
     }
 
     async provideLanguageModelChatInformation(
-        options: { silent: boolean },
+        options: { silent?: boolean },
         token: CancellationToken
     ): Promise<LanguageModelChatInformation[]> {
-        return this.discoverModels(options, token);
+        return this.discoverModels({ silent: options.silent ?? false }, token);
     }
 
     async provideTokenCount(
