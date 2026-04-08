@@ -3,22 +3,27 @@
 All notable changes to this project will be documented in this file.
 
 
-## [1.6.0-dev10] - 2026-04-04
+## [1.6.0-dev17] - 2026-04-04
 
 ### 🚧 Development snapshot
-* Consolidate the current 1.6 pre-release work on dev10.
+* Consolidate the current 1.6 pre-release work on dev17.
+
+### 🛠️ Bug Fixes
+* �️ Keep commit-message generation failures visible in both local logs and telemetry.
+* 🧭 Propagate request IDs through PostHog request telemetry for better event correlation.
 
 ### 📊 Telemetry & observability
-* 🛰️ Add telemetry feature-usage reporting for chat, completions, inline completions, commit generation, and model picker usage.
+* �️ Add telemetry feature-usage reporting for chat, completions, inline completions, commit generation, and model picker usage.
 * 🔔 Capture feature toggle snapshots and toggle-change events from config changes so opt-in behavior is visible in telemetry.
 * 🧭 Extend telemetry exception capture with caller context and add tests for the new feature-usage events.
+
+### 🧪 Testing & validation
+* ✅ Add regression coverage for commit-provider exception reporting and request ID propagation in telemetry events.
 
 ### 🧩 Configuration & commands
 * ⚙️ Teach `ConfigManager` to report feature-toggle state after config changes.
 * 🚦 Wire telemetry into model-management and reset/check commands so command execution is tracked consistently.
 * 📝 Emit a feature-usage snapshot during extension activation after configuration loads.
-
-### 🧪 Testing & validation
 * ✅ Add coverage for `ConfigManager` feature-toggle reporting and `TelemetryService` feature event helpers.
 * 🛠️ Update telemetry and config tests to verify caller metadata and new event payloads.
 

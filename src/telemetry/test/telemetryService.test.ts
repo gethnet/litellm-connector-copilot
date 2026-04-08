@@ -56,6 +56,7 @@ suite("TelemetryService", () => {
 
         telemetryService.initialize(mockContext);
         telemetryService.captureChatRequest({
+            request_id: "test-request-id",
             caller: "test-caller",
             model: "test-model",
             endpoint: "test-endpoint",
@@ -68,10 +69,117 @@ suite("TelemetryService", () => {
         assert.strictEqual(adapterMock.capture.calledOnce, true);
         const event = adapterMock.capture.firstCall.args[0];
         assert.strictEqual(event.event, "chat_request");
+        assert.strictEqual(event.properties.request_id, "test-request-id");
         assert.strictEqual(event.properties.caller, "test-caller");
         assert.strictEqual(event.properties.model, "test-model");
-        assert.strictEqual(event.properties.distinctId, "test-crash-reporter-id");
+        assert.strictEqual(event.properties.distinctId, "test-machine-id");
         assert.strictEqual(event.properties.extension_version, "1.0.0");
+    });
+
+    test("captureChatRequest includes request_id when provided", () => {
+        const mockContext = {
+            extension: {
+                packageJSON: {
+                    version: "1.0.0",
+                },
+            },
+        } as unknown as vscode.ExtensionContext;
+
+        telemetryService.initialize(mockContext);
+        telemetryService.captureChatRequest({
+            request_id: "req-chat-123",
+            caller: "test-caller",
+            model: "test-model",
+            endpoint: "test-endpoint",
+            durationMs: 100,
+            tokensIn: 10,
+            tokensOut: 20,
+            status: "success",
+        });
+
+        assert.strictEqual(adapterMock.capture.calledOnce, true);
+        const event = adapterMock.capture.firstCall.args[0];
+        assert.strictEqual(event.event, "chat_request");
+        assert.strictEqual(event.properties.request_id, "req-chat-123");
+        assert.strictEqual(event.properties.distinctId, "test-machine-id");
+    });
+
+    test("captureRequestCompleted includes request_id when provided", () => {
+        const mockContext = {
+            extension: {
+                packageJSON: {
+                    version: "1.0.0",
+                },
+            },
+        } as unknown as vscode.ExtensionContext;
+
+        telemetryService.initialize(mockContext);
+        telemetryService.captureRequestCompleted({
+            request_id: "req-complete-123",
+            caller: "inline-completions",
+            model: "test-model",
+            endpoint: "/chat/completions",
+            durationMs: 42,
+            tokensIn: 7,
+            tokensOut: 11,
+        });
+
+        assert.strictEqual(adapterMock.capture.calledOnce, true);
+        const event = adapterMock.capture.firstCall.args[0];
+        assert.strictEqual(event.event, "request_completed");
+        assert.strictEqual(event.properties.request_id, "req-complete-123");
+        assert.strictEqual(event.properties.caller, "inline-completions");
+    });
+
+    test("captureRequestFailed includes request_id when provided", () => {
+        const mockContext = {
+            extension: {
+                packageJSON: {
+                    version: "1.0.0",
+                },
+            },
+        } as unknown as vscode.ExtensionContext;
+
+        telemetryService.initialize(mockContext);
+        telemetryService.captureRequestFailed({
+            request_id: "req-fail-123",
+            caller: "chat",
+            model: "test-model",
+            endpoint: "unknown",
+            durationMs: 12,
+            errorType: "boom",
+        });
+
+        assert.strictEqual(adapterMock.capture.calledOnce, true);
+        const event = adapterMock.capture.firstCall.args[0];
+        assert.strictEqual(event.event, "request_failed");
+        assert.strictEqual(event.properties.request_id, "req-fail-123");
+        assert.strictEqual(event.properties.errorType, "boom");
+    });
+
+    test("request telemetry preserves request_id as a flat searchable property", () => {
+        const mockContext = {
+            extension: {
+                packageJSON: {
+                    version: "1.0.0",
+                },
+            },
+        } as unknown as vscode.ExtensionContext;
+
+        telemetryService.initialize(mockContext);
+        telemetryService.captureRequestFailed({
+            request_id: "req-flat-123",
+            caller: "chat",
+            model: "test-model",
+            endpoint: "unknown",
+            durationMs: 1,
+            errorType: "failure",
+        });
+
+        assert.strictEqual(adapterMock.capture.calledOnce, true);
+        const event = adapterMock.capture.firstCall.args[0];
+        assert.strictEqual(typeof event.properties.request_id, "string");
+        assert.strictEqual(event.properties.request_id, "req-flat-123");
     });
 
     test("should capture exceptions with correct properties", () => {
@@ -97,7 +205,7 @@ suite("TelemetryService", () => {
         assert.strictEqual(capturedError, error);
         assert.strictEqual(options?.caller, "scm-generator");
         assert.strictEqual(options?.properties?.feature, "test-feature");
-        assert.strictEqual(options?.properties?.distinctId, "test-crash-reporter-id");
+        assert.strictEqual(options?.properties?.distinctId, "test-machine-id");
         assert.strictEqual(options?.properties?.extension_version, "1.0.0");
     });
 
@@ -111,11 +219,11 @@ suite("TelemetryService", () => {
         } as unknown as vscode.ExtensionContext;
 
         telemetryService.initialize(mockContext);
-        telemetryService.identify("user-123", { email: "test@example.com" });
+        telemetryService.identify("test-machine-id", { email: "test@example.com" });
 
         assert.strictEqual(adapterMock.identify.calledOnce, true);
         const [distinctId, properties] = adapterMock.identify.firstCall.args;
-        assert.strictEqual(distinctId, "test-crash-reporter-id");
+        assert.strictEqual(distinctId, "test-machine-id");
         assert.strictEqual(properties?.email, "test@example.com");
         assert.strictEqual(properties?.extension_version, "1.0.0");
     });
@@ -133,7 +241,7 @@ suite("TelemetryService", () => {
         adapterMock.isFeatureEnabled.resolves(true);
         const enabled = await telemetryService.isFeatureEnabled("test-flag");
         assert.strictEqual(enabled, true);
-        assert.strictEqual(adapterMock.isFeatureEnabled.calledWith("test-flag", "test-crash-reporter-id"), true);
+        assert.strictEqual(adapterMock.isFeatureEnabled.calledWith("test-flag", "test-machine-id"), true);
     });
 
     test("should respect telemetry enabled setting changes", () => {
@@ -179,7 +287,7 @@ suite("TelemetryService", () => {
         assert.strictEqual(event.properties["inline-completions"], true);
         assert.strictEqual(event.properties["responses-api"], false);
         assert.strictEqual(event.properties["commit-message"], true);
-        assert.strictEqual(event.properties.distinctId, "test-crash-reporter-id");
+        assert.strictEqual(event.properties.distinctId, "test-machine-id");
     });
 
     test("captureFeatureToggled sends correct event", () => {

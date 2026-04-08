@@ -25,8 +25,9 @@ export class LiteLLMTelemetry {
         Logger.debug(`[Telemetry] ${JSON.stringify(metric)}`);
 
         if (this._telemetryService) {
-            /* if (metric.status === "success") {
+            if (metric.status === "success") {
                 this._telemetryService.captureRequestCompleted({
+                    request_id: metric.requestId,
                     caller: metric.caller ?? "unknown",
                     model: metric.model,
                     endpoint: "unknown", // endpoint not available in IMetrics
@@ -34,9 +35,9 @@ export class LiteLLMTelemetry {
                     tokensIn: metric.tokensIn ?? 0,
                     tokensOut: metric.tokensOut ?? 0,
                 });
-            } else */
-            if (metric.status === "failure") {
+            } else if (metric.status === "failure") {
                 this._telemetryService.captureRequestFailed({
+                    request_id: metric.requestId,
                     caller: metric.caller ?? "unknown",
                     model: metric.model,
                     endpoint: "unknown",

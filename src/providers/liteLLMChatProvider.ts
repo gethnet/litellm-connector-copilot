@@ -222,6 +222,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                             // TODO: look into potentially removing this in the future if don't need it.
                             /* if (this._telemetryService) {
                                 this._telemetryService.captureChatRequest({
+                                    request_id: requestId,
                                     caller,
                                     model: modelToUse.id,
                                     endpoint: modelInfo?.mode ?? "chat",
@@ -273,6 +274,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             /*
             if (this._telemetryService) {
                 this._telemetryService.captureChatRequest({
+                    request_id: requestId,
                     caller,
                     model: modelToUse.id,
                     endpoint: modelInfo?.mode ?? "chat",
@@ -319,6 +321,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
 
             if (this._telemetryService) {
                 this._telemetryService.captureChatRequest({
+                    request_id: requestId,
                     caller,
                     model: model.id,
                     endpoint: "unknown",

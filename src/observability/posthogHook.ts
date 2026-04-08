@@ -18,11 +18,12 @@ export class PostHogHook implements vscode.Disposable {
 
     private handleAfterTransform(_point: HookPoint, context: HookContext): void {
         // This is where we have the final response and metadata
-        const { modelId, endpoint, caller, metadata } = context;
+        const { requestId, modelId, endpoint, caller, metadata } = context;
 
         // Check if this was a successful request completion
-        /* if (metadata.status === "success" || metadata.tokensOut !== undefined) {
+        if (metadata.status === "success" || metadata.tokensOut !== undefined) {
             this.telemetryService.captureRequestCompleted({
+                request_id: requestId,
                 caller,
                 model: modelId,
                 endpoint,
@@ -30,10 +31,10 @@ export class PostHogHook implements vscode.Disposable {
                 tokensIn: (metadata.tokensIn as number) || 0,
                 tokensOut: (metadata.tokensOut as number) || 0,
             });
-        } else  */
-        // Report error
-        if (metadata.error) {
+        } else if (metadata.error) {
+            // Report error
             this.telemetryService.captureRequestFailed({
+                request_id: requestId,
                 caller,
                 model: modelId,
                 endpoint,

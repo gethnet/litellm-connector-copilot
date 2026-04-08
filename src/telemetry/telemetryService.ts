@@ -26,7 +26,7 @@ export class TelemetryService implements vscode.Disposable {
     }
 
     initialize(context: vscode.ExtensionContext): void {
-        this.distinctId = vscode.env.sessionId || vscode.env.machineId;
+        this.distinctId = vscode.env.machineId || vscode.env.sessionId;
         const extensionVersion =
             context.extension?.packageJSON?.version ??
             vscode.extensions.getExtension("litellm-connector")?.packageJSON?.version ??
@@ -85,7 +85,7 @@ export class TelemetryService implements vscode.Disposable {
     }
 
     public identify(distinctId: string, properties?: TelemetryPersonProperties): void {
-        this.adapter.identify(this.distinctId, {
+        this.adapter.identify(distinctId || this.distinctId, {
             ...properties,
             [TelemetryService.EXTENSION_VERSION_PROPERTY]: this.extensionVersion,
         });
@@ -121,8 +121,10 @@ export class TelemetryService implements vscode.Disposable {
         this.capture("backend_removed", { backend_count: backendCount });
     }
 
-    // Feature usage
+    // `request_id` is emitted as a flat top-level property so PostHog can index and filter
+    // request lifecycle events without requiring nested JSON parsing.
     captureChatRequest(props: {
+        request_id: string;
         caller: string;
         model: string;
         endpoint: string;
@@ -154,6 +156,7 @@ export class TelemetryService implements vscode.Disposable {
 
     // Performance & pain points
     captureRequestCompleted(props: {
+        request_id: string;
         caller: string;
         model: string;
         endpoint: string;
@@ -165,6 +168,7 @@ export class TelemetryService implements vscode.Disposable {
     }
 
     captureRequestFailed(props: {
+        request_id: string;
         caller: string;
         model: string;
         endpoint: string;

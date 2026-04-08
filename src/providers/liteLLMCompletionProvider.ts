@@ -97,8 +97,9 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
                 caller: "inline-completions",
             });
             // todo: remove this as it is too chatty
-            /*            if (this._telemetryService) {
+            if (this._telemetryService) {
                 this._telemetryService.captureRequestCompleted({
+                    request_id: requestId,
                     caller: "inline-completions",
                     model: model.id,
                     endpoint: modelInfo?.mode ?? "chat",
@@ -106,7 +107,7 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
                     tokensIn: tokensIn ?? 0,
                     tokensOut,
                 });
-            } */
+            }
 
             return {
                 insertText: completionText,
@@ -128,6 +129,7 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
 
             if (this._telemetryService) {
                 this._telemetryService.captureRequestFailed({
+                    request_id: requestId,
                     caller: "inline-completions",
                     model: options.modelId ?? "unknown",
                     endpoint: "unknown",
