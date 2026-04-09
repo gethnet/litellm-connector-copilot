@@ -3,10 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 
-## [1.6.0-dev17] - 2026-04-04
+## [1.6.0-rc1] - 2026-04-04
 
 ### 🚧 Development snapshot
-* Consolidate the current 1.6 pre-release work on dev17.
+* Consolidate the current 1.6 pre-release work on rc1.
 
 ### 🎊 New Features
 * Telemetry / Non-identifable data collection & reporting.
