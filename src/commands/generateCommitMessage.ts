@@ -7,12 +7,21 @@ import { showModelPicker } from "./modelPicker";
 import { calculateAvailableContext } from "../adapters/tokenUtils";
 import { COMMIT_MESSAGE_PROMPT, COMMIT_SYSTEM_PROMPT } from "../utils/prompts";
 import { stripMarkdownCodeBlocks } from "../utils";
+import type { TelemetryService } from "../telemetry/telemetryService";
 
 /**
  * Registers the command to generate a git commit message.
  */
-export function registerGenerateCommitMessageCommand(provider: LiteLLMCommitMessageProvider): vscode.Disposable {
+export function registerGenerateCommitMessageCommand(
+    provider: LiteLLMCommitMessageProvider,
+    telemetryService?: TelemetryService
+): vscode.Disposable {
     return vscode.commands.registerCommand("litellm-connector.generateCommitMessage", async (scm: unknown) => {
+        const startTime = Date.now();
+        if (telemetryService) {
+            telemetryService.captureCommandExecuted("generateCommitMessage");
+            telemetryService.captureFeatureUsed("commit-message", "commit-message");
+        }
         try {
             // Check if model is configured, if not, show picker
             const config = await provider.getConfigManager().getConfig();
@@ -27,6 +36,8 @@ export function registerGenerateCommitMessageCommand(provider: LiteLLMCommitMess
                     await showModelPicker(provider, {
                         title: "Select Commit Message Model",
                         settingKey: "commitModelIdOverride",
+                        telemetryService: telemetryService,
+                        caller: "commit-message",
                     });
                 }
                 return;
@@ -129,11 +140,27 @@ export function registerGenerateCommitMessageCommand(provider: LiteLLMCommitMess
                         );
                         // Ensure final value is fully sanitized
                         inputBox.value = stripMarkdownCodeBlocks(accumulatedText);
+
+                        /* if (telemetryService) {
+                            telemetryService.captureCommitMessageGenerated({
+                                model: modelId,
+                                durationMs: Date.now() - startTime,
+                                status: "success",
+                            });
+                        } */
                     } catch (err) {
                         Logger.error("Failed to generate commit message", err);
                         vscode.window.showErrorMessage(
                             "Failed to generate commit message: " + (err instanceof Error ? err.message : String(err))
                         );
+
+                        if (telemetryService) {
+                            telemetryService.captureCommitMessageGenerated({
+                                model: modelId,
+                                durationMs: Date.now() - startTime,
+                                status: "failure",
+                            });
+                        }
                     } finally {
                         inputBox.placeholder = originalPlaceholder;
                         inputBox.enabled = true;

@@ -1,0 +1,292 @@
+import * as vscode from "vscode";
+import { PostHogAdapter } from "./posthogAdapter";
+import type {
+    TelemetryEvent,
+    TelemetryCaptureExceptionOptions,
+    TelemetryEventProperties,
+    TelemetryPersonProperties,
+} from "./types";
+
+export class TelemetryService implements vscode.Disposable {
+    private adapter: PostHogAdapter;
+    private distinctId = "";
+    private extensionVersion = "";
+    private disposables: vscode.Disposable[] = [];
+
+    private _featureUsageCounter = new Map<string, number>();
+    private _lastFeatureUsageFlush: number = Date.now();
+
+    private static readonly EXTENSION_VERSION_PROPERTY = "extension_version";
+
+    static readonly POSTHOG_API_KEY = "phc_OJr5j3sxq9AX6YglCd9NMP4HlwchYwBa53n8Jz44jkp";
+    static readonly POSTHOG_HOST = "https://us.i.posthog.com";
+
+    constructor() {
+        this.adapter = new PostHogAdapter();
+    }
+
+    initialize(context: vscode.ExtensionContext): void {
+        this.distinctId = vscode.env.machineId || vscode.env.sessionId;
+        const extensionVersion =
+            context.extension?.packageJSON?.version ??
+            vscode.extensions.getExtension("litellm-connector")?.packageJSON?.version ??
+            vscode.extensions.getExtension("GethNet.litellm-connector-copilot")?.packageJSON?.version ??
+            "unknown";
+        this.extensionVersion = extensionVersion;
+
+        this.adapter.initialize({
+            apiKey: TelemetryService.POSTHOG_API_KEY,
+            host: TelemetryService.POSTHOG_HOST,
+            enabled: vscode.env.isTelemetryEnabled,
+        });
+
+        this.disposables.push(
+            vscode.env.onDidChangeTelemetryEnabled((enabled) => {
+                this.adapter.setEnabled(enabled);
+            })
+        );
+    }
+
+    private capture(event: string, properties: TelemetryEventProperties = {}): void {
+        const fullProperties: TelemetryEventProperties = {
+            ...properties,
+            distinctId: this.distinctId,
+            [TelemetryService.EXTENSION_VERSION_PROPERTY]: this.extensionVersion,
+            vscode_version: vscode.version,
+            ui_kind: vscode.UIKind[vscode.env.uiKind],
+            os: process.platform || "web",
+        };
+
+        const telemetryEvent: TelemetryEvent = {
+            event,
+            properties: fullProperties,
+            timestamp: new Date(),
+        };
+
+        this.adapter.capture(telemetryEvent);
+    }
+
+    public captureException(error: Error, options?: TelemetryCaptureExceptionOptions): void {
+        const fullProperties: TelemetryEventProperties = {
+            ...options?.properties,
+            distinctId: options?.distinctId ?? this.distinctId,
+            [TelemetryService.EXTENSION_VERSION_PROPERTY]: this.extensionVersion,
+            vscode_version: vscode.version,
+            ui_kind: vscode.UIKind[vscode.env.uiKind],
+            os: process.platform || "web",
+        };
+
+        this.adapter.captureException(error, {
+            ...options,
+            caller: options?.caller,
+            distinctId: options?.distinctId ?? this.distinctId,
+            properties: fullProperties,
+        });
+    }
+
+    public identify(distinctId: string, properties?: TelemetryPersonProperties): void {
+        this.adapter.identify(distinctId || this.distinctId, {
+            ...properties,
+            [TelemetryService.EXTENSION_VERSION_PROPERTY]: this.extensionVersion,
+        });
+    }
+
+    public isFeatureEnabled(flagKey: string, distinctId?: string): Promise<boolean> | boolean {
+        return this.adapter.isFeatureEnabled(flagKey, distinctId ?? this.distinctId);
+    }
+
+    public reloadFeatureFlags(): Promise<void> | void {
+        return this.adapter.reloadFeatureFlags();
+    }
+
+    // Lifecycle
+    captureExtensionActivated(version: string, vscodeVersion: string): void {
+        this.capture("extension_activated", { version, vscode_version: vscodeVersion });
+    }
+
+    captureExtensionDeactivated(uptimeSeconds: number): void {
+        this.capture("extension_deactivated", { uptime_seconds: uptimeSeconds });
+    }
+
+    // Configuration
+    captureConfigChanged(settingKey: string, source: string): void {
+        this.capture("config_changed", { setting_key: settingKey, source });
+    }
+
+    captureBackendAdded(backendCount: number): void {
+        this.capture("backend_added", { backend_count: backendCount });
+    }
+
+    captureBackendRemoved(backendCount: number): void {
+        this.capture("backend_removed", { backend_count: backendCount });
+    }
+
+    // `request_id` is emitted as a flat top-level property so PostHog can index and filter
+    // request lifecycle events without requiring nested JSON parsing.
+    captureChatRequest(props: {
+        request_id: string;
+        caller: string;
+        model: string;
+        endpoint: string;
+        durationMs: number;
+        tokensIn: number;
+        tokensOut: number;
+        status: string;
+        error?: string;
+        stack?: string;
+    }): void {
+        this.capture("chat_request", props);
+    }
+
+    captureInlineCompletionRequest(props: { status: string; durationMs: number; model: string }): void {
+        this.capture("inline_completion_request", props);
+    }
+
+    captureCommitMessageGenerated(props: { model: string; durationMs: number; status: string }): void {
+        this.capture("commit_message_generated", props);
+    }
+
+    captureModelPickerOpened(caller: string): void {
+        this.capture("model_picker_opened", { caller });
+    }
+
+    captureCommandExecuted(commandId: string): void {
+        this.capture("command_executed", { command_id: commandId });
+    }
+
+    // Performance & pain points
+    captureRequestCompleted(props: {
+        request_id: string;
+        caller: string;
+        model: string;
+        endpoint: string;
+        durationMs: number;
+        tokensIn: number;
+        tokensOut: number;
+    }): void {
+        this.capture("request_completed", props);
+    }
+
+    captureRequestFailed(props: {
+        request_id: string;
+        caller: string;
+        model: string;
+        endpoint: string;
+        durationMs: number;
+        errorType: string;
+    }): void {
+        this.capture("request_failed", props);
+    }
+
+    captureQuotaError(model: string, caller: string): void {
+        this.capture("quota_error", { model, caller });
+    }
+
+    captureModelNotFound(model: string, caller: string): void {
+        this.capture("model_not_found", { model, caller });
+    }
+
+    captureTimeout(caller: string, model: string, durationMs: number): void {
+        this.capture("timeout", { caller, model, duration_ms: durationMs });
+    }
+
+    captureConnectionError(caller: string, errorType: string): void {
+        this.capture("connection_error", { caller, error_type: errorType });
+    }
+
+    captureTrimExecuted(
+        model: string,
+        caller: string,
+        originalTokens: number,
+        trimmedTokens: number,
+        budget: number
+    ): void {
+        this.capture("trim_executed", {
+            model,
+            caller,
+            original_tokens: originalTokens,
+            trimmed_tokens: trimmedTokens,
+            budget,
+        });
+    }
+
+    // Model discovery
+    captureModelsDiscovered(modelCount: number, backendCount: number): void {
+        this.capture("models_discovered", { model_count: modelCount, backend_count: backendCount });
+    }
+
+    captureModelsCacheHit(modelCount: number): void {
+        this.capture("models_cache_hit", { model_count: modelCount });
+    }
+
+    // Feature usage reporting
+    captureFeatureUsageSnapshot(features: Record<string, boolean>): void {
+        this.capture("feature_usage_snapshot", features);
+    }
+
+    captureFeatureToggled(featureName: string, enabled: boolean, source: string): void {
+        this.capture("feature_toggled", {
+            feature_name: featureName,
+            enabled,
+            source,
+        });
+    }
+
+    captureFeatureUsed(featureName: string, _caller: string): void {
+        this._captureAggregatedFeatureUsage(featureName);
+    }
+
+    private _captureAggregatedFeatureUsage(featureName: string): void {
+        const now = Date.now();
+        const flushIntervalMs = 15 * 60 * 1000; // 15 minutes
+
+        if (now - this._lastFeatureUsageFlush >= flushIntervalMs) {
+            this._flushAggregatedFeatureUsage();
+            this._lastFeatureUsageFlush = now;
+        }
+
+        const count = this._featureUsageCounter.get(featureName) || 0;
+        this._featureUsageCounter.set(featureName, count + 1);
+    }
+
+    private _flushAggregatedFeatureUsage(): void {
+        if (this._featureUsageCounter.size === 0) {
+            return;
+        }
+
+        const features: Record<string, number> = {};
+        for (const [feature, count] of this._featureUsageCounter) {
+            features[feature] = count;
+        }
+
+        this.capture("feature_used_aggregated", {
+            features: JSON.stringify(features),
+            period_minutes: 15,
+        });
+
+        this._featureUsageCounter.clear();
+    }
+
+    public captureModelUsed(modelId: string, caller: string): void {
+        this.capture("model_used", { model_id: modelId, caller });
+
+        // Also track provider
+        const provider = modelId.includes("/") ? modelId.split("/")[0] : modelId;
+        this.capture("provider_used", { provider, caller });
+    }
+
+    public captureFeatureAdoption(feature: string): void {
+        this.capture("feature_adoption", { feature });
+    }
+
+    async shutdown(): Promise<void> {
+        this._flushAggregatedFeatureUsage();
+        await this.adapter.flush();
+        await this.adapter.shutdown();
+    }
+
+    dispose(): void {
+        this.disposables.forEach((d) => d.dispose());
+        void this.shutdown();
+    }
+}

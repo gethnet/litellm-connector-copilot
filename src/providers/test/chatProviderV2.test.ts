@@ -29,15 +29,11 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
     test("provideLanguageModelChatResponse emits text, data, and thinking parts on the V2 pipeline", async () => {
         const provider = new LiteLLMChatProviderV2(mockSecrets, userAgent);
 
-        interface ProviderWithConfigManager {
-            _configManager: {
-                getConfig: () => Promise<{ url: string; experimentalEmitUsageData?: boolean }>;
-            };
-        }
-        const providerWithConfig = provider as unknown as ProviderWithConfigManager;
-        sandbox
-            .stub(providerWithConfig._configManager, "getConfig")
-            .resolves({ url: "http://localhost:4000", experimentalEmitUsageData: true });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (provider as any)._configManager.getConfig = async () => ({
+            url: "http://localhost:4000",
+            experimentalEmitUsageData: true,
+        });
 
         const encoder = new TextEncoder();
         sandbox.stub(LiteLLMClient.prototype, "chat").callsFake(
@@ -72,7 +68,7 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
             capabilities: { toolCalling: true, imageInput: false },
         };
 
-        const reported: unknown[] = [];
+        const reported: vscode.LanguageModelResponsePart[] = [];
         await provider.provideLanguageModelChatResponse(
             model,
             [
@@ -223,11 +219,14 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
             {
                 role: vscode.LanguageModelChatMessageRole.Assistant,
                 name: undefined,
-                content: [new ThinkingPart!("internal reasoning", "t-1")],
+                content: [
+                    new vscode.LanguageModelTextPart("thinking..."),
+                    new ThinkingPart!("internal reasoning", "t-1"),
+                ],
             } as unknown as vscode.LanguageModelChatMessage,
         ]);
 
-        assert.strictEqual(normalized[0].content[0].type, "thinking");
+        assert.strictEqual(normalized[0].content[0].type, "text");
         assert.strictEqual(normalized[0].role, "assistant");
 
         const request = await provider.buildV2ChatRequest(
@@ -248,7 +247,7 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
             ["assistant", "system"].includes(request.messages[0].role),
             `Unexpected role: ${request.messages[0].role}`
         );
-        assert.strictEqual(request.messages[0].content, "internal reasoning");
+        assert.strictEqual(request.messages[0].content, "thinking...internal reasoning");
     });
 
     test("V2 data stays distinct until transport shaping and cache_control becomes transport text", () => {
@@ -388,5 +387,60 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
         assert.strictEqual(toolCalls.length, 2, "Should have emitted 2 tool calls");
         assert.strictEqual(toolCalls[0].name, "t1");
         assert.strictEqual(toolCalls[1].name, "t2");
+    });
+
+    test("provideLanguageModelChatResponse handles empty usage data part gracefully", async () => {
+        const provider = new LiteLLMChatProviderV2(mockSecrets, userAgent);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (provider as any)._configManager.getConfig = async () => ({ url: "u", experimentalEmitUsageData: true });
+
+        const encoder = new TextEncoder();
+        sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
+            new ReadableStream({
+                start(controller) {
+                    controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'));
+                    controller.close();
+                },
+            }) as unknown as ReadableStream<Uint8Array>
+        );
+
+        const reported: vscode.LanguageModelResponsePart[] = [];
+        await provider.provideLanguageModelChatResponse(
+            { id: "m", maxInputTokens: 100, maxOutputTokens: 100 } as unknown as vscode.LanguageModelChatInformation,
+            [
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    content: [new vscode.LanguageModelTextPart("hi")],
+                    name: undefined,
+                },
+            ],
+            { requestInitiator: "test" } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+            { report: (p) => reported.push(p) },
+            new vscode.CancellationTokenSource().token
+        );
+
+        assert.ok(reported.some((p) => p instanceof vscode.LanguageModelDataPart));
+    });
+
+    test("decodeStream handles invalid JSON", async () => {
+        const provider = new LiteLLMChatProviderV2(mockSecrets, userAgent);
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+            start(controller) {
+                controller.enqueue(encoder.encode('data: {"a":1}\n\n'));
+                controller.enqueue(encoder.encode("data: invalid\n\n"));
+                controller.enqueue(encoder.encode('data: {"b":2}\n\n'));
+                controller.close();
+            },
+        }) as unknown as ReadableStream<Uint8Array>;
+
+        const results = [];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for await (const chunk of (provider as any).decodeStream(stream, new vscode.CancellationTokenSource().token)) {
+            results.push(chunk);
+        }
+        assert.strictEqual(results.length, 2);
+        assert.deepStrictEqual(results[0], { a: 1 });
+        assert.deepStrictEqual(results[1], { b: 2 });
     });
 });

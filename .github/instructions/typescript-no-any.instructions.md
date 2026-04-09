@@ -147,38 +147,19 @@ if (isValidData(data)) {
 - Code reviews should reject any PR containing `any` types
 - When encountering existing `any` in legacy code, refactor it when you touch that code
 
+## Bypass Comments Are Prohibited
+
+**Never use `// eslint-disable-next-line @typescript-eslint/no-explicit-any` (or any equivalent `eslint-disable` comment) to silence the linter.** This is the same as using `any` — it defeats the purpose of the rule.
+
+If ESLint flags an `any`, fix the type. Do not suppress the warning.
+
 ## Exceptions
 The only acceptable use of `any` is:
 1. **Type definition files (`.d.ts`)**: Vendor-provided files that cannot be modified (e.g., `vscode.d.ts`, `vscode.proposed.*.d.ts`)
-2. **Third-party JavaScript libraries**: When interfacing with a library that has no type definitions and you're creating a minimal wrapper (document why and create a proper type as soon as possible)
-3. **VS Code proposed API features**: When accessing features not yet fully typed - **must** include `// eslint-disable-next-line @typescript-eslint/no-explicit-any` comment explaining why
-4. **Test files (`*.test.ts`)**: When stubbing private members or accessing internal state for testing purposes - minimize usage and prefer public API testing when possible
 
 **Note**: The `.d.ts` files in this repository (`src/vscode.d.ts`, `src/vscode.proposed.*.d.ts`) are VS Code API type definitions and are explicitly excluded from this rule.
 
-### Example of Acceptable `as any` Usage in Production Code
-```typescript
-// When accessing a proposed VS Code API feature not yet in the type definitions
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(progress as any).report({
-    kind: "usage",
-    promptTokens: tokensIn,
-    completionTokens: tokensOut,
-});
-```
-
-### Example of Acceptable `as any` Usage in Test Files
-```typescript
-// Stubbing private method for testing
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const doDiscoverStub = sandbox.stub(provider as any, "_doDiscoverModels").resolves(mockModels);
-
-// Setting internal state for test setup
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(provider as any)._modelListFetchedAtMs = Date.now() - 10000;
-```
-
-**Important**: Even in these cases, add a TODO comment to remove the `any` once the proper types are available.
+All other cases — including VS Code proposed API access, test files, and third-party wrappers — must use proper types (`unknown`, generics, type guards, or explicit interfaces) instead of `any`.
 
 ## Quick Reference
 | Instead of | Use |

@@ -5,7 +5,7 @@ import { registerGenerateCommitMessageCommand } from "../generateCommitMessage";
 import { LiteLLMCommitMessageProvider } from "../../providers/liteLLMCommitProvider";
 import { GitUtils } from "../../utils/gitUtils";
 import type { ConfigManager } from "../../config/configManager";
-import type { LiteLLMModelInfo } from "../../types";
+import type { LiteLLMModelInfo, LiteLLMConfig } from "../../types";
 
 suite("GenerateCommitMessage Command Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -168,5 +168,37 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         await handler();
 
         assert.ok(errorStub.calledWith(sinon.match("provider fail")));
+    });
+
+    test("handler handles missing git API or repositories", async () => {
+        const registerStub = sandbox.stub(vscode.commands, "registerCommand");
+        registerGenerateCommitMessageCommand(mockProvider as unknown as LiteLLMCommitMessageProvider);
+        const handler = registerStub.firstCall.args[1] as () => Promise<void>;
+
+        mockProvider.getConfigManager.returns({
+            getConfig: async () => ({ commitModelIdOverride: "m" }) as unknown as LiteLLMConfig,
+        } as unknown as ConfigManager);
+
+        sandbox.stub(GitUtils, "getStagedDiff").resolves("diff");
+        sandbox.stub(GitUtils, "getGitAPI").resolves(undefined);
+
+        await handler();
+        // Should return early
+    });
+
+    test("handler handles missing SCM input box", async () => {
+        const registerStub = sandbox.stub(vscode.commands, "registerCommand");
+        registerGenerateCommitMessageCommand(mockProvider as unknown as LiteLLMCommitMessageProvider);
+        const handler = registerStub.firstCall.args[1] as () => Promise<void>;
+
+        mockProvider.getConfigManager.returns({
+            getConfig: async () => ({ commitModelIdOverride: "m" }) as unknown as LiteLLMConfig,
+        } as unknown as ConfigManager);
+
+        sandbox.stub(GitUtils, "getStagedDiff").resolves("diff");
+        sandbox.stub(GitUtils, "getGitAPI").resolves({ repositories: [{}] } as unknown as never);
+
+        await handler();
+        // Should return early
     });
 });

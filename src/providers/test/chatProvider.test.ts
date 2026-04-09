@@ -636,4 +636,59 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         assert.ok(payload.completionTokens > 0);
         assert.ok(debugStub.calledWithMatch(sinon.match(/experimental usage data part/i)));
     });
+
+    test("provideLanguageModelChatResponse handles empty stream without emitting parts", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        interface ProviderWithConfigManager {
+            _configManager: {
+                getConfig: () => Promise<{ url: string; experimentalEmitUsageData?: boolean }>;
+            };
+        }
+        const providerWithConfig = provider as unknown as ProviderWithConfigManager;
+        sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            experimentalEmitUsageData: false,
+        });
+
+        sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.close();
+                },
+            })
+        );
+        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
+
+        const reported: unknown[] = [];
+        await provider.provideLanguageModelChatResponse(
+            {
+                id: "model-1",
+                name: "model-1",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1000,
+                maxOutputTokens: 1000,
+                capabilities: { toolCalling: true, imageInput: false },
+            },
+            [
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [new vscode.LanguageModelTextPart("hi")],
+                },
+            ],
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+            },
+            { report: (part) => reported.push(part) },
+            new vscode.CancellationTokenSource().token
+        );
+
+        assert.deepStrictEqual(reported, []);
+    });
 });

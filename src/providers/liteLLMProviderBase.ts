@@ -26,6 +26,7 @@ import { countTokensForV2Messages, trimV2MessagesForBudget } from "../adapters/t
 import { ConfigManager } from "../config/configManager";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
+import type { TelemetryService } from "../telemetry/telemetryService";
 import {
     deriveCapabilitiesFromModelInfo,
     capabilitiesToVSCode,
@@ -78,11 +79,17 @@ export abstract class LiteLLMProviderBase {
     protected _multiBackendClient: MultiBackendClient | undefined;
     protected _activeBackendNames: string[] = [];
 
+    protected _telemetryService?: TelemetryService;
+
     constructor(
         protected readonly secrets: vscode.SecretStorage,
         protected readonly userAgent: string
     ) {
         this._configManager = new ConfigManager(secrets);
+    }
+
+    public setTelemetryService(service: TelemetryService): void {
+        this._telemetryService = service;
     }
 
     /** Exposes the ConfigManager for external access (e.g., commands that need configuration). */
@@ -127,9 +134,11 @@ export abstract class LiteLLMProviderBase {
      * the same discovery + tag logic.
      */
     public async discoverModels(
-        options: { silent: boolean },
+        options: { silent?: boolean },
         token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelChatInformation[]> {
+        const silent = options.silent ?? false;
+
         if (this._inFlightDiscovery) {
             Logger.trace("Returning in-flight discovery promise");
             return this._inFlightDiscovery;
@@ -137,14 +146,17 @@ export abstract class LiteLLMProviderBase {
 
         const TTL_MS = 30000; // 30 seconds
         const now = Date.now();
-        if (options.silent && this._lastModelList.length > 0 && now - this._modelListFetchedAtMs < TTL_MS) {
+        if (silent && this._lastModelList.length > 0 && now - this._modelListFetchedAtMs < TTL_MS) {
             Logger.trace("Returning cached models (within TTL)");
+            if (this._telemetryService) {
+                this._telemetryService.captureModelsCacheHit(this._lastModelList.length);
+            }
             return this._lastModelList;
         }
 
         this._inFlightDiscovery = (async () => {
             try {
-                return await this._doDiscoverModels(options, token);
+                return await this._doDiscoverModels({ silent }, token);
             } finally {
                 this._inFlightDiscovery = undefined;
             }
@@ -190,22 +202,33 @@ export abstract class LiteLLMProviderBase {
 
             // Create multi-backend client
             this._multiBackendClient = new MultiBackendClient(effectiveBackends, this.userAgent);
+            if (this._telemetryService) {
+                this._multiBackendClient.setTelemetryService(this._telemetryService);
+            }
             this._activeBackendNames = effectiveBackends.map((b) => b.name);
 
             Logger.trace(`Fetching model info from ${effectiveBackends.length} backend(s)...`);
             const aggregated = await this._multiBackendClient.getModelInfoAll(token);
 
             Logger.info(`Found ${aggregated.data.length} models across ${effectiveBackends.length} backend(s)`);
+            if (this._telemetryService) {
+                this._telemetryService.captureModelsDiscovered(aggregated.data.length, effectiveBackends.length);
+            }
             const infos: LanguageModelChatInformation[] = aggregated.data.map((entry) => {
                 const modelId = entry.namespacedId;
                 const modelInfo = entry.model_info;
                 this._modelInfoCache.set(modelId, modelInfo);
 
+                if (this._telemetryService) {
+                    this._telemetryService.captureModelUsed(modelId, "discovery");
+                }
+
                 const derived = deriveCapabilitiesFromModelInfo(modelId, modelInfo);
                 this._derivedCapabilitiesCache.set(modelId, derived);
 
-                const capabilities = capabilitiesToVSCode(derived);
-                const tags = getDerivedModelTags(modelId, derived, config.modelOverrides);
+                const capOverride = config.modelCapabilitiesOverrides?.[modelId];
+                const capabilities = capabilitiesToVSCode(derived, capOverride);
+                const tags = getDerivedModelTags(modelId, derived, config.modelOverrides, capOverride);
 
                 const formatTokens = (num: number): string => {
                     if (num >= 1000000) {
@@ -377,10 +400,18 @@ export abstract class LiteLLMProviderBase {
         if (
             modelInfo?.supports_function_calling ||
             modelInfo?.supports_vision ||
+            modelInfo?.supports_native_streaming ||
             modelInfo?.supported_openai_params?.includes("tools") ||
             modelInfo?.supported_openai_params?.includes("tool_choice")
         ) {
             tags.add("tools");
+        }
+
+        if (
+            modelInfo?.supports_vision ||
+            (Array.isArray(modelInfo?.modalities) && (modelInfo.modalities as string[]).includes("vision"))
+        ) {
+            tags.add("vision");
         }
 
         if (modelInfo?.mode === "chat") {

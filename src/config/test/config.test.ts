@@ -1,7 +1,8 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import * as sinon from "sinon";
-import { ConfigManager } from "..//configManager";
+import { ConfigManager } from "../configManager";
+import type { TelemetryService } from "../../telemetry/telemetryService";
 
 suite("ConfigManager Unit Tests", () => {
     let mockSecrets: vscode.SecretStorage;
@@ -48,6 +49,8 @@ suite("ConfigManager Unit Tests", () => {
                     return {};
                 case "litellm-connector.modelIdOverride":
                     return "";
+                case "litellm-connector.modelCapabilitiesOverrides":
+                    return {};
                 default:
                     return defaultValue;
             }
@@ -147,6 +150,30 @@ suite("ConfigManager Unit Tests", () => {
         assert.strictEqual(config.backends[1].name, "local");
     });
 
+    test("getConfig reads modelCapabilitiesOverrides", async () => {
+        settingsMap.set("litellm-connector.modelCapabilitiesOverrides", {
+            "gpt-4o": "toolCalling, imageInput",
+            "some-model": "tools",
+            "another-model": ["vision"],
+        });
+
+        const manager = new ConfigManager(mockSecrets);
+        const cfg = await manager.getConfig();
+
+        assert.deepStrictEqual(cfg.modelCapabilitiesOverrides, {
+            "gpt-4o": { toolCalling: true, imageInput: true },
+            "some-model": { toolCalling: true },
+            "another-model": { imageInput: true },
+        });
+    });
+
+    test("getConfig returns empty object for modelCapabilitiesOverrides when not set", async () => {
+        const manager = new ConfigManager(mockSecrets);
+        const cfg = await manager.getConfig();
+
+        assert.deepStrictEqual(cfg.modelCapabilitiesOverrides, {});
+    });
+
     test("resolveBackends returns resolved backends with API keys", async () => {
         settingsMap.set("litellm-connector.backends", [
             { name: "cloud", url: "http://cloud:4000", apiKeySecretRef: "cloud" },
@@ -203,6 +230,32 @@ suite("ConfigManager Unit Tests", () => {
         const backends = await manager.listBackends();
         assert.strictEqual(backends.length, 0);
         assert.strictEqual(secretsMap.has("litellm-connector.apiKey.to-remove"), false);
+    });
+
+    test("reportFeatureToggles calls telemetry service with correct toggles", async () => {
+        const manager = new ConfigManager(mockSecrets);
+        const captureStub = sinon.stub();
+        const telemetryMock = {
+            captureFeatureToggled: captureStub,
+        } as unknown as TelemetryService;
+        manager.setTelemetryService(telemetryMock);
+
+        settingsMap.set("litellm-connector.inlineCompletions.enabled", true);
+        settingsMap.set("litellm-connector.enableResponsesApi", true);
+        settingsMap.set("litellm-connector.commitModelIdOverride", "gpt-4");
+        settingsMap.set("litellm-connector.emitUsageData", true);
+        settingsMap.set("litellm-connector.disableCaching", false);
+        settingsMap.set("litellm-connector.disableQuotaToolRedaction", false);
+
+        await manager.reportFeatureToggles("test_source");
+
+        assert.strictEqual(captureStub.callCount, 6);
+        assert.ok(captureStub.calledWith("inline-completions", true, "test_source"));
+        assert.ok(captureStub.calledWith("responses-api", true, "test_source"));
+        assert.ok(captureStub.calledWith("commit-message", true, "test_source"));
+        assert.ok(captureStub.calledWith("usage-data", true, "test_source"));
+        assert.ok(captureStub.calledWith("caching", true, "test_source"));
+        assert.ok(captureStub.calledWith("quota-tool-redaction", true, "test_source"));
     });
 
     test("getConfig reads modelIdOverride and trims whitespace", async () => {
@@ -293,5 +346,27 @@ suite("ConfigManager Unit Tests", () => {
         const clearedConfig = await manager.getConfig();
         assert.strictEqual(clearedConfig.url, "");
         assert.strictEqual(clearedConfig.key, undefined);
+    });
+
+    test("updateBackend updates existing entry and key", async () => {
+        settingsMap.set("litellm-connector.backends", [{ name: "b1", url: "u1", enabled: true }]);
+        const manager = new ConfigManager(mockSecrets);
+
+        await manager.updateBackend("b1", { url: "u2" }, "new-key");
+        const backends = await manager.listBackends();
+        assert.strictEqual(backends[0].url, "u2");
+        assert.strictEqual(secretsMap.get("litellm-connector.apiKey.b1"), "new-key");
+    });
+
+    test("updateBackend and removeBackend throw if not found", async () => {
+        const manager = new ConfigManager(mockSecrets);
+        await assert.rejects(() => manager.updateBackend("none", {}), /not found/);
+        await assert.rejects(() => manager.removeBackend("none"), /not found/);
+    });
+
+    test("reportFeatureToggles is a no-op without telemetry service", async () => {
+        const manager = new ConfigManager(mockSecrets);
+        // This should not throw
+        await manager.reportFeatureToggles("test");
     });
 });

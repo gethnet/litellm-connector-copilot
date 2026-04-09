@@ -166,4 +166,13 @@ suite("Model Tags Unit Tests", () => {
         assert.ok(tags.includes("inline-completions"));
         assert.ok(tags.includes("scm-generator"));
     });
+
+    test("getModelTags adds vision tag for vision-capable models", () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        callGetModelTags(provider, "m1", { modality: "vision" } as unknown as LiteLLMModelInfo);
+        // LiteLLM model_info modalities is often an array or modalities string
+        const tags2 = callGetModelTags(provider, "m2", { modalities: ["vision"] } as unknown as LiteLLMModelInfo);
+
+        assert.ok(tags2.includes("vision"));
+    });
 });

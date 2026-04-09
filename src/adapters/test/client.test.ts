@@ -1,6 +1,7 @@
 import * as assert from "assert";
 import { LiteLLMClient } from "../litellmClient";
 import * as sinon from "sinon";
+import type { LiteLLMModelInfo, LiteLLMModelInfoResponse } from "../../types";
 
 suite("LiteLLM Client Unit Tests", () => {
     const config = { url: "http://localhost:4000", key: "test-key" };
@@ -316,8 +317,11 @@ suite("LiteLLM Client Unit Tests", () => {
             headers: { get: () => null },
         };
 
-        fetchStub.onCall(0).resolves(rateLimitResponse as unknown as Response);
-        fetchStub.onCall(1).resolves(successResponse as unknown as Response);
+        const firstAttempt = Promise.resolve(rateLimitResponse as unknown as Response);
+        const secondAttempt = Promise.resolve(successResponse as unknown as Response);
+
+        fetchStub.onCall(0).returns(firstAttempt);
+        fetchStub.onCall(1).returns(secondAttempt);
 
         await client.chat({ model: "m", messages: [] });
 
@@ -371,5 +375,50 @@ suite("LiteLLM Client Unit Tests", () => {
 
         await assert.rejects(() => client.chat({ model: "m", messages: [] }));
         assert.strictEqual(fetchStub.callCount, 1);
+    });
+
+    test("checkConnection handles empty or invalid data", async () => {
+        const client = new LiteLLMClient(config, userAgent);
+        sandbox.stub(client, "getModelInfo").resolves({
+            data: [] as { model_name?: string; model_info?: LiteLLMModelInfo }[],
+        } as unknown as LiteLLMModelInfoResponse);
+
+        const res = await client.checkConnection();
+        assert.strictEqual(res.modelCount, 0);
+        assert.deepStrictEqual(res.sampleModelIds, []);
+    });
+
+    test("checkConnection extracts model IDs correctly", async () => {
+        const client = new LiteLLMClient(config, userAgent);
+        sandbox.stub(client, "getModelInfo").resolves({
+            data: [{ model_name: "m1", model_info: { key: "k1" } }, { model_name: "m2" }, {}],
+        } as unknown as LiteLLMModelInfoResponse);
+
+        const res = await client.checkConnection();
+        assert.strictEqual(res.modelCount, 3);
+        assert.deepStrictEqual(res.sampleModelIds, ["k1", "m2", "unknown"]);
+    });
+
+    test("countTokens handles non-OK response", async () => {
+        const client = new LiteLLMClient(config, userAgent);
+        sandbox.stub(global, "fetch").resolves({
+            ok: false,
+            status: 400,
+            statusText: "Bad Request",
+            text: async () => "detailed error",
+        } as Response);
+
+        await assert.rejects(() => client.countTokens({ model: "m", prompt: "p" }), /Failed to count tokens/);
+    });
+
+    test("chat handles missing response body", async () => {
+        const client = new LiteLLMClient(config, userAgent);
+        sandbox.stub(global, "fetch").resolves({
+            ok: true,
+            status: 200,
+            body: null,
+        } as Response);
+
+        await assert.rejects(() => client.chat({ model: "m", messages: [] }), /No response body/);
     });
 });

@@ -74,10 +74,10 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
     }
 
     async provideLanguageModelChatInformation(
-        options: { silent: boolean },
+        options: { silent?: boolean },
         token: CancellationToken
     ): Promise<LanguageModelChatInformation[]> {
-        return this.discoverModels(options, token);
+        return this.discoverModels({ silent: options.silent ?? false }, token);
     }
 
     async provideTokenCount(
@@ -98,13 +98,20 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         this.resetStreamingState();
         const startTime = LiteLLMTelemetry.startTimer();
         const requestId = Math.random().toString(36).substring(7);
-        let tokensIn: number | undefined;
 
         // Extract caller/justification from options or model tags
         const telemetry = this.getTelemetryOptions(options);
         const modelWithTags = model as vscode.LanguageModelChatInformation & { tags?: string[] };
         const caller = telemetry.caller || modelWithTags.tags?.[0] || "chat";
         const justification = telemetry.justification;
+
+        if (this._telemetryService) {
+            // We do not need the excess noise here.  But this block is useful...
+            // this._telemetryService.captureFeatureUsed("chat", "chat");
+            this._telemetryService.captureModelUsed(model.id, caller);
+        }
+
+        let tokensIn: number | undefined;
 
         Logger.info(
             `Chat request started | RequestID: ${requestId} | Model: ${model.id} | Caller: ${caller} | Justification: ${
@@ -200,19 +207,31 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                             // Estimate tokensOut from the accumulated assistant text
                             const tokensOut = countTokens(this._partialAssistantText, modelToUse.id, modelInfo);
 
-                            LiteLLMTelemetry.reportMetric({
+                            const metric = {
                                 requestId,
                                 model: modelToUse.id,
                                 durationMs: LiteLLMTelemetry.endTimer(startTime),
                                 tokensIn,
                                 tokensOut,
-                                status: "success",
+                                status: "success" as const,
                                 caller,
-                            });
-                            if (config.experimentalEmitUsageData && typeof tokensIn === "number") {
-                                this.emitExperimentalUsageData(trackingProgress, tokensIn, tokensOut);
-                            }
-                            return;
+                            };
+                            LiteLLMTelemetry.reportMetric(metric);
+
+                            // Disabling this to reduce noise / unecessary logging
+                            // TODO: look into potentially removing this in the future if don't need it.
+                            /* if (this._telemetryService) {
+                                this._telemetryService.captureChatRequest({
+                                    request_id: requestId,
+                                    caller,
+                                    model: modelToUse.id,
+                                    endpoint: modelInfo?.mode ?? "chat",
+                                    durationMs: metric.durationMs,
+                                    tokensIn: tokensIn ?? 0,
+                                    tokensOut,
+                                    status: "success",
+                                });
+                            } */
                         } catch (retryErr: unknown) {
                             // If retry fails, throw a more descriptive error
                             let retryErrorMessage = retryErr instanceof Error ? retryErr.message : String(retryErr);
@@ -239,15 +258,34 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             // Estimate tokensOut from the accumulated assistant text
             const tokensOut = countTokens(this._partialAssistantText, modelToUse.id, modelInfo);
 
-            LiteLLMTelemetry.reportMetric({
+            const metric = {
                 requestId,
                 model: modelToUse.id,
                 durationMs: LiteLLMTelemetry.endTimer(startTime),
                 tokensIn,
                 tokensOut,
-                status: "success",
+                status: "success" as const,
                 caller,
-            });
+            };
+            LiteLLMTelemetry.reportMetric(metric);
+
+            // Disabling this to reduce noise / unecessary logging
+            // TODO: look into potentially removing this in the future if don't need it.
+            /*
+            if (this._telemetryService) {
+                this._telemetryService.captureChatRequest({
+                    request_id: requestId,
+                    caller,
+                    model: modelToUse.id,
+                    endpoint: modelInfo?.mode ?? "chat",
+                    durationMs: metric.durationMs,
+                    tokensIn: tokensIn ?? 0,
+                    tokensOut,
+                    status: "success",
+                });
+            }
+            */
+
             if (config.experimentalEmitUsageData && typeof tokensIn === "number") {
                 this.emitExperimentalUsageData(trackingProgress, tokensIn, tokensOut);
             }
@@ -269,15 +307,32 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 }
             }
             Logger.error("Chat request failed", err);
-            LiteLLMTelemetry.reportMetric({
+
+            const metric = {
                 requestId,
                 model: model.id,
                 durationMs: LiteLLMTelemetry.endTimer(startTime),
                 tokensIn,
-                status: "failure",
+                status: "failure" as const,
                 error: errorMessage,
                 caller,
-            });
+            };
+            LiteLLMTelemetry.reportMetric(metric);
+
+            if (this._telemetryService) {
+                this._telemetryService.captureChatRequest({
+                    request_id: requestId,
+                    caller,
+                    model: model.id,
+                    endpoint: "unknown",
+                    durationMs: metric.durationMs,
+                    tokensIn: tokensIn ?? 0,
+                    tokensOut: 0,
+                    status: "failure",
+                    error: errorMessage,
+                    stack: err instanceof Error ? err.stack : undefined,
+                });
+            }
             throw new Error(errorMessage, { cause: err });
         }
     }

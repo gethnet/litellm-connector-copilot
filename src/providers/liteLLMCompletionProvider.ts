@@ -29,6 +29,11 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
         const caller = options.modelId?.includes("inline") ? "inline-completions" : "text-completion";
         const justification = (options as { justification?: string }).justification;
 
+        if (this._telemetryService) {
+            // this may be chatty, but saving
+            // this._telemetryService.captureFeatureUsed("completions", caller);
+        }
+
         Logger.info(
             `Completion request started | RequestID: ${requestId} | Model: ${options.modelId || "auto"} | Caller: ${caller} | Justification: ${justification || "none"}`
         );
@@ -81,15 +86,28 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
             // Estimate tokensOut from the completion text
             const tokensOut = countTokens(completionText, model.id, modelInfo);
 
+            const durationMs = LiteLLMTelemetry.endTimer(startTime);
             LiteLLMTelemetry.reportMetric({
                 requestId,
                 model: model.id,
-                durationMs: LiteLLMTelemetry.endTimer(startTime),
+                durationMs,
                 tokensIn,
                 tokensOut,
                 status: "success",
                 caller: "inline-completions",
             });
+            // todo: remove this as it is too chatty
+            if (this._telemetryService) {
+                this._telemetryService.captureRequestCompleted({
+                    request_id: requestId,
+                    caller: "inline-completions",
+                    model: model.id,
+                    endpoint: modelInfo?.mode ?? "chat",
+                    durationMs,
+                    tokensIn: tokensIn ?? 0,
+                    tokensOut,
+                });
+            }
 
             return {
                 insertText: completionText,
@@ -98,15 +116,27 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
             const errorMsg = err instanceof Error ? err.message : String(err);
             Logger.error(`Completions failed: ${errorMsg}`, err);
 
+            const durationMs = LiteLLMTelemetry.endTimer(startTime);
             LiteLLMTelemetry.reportMetric({
                 requestId,
                 model: options.modelId ?? "unknown",
-                durationMs: LiteLLMTelemetry.endTimer(startTime),
+                durationMs,
                 tokensIn,
                 status: "failure",
                 error: errorMsg,
                 caller: "inline-completions",
             });
+
+            if (this._telemetryService) {
+                this._telemetryService.captureRequestFailed({
+                    request_id: requestId,
+                    caller: "inline-completions",
+                    model: options.modelId ?? "unknown",
+                    endpoint: "unknown",
+                    durationMs,
+                    errorType: errorMsg,
+                });
+            }
 
             throw err;
         }

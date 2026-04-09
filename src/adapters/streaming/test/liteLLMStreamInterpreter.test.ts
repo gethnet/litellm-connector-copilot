@@ -162,4 +162,63 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
             assert.strictEqual(toolCall.args, '{"key":"value"}');
         }
     });
+
+    test("should deduplicate tool calls with same ID across turns", () => {
+        const state = createInitialStreamingState();
+
+        const chunk = {
+            choices: [
+                {
+                    delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "t1", arguments: "{}" } }] },
+                    finish_reason: "tool_calls",
+                },
+            ],
+        };
+
+        const parts1 = interpretStreamEvent(chunk, state);
+        assert.strictEqual(parts1.filter((p) => p.type === "tool_call").length, 1);
+
+        const parts2 = interpretStreamEvent(chunk, state);
+        assert.strictEqual(parts2.filter((p) => p.type === "tool_call").length, 0, "Should not re-emit same ID");
+    });
+
+    test("should handle /responses format edge cases", () => {
+        const state = createInitialStreamingState();
+
+        // Reasoning delta
+        const parts1 = interpretStreamEvent({ type: "response.output_reasoning.delta", delta: "thinking" }, state);
+        assert.strictEqual(parts1[0].type, "thinking");
+
+        // response.completed with partial usage
+        const parts2 = interpretStreamEvent(
+            {
+                type: "response.completed",
+                response: { usage: { input_tokens: 10 } },
+            },
+            state
+        );
+        assert.strictEqual(parts2.length, 2);
+        assert.strictEqual(parts2[1].type, "data");
+
+        // response.output_item.done
+        const parts3 = interpretStreamEvent({ type: "response.output_item.done" }, state);
+        assert.strictEqual(parts3[0].type, "finish");
+    });
+
+    test("should handle Gemini native format", () => {
+        const state = createInitialStreamingState();
+        const chunk = {
+            candidates: [
+                {
+                    content: {
+                        parts: [{ text: "hello" }],
+                    },
+                },
+            ],
+        };
+        const parts = interpretStreamEvent(chunk, state);
+        assert.strictEqual(parts[0].type, "text");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        assert.strictEqual((parts[0] as any).value, "hello");
+    });
 });

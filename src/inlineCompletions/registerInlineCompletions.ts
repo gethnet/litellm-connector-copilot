@@ -4,6 +4,7 @@ import { ConfigManager } from "../config/configManager";
 import { LiteLLMCompletionProvider } from "../providers";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
+import type { TelemetryService } from "../telemetry/telemetryService";
 import { LiteLLMInlineCompletionProvider } from "./liteLLMInlineCompletionProvider";
 
 const INLINE_COMPLETIONS_ENABLED_KEY = "litellm-connector.inlineCompletions.enabled";
@@ -12,6 +13,7 @@ export class InlineCompletionsRegistrar implements vscode.Disposable {
     private registration: vscode.Disposable | undefined;
     private readonly configManager: ConfigManager;
     private readonly completionProvider: LiteLLMCompletionProvider;
+    private _telemetryService?: TelemetryService;
 
     constructor(
         secrets: vscode.SecretStorage,
@@ -39,6 +41,11 @@ export class InlineCompletionsRegistrar implements vscode.Disposable {
         );
     }
 
+    public setTelemetryService(service: TelemetryService): void {
+        this._telemetryService = service;
+        this.completionProvider.setTelemetryService(service);
+    }
+
     private async refreshRegistration(): Promise<void> {
         const config = await this.configManager.getConfig();
         const enabled = config.inlineCompletionsEnabled;
@@ -63,6 +70,11 @@ export class InlineCompletionsRegistrar implements vscode.Disposable {
             getConfig: () => this.configManager.getConfig(),
             completionProvider: this.completionProvider,
         });
+
+        if (this._telemetryService) {
+            provider.setTelemetryService(this._telemetryService);
+            this._telemetryService.captureCommandExecuted("inline-completions.registration");
+        }
 
         // Register for all file-backed documents. This is intentionally broad; the provider
         // itself is responsible for returning null when not configured.

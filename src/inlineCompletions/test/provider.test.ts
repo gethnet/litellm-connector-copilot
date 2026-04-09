@@ -232,4 +232,57 @@ suite("LiteLLMInlineCompletionProvider Unit Tests", () => {
         assert.strictEqual(res, null);
         assert.ok(provideTextCompletion.calledOnce);
     });
+
+    test("provideInlineCompletionItems returns null when token is already cancelled", async () => {
+        const provideTextCompletion = sandbox.stub().resolves({ insertText: "hello" });
+
+        const provider = new LiteLLMInlineCompletionProvider({
+            getConfig: async () =>
+                ({
+                    url: "http://localhost:4000",
+                    key: "k",
+                    inlineCompletionsEnabled: true,
+                    inlineCompletionsModelId: "m1",
+                }) as LiteLLMConfig,
+            completionProvider: {
+                provideTextCompletion:
+                    provideTextCompletion as InlineCompletionsDependencies["completionProvider"]["provideTextCompletion"],
+            } as InlineCompletionsDependencies["completionProvider"],
+        });
+
+        const result = await provider.provideInlineCompletionItems(
+            {
+                getText: () => "const a = ",
+                offsetAt: () => 10,
+            } as unknown as vscode.TextDocument,
+            new vscode.Position(0, 10),
+            {} as vscode.InlineCompletionContext,
+            {
+                isCancellationRequested: true,
+                onCancellationRequested: () => ({ dispose() {} }),
+            } as vscode.CancellationToken
+        );
+
+        assert.strictEqual(result, null);
+        assert.strictEqual(provideTextCompletion.called, false);
+    });
+
+    test("buildInlineCompletionPrompt handles empty document text", () => {
+        const doc = {
+            getText: () => "",
+            offsetAt: () => 0,
+        } as unknown as vscode.TextDocument;
+
+        const result = buildInlineCompletionPrompt(doc, new vscode.Position(0, 0), {
+            reservedOutputTokens: 128,
+            maxContextTokens: 512,
+            availableTokens: 256,
+            modelId: "test-model",
+        });
+
+        assert.ok(result.prompt.includes("<prefix>"));
+        assert.ok(result.prompt.includes("<suffix>"));
+        assert.strictEqual(result.prefixTokens >= 0, true);
+        assert.strictEqual(result.suffixTokens >= 0, true);
+    });
 });

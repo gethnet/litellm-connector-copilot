@@ -2,7 +2,6 @@
 name: vscode-extension-implementation
 description: "Implement, fix, or refactor VS Code extension code in this repository using the vscode-extension-implementation skill."
 argument-hint: What extension change should be made?
-model: GPT-5
 ---
 Use the `vscode-extension-implementation` skill.
 

@@ -1,5 +1,5 @@
 import type * as vscode from "vscode";
-import type { LiteLLMModelInfo } from "../types";
+import type { LiteLLMModelInfo, ModelCapabilityOverride } from "../types";
 
 export interface DerivedModelCapabilities {
     supportsTools: boolean;
@@ -42,18 +42,22 @@ export function deriveCapabilitiesFromModelInfo(
     };
 }
 
-export function capabilitiesToVSCode(derived: DerivedModelCapabilities): vscode.LanguageModelChatCapabilities {
+export function capabilitiesToVSCode(
+    derived: DerivedModelCapabilities,
+    overrides?: ModelCapabilityOverride
+): vscode.LanguageModelChatCapabilities {
     return {
         // VS Code currently supports these two main ones
-        toolCalling: derived.supportsTools,
-        imageInput: derived.supportsVision,
+        toolCalling: overrides?.toolCalling ?? derived.supportsTools,
+        imageInput: overrides?.imageInput ?? derived.supportsVision,
     };
 }
 
 export function getModelTags(
     modelId: string,
     derived: DerivedModelCapabilities,
-    overrides?: Record<string, string[]>
+    overrides?: Record<string, string[]>,
+    capabilityOverrides?: ModelCapabilityOverride
 ): string[] {
     const tags = new Set<string>();
 
@@ -62,11 +66,15 @@ export function getModelTags(
         tags.add("inline-edit");
     }
 
-    if (derived.supportsTools) {
+    // Use capability override if set, otherwise use derived value
+    const effectiveTools = capabilityOverrides?.toolCalling ?? derived.supportsTools;
+    const effectiveVision = capabilityOverrides?.imageInput ?? derived.supportsVision;
+
+    if (effectiveTools) {
         tags.add("tools");
     }
 
-    if (derived.supportsVision) {
+    if (effectiveVision) {
         tags.add("vision");
     }
 

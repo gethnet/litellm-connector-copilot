@@ -15,17 +15,72 @@ import { registerGenerateCommitMessageCommand } from "./commands/generateCommitM
 import { LiteLLMCommitMessageProvider } from "./providers/liteLLMCommitProvider";
 import { Logger } from "./utils/logger";
 import { StructuredLogger } from "./observability";
+import { PostHogHook } from "./observability/posthogHook";
 import { InlineCompletionsRegistrar } from "./inlineCompletions/registerInlineCompletions";
+import { TelemetryService } from "./telemetry/telemetryService";
+import { LiteLLMTelemetry } from "./utils/telemetry";
+import { setTelemetryService as setTokenUtilsTelemetryService } from "./adapters/tokenUtils";
 
 // Store the config manager for cleanup on deactivation
 let configManagerInstance: ConfigManager | undefined;
+let telemetryServiceInstance: TelemetryService | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
-    Logger.initialize(context);
+    // Initialize telemetry first so logger can use it
+    telemetryServiceInstance = new TelemetryService();
+    const telemetryService = telemetryServiceInstance;
+    telemetryService.initialize(context);
+    context.subscriptions.push(telemetryService);
+
+    Logger.initialize(context, telemetryService);
     Logger.info("Activating extension...");
+
+    // Bridge to static telemetry class
+    LiteLLMTelemetry.setTelemetryService(telemetryService);
+
+    // Bridge to token utils
+    setTokenUtilsTelemetryService(telemetryService);
 
     // Initialize v2 structured logger
     StructuredLogger.initialize(context);
+
+    // Initialize PostHog hook for v2 observability
+    const postHogHook = new PostHogHook(telemetryService);
+    postHogHook.initialize();
+    context.subscriptions.push(postHogHook);
+
+    // Scoped unhandled exception capture (Extension-specific)
+    const uncaughtExceptionListener = (error: Error) => {
+        if (error?.stack?.includes("litellm-connector-copilot") || error?.stack?.includes("litellm-connector")) {
+            telemetryService.captureException(error, {
+                caller: "uncaughtException",
+                level: "error",
+            });
+        }
+    };
+
+    const unhandledRejectionListener = (reason: unknown) => {
+        if (
+            reason instanceof Error &&
+            (reason?.stack?.includes("litellm-connector-copilot") || reason?.stack?.includes("litellm-connector"))
+        ) {
+            telemetryService.captureException(reason, {
+                caller: "unhandledRejection",
+                level: "error",
+            });
+        }
+    };
+
+    process.on("uncaughtException", uncaughtExceptionListener);
+    process.on("unhandledRejection", unhandledRejectionListener);
+
+    // Cleanup listeners on deactivation
+    context.subscriptions.push({
+        dispose: () => {
+            process.off("uncaughtException", uncaughtExceptionListener);
+            process.off("unhandledRejection", unhandledRejectionListener);
+        },
+    });
 
     let ua = "litellm-vscode-chat/unknown VSCode/unknown";
     try {
@@ -36,6 +91,9 @@ export function activate(context: vscode.ExtensionContext) {
         const vscodeVersion = vscode.version;
         // Keep UA minimal: only extension version and VS Code version
         ua = `litellm-vscode-chat/${extVersion} VSCode/${vscodeVersion}`;
+
+        // Capture activation
+        telemetryService.captureExtensionActivated(extVersion, vscodeVersion);
     } catch (uaErr) {
         Logger.error("Failed to build UA", uaErr);
     }
@@ -44,6 +102,25 @@ export function activate(context: vscode.ExtensionContext) {
 
     configManagerInstance = new ConfigManager(context.secrets);
     const configManager = configManagerInstance;
+    configManager.setTelemetryService(telemetryService);
+
+    // Track feature adoption
+    telemetryService.captureFeatureAdoption("chat");
+    telemetryService.captureFeatureAdoption("inline-completions");
+    telemetryService.captureFeatureAdoption("commit-generation");
+    telemetryService.captureFeatureAdoption("model-picker");
+
+    // Emit feature usage snapshot after config is loaded
+    void configManager.getConfig().then((config) => {
+        telemetryService.captureFeatureUsageSnapshot({
+            "inline-completions": config.inlineCompletionsEnabled ?? false,
+            "responses-api": config.v2ApiEnabled ?? false,
+            "commit-message": !!(config.commitModelIdOverride && config.commitModelIdOverride.length > 0),
+            "usage-data": config.experimentalEmitUsageData ?? false,
+            caching: !config.disableCaching,
+            "quota-tool-redaction": !config.disableQuotaToolRedaction,
+        });
+    });
 
     // Legacy providers (will be removed after v2 migration)
     // @deprecated - Will be replaced by v2 baseline providers
@@ -51,20 +128,29 @@ export function activate(context: vscode.ExtensionContext) {
     // @deprecated - Will be replaced by v2 baseline providers
     const commitProvider = new LiteLLMCommitMessageProvider(context.secrets, ua);
 
+    // Bridge to providers
+    chatProviderV1.setTelemetryService(telemetryService);
+    commitProvider.setTelemetryService(telemetryService);
+
     // Track active provider registration for hot-swap
     const activeProvider: LiteLLMChatProvider = chatProviderV1;
+    let chatProviderRegistration: vscode.Disposable | undefined;
 
-    // Register based on initial config
-    void configManager.getConfig().then(() => {
-        // Register the LiteLLM provider under the vendor id used in package.json
+    const registerProvider = () => {
         try {
+            if (chatProviderRegistration) {
+                Logger.info("Disposing existing LanguageModelChatProvider registration...");
+                chatProviderRegistration.dispose();
+                chatProviderRegistration = undefined;
+            }
+
             Logger.info("Registering LanguageModelChatProvider...");
-            const registration = vscode.lm.registerLanguageModelChatProvider(
+            chatProviderRegistration = vscode.lm.registerLanguageModelChatProvider(
                 "litellm-connector",
                 activeProvider as unknown as vscode.LanguageModelChatProvider
             );
-            if (registration) {
-                context.subscriptions.push(registration);
+            if (chatProviderRegistration) {
+                context.subscriptions.push(chatProviderRegistration);
                 Logger.info("Provider registered successfully.");
             } else {
                 Logger.error("registerLanguageModelChatProvider returned undefined/null");
@@ -72,30 +158,56 @@ export function activate(context: vscode.ExtensionContext) {
         } catch (err) {
             Logger.error("Failed to register provider", err);
         }
+    };
+
+    // Register based on initial config
+    void configManager.getConfig().then(() => {
+        // Register the LiteLLM provider under the vendor id used in package.json
+        registerProvider();
 
         // Management commands to configure base URL and API key
         try {
             context.subscriptions.push(
-                registerManageConfigCommand(context, configManager, activeProvider as unknown as LiteLLMChatProvider)
+                registerManageConfigCommand(
+                    context,
+                    configManager,
+                    activeProvider as unknown as LiteLLMChatProvider,
+                    telemetryService
+                )
             );
             context.subscriptions.push(
-                registerManageBackendsCommand(configManager, activeProvider as unknown as LiteLLMChatProvider)
+                registerManageBackendsCommand(
+                    configManager,
+                    activeProvider as unknown as LiteLLMChatProvider,
+                    telemetryService
+                )
             );
-            context.subscriptions.push(registerShowModelsCommand(activeProvider as unknown as LiteLLMChatProvider));
-            context.subscriptions.push(registerReloadModelsCommand(activeProvider as unknown as LiteLLMChatProvider));
-            context.subscriptions.push(registerCheckConnectionCommand(configManager));
             context.subscriptions.push(
-                registerResetConfigCommand(configManager, activeProvider as unknown as LiteLLMChatProvider)
+                registerShowModelsCommand(activeProvider as unknown as LiteLLMChatProvider, telemetryService)
+            );
+            context.subscriptions.push(
+                registerReloadModelsCommand(activeProvider as unknown as LiteLLMChatProvider, telemetryService)
+            );
+            context.subscriptions.push(registerCheckConnectionCommand(configManager, telemetryService));
+            context.subscriptions.push(
+                registerResetConfigCommand(
+                    configManager,
+                    activeProvider as unknown as LiteLLMChatProvider,
+                    telemetryService,
+                    registerProvider
+                )
             );
             context.subscriptions.push(
                 registerSelectInlineCompletionModelCommand(activeProvider as unknown as LiteLLMChatProvider)
             );
-            context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider));
+            context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider, telemetryService));
             context.subscriptions.push(
                 vscode.commands.registerCommand("litellm-connector.generateCommitMessage.selectModel", async () => {
                     await showModelPicker(commitProvider, {
                         title: "Select Commit Message Model",
                         settingKey: "commitModelIdOverride",
+                        telemetryService: telemetryService,
+                        caller: "commit-message",
                     });
                 })
             );
@@ -107,6 +219,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Stable inline completions (optional; disabled by default)
     const inlineRegistrar = new InlineCompletionsRegistrar(context.secrets, ua, context);
+    inlineRegistrar.setTelemetryService(telemetryService);
     inlineRegistrar.initialize();
     context.subscriptions.push(inlineRegistrar);
 
