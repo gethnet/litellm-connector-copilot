@@ -17,7 +17,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "1.6.0-dev19",
+	"version": "1.6.0-dev23",
 	"preview": false,
 	"engines": {
 		"vscode": "^1.110.0"
@@ -201,12 +201,17 @@
 				"litellm-connector.modelOverrides": {
 					"type": "object",
 					"default": {},
-					"description": "Override or add tags for specific models. Key is the Model ID (e.g. 'gpt-4o'), value is an array of tags (e.g. ['inline-completions']).",
+					"description": "Override or add tags for specific models. Key is the Model ID (e.g. 'gpt-4o'), value is a comma-separated list of tags (e.g. 'inline-completions,chat,tools').",
 					"additionalProperties": {
-						"type": "array",
-						"items": {
-							"type": "string"
-						}
+						"type": "string"
+					}
+				},
+				"litellm-connector.modelCapabilitiesOverrides": {
+					"type": "object",
+					"default": {},
+					"description": "Override model capabilities (toolCalling, imageInput) reported to VS Code. Key is the Model ID (e.g. 'gpt-4o'), value is a comma-separated list of capabilities to ENABLE (e.g. 'toolCalling,imageInput').",
+					"additionalProperties": {
+						"type": "string"
 					}
 				},
 				"litellm-connector.inactivityTimeout": {

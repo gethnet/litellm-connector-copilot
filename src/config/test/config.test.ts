@@ -49,6 +49,8 @@ suite("ConfigManager Unit Tests", () => {
                     return {};
                 case "litellm-connector.modelIdOverride":
                     return "";
+                case "litellm-connector.modelCapabilitiesOverrides":
+                    return {};
                 default:
                     return defaultValue;
             }
@@ -146,6 +148,30 @@ suite("ConfigManager Unit Tests", () => {
         assert.strictEqual(config.backends.length, 2);
         assert.strictEqual(config.backends[0].name, "cloud");
         assert.strictEqual(config.backends[1].name, "local");
+    });
+
+    test("getConfig reads modelCapabilitiesOverrides", async () => {
+        settingsMap.set("litellm-connector.modelCapabilitiesOverrides", {
+            "gpt-4o": "toolCalling, imageInput",
+            "some-model": "tools",
+            "another-model": ["vision"],
+        });
+
+        const manager = new ConfigManager(mockSecrets);
+        const cfg = await manager.getConfig();
+
+        assert.deepStrictEqual(cfg.modelCapabilitiesOverrides, {
+            "gpt-4o": { toolCalling: true, imageInput: true },
+            "some-model": { toolCalling: true },
+            "another-model": { imageInput: true },
+        });
+    });
+
+    test("getConfig returns empty object for modelCapabilitiesOverrides when not set", async () => {
+        const manager = new ConfigManager(mockSecrets);
+        const cfg = await manager.getConfig();
+
+        assert.deepStrictEqual(cfg.modelCapabilitiesOverrides, {});
     });
 
     test("resolveBackends returns resolved backends with API keys", async () => {

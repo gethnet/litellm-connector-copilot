@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 ### 🎊 New Features
 * Telemetry / Non-identifable data collection & reporting.
 * Multiple Backend / LiteLLM instances supported - Legacy Method.
+* **Model Capability Overrides**: Add configuration to manually override VS Code's capability detection (toolCalling, imageInput) when LiteLLM's auto-detection is incorrect. Configure via `litellm-connector.modelCapabilitiesOverrides` setting with comma-separated values (e.g., `"toolCalling, imageInput"` or `"tools, vision"`).
 
 ### 🛠️ Bug Fixes
 * �️ Keep commit-message generation failures visible in both local logs and telemetry.

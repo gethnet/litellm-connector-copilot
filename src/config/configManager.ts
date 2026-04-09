@@ -13,6 +13,7 @@ export class ConfigManager {
     private static readonly EXPERIMENTAL_EMIT_USAGE_DATA_KEY = "litellm-connector.emitUsageData";
     private static readonly DISABLE_QUOTA_TOOL_REDACTION_KEY = "litellm-connector.disableQuotaToolRedaction";
     private static readonly MODEL_OVERRIDES_KEY = "litellm-connector.modelOverrides";
+    private static readonly MODEL_CAPABILITIES_OVERRIDES_KEY = "litellm-connector.modelCapabilitiesOverrides";
     private static readonly MODEL_ID_OVERRIDE_KEY = "litellm-connector.modelIdOverride";
     private static readonly INLINE_COMPLETIONS_ENABLED_KEY = "litellm-connector.inlineCompletions.enabled";
     private static readonly INLINE_COMPLETIONS_MODEL_ID_KEY = "litellm-connector.inlineCompletions.modelId";
@@ -87,9 +88,62 @@ export class ConfigManager {
         const disableQuotaToolRedaction = vscode.workspace
             .getConfiguration()
             .get<boolean>(ConfigManager.DISABLE_QUOTA_TOOL_REDACTION_KEY, false);
-        const modelOverrides = vscode.workspace
+        const modelOverridesRaw = vscode.workspace
             .getConfiguration()
-            .get<Record<string, string[]>>(ConfigManager.MODEL_OVERRIDES_KEY, {});
+            .get<Record<string, string | string[]>>(ConfigManager.MODEL_OVERRIDES_KEY, {});
+
+        const modelOverrides: Record<string, string[]> = {};
+        if (modelOverridesRaw && typeof modelOverridesRaw === "object" && !Array.isArray(modelOverridesRaw)) {
+            for (const [modelId, tagsValue] of Object.entries(modelOverridesRaw)) {
+                if (Array.isArray(tagsValue)) {
+                    // Legacy format: Array of tags
+                    modelOverrides[modelId] = tagsValue.map(String);
+                } else if (typeof tagsValue === "string") {
+                    // New format: Comma-separated string (for table UI support)
+                    modelOverrides[modelId] = tagsValue
+                        .split(",")
+                        .map((tag) => tag.trim())
+                        .filter((tag) => tag.length > 0);
+                }
+            }
+        }
+
+        const modelCapabilitiesOverridesRaw = vscode.workspace
+            .getConfiguration()
+            .get<Record<string, string | string[]>>(ConfigManager.MODEL_CAPABILITIES_OVERRIDES_KEY, {});
+
+        const modelCapabilitiesOverrides: Record<string, { toolCalling?: boolean; imageInput?: boolean }> = {};
+        if (
+            modelCapabilitiesOverridesRaw &&
+            typeof modelCapabilitiesOverridesRaw === "object" &&
+            !Array.isArray(modelCapabilitiesOverridesRaw)
+        ) {
+            for (const [modelId, value] of Object.entries(modelCapabilitiesOverridesRaw)) {
+                let caps: string[] = [];
+                if (Array.isArray(value)) {
+                    caps = value.map(String);
+                } else if (typeof value === "string") {
+                    caps = value
+                        .split(",")
+                        .map((c) => c.trim())
+                        .filter((c) => c.length > 0);
+                }
+
+                if (caps.length > 0) {
+                    const entry: { toolCalling?: boolean; imageInput?: boolean } = {};
+                    if (caps.some((c) => c.toLowerCase() === "toolcalling" || c.toLowerCase() === "tools")) {
+                        entry.toolCalling = true;
+                    }
+                    if (caps.some((c) => c.toLowerCase() === "imageinput" || c.toLowerCase() === "vision")) {
+                        entry.imageInput = true;
+                    }
+                    if (Object.keys(entry).length > 0) {
+                        modelCapabilitiesOverrides[modelId] = entry;
+                    }
+                }
+            }
+        }
+
         const modelIdOverride = vscode.workspace
             .getConfiguration()
             .get<string>(ConfigManager.MODEL_ID_OVERRIDE_KEY, "")
@@ -118,6 +172,7 @@ export class ConfigManager {
             experimentalEmitUsageData,
             disableQuotaToolRedaction,
             modelOverrides,
+            modelCapabilitiesOverrides,
             modelIdOverride: modelIdOverride.length > 0 ? modelIdOverride : undefined,
             inlineCompletionsEnabled,
             inlineCompletionsModelId:

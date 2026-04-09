@@ -671,6 +671,69 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.ok(gpt4Tags.includes("custom-tag"), "Should include custom-tag override tag from config");
     });
 
+    test("provideLanguageModelChatInformation applies capability overrides", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        const mockData = [
+            {
+                model_name: "gpt-4",
+                model_info: {
+                    id: "gpt-4",
+                    mode: "chat",
+                    supports_native_streaming: true,
+                    supported_openai_params: [], // No tools
+                    supports_vision: false, // No vision
+                } as LiteLLMModelInfo,
+            },
+        ];
+
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({ data: mockData });
+
+        interface ConfigManager {
+            getConfig: () => Promise<{
+                url: string;
+                modelOverrides: Record<string, string[]>;
+                modelCapabilitiesOverrides: Record<string, { toolCalling?: boolean; imageInput?: boolean }>;
+            }>;
+            resolveBackends: () => Promise<ResolvedBackend[]>;
+        }
+        interface ProviderWithConfigManager {
+            _configManager: ConfigManager;
+        }
+        const providerWithConfig = provider as unknown as ProviderWithConfigManager;
+        sandbox
+            .stub(providerWithConfig._configManager, "resolveBackends")
+            .resolves([{ name: "default", url: "http://localhost:4000", apiKey: "test-key", enabled: true }]);
+        sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            modelOverrides: {},
+            modelCapabilitiesOverrides: {
+                "default/gpt-4": { toolCalling: true, imageInput: true },
+            },
+        } as unknown as {
+            url: string;
+            modelOverrides: Record<string, string[]>;
+            modelCapabilitiesOverrides: Record<string, { toolCalling?: boolean; imageInput?: boolean }>;
+        });
+
+        const infos = await provider.provideLanguageModelChatInformation({ silent: true }, {
+            isCancellationRequested: false,
+            onCancellationRequested: () => ({ dispose() {} }),
+        } as vscode.CancellationToken);
+
+        assert.strictEqual(infos.length, 1);
+        interface ModelInfoWithTags {
+            tags?: string[];
+            capabilities: { toolCalling?: boolean; imageInput?: boolean };
+        }
+        const gpt4 = infos[0] as unknown as ModelInfoWithTags;
+        assert.strictEqual(gpt4.capabilities.toolCalling, true);
+        assert.strictEqual(gpt4.capabilities.imageInput, true);
+        const gpt4Tags = gpt4.tags || [];
+        assert.ok(gpt4Tags.includes("tools"), "Should include tools tag from capability override");
+        assert.ok(gpt4Tags.includes("vision"), "Should include vision tag from capability override");
+    });
+
     test("provideLanguageModelChatInformation returns empty when /model/info data is invalid", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({ data: undefined } as never);

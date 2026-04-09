@@ -38,6 +38,17 @@ export interface OpenAIChatMessage {
 }
 
 /**
+ * Capability overrides for a single model.
+ * Undefined fields are left at their auto-derived values.
+ */
+export interface ModelCapabilityOverride {
+    /** Override the toolCalling capability reported to VS Code. */
+    toolCalling?: boolean;
+    /** Override the imageInput (vision) capability reported to VS Code. */
+    imageInput?: boolean;
+}
+
+/**
  * LiteLLM model configuration parameters.
  */
 export interface LiteLLMParams {
@@ -101,6 +112,12 @@ export interface LiteLLMConfig {
     experimentalEmitUsageData?: boolean;
     disableQuotaToolRedaction?: boolean;
     modelOverrides?: Record<string, string[]>;
+    /**
+     * Per-model capability overrides exposed to VS Code.
+     * Key is the Model ID (e.g. 'gpt-4o').
+     * When set, overrides the auto-derived toolCalling / imageInput capabilities.
+     */
+    modelCapabilitiesOverrides?: Record<string, ModelCapabilityOverride>;
     /**
      * Optional: force a specific model id (e.g. for inline completions).
      * When unset, the provider uses the model selected by Copilot/VS Code.

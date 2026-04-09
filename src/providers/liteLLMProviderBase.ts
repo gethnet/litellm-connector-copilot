@@ -226,8 +226,9 @@ export abstract class LiteLLMProviderBase {
                 const derived = deriveCapabilitiesFromModelInfo(modelId, modelInfo);
                 this._derivedCapabilitiesCache.set(modelId, derived);
 
-                const capabilities = capabilitiesToVSCode(derived);
-                const tags = getDerivedModelTags(modelId, derived, config.modelOverrides);
+                const capOverride = config.modelCapabilitiesOverrides?.[modelId];
+                const capabilities = capabilitiesToVSCode(derived, capOverride);
+                const tags = getDerivedModelTags(modelId, derived, config.modelOverrides, capOverride);
 
                 const formatTokens = (num: number): string => {
                     if (num >= 1000000) {
