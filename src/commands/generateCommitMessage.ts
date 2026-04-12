@@ -43,8 +43,10 @@ export function registerGenerateCommitMessageCommand(
                 return;
             }
 
-            // Get staged diff
-            const diff = await GitUtils.getStagedDiff();
+            // Get staged diff — extract rootUri from SCM context to select the correct repository
+            const scmContext = scm as { rootUri?: vscode.Uri } | undefined;
+            const targetRootUri = scmContext?.rootUri;
+            const diff = await GitUtils.getStagedDiff(targetRootUri);
             if (diff === undefined) {
                 vscode.window.showErrorMessage(
                     "No staged changes found. Please stage your changes before generating a commit message."
@@ -91,12 +93,16 @@ export function registerGenerateCommitMessageCommand(
                 vscode.window.showWarningMessage("The diff was truncated to fit within the model's context window.");
             }
 
-            // Find the SCM input box
+            // Find the SCM input box — prefer the repository matching the SCM context
             const api = await GitUtils.getGitAPI();
             if (!api || api.repositories.length === 0) {
                 return;
             }
-            const repo = api.repositories[0];
+
+            // Match the correct repository from SCM context, or fall back to first
+            const matchedRepo = targetRootUri ? GitUtils.findRepositoryByRootUri(api, targetRootUri) : undefined;
+            const repo = matchedRepo ?? api.repositories[0];
+
             const scmAny = scm as { inputBox?: { value: string; placeholder: string; enabled: boolean } };
             const repoAny = repo as { inputBox?: { value: string; placeholder: string; enabled: boolean } };
             const inputBox = repoAny.inputBox || (scmAny && scmAny.inputBox);

@@ -201,4 +201,107 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         await handler();
         // Should return early
     });
+
+    test("handler uses diff from correct repository when multiple repos are open", async () => {
+        const registerStub = sandbox.stub(vscode.commands, "registerCommand");
+        registerGenerateCommitMessageCommand(mockProvider as unknown as LiteLLMCommitMessageProvider);
+        const handler = registerStub.firstCall.args[1] as (scm: unknown) => Promise<void>;
+
+        mockProvider.getConfigManager.returns({
+            getConfig: async () => ({ commitModelIdOverride: "test-model" }),
+        } as unknown as ConfigManager);
+
+        const repoAInput = { value: "", placeholder: "", enabled: true };
+        const repoBInput = { value: "", placeholder: "", enabled: true };
+        const repoA = {
+            rootUri: vscode.Uri.file("/workspace/repo-a"),
+            inputBox: repoAInput,
+            state: { indexChanges: [] },
+            diffIndexWithHEAD: async () => [],
+            diff: async () => "diff-a",
+        };
+        const repoB = {
+            rootUri: vscode.Uri.file("/workspace/repo-b"),
+            inputBox: repoBInput,
+            state: { indexChanges: [{ uri: vscode.Uri.file("/workspace/repo-b/file.ts"), status: 1 }] },
+            diffIndexWithHEAD: async () => [{ uri: vscode.Uri.file("/workspace/repo-b/file.ts"), status: 1 }],
+            diff: async () => "diff-b-content",
+        };
+
+        const mockApi = { repositories: [repoA, repoB] } as unknown as never;
+        sandbox.stub(GitUtils, "getGitAPI").resolves(mockApi);
+        // getStagedDiff is called with rootUri now — stub to verify it receives the right URI
+        const getDiffStub = sandbox.stub(GitUtils, "getStagedDiff").resolves("diff-b-content");
+
+        mockProvider.getModelInfo.returns({ max_input_tokens: 1000 } as unknown as LiteLLMModelInfo);
+        mockProvider.provideCommitMessage.callsFake(async (_diff, _options, _token, onProgress) => {
+            if (onProgress) {
+                onProgress("fix: update file");
+            }
+            return "fix: update file";
+        });
+
+        sandbox.stub(vscode.window, "withProgress").callsFake(async (_options, task) => {
+            return await task(
+                { report: () => {} } as vscode.Progress<{ message?: string; increment?: number }>,
+                new vscode.CancellationTokenSource().token
+            );
+        });
+
+        // Simulate invoking from repo-b's SCM context
+        const scmContext = { rootUri: vscode.Uri.file("/workspace/repo-b") };
+        await handler(scmContext);
+
+        // Verify getStagedDiff was called with repo-b's rootUri
+        // Using getCall(0).args[0] for more robust verification
+        assert.strictEqual(getDiffStub.getCall(0).args[0]?.fsPath, vscode.Uri.file("/workspace/repo-b").fsPath);
+        // Verify the commit message was written to repo-b's input box, not repo-a's
+        assert.strictEqual(repoBInput.value, "fix: update file");
+        assert.strictEqual(repoAInput.value, "");
+    });
+
+    test("handler falls back to first repo when scm has no rootUri", async () => {
+        const registerStub = sandbox.stub(vscode.commands, "registerCommand");
+        registerGenerateCommitMessageCommand(mockProvider as unknown as LiteLLMCommitMessageProvider);
+        const handler = registerStub.firstCall.args[1] as (scm: unknown) => Promise<void>;
+
+        mockProvider.getConfigManager.returns({
+            getConfig: async () => ({ commitModelIdOverride: "test-model" }),
+        } as unknown as ConfigManager);
+
+        const repoAInput = { value: "", placeholder: "", enabled: true };
+        const repoA = {
+            rootUri: vscode.Uri.file("/workspace/repo-a"),
+            inputBox: repoAInput,
+            state: { indexChanges: [] },
+            diffIndexWithHEAD: async () => [],
+            diff: async () => "diff-a",
+        };
+
+        const mockApi = { repositories: [repoA] } as unknown as never;
+        sandbox.stub(GitUtils, "getGitAPI").resolves(mockApi);
+        const getDiffStub = sandbox.stub(GitUtils, "getStagedDiff").resolves("diff-a");
+
+        mockProvider.getModelInfo.returns({ max_input_tokens: 1000 } as unknown as LiteLLMModelInfo);
+        mockProvider.provideCommitMessage.callsFake(async (_diff, _options, _token, onProgress) => {
+            if (onProgress) {
+                onProgress("chore: update");
+            }
+            return "chore: update";
+        });
+
+        sandbox.stub(vscode.window, "withProgress").callsFake(async (_options, task) => {
+            return await task(
+                { report: () => {} } as vscode.Progress<{ message?: string; increment?: number }>,
+                new vscode.CancellationTokenSource().token
+            );
+        });
+
+        // Simulate invoking with no scm context (undefined)
+        await handler(undefined);
+
+        // getStagedDiff called without rootUri (backward compat)
+        assert.ok(getDiffStub.calledWith(undefined));
+        assert.strictEqual(repoAInput.value, "chore: update");
+    });
 });
