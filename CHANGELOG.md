@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 
 
+## [1.6.0-rc2] - 2026-04-12
+
+### 🚧 Development snapshot
+* Multi-repo support for commit message generation.
+
+### 🛠️ Bug Fixes
+* **Multi-repo commit generation**: Fixed an issue where commit messages were always generated from the first repository in the workspace. The extension now correctly identifies the active repository from the SCM context.
+  - Added `rootUri` to `Repository` interface in `GitUtils`.
+  - Added `findRepositoryByRootUri` to `GitUtils` for precise repository matching.
+  - Updated `generateCommitMessage` command to use the correct repository for both diff retrieval and input box updates.
+
+### 🧪 Testing & validation
+* ✅ Added multi-repo regression tests for `GitUtils` and `generateCommitMessage` command.
+
+
 ## [1.6.0-rc1] - 2026-04-04
 
 ### 🚧 Development snapshot
