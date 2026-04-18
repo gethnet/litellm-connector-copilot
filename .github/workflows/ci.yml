@@ -39,7 +39,7 @@ jobs:
         run: npm install --include dev
 
       - name: CI Pipeline
-        run: zx scripts/build.mjs ci
+        run: npm run ci
         env:
           VSCODE_TEST_RESULTS_DIR: ${{ github.workspace }}/test-results
           POSTHOG_MOCK: true
