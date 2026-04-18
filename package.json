@@ -239,15 +239,6 @@
 	},
 	"main": "./dist/extension.js",
 	"browser": "./dist/web/extension.js",
-	"enabledApiProposals": [
-		"chatProvider",
-		"languageModelCapabilities",
-		"languageModelProxy",
-		"languageModelSystem",
-		"languageModelThinkingPart",
-		"languageModelToolResultAudience",
-		"languageModelToolSupportsModel"
-	],
 	"scripts": {
 		"build": "zx scripts/build.mjs",
 		"build:dev": "zx scripts/build.mjs dev",
@@ -304,5 +295,14 @@
 	"dependencies": {
 		"posthog-js": "^1.364.7",
 		"posthog-node": "^5.28.11"
-	}
+	},
+	"enabledApiProposals": [
+		"chatProvider",
+		"languageModelCapabilities",
+		"languageModelProxy",
+		"languageModelSystem",
+		"languageModelThinkingPart",
+		"languageModelToolResultAudience",
+		"languageModelToolSupportsModel"
+	]
 }

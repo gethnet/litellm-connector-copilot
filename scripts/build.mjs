@@ -187,24 +187,30 @@ async function stepClean(what = 'all') {
     }
 }
 
-async function stripProposals() {
-    logStep('Stripping enabledApiProposals for marketplace build...');
-    const pkg = readPkg();
-    delete pkg.enabledApiProposals;
-    writePkg(pkg);
-}
-
-async function restoreProposals(proposals) {
-    logStep('Restoring enabledApiProposals...');
-    const pkg = readPkg();
-    pkg.enabledApiProposals = proposals;
-    writePkg(pkg);
-}
-
 async function stepVscePackage(production = false) {
     logStep(`Packaging VSIX${production ? ' (production)' : ''}...`);
     const args = production ? [] : [];
     await $`npx vsce package ${args}`;
+}
+
+async function withPackageMetadata(options, action) {
+    const pkg = readPkg();
+    const savedPreview = pkg.preview;
+    const savedProposals = pkg.enabledApiProposals;
+
+    try {
+        pkg.preview = options.preview;
+        if (!options.preserveProposals) {
+            delete pkg.enabledApiProposals;
+        }
+        writePkg(pkg);
+        await action();
+    } finally {
+        const restored = readPkg();
+        restored.preview = savedPreview;
+        restored.enabledApiProposals = savedProposals;
+        writePkg(restored);
+    }
 }
 
 async function swapReadme(mode) {
@@ -305,39 +311,39 @@ async function main() {
             await stepFormatCheck();
             await stepTestCoverage();
             // Marketplace build: strip proposals + swap readme
-            const savedProposals = readPkg().enabledApiProposals;
             try {
-                await stripProposals();
-                await swapReadme('marketplace');
-                await stepTypecheck();
-                await stepEsbuild(true);
-                await stepVscePackage(true);
+                await withPackageMetadata({ preview: false, preserveProposals: false }, async () => {
+                    await swapReadme('marketplace');
+                    await stepTypecheck();
+                    await stepEsbuild(true);
+                    await stepVscePackage(true);
+                });
             } finally {
-                await restoreProposals(savedProposals);
                 await swapReadme('restore');
             }
             break;
         }
         case 'package': {
-            const savedProposals = readPkg().enabledApiProposals;
             try {
-                await stripProposals();
-                await swapReadme('marketplace');
-                await stepClean('build');
-                await stepTypecheck();
-                await stepEsbuild(true);
-                await stepVscePackage(true);
+                await withPackageMetadata({ preview: false, preserveProposals: false }, async () => {
+                    await swapReadme('marketplace');
+                    await stepClean('build');
+                    await stepTypecheck();
+                    await stepEsbuild(true);
+                    await stepVscePackage(true);
+                });
             } finally {
-                await restoreProposals(savedProposals);
                 await swapReadme('restore');
             }
             break;
         }
         case 'package:dev': {
-            await stepClean('build');
-            await stepTypecheck();
-            await stepEsbuild(false);
-            await stepVscePackage(false);
+            await withPackageMetadata({ preview: true, preserveProposals: true }, async () => {
+                await stepClean('build');
+                await stepTypecheck();
+                await stepEsbuild(false);
+                await stepVscePackage(false);
+            });
             break;
         }
         case 'test': {
