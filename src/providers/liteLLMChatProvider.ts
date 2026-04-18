@@ -99,6 +99,16 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         const startTime = LiteLLMTelemetry.startTimer();
         const requestId = Math.random().toString(36).substring(7);
 
+        // Check if vscode has thinking part API available.
+        // Even if we are not the V2 provider, we can safely report thinking parts if the type exists.
+        const ThinkingPart = (vscode as unknown as Record<string, unknown>).LanguageModelThinkingPart as
+            | (new (
+                  value: string | string[],
+                  id?: string,
+                  metadata?: Record<string, unknown>
+              ) => vscode.LanguageModelResponsePart)
+            | undefined;
+
         // Extract caller/justification from options or model tags
         const telemetry = this.getTelemetryOptions(options);
         const modelWithTags = model as vscode.LanguageModelChatInformation & { tags?: string[] };
@@ -123,6 +133,10 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             report: (part) => {
                 if (part instanceof vscode.LanguageModelTextPart) {
                     this._partialAssistantText += part.value;
+                } else if (ThinkingPart && part instanceof ThinkingPart) {
+                    // Accumulate thinking tokens as well to count total output tokens accurately
+                    const tp = part as unknown as { value: string | string[] };
+                    this._partialAssistantText += Array.isArray(tp.value) ? tp.value.join("") : tp.value;
                 }
                 progress.report(part);
             },

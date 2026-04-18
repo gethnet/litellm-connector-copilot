@@ -8,6 +8,9 @@ on:
       - '.devcontainer/devcontainer.json'
       - '.devcontainer/**'
       - '.github/workflows/docker-build.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/build.mjs'
   workflow_dispatch:
 
 env:

@@ -38,14 +38,10 @@ jobs:
       - name: Install Dependencies
         run: npm install --include dev
 
-      - name: Lint
-        run: npm run lint:check
-
-      - name: Check Formatting
-        run: npm run format:check
-
-      - name: Run Tests with Coverage
-        run: npm run test:coverage
+      - name: CI Pipeline
+        run: zx scripts/build.mjs ci
+        env:
+          VSCODE_TEST_RESULTS_DIR: ${{ github.workspace }}/test-results
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v6
@@ -68,9 +64,6 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Package Extension
-        run: npm run package:marketplace
 
       - name: Upload VSIX
         uses: actions/upload-artifact@v7
