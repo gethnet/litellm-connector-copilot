@@ -42,6 +42,7 @@ jobs:
         run: zx scripts/build.mjs ci
         env:
           VSCODE_TEST_RESULTS_DIR: ${{ github.workspace }}/test-results
+          POSTHOG_MOCK: true
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v6

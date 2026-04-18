@@ -5,18 +5,38 @@ import posthog from "posthog-js";
 
 suite("PostHogAdapter (Web)", () => {
     let sandbox: sinon.SinonSandbox;
+    let envCiValue: string | undefined;
+    let envMockValue: string | undefined;
     let posthogCaptureExceptionStub: sinon.SinonStub;
     let posthogIdentifyStub: sinon.SinonStub;
     let posthogIsFeatureEnabledStub: sinon.SinonStub;
+    let posthogReloadFeatureFlagsStub: sinon.SinonStub;
+    let posthogResetStub: sinon.SinonStub;
 
     setup(() => {
         sandbox = sinon.createSandbox();
+        envCiValue = process.env.CI;
+        envMockValue = process.env.POSTHOG_MOCK;
+        delete process.env.CI;
+        delete process.env.POSTHOG_MOCK;
         posthogCaptureExceptionStub = sandbox.stub(posthog, "captureException");
         posthogIdentifyStub = sandbox.stub(posthog, "identify");
         posthogIsFeatureEnabledStub = sandbox.stub(posthog, "isFeatureEnabled");
+        posthogReloadFeatureFlagsStub = sandbox.stub(posthog, "reloadFeatureFlags");
+        posthogResetStub = sandbox.stub(posthog, "reset");
     });
 
     teardown(() => {
+        if (envCiValue === undefined) {
+            delete process.env.CI;
+        } else {
+            process.env.CI = envCiValue;
+        }
+        if (envMockValue === undefined) {
+            delete process.env.POSTHOG_MOCK;
+        } else {
+            process.env.POSTHOG_MOCK = envMockValue;
+        }
         sandbox.restore();
     });
 
@@ -102,5 +122,29 @@ suite("PostHogAdapter (Web)", () => {
         const enabled = adapter.isFeatureEnabled("test-flag", "user-123");
         assert.strictEqual(enabled, false);
         assert.strictEqual(posthogIsFeatureEnabledStub.called, false);
+    });
+
+    test("reloadFeatureFlags is a no-op when adapter is disabled", () => {
+        const adapter = new PostHogAdapter();
+        adapter.initialize({
+            apiKey: "test-key",
+            host: "test-host",
+            enabled: false,
+        });
+
+        adapter.reloadFeatureFlags();
+        assert.strictEqual(posthogReloadFeatureFlagsStub.called, false);
+    });
+
+    test("shutdown delegates to PostHog reset when enabled", async () => {
+        const adapter = new PostHogAdapter();
+        adapter.initialize({
+            apiKey: "test-key",
+            host: "test-host",
+            enabled: true,
+        });
+
+        await adapter.shutdown();
+        assert.strictEqual(posthogResetStub.calledOnce, true);
     });
 });

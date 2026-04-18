@@ -10,8 +10,15 @@ import type {
 export class PostHogAdapter implements IPostHogAdapter {
     private initialized = false;
     private enabled = false;
+    private readonly offlineMode = process.env.CI === "true" || process.env.POSTHOG_MOCK === "true";
 
     initialize(config: PostHogConfig): void {
+        if (this.offlineMode) {
+            this.initialized = true;
+            this.enabled = false;
+            return;
+        }
+
         posthog.init(config.apiKey, {
             api_host: config.host,
             autocapture: false,
@@ -70,6 +77,10 @@ export class PostHogAdapter implements IPostHogAdapter {
     }
 
     async shutdown(): Promise<void> {
+        if (!this.enabled || !this.initialized) {
+            return;
+        }
+
         posthog.reset();
     }
 

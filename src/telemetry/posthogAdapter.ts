@@ -10,8 +10,15 @@ import type {
 export class PostHogAdapter implements IPostHogAdapter {
     private client: PostHog | undefined;
     private enabled = false;
+    private readonly offlineMode = process.env.CI === "true" || process.env.POSTHOG_MOCK === "true";
 
     initialize(config: PostHogConfig): void {
+        if (this.offlineMode) {
+            this.enabled = false;
+            this.client = undefined;
+            return;
+        }
+
         this.client = new PostHog(config.apiKey, {
             host: config.host,
             enableExceptionAutocapture: false, // Must be false to prevent GUIDs and capturing other extension's errors
@@ -69,11 +76,19 @@ export class PostHogAdapter implements IPostHogAdapter {
     }
 
     async flush(): Promise<void> {
-        await this.client?.flush();
+        if (!this.enabled || !this.client) {
+            return;
+        }
+
+        await this.client.flush();
     }
 
     async shutdown(): Promise<void> {
-        await this.client?.shutdown();
+        if (!this.enabled || !this.client) {
+            return;
+        }
+
+        await this.client.shutdown();
     }
 
     setEnabled(enabled: boolean): void {
