@@ -7,6 +7,7 @@ import { MultiBackendClient } from "../../adapters/multiBackendClient";
 import { ResponsesClient } from "../../adapters/responsesClient";
 import type { ConfigManager } from "../../config/configManager";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, ResolvedBackend } from "../../types";
+import { createMockSecrets } from "../../test/utils/testMocks";
 
 suite("LiteLLM Provider Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -35,20 +36,11 @@ suite("LiteLLM Provider Unit Tests", () => {
             has: (key: string) => settingsMap.has(key),
         } as unknown as vscode.WorkspaceConfiguration);
     });
-    const mockSecrets: vscode.SecretStorage = {
-        get: async (key: string) => {
-            if (key === "litellm-connector.baseUrl") {
-                return "http://localhost:4000";
-            }
-            if (key === "litellm-connector.apiKey") {
-                return "test-api-key";
-            }
-            return undefined;
-        },
-        store: async () => {},
-        delete: async () => {},
-        onDidChange: (_listener: unknown) => ({ dispose() {} }),
-    } as unknown as vscode.SecretStorage;
+
+    const mockSecrets = createMockSecrets({
+        "litellm-connector.baseUrl": "http://localhost:4000",
+        "litellm-connector.apiKey": "test-api-key",
+    });
 
     const userAgent = "GitHubCopilotChat/test VSCode/test";
 

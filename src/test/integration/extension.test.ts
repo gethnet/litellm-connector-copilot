@@ -6,6 +6,7 @@ import * as extension from "../../extension";
 import { ConfigManager } from "../../config/configManager";
 import { LiteLLMChatProvider } from "../../providers";
 import { InlineCompletionsRegistrar } from "../../inlineCompletions/registerInlineCompletions";
+import { createMockSecrets, createMockOutputChannel } from "../utils/testMocks";
 
 suite("Extension Activation Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -19,12 +20,7 @@ suite("Extension Activation Unit Tests", () => {
     });
 
     test("activate registers providers and commands", async () => {
-        const mockSecrets = {
-            get: async () => undefined,
-            store: async () => {},
-            delete: async () => {},
-            onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
-        } as unknown as vscode.SecretStorage;
+        const mockSecrets = createMockSecrets();
 
         const context = {
             subscriptions: [],
@@ -32,15 +28,7 @@ suite("Extension Activation Unit Tests", () => {
         } as unknown as vscode.ExtensionContext;
 
         // Avoid touching real output channels.
-        sandbox.stub(vscode.window, "createOutputChannel").returns({
-            info() {},
-            warn() {},
-            error() {},
-            debug() {},
-            trace() {},
-            show() {},
-            dispose() {},
-        } as unknown as vscode.LogOutputChannel);
+        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
 
         // UA builder.
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
@@ -73,27 +61,14 @@ suite("Extension Activation Unit Tests", () => {
     });
 
     test("activate prompts classic config flow when not configured", async () => {
-        const mockSecrets = {
-            get: async () => undefined,
-            store: async () => {},
-            delete: async () => {},
-            onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
-        } as unknown as vscode.SecretStorage;
+        const mockSecrets = createMockSecrets();
 
         const context = {
             subscriptions: [],
             secrets: mockSecrets,
         } as unknown as vscode.ExtensionContext;
 
-        sandbox.stub(vscode.window, "createOutputChannel").returns({
-            info() {},
-            warn() {},
-            error() {},
-            debug() {},
-            trace() {},
-            show() {},
-            dispose() {},
-        } as unknown as vscode.LogOutputChannel);
+        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
 
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
         sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
@@ -117,15 +92,7 @@ suite("Extension Activation Unit Tests", () => {
 
     test("deactivate does not clear configuration", async () => {
         // Ensure Logger doesn't explode if used during deactivate.
-        sandbox.stub(vscode.window, "createOutputChannel").returns({
-            info() {},
-            warn() {},
-            error() {},
-            debug() {},
-            trace() {},
-            show() {},
-            dispose() {},
-        } as unknown as vscode.LogOutputChannel);
+        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
 
         const context = {
             subscriptions: [],
@@ -145,27 +112,14 @@ suite("Extension Activation Unit Tests", () => {
     });
 
     test("activate skips classic configuration prompt when provider is already configured", async () => {
-        const mockSecrets = {
-            get: async () => undefined,
-            store: async () => {},
-            delete: async () => {},
-            onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
-        } as unknown as vscode.SecretStorage;
+        const mockSecrets = createMockSecrets();
 
         const context = {
             subscriptions: [],
             secrets: mockSecrets,
         } as unknown as vscode.ExtensionContext;
 
-        sandbox.stub(vscode.window, "createOutputChannel").returns({
-            info() {},
-            warn() {},
-            error() {},
-            debug() {},
-            trace() {},
-            show() {},
-            dispose() {},
-        } as unknown as vscode.LogOutputChannel);
+        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
 
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
         sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
@@ -186,27 +140,14 @@ suite("Extension Activation Unit Tests", () => {
     });
 
     test("deactivate tolerates repeated disposal", async () => {
-        const mockSecrets = {
-            get: async () => undefined,
-            store: async () => {},
-            delete: async () => {},
-            onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
-        } as unknown as vscode.SecretStorage;
+        const mockSecrets = createMockSecrets();
 
         const context = {
             subscriptions: [],
             secrets: mockSecrets,
         } as unknown as vscode.ExtensionContext;
 
-        sandbox.stub(vscode.window, "createOutputChannel").returns({
-            info() {},
-            warn() {},
-            error() {},
-            debug() {},
-            trace() {},
-            show() {},
-            dispose() {},
-        } as unknown as vscode.LogOutputChannel);
+        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
 
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
         sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
@@ -221,27 +162,14 @@ suite("Extension Activation Unit Tests", () => {
     });
 
     test("activate handles missing extension object gracefully", async () => {
-        const mockSecrets = {
-            get: async () => undefined,
-            store: async () => {},
-            delete: async () => {},
-            onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
-        } as unknown as vscode.SecretStorage;
+        const mockSecrets = createMockSecrets();
 
         const context = {
             subscriptions: [],
             secrets: mockSecrets,
         } as unknown as vscode.ExtensionContext;
 
-        sandbox.stub(vscode.window, "createOutputChannel").returns({
-            info() {},
-            warn() {},
-            error() {},
-            debug() {},
-            trace() {},
-            show() {},
-            dispose() {},
-        } as unknown as vscode.LogOutputChannel);
+        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
 
         // Extension not found.
         sandbox.stub(vscode.extensions, "getExtension").returns(undefined);
@@ -255,27 +183,14 @@ suite("Extension Activation Unit Tests", () => {
     });
 
     test("activate handles registration failure gracefully", async () => {
-        const mockSecrets = {
-            get: async () => undefined,
-            store: async () => {},
-            delete: async () => {},
-            onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
-        } as unknown as vscode.SecretStorage;
+        const mockSecrets = createMockSecrets();
 
         const context = {
             subscriptions: [],
             secrets: mockSecrets,
         } as unknown as vscode.ExtensionContext;
 
-        sandbox.stub(vscode.window, "createOutputChannel").returns({
-            info() {},
-            warn() {},
-            error() {},
-            debug() {},
-            trace() {},
-            show() {},
-            dispose() {},
-        } as unknown as vscode.LogOutputChannel);
+        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
 
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
         sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
@@ -291,27 +206,14 @@ suite("Extension Activation Unit Tests", () => {
     });
 
     test("activate handles configuration prompt dismissal", async () => {
-        const mockSecrets = {
-            get: async () => undefined,
-            store: async () => {},
-            delete: async () => {},
-            onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
-        } as unknown as vscode.SecretStorage;
+        const mockSecrets = createMockSecrets();
 
         const context = {
             subscriptions: [],
             secrets: mockSecrets,
         } as unknown as vscode.ExtensionContext;
 
-        sandbox.stub(vscode.window, "createOutputChannel").returns({
-            info() {},
-            warn() {},
-            error() {},
-            debug() {},
-            trace() {},
-            show() {},
-            dispose() {},
-        } as unknown as vscode.LogOutputChannel);
+        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
 
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
         sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");

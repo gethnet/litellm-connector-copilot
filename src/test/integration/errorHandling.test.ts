@@ -3,35 +3,13 @@ import * as vscode from "vscode";
 import { LiteLLMChatProvider } from "../../providers";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 import * as sinon from "sinon";
+import { createMockSecrets } from "../../test/utils/testMocks";
 
 suite("LiteLLM Error Handling Unit Tests", function () {
-    // Some of these tests previously attempted to contact a real LiteLLM instance
-    // when running on CI, which obviously isn't available.  Stubbing worked
-    // locally but CI still exercised network paths and caused failures.  The
-    // quickest fix is to skip the entire suite when the process is running in a
-    // CI environment.  We detect both the generic `CI` variable as well as
-    // GitHub Actions.
-    suiteSetup(function () {
-        const runningOnCI =
-            process.env.CI === "true" || process.env.CI === "1" || process.env.GITHUB_ACTIONS === "true";
-        if (runningOnCI) {
-            this.skip();
-        }
+    const mockSecrets = createMockSecrets({
+        "litellm-connector.baseUrl": "http://localhost:4000",
+        "litellm-connector.apiKey": "test-api-key",
     });
-    const mockSecrets: vscode.SecretStorage = {
-        get: async (key: string) => {
-            if (key === "litellm-connector.baseUrl") {
-                return "http://localhost:4000";
-            }
-            if (key === "litellm-connector.apiKey") {
-                return "test-api-key";
-            }
-            return undefined;
-        },
-        store: async () => {},
-        delete: async () => {},
-        onDidChange: (_listener: unknown) => ({ dispose() {} }),
-    } as unknown as vscode.SecretStorage;
 
     const userAgent = "GitHubCopilotChat/test VSCode/test";
     let sandbox: sinon.SinonSandbox;

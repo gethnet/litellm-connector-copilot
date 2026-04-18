@@ -307,13 +307,24 @@ suite("LiteLLM Client Unit Tests", () => {
                 return this;
             },
             text: async () => "Rate limit exceeded",
-            headers: { get: () => null },
+            headers: {
+                get: (name: string) => {
+                    if (name.toLowerCase() === "retry-after") {
+                        return "0.5";
+                    }
+                    return null;
+                },
+            },
         };
 
         const successResponse = {
             ok: true,
             status: 200,
+            statusText: "OK",
             body: new ReadableStream(),
+            clone: function () {
+                return this;
+            },
             headers: { get: () => null },
         };
 

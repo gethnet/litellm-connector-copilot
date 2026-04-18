@@ -6,24 +6,15 @@ import { LiteLLMChatProvider } from "../";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 import { ResponsesClient } from "../../adapters/responsesClient";
 import { Logger } from "../../utils/logger";
+import { createMockSecrets } from "../../test/utils/testMocks";
 
 suite("LiteLLM Chat Provider Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
 
-    const mockSecrets: vscode.SecretStorage = {
-        get: async (key: string) => {
-            if (key === "litellm-connector.baseUrl") {
-                return "http://localhost:4000";
-            }
-            if (key === "litellm-connector.apiKey") {
-                return "test-api-key";
-            }
-            return undefined;
-        },
-        store: async () => {},
-        delete: async () => {},
-        onDidChange: (_listener: unknown) => ({ dispose() {} }),
-    } as unknown as vscode.SecretStorage;
+    const mockSecrets = createMockSecrets({
+        "litellm-connector.baseUrl": "http://localhost:4000",
+        "litellm-connector.apiKey": "test-api-key",
+    });
 
     const userAgent = "GitHubCopilotChat/test VSCode/test";
 

@@ -7,18 +7,13 @@ import { LiteLLMTelemetry } from "../../utils/telemetry";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 import { ResponsesClient } from "../../adapters/responsesClient";
 import type { ConfigManager } from "../../config/configManager";
+import { createMockSecrets } from "../utils/testMocks";
 
 suite("Token Telemetry Regression Tests", () => {
     let sandbox: sinon.SinonSandbox;
     let reportMetricStub: sinon.SinonStub;
 
-    const mockSecrets: vscode.SecretStorage = {
-        get: async () => undefined,
-        store: async () => {},
-        delete: async () => {},
-        keys: async () => [],
-        onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
-    };
+    const mockSecrets = createMockSecrets();
     const userAgent = "test-ua";
 
     setup(() => {
