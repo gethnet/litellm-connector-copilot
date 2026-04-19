@@ -193,3 +193,12 @@ The implementation agent MUST:
 7. NOT modify files not listed in the Changes Overview
 
 If the agent encounters ambiguity, it MUST stop and request clarification rather than assume.
+
+## Deliverables
+
+1. Save the plan with in the `.plans` folder at the workspace/project root.  The file name should be concise and descriptive.  Under 48chars, must have a `.prompt.md` file extension.
+2. Summerize the state of the plan, and provide the user with a clickable in-line link to open the newly created plan.
+
+### File Exists already
+
+If the file exists, compare the existing file content and determine if they conver the same content for the plan you just generated.  If the plan covers the same content, inteligently update the plan unless the user specifically requests that you replace it.

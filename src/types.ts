@@ -46,6 +46,10 @@ export interface ModelCapabilityOverride {
     toolCalling?: boolean;
     /** Override the imageInput (vision) capability reported to VS Code. */
     imageInput?: boolean;
+    /** Override the reasoning capability (surfaced as tag). */
+    reasoning?: boolean;
+    /** Override the pdf input capability (surfaced as tag). */
+    pdfInput?: boolean;
 }
 
 /**

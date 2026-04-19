@@ -36,6 +36,7 @@
 				"ms-vscode.test-adapter-converter",
 				"ryanluker.vscode-coverage-gutters",
 				"GitHub.vscode-pull-request-github",
+				"dennisvhest.npm-browser"
 			],
 			"settings": {
 				"editor.formatOnSave": true,

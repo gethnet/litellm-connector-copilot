@@ -10,9 +10,6 @@ Follow this workflow exactly:
 
 1. Read and follow these files before making changes:
    - [AGENTS.md](../../AGENTS.md)
-   - [.github/instructions/plan-generation.instructions.md](../instructions/plan-generation.instructions.md)
-   - [.github/instructions/typescript-no-any.instructions.md](../instructions/typescript-no-any.instructions.md)
-   - [.github/skills/agent-customization/SKILL.md](../skills/agent-customization/SKILL.md)
 
 2. Determine the current version from [package.json](../../package.json).
    - Use the `version` field as the source of truth.

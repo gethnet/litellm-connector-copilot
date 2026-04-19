@@ -9,6 +9,8 @@ suite("modelCapabilities", () => {
                 supportsTools: false,
                 supportsVision: false,
                 supportsStreaming: true,
+                supportsReasoning: false,
+                supportsPdf: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -24,6 +26,8 @@ suite("modelCapabilities", () => {
                 supportsTools: false,
                 supportsVision: false,
                 supportsStreaming: true,
+                supportsReasoning: false,
+                supportsPdf: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -40,6 +44,8 @@ suite("modelCapabilities", () => {
                 supportsTools: false,
                 supportsVision: false,
                 supportsStreaming: true,
+                supportsReasoning: false,
+                supportsPdf: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -56,6 +62,8 @@ suite("modelCapabilities", () => {
                 supportsTools: true,
                 supportsVision: true,
                 supportsStreaming: true,
+                supportsReasoning: false,
+                supportsPdf: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -72,6 +80,8 @@ suite("modelCapabilities", () => {
                 supportsTools: false,
                 supportsVision: false,
                 supportsStreaming: true,
+                supportsReasoning: false,
+                supportsPdf: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -90,6 +100,8 @@ suite("modelCapabilities", () => {
                 supportsTools: false,
                 supportsVision: false,
                 supportsStreaming: true,
+                supportsReasoning: false,
+                supportsPdf: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -106,6 +118,8 @@ suite("modelCapabilities", () => {
                 supportsTools: false,
                 supportsVision: false,
                 supportsStreaming: true,
+                supportsReasoning: false,
+                supportsPdf: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -122,6 +136,8 @@ suite("modelCapabilities", () => {
                 supportsTools: true,
                 supportsVision: true,
                 supportsStreaming: true,
+                supportsReasoning: false,
+                supportsPdf: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -133,11 +149,48 @@ suite("modelCapabilities", () => {
             assert.ok(tags.includes("vision"), "Should still include vision tag");
         });
 
+        test("adds reasoning and pdf tags based on capabilities", () => {
+            const derived = {
+                supportsTools: false,
+                supportsVision: false,
+                supportsStreaming: false,
+                supportsReasoning: true,
+                supportsPdf: true,
+                endpointMode: "chat" as const,
+                maxInputTokens: 100,
+                maxOutputTokens: 100,
+                rawContextWindow: 200,
+            };
+            const tags = getModelTags("test", derived);
+            assert.ok(tags.includes("reasoning"), "should have reasoning tag");
+            assert.ok(tags.includes("pdf"), "should have pdf tag");
+        });
+
+        test("adds reasoning and pdf tags based on overrides", () => {
+            const derived = {
+                supportsTools: false,
+                supportsVision: false,
+                supportsStreaming: false,
+                supportsReasoning: false,
+                supportsPdf: false,
+                endpointMode: "chat" as const,
+                maxInputTokens: 100,
+                maxOutputTokens: 100,
+                rawContextWindow: 200,
+            };
+            const capabilityOverrides: ModelCapabilityOverride = { reasoning: true, pdfInput: true };
+            const tags = getModelTags("test", derived, {}, capabilityOverrides);
+            assert.ok(tags.includes("reasoning"), "should have reasoning tag from override");
+            assert.ok(tags.includes("pdf"), "should have pdf tag from override");
+        });
+
         test("merges tag overrides and capability overrides together", () => {
             const derived = {
                 supportsTools: false,
                 supportsVision: false,
                 supportsStreaming: true,
+                supportsReasoning: false,
+                supportsPdf: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,

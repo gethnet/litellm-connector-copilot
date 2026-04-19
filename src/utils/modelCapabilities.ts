@@ -5,6 +5,8 @@ export interface DerivedModelCapabilities {
     supportsTools: boolean;
     supportsVision: boolean;
     supportsStreaming: boolean;
+    supportsReasoning: boolean;
+    supportsPdf: boolean;
     endpointMode: "chat" | "responses" | "completions";
     maxInputTokens: number;
     maxOutputTokens: number;
@@ -26,6 +28,8 @@ export function deriveCapabilitiesFromModelInfo(
     const supportsStreaming = !!(
         modelInfo?.supports_native_streaming || modelInfo?.supported_openai_params?.includes("stream")
     );
+    const supportsReasoning = !!modelInfo?.supports_reasoning;
+    const supportsPdf = !!modelInfo?.supports_pdf_input;
 
     const rawLimit = modelInfo?.max_input_tokens ?? modelInfo?.context_window_tokens ?? modelInfo?.max_tokens ?? 128000;
     const maxOutputTokens = modelInfo?.max_output_tokens ?? 16000;
@@ -35,6 +39,8 @@ export function deriveCapabilitiesFromModelInfo(
         supportsTools,
         supportsVision,
         supportsStreaming,
+        supportsReasoning,
+        supportsPdf,
         endpointMode: (modelInfo?.mode as "chat" | "responses" | "completions") ?? "chat",
         maxInputTokens,
         maxOutputTokens,
@@ -69,6 +75,8 @@ export function getModelTags(
     // Use capability override if set, otherwise use derived value
     const effectiveTools = capabilityOverrides?.toolCalling ?? derived.supportsTools;
     const effectiveVision = capabilityOverrides?.imageInput ?? derived.supportsVision;
+    const effectiveReasoning = capabilityOverrides?.reasoning ?? derived.supportsReasoning;
+    const effectivePdf = capabilityOverrides?.pdfInput ?? derived.supportsPdf;
 
     if (effectiveTools) {
         tags.add("tools");
@@ -76,6 +84,14 @@ export function getModelTags(
 
     if (effectiveVision) {
         tags.add("vision");
+    }
+
+    if (effectiveReasoning) {
+        tags.add("reasoning");
+    }
+
+    if (effectivePdf) {
+        tags.add("pdf");
     }
 
     if (derived.supportsStreaming) {

@@ -5,10 +5,8 @@
 
 set -euo pipefail
 
-# Read stdin (hook input) if available, otherwise continue
-if [ ! -t 0 ]; then
-    INPUT=$(cat)
-fi
+# Drain stdin if piped (prevents blocking on hook input)
+exec </dev/null
 
 # Function to run a command and capture output
 run_check() {
