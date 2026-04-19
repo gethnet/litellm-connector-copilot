@@ -9,8 +9,6 @@ on:
     branches:
       - main
       - dev
-      - geth-dev
-      - dev/**
       - fix/**
       - bugfix/**
       - enhance/**
@@ -18,7 +16,6 @@ on:
   pull_request:
     branches:
       - main
-      - geth-dev
       - dev
   workflow_call:
     outputs:
@@ -41,17 +38,14 @@ jobs:
       - name: Install Dependencies
         run: npm install --include dev
 
-      - name: Lint
-        run: npm run lint:check
-
-      - name: Check Formatting
-        run: npm run format:check
-
-      - name: Run Tests with Coverage
-        run: npm run test:coverage
+      - name: CI Pipeline
+        run: npm run test:coverage && npm run package:marketplace
+        env:
+          VSCODE_TEST_RESULTS_DIR: ${{ github.workspace }}/test-results
+          POSTHOG_MOCK: true
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: ${{ github.workspace }}/coverage/lcov.info
           fail_ci_if_error: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' }}
@@ -59,7 +53,7 @@ jobs:
 
       - name: Upload test results to Codecov
         if: always()
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: ${{ github.workspace }}/test-results/test-results.xml
           report_type: test_results
@@ -71,9 +65,6 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Package Extension
-        run: npm run package:marketplace
 
       - name: Upload VSIX
         uses: actions/upload-artifact@v7

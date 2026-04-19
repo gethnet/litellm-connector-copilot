@@ -139,6 +139,16 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
                 caller: "scm-generator",
             });
 
+            if (err instanceof Error) {
+                this._telemetryService?.captureException(err, {
+                    caller: "scm-generator",
+                    properties: {
+                        requestId,
+                        modelId,
+                    },
+                });
+            }
+
             throw err;
         }
     }

@@ -3,16 +3,19 @@ import * as sinon from "sinon";
 import type { IMetrics } from "..//telemetry";
 import { LiteLLMTelemetry } from "..//telemetry";
 import { Logger } from "..//logger";
+import type { TelemetryService } from "../../telemetry/telemetryService";
 
 suite("Telemetry Unit Tests", () => {
     let loggerDebugStub: sinon.SinonStub;
+    let sandbox: sinon.SinonSandbox;
 
     setup(() => {
-        loggerDebugStub = sinon.stub(Logger, "debug");
+        sandbox = sinon.createSandbox();
+        loggerDebugStub = sandbox.stub(Logger, "debug");
     });
 
     teardown(() => {
-        sinon.restore();
+        sandbox.restore();
     });
 
     test("reportMetric logs to Logger.debug", () => {
@@ -92,5 +95,36 @@ suite("Telemetry Unit Tests", () => {
             const logMessage = loggerDebugStub.firstCall.args[0];
             assert.ok(logMessage.includes(`"caller":"${caller}"`), `Should log caller: ${caller}`);
         }
+    });
+
+    test("reportMetric forwards requestId to captureRequestFailed", () => {
+        const captureRequestFailed = sandbox.stub();
+        const telemetryServiceStub = {
+            captureRequestFailed,
+        } as unknown as TelemetryService;
+
+        LiteLLMTelemetry.setTelemetryService(telemetryServiceStub);
+
+        LiteLLMTelemetry.reportMetric({
+            requestId: "req-metric-fail-123",
+            model: "gpt-4",
+            durationMs: 50,
+            status: "failure",
+            error: "network_error",
+            caller: "chat",
+        });
+
+        assert.strictEqual(captureRequestFailed.calledOnce, true);
+        const props = captureRequestFailed.firstCall.args[0] as {
+            request_id: string;
+            caller: string;
+            model: string;
+            endpoint: string;
+            durationMs: number;
+            errorType: string;
+        };
+        assert.strictEqual(props.request_id, "req-metric-fail-123");
+        assert.strictEqual(props.caller, "chat");
+        assert.strictEqual(props.errorType, "network_error");
     });
 });

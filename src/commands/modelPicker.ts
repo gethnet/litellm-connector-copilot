@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import type { LiteLLMProviderBase } from "../providers/liteLLMProviderBase";
 import { Logger } from "../utils/logger";
+import type { TelemetryService } from "../telemetry/telemetryService";
 
 /**
  * Options for the model picker.
@@ -22,6 +23,14 @@ export interface ModelPickerOptions {
      * Optional callback when the selection is cleared.
      */
     onClear?: () => void;
+    /**
+     * Optional telemetry service.
+     */
+    telemetryService?: TelemetryService;
+    /**
+     * Optional caller context for telemetry.
+     */
+    caller?: string;
 }
 
 /**
@@ -30,6 +39,10 @@ export interface ModelPickerOptions {
  * @param options Picker options.
  */
 export async function showModelPicker(provider: LiteLLMProviderBase, options: ModelPickerOptions): Promise<void> {
+    if (options.telemetryService) {
+        options.telemetryService.captureModelPickerOpened(options.caller || "unknown");
+        options.telemetryService.captureFeatureUsed("model-picker", options.caller || "unknown");
+    }
     try {
         // Ensure models are discovered
         const models = await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
@@ -41,7 +54,10 @@ export async function showModelPicker(provider: LiteLLMProviderBase, options: Mo
         const items: vscode.QuickPickItem[] = models.map((m) => {
             const mAny = m as unknown as { vendor?: string; tags?: string[] };
             return {
-                label: m.id,
+                label: m.name,
+                // Keep routing value as the internal VS Code model id.
+                // QuickPickItem has no separate value field, so we encode it in the description.
+                // Instead, we update later by selecting label -> id mapping.
                 description: mAny.vendor || "",
                 detail: mAny.tags?.join(", ") || "",
             };
@@ -72,6 +88,9 @@ export async function showModelPicker(provider: LiteLLMProviderBase, options: Mo
             await vscode.workspace
                 .getConfiguration("litellm-connector")
                 .update(options.settingKey, undefined, vscode.ConfigurationTarget.Global);
+            if (options.telemetryService) {
+                options.telemetryService.captureConfigChanged(options.settingKey, "model-picker-clear");
+            }
             if (options.onClear) {
                 options.onClear();
             }
@@ -79,13 +98,22 @@ export async function showModelPicker(provider: LiteLLMProviderBase, options: Mo
             return;
         }
 
+        const selectedId = models.find((m) => m.name === selected.label)?.id;
+        if (!selectedId) {
+            vscode.window.showErrorMessage("Selected model could not be resolved.");
+            return;
+        }
+
         await vscode.workspace
             .getConfiguration("litellm-connector")
-            .update(options.settingKey, selected.label, vscode.ConfigurationTarget.Global);
-        if (options.onSelect) {
-            options.onSelect(selected.label);
+            .update(options.settingKey, selectedId, vscode.ConfigurationTarget.Global);
+        if (options.telemetryService) {
+            options.telemetryService.captureConfigChanged(options.settingKey, "model-picker-select");
         }
-        vscode.window.showInformationMessage(`Selected model: ${selected.label}`);
+        if (options.onSelect) {
+            options.onSelect(selectedId);
+        }
+        vscode.window.showInformationMessage(`Selected model: ${selectedId}`);
     } catch (err) {
         Logger.error("Failed to show model picker", err);
         vscode.window.showErrorMessage("Failed to load models for selection.");

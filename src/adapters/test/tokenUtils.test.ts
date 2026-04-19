@@ -7,8 +7,13 @@ import {
     estimateToolTokens,
     trimMessagesToFitBudget,
     countTokens,
+    calculateAvailableContext,
+    getStaticPromptTokenCount,
+    countTokensForV2Messages,
+    trimV2MessagesForBudget,
 } from "../tokenUtils";
-import type { LiteLLMModelInfo } from "../../types";
+import type { LiteLLMModelInfo, OpenAIFunctionToolDef } from "../../types";
+import type { V2ChatMessage } from "../../providers/v2Types";
 
 suite("TokenUtils Unit Tests", () => {
     test("countTokens handles strings, single messages, and message arrays", () => {
@@ -216,5 +221,72 @@ suite("TokenUtils Unit Tests", () => {
             () => trimMessagesToFitBudget([systemMsg], undefined, modelInfo),
             /Message exceeds token limit\./
         );
+    });
+
+    test("calculateAvailableContext computes correctly with buffer", () => {
+        // Mock getStaticPromptTokenCount or use values from selectTokenizer (default)
+        const available = calculateAvailableContext(1000, 200, ["static"], "m");
+        // "static" is 6 chars -> 2 tokens. Total static: 2.
+        // 1000 - 200 - 2 = 798. Buffer 0.05 -> 798 * 0.95 = 758.1 -> 758.
+        assert.strictEqual(available, 758);
+    });
+
+    test("getStaticPromptTokenCount uses cache", () => {
+        const p = "unique-prompt-" + Math.random();
+        const count1 = getStaticPromptTokenCount(p, "m");
+        const count2 = getStaticPromptTokenCount(p, "m");
+        assert.strictEqual(count1, count2);
+    });
+
+    test("countTokensForV2Messages counts text, thinking, data, tool_call, tool_result", () => {
+        const messages = [
+            {
+                role: "assistant",
+                content: [
+                    { type: "text", text: "hi" },
+                    { type: "thinking", value: ["thought ", "process"] },
+                    { type: "data", data: new Uint8Array([104, 105]), mimeType: "application/json" },
+                    { type: "data", data: new Uint8Array([104, 105]), mimeType: "cache_control" },
+                    { type: "tool_call", id: "c1", name: "n", input: undefined },
+                    { type: "tool_result", id: "c1", call_id: "c1", content: undefined },
+                ],
+            },
+        ] as unknown as V2ChatMessage[];
+
+        const count = countTokensForV2Messages(messages, "m");
+        assert.ok(count > 0);
+
+        assert.strictEqual(countTokensForV2Messages("string"), 2);
+    });
+
+    test("trimV2MessagesForBudget protects assistant message on 'continue'", () => {
+        const systemMsg = { role: "system", content: [{ type: "text", text: "System" }] } as unknown as V2ChatMessage;
+        const assistantMsg = {
+            role: "assistant",
+            content: [{ type: "text", text: "Long text..." }],
+        } as unknown as V2ChatMessage;
+        const continueMsg = { role: "user", content: [{ type: "text", text: "continue" }] } as unknown as V2ChatMessage;
+
+        const modelInfo = { id: "test", maxInputTokens: 100 } as unknown as vscode.LanguageModelChatInformation;
+
+        const trimmed = trimV2MessagesForBudget([systemMsg, assistantMsg, continueMsg], undefined, modelInfo);
+        assert.strictEqual(trimmed.length, 3);
+    });
+
+    test("trimV2MessagesForBudget handles budget edge cases", () => {
+        const msg = { role: "user", content: [{ type: "text", text: "hi" }] } as unknown as V2ChatMessage;
+        const modelInfo = { id: "test", maxInputTokens: 1 } as unknown as vscode.LanguageModelChatInformation;
+
+        const tools = [
+            { type: "function", function: { name: "t", description: "x".repeat(1000) } },
+        ] as unknown as OpenAIFunctionToolDef[];
+
+        assert.throws(() => trimV2MessagesForBudget([msg], tools, modelInfo), /Message exceeds token limit/);
+
+        const sysMsg = {
+            role: "system",
+            content: [{ type: "text", text: "way too long system message" }],
+        } as unknown as V2ChatMessage;
+        assert.throws(() => trimV2MessagesForBudget([sysMsg], undefined, modelInfo), /Message exceeds token limit/);
     });
 });

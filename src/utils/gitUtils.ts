@@ -14,6 +14,7 @@ export interface GitAPI {
 }
 
 export interface Repository {
+    rootUri: vscode.Uri | undefined;
     state: RepositoryState;
     diffIndexWithHEAD(): Promise<Change[]>;
     diff(path: string, options?: { cached?: boolean }): Promise<string>;
@@ -50,24 +51,44 @@ export class GitUtils {
     }
 
     /**
-     * Gets the staged diff for the first available repository.
+     * Finds a repository in the Git API's repository list by matching its root URI.
+     * @param api The Git API instance
+     * @param rootUri The root URI of the target repository
+     * @returns The matching Repository, or undefined if not found
      */
-    static async getStagedDiff(): Promise<string | undefined> {
+    static findRepositoryByRootUri(api: GitAPI, rootUri: vscode.Uri): Repository | undefined {
+        for (const repo of api.repositories) {
+            if (repo.rootUri && repo.rootUri.fsPath === rootUri.fsPath) {
+                return repo;
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * Gets the staged diff for the specified repository, or the first available repository if no rootUri is provided.
+     * @param rootUri Optional root URI of the target repository. When provided, the matching
+     *                repository is used. When omitted, falls back to repositories[0] for backward compatibility.
+     */
+    static async getStagedDiff(rootUri?: vscode.Uri): Promise<string | undefined> {
         try {
             const api = await this.getGitAPI();
             if (!api || api.repositories.length === 0) {
                 return undefined;
             }
 
-            const repo = api.repositories[0];
+            const repo = rootUri
+                ? (this.findRepositoryByRootUri(api, rootUri) ?? api.repositories[0])
+                : api.repositories[0];
+
             // We want the staged changes (diff between index and HEAD)
             // The Git API doesn't have a single "get full staged diff" method that returns a string easily
             // for all files at once in the stable API without running a command,
             // but we can use repository.diffIndexWithHEAD() to get changes and then aggregate.
 
             // However, a more reliable way to get the full unified diff for staged changes:
-            // @ts-expect-error - Using internal repository if available, or fallback to manual
-            const internalRepo = repo.repository;
+            const internalRepo = (repo as unknown as { repository?: { diff?: (cached: boolean) => Promise<string> } })
+                .repository;
             if (internalRepo && typeof internalRepo.diff === "function") {
                 return await internalRepo.diff(true); // true means --cached
             }

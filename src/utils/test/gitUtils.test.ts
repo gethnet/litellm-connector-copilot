@@ -116,5 +116,98 @@ suite("GitUtils Unit Tests", () => {
             assert.ok(result.includes("-deleted line"));
             assert.ok(result.includes("+added line"));
         });
+
+        test("compactDiff removes context lines if too large", () => {
+            const diff =
+                "diff --git a/file.txt b/file.txt\n" +
+                "index 123..456 100644\n" +
+                "--- a/file.txt\n" +
+                "+++ b/file.txt\n" +
+                "@@ -1,5 +1,5 @@\n" +
+                " context 1\n" +
+                " context 2\n" +
+                "-old line\n" +
+                "+new line\n" +
+                " context 3\n" +
+                " context 4";
+
+            // Use 20 tokens (80 chars) to allow headers + changes but still force context removal
+            const result = GitUtils.compactDiff(diff, 20);
+            assert.ok(!result.includes("context 1"));
+            assert.ok(result.includes("-old line"));
+            assert.ok(result.includes("+new line"));
+        });
+    });
+});
+
+suite("GitUtils — multi-repo support", () => {
+    let sandbox: sinon.SinonSandbox;
+
+    setup(() => {
+        sandbox = sinon.createSandbox();
+    });
+
+    teardown(() => {
+        sandbox.restore();
+    });
+
+    test("findRepositoryByRootUri returns matching repo by rootUri", () => {
+        const repoA = { rootUri: vscode.Uri.file("/workspace/repo-a"), inputBox: { value: "" } };
+        const repoB = { rootUri: vscode.Uri.file("/workspace/repo-b"), inputBox: { value: "" } };
+        const api = { repositories: [repoA, repoB] } as unknown as GitAPI;
+
+        const result = GitUtils.findRepositoryByRootUri(api, vscode.Uri.file("/workspace/repo-b"));
+        assert.strictEqual(result, repoB);
+    });
+
+    test("findRepositoryByRootUri returns undefined when no match found", () => {
+        const repoA = { rootUri: vscode.Uri.file("/workspace/repo-a"), inputBox: { value: "" } };
+        const api = { repositories: [repoA] } as unknown as GitAPI;
+
+        const result = GitUtils.findRepositoryByRootUri(api, vscode.Uri.file("/workspace/other"));
+        assert.strictEqual(result, undefined);
+    });
+
+    test("findRepositoryByRootUri returns undefined for empty repositories", () => {
+        const api = { repositories: [] } as unknown as GitAPI;
+        const result = GitUtils.findRepositoryByRootUri(api, vscode.Uri.file("/workspace/repo-a"));
+        assert.strictEqual(result, undefined);
+    });
+
+    test("getStagedDiff uses correct repository when rootUri is provided", async () => {
+        const repoA = {
+            rootUri: vscode.Uri.file("/workspace/repo-a"),
+            state: { indexChanges: [] },
+            diffIndexWithHEAD: async () => [],
+            diff: async () => "diff-a",
+        };
+        const repoB = {
+            rootUri: vscode.Uri.file("/workspace/repo-b"),
+            state: { indexChanges: [{ uri: vscode.Uri.file("/workspace/repo-b/file.ts"), status: 1 }] },
+            diffIndexWithHEAD: async () => [{ uri: vscode.Uri.file("/workspace/repo-b/file.ts"), status: 1 }],
+            diff: async () => "diff-b-content",
+        };
+
+        const mockApi = { repositories: [repoA, repoB] } as unknown as GitAPI;
+        sandbox.stub(GitUtils, "getGitAPI").resolves(mockApi);
+
+        const result = await GitUtils.getStagedDiff(vscode.Uri.file("/workspace/repo-b"));
+        // Should NOT get repoA's diff, even though repoA is first
+        assert.notStrictEqual(result, "diff-a");
+    });
+
+    test("getStagedDiff falls back to first repo when no rootUri provided (backward compat)", async () => {
+        const repoA = {
+            rootUri: vscode.Uri.file("/workspace/repo-a"),
+            state: { indexChanges: [{ uri: vscode.Uri.file("/workspace/repo-a/file.ts"), status: 1 }] },
+            diffIndexWithHEAD: async () => [{ uri: vscode.Uri.file("/workspace/repo-a/file.ts"), status: 1 }],
+            diff: async () => "diff-a",
+        };
+        const mockApi = { repositories: [repoA] } as unknown as GitAPI;
+        sandbox.stub(GitUtils, "getGitAPI").resolves(mockApi);
+
+        const result = await GitUtils.getStagedDiff();
+        // Fallback: uses first repo
+        assert.ok(result?.includes("diff-a"));
     });
 });

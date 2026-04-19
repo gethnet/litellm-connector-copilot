@@ -2,6 +2,55 @@
 
 All notable changes to this project will be documented in this file.
 
+
+## [1.6.0-rc2] - 2026-04-12
+
+### 🚧 Development snapshot
+* Multi-repo support for commit message generation.
+
+### 🛠️ Bug Fixes
+* **Multi-repo commit generation**: Fixed an issue where commit messages were always generated from the first repository in the workspace. The extension now correctly identifies the active repository from the SCM context.
+  - Added `rootUri` to `Repository` interface in `GitUtils`.
+  - Added `findRepositoryByRootUri` to `GitUtils` for precise repository matching.
+  - Updated `generateCommitMessage` command to use the correct repository for both diff retrieval and input box updates.
+
+### 🧪 Testing & validation
+* ✅ Added multi-repo regression tests for `GitUtils` and `generateCommitMessage` command.
+
+
+## [1.6.0-rc1] - 2026-04-04
+
+### 🚧 Development snapshot
+* Consolidate the current 1.6 pre-release work on rc1.
+
+### 🎊 New Features
+* Telemetry / Non-identifable data collection & reporting.
+* Multiple Backend / LiteLLM instances supported - Legacy Method.
+* **Model Capability Overrides**: Add configuration to manually override VS Code's capability detection (toolCalling, imageInput) when LiteLLM's auto-detection is incorrect. Configure via `litellm-connector.modelCapabilitiesOverrides` setting with comma-separated values (e.g., `"toolCalling, imageInput"` or `"tools, vision"`).
+
+### 🛠️ Bug Fixes
+* �️ Keep commit-message generation failures visible in both local logs and telemetry.
+* 🧭 Propagate request IDs through PostHog request telemetry for better event correlation.
+* ⚙️ Fixed undefined silent flag which blocked the ability to configure litellm as a new instance.
+* 🛠️ Fixed issues with the nuke command leaving stale models behind when resetting the users configuration.
+* 🛠️ Stablized telemetry id and re-scoped unhandled exception detection and handling to be properly aligned with best practices.
+
+### 📊 Telemetry & observability
+* �️ Add telemetry feature-usage reporting for chat, completions, inline completions, commit generation, and model picker usage.
+* 🔔 Capture feature toggle snapshots and toggle-change events from config changes so opt-in behavior is visible in telemetry.
+* 🧭 Extend telemetry exception capture with caller context and add tests for the new feature-usage events.
+
+### 🧪 Testing & validation
+* ✅ Add regression coverage for commit-provider exception reporting and request ID propagation in telemetry events.
+
+### 🧩 Configuration & commands
+* ⚙️ Teach `ConfigManager` to report feature-toggle state after config changes.
+* 🚦 Wire telemetry into model-management and reset/check commands so command execution is tracked consistently.
+* 📝 Emit a feature-usage snapshot during extension activation after configuration loads.
+* ✅ Add coverage for `ConfigManager` feature-toggle reporting and `TelemetryService` feature event helpers.
+* 🛠️ Update telemetry and config tests to verify caller metadata and new event payloads.
+
+
 ## [1.5.0] - 2026-03-20
 
 ### 🚀 Features
@@ -213,7 +262,8 @@ There have been a tremendous amount of backend work done with this update to mak
 
 ---
 
-[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v1.4.6...HEAD
+[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v1.6.0-dev10...HEAD
+[1.6.0-dev10]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.6.0-dev10
 [1.4.6]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.4.6
 [1.4.4]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.4.4
 [1.4.2]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.4.2

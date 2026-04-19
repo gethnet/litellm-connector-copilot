@@ -66,20 +66,24 @@ export class ResponsesClient {
         }
 
         // 2. Keep the DataPart probe as fallback
-        progress.report(
-            vscode.LanguageModelDataPart.json(
-                {
-                    kind: "usage",
-                    promptTokens,
-                    completionTokens,
-                    details: detailsString,
-                    metadata: {
+        try {
+            progress.report(
+                vscode.LanguageModelDataPart.json(
+                    {
+                        kind: "usage",
+                        promptTokens,
+                        completionTokens,
                         details: detailsString,
+                        metadata: {
+                            details: detailsString,
+                        },
                     },
-                },
-                "application/vnd.litellm.usage+json"
-            )
-        );
+                    "application/vnd.litellm.usage+json"
+                )
+            );
+        } catch (e) {
+            Logger.trace("DataPart usage report failed", e);
+        }
     }
 
     constructor(

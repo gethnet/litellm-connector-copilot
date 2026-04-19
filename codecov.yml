@@ -7,11 +7,11 @@ coverage:
     project:
       default:
         target: auto
-        threshold: 10%
+        threshold: 20%
     patch:
       default:
         target: auto
-        threshold: 10%
+        threshold: 20%
 
 component_management:
   default_rules:

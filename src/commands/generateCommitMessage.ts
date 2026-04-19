@@ -7,12 +7,21 @@ import { showModelPicker } from "./modelPicker";
 import { calculateAvailableContext } from "../adapters/tokenUtils";
 import { COMMIT_MESSAGE_PROMPT, COMMIT_SYSTEM_PROMPT } from "../utils/prompts";
 import { stripMarkdownCodeBlocks } from "../utils";
+import type { TelemetryService } from "../telemetry/telemetryService";
 
 /**
  * Registers the command to generate a git commit message.
  */
-export function registerGenerateCommitMessageCommand(provider: LiteLLMCommitMessageProvider): vscode.Disposable {
+export function registerGenerateCommitMessageCommand(
+    provider: LiteLLMCommitMessageProvider,
+    telemetryService?: TelemetryService
+): vscode.Disposable {
     return vscode.commands.registerCommand("litellm-connector.generateCommitMessage", async (scm: unknown) => {
+        const startTime = Date.now();
+        if (telemetryService) {
+            telemetryService.captureCommandExecuted("generateCommitMessage");
+            telemetryService.captureFeatureUsed("commit-message", "commit-message");
+        }
         try {
             // Check if model is configured, if not, show picker
             const config = await provider.getConfigManager().getConfig();
@@ -27,13 +36,17 @@ export function registerGenerateCommitMessageCommand(provider: LiteLLMCommitMess
                     await showModelPicker(provider, {
                         title: "Select Commit Message Model",
                         settingKey: "commitModelIdOverride",
+                        telemetryService: telemetryService,
+                        caller: "commit-message",
                     });
                 }
                 return;
             }
 
-            // Get staged diff
-            const diff = await GitUtils.getStagedDiff();
+            // Get staged diff — extract rootUri from SCM context to select the correct repository
+            const scmContext = scm as { rootUri?: vscode.Uri } | undefined;
+            const targetRootUri = scmContext?.rootUri;
+            const diff = await GitUtils.getStagedDiff(targetRootUri);
             if (diff === undefined) {
                 vscode.window.showErrorMessage(
                     "No staged changes found. Please stage your changes before generating a commit message."
@@ -80,12 +93,16 @@ export function registerGenerateCommitMessageCommand(provider: LiteLLMCommitMess
                 vscode.window.showWarningMessage("The diff was truncated to fit within the model's context window.");
             }
 
-            // Find the SCM input box
+            // Find the SCM input box — prefer the repository matching the SCM context
             const api = await GitUtils.getGitAPI();
             if (!api || api.repositories.length === 0) {
                 return;
             }
-            const repo = api.repositories[0];
+
+            // Match the correct repository from SCM context, or fall back to first
+            const matchedRepo = targetRootUri ? GitUtils.findRepositoryByRootUri(api, targetRootUri) : undefined;
+            const repo = matchedRepo ?? api.repositories[0];
+
             const scmAny = scm as { inputBox?: { value: string; placeholder: string; enabled: boolean } };
             const repoAny = repo as { inputBox?: { value: string; placeholder: string; enabled: boolean } };
             const inputBox = repoAny.inputBox || (scmAny && scmAny.inputBox);
@@ -129,11 +146,27 @@ export function registerGenerateCommitMessageCommand(provider: LiteLLMCommitMess
                         );
                         // Ensure final value is fully sanitized
                         inputBox.value = stripMarkdownCodeBlocks(accumulatedText);
+
+                        /* if (telemetryService) {
+                            telemetryService.captureCommitMessageGenerated({
+                                model: modelId,
+                                durationMs: Date.now() - startTime,
+                                status: "success",
+                            });
+                        } */
                     } catch (err) {
                         Logger.error("Failed to generate commit message", err);
                         vscode.window.showErrorMessage(
                             "Failed to generate commit message: " + (err instanceof Error ? err.message : String(err))
                         );
+
+                        if (telemetryService) {
+                            telemetryService.captureCommitMessageGenerated({
+                                model: modelId,
+                                durationMs: Date.now() - startTime,
+                                status: "failure",
+                            });
+                        }
                     } finally {
                         inputBox.placeholder = originalPlaceholder;
                         inputBox.enabled = true;

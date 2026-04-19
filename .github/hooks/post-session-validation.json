@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "./scripts/post-session-validation.sh",
+        "timeout": 300
+      }
+    ]
+  }
+}

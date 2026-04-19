@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import { calculateAvailableContext, countTokens } from "../adapters/tokenUtils";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
+import type { TelemetryService } from "../telemetry/telemetryService";
 import type { LiteLLMConfig } from "../types";
 
 const INLINE_SYSTEM_PROMPT =
@@ -34,19 +35,32 @@ export interface InlineCompletionsDependencies {
  */
 export class LiteLLMInlineCompletionProvider implements vscode.InlineCompletionItemProvider {
     private readonly _deps: InlineCompletionsDependencies;
+    private _telemetryService?: TelemetryService;
 
     constructor(deps: InlineCompletionsDependencies) {
         this._deps = deps;
     }
 
+    public setTelemetryService(service: TelemetryService): void {
+        this._telemetryService = service;
+    }
+
     async provideInlineCompletionItems(
         document: vscode.TextDocument,
         position: vscode.Position,
-        context: vscode.InlineCompletionContext,
+        _context: vscode.InlineCompletionContext,
         token: vscode.CancellationToken
     ): Promise<vscode.InlineCompletionList | vscode.InlineCompletionItem[] | null> {
+        if (token.isCancellationRequested) {
+            return null;
+        }
+
         const requestId = `ic_${Math.random().toString(36).slice(2, 10)}`;
         const startTime = LiteLLMTelemetry.startTimer();
+
+        if (this._telemetryService) {
+            this._telemetryService.captureFeatureUsed("inline-completions", "inline-completions");
+        }
 
         LiteLLMTelemetry.reportMetric({
             requestId,
@@ -57,41 +71,65 @@ export class LiteLLMInlineCompletionProvider implements vscode.InlineCompletionI
 
         const config = await this._deps.getConfig();
         if (!config.inlineCompletionsEnabled) {
+            const durationMs = LiteLLMTelemetry.endTimer(startTime);
             LiteLLMTelemetry.reportMetric({
                 requestId,
                 model: config.inlineCompletionsModelId ?? "unset",
-                durationMs: LiteLLMTelemetry.endTimer(startTime),
+                durationMs,
                 status: "failure",
                 error: "inline_completions_disabled",
                 caller: "inline-completions",
             });
+            if (this._telemetryService) {
+                this._telemetryService.captureInlineCompletionRequest({
+                    status: "disabled",
+                    durationMs,
+                    model: config.inlineCompletionsModelId ?? "unset",
+                });
+            }
             return null;
         }
 
         if (!config.url) {
             Logger.info("Inline completions: missing baseUrl; returning no items");
+            const durationMs = LiteLLMTelemetry.endTimer(startTime);
             LiteLLMTelemetry.reportMetric({
                 requestId,
                 model: config.inlineCompletionsModelId ?? "unset",
-                durationMs: LiteLLMTelemetry.endTimer(startTime),
+                durationMs,
                 status: "failure",
                 error: "not_configured",
                 caller: "inline-completions",
             });
+            if (this._telemetryService) {
+                this._telemetryService.captureInlineCompletionRequest({
+                    status: "not_configured",
+                    durationMs,
+                    model: config.inlineCompletionsModelId ?? "unset",
+                });
+            }
             return null;
         }
 
         const modelId = config.inlineCompletionsModelId;
         if (!modelId) {
             Logger.info("Inline completions: no model configured; returning no items");
+            const durationMs = LiteLLMTelemetry.endTimer(startTime);
             LiteLLMTelemetry.reportMetric({
                 requestId,
                 model: "unset",
-                durationMs: LiteLLMTelemetry.endTimer(startTime),
+                durationMs,
                 status: "failure",
                 error: "model_not_selected",
                 caller: "inline-completions",
             });
+            if (this._telemetryService) {
+                this._telemetryService.captureInlineCompletionRequest({
+                    status: "model_not_selected",
+                    durationMs,
+                    model: "unset",
+                });
+            }
             return null;
         }
 
@@ -144,41 +182,57 @@ export class LiteLLMInlineCompletionProvider implements vscode.InlineCompletionI
             });
 
             const insertText = completion?.insertText ?? "";
+            const durationMs = LiteLLMTelemetry.endTimer(startTime);
             if (!insertText.trim()) {
                 LiteLLMTelemetry.reportMetric({
                     requestId,
                     model: modelId,
-                    durationMs: LiteLLMTelemetry.endTimer(startTime),
+                    durationMs,
                     status: "success",
                     tokensIn: prefixTokens + suffixTokens,
                     tokensOut: 0,
                     caller: "inline-completions.request.result",
                 });
+
+                /* if (this._telemetryService) {
+                    this._telemetryService.captureInlineCompletionRequest({
+                        status: "empty",
+                        durationMs,
+                        model: modelId,
+                    });
+                } */
                 return null;
             }
 
             LiteLLMTelemetry.reportMetric({
                 requestId,
                 model: modelId,
-                durationMs: LiteLLMTelemetry.endTimer(startTime),
+                durationMs,
                 status: "success",
                 tokensIn: prefixTokens + suffixTokens,
                 tokensOut: Math.ceil(insertText.length / 4),
                 caller: "inline-completions.request.result",
             });
 
+            /*  if (this._telemetryService) {
+                this._telemetryService.captureInlineCompletionRequest({
+                    status: "success",
+                    durationMs,
+                    model: modelId,
+                });
+            } */
+
             const range = new vscode.Range(position, position);
             const item = new vscode.InlineCompletionItem(insertText, range);
-            // Avoid showing completions in comments/strings? Leave for later.
-            void context;
             return [item];
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             Logger.warn(`Inline completions failed: ${msg}`);
+            const durationMs = LiteLLMTelemetry.endTimer(startTime);
             LiteLLMTelemetry.reportMetric({
                 requestId,
                 model: modelId,
-                durationMs: LiteLLMTelemetry.endTimer(startTime),
+                durationMs,
                 status: "failure",
                 error: msg.slice(0, 200),
                 caller: "inline-completions",
@@ -190,6 +244,13 @@ export class LiteLLMInlineCompletionProvider implements vscode.InlineCompletionI
                 error: msg.slice(0, 200),
                 caller: "inline-completions.litellm.failure",
             });
+            if (this._telemetryService) {
+                this._telemetryService.captureInlineCompletionRequest({
+                    status: "error",
+                    durationMs,
+                    model: modelId,
+                });
+            }
             return null;
         }
     }

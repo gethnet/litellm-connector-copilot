@@ -17,7 +17,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "1.5.1",
+	"version": "1.6.0",
 	"preview": false,
 	"engines": {
 		"vscode": "^1.110.0"
@@ -117,6 +117,37 @@
 					"default": "",
 					"description": "Base URL for the LiteLLM proxy server (used for model discovery and requests)."
 				},
+				"litellm-connector.backends": {
+					"type": "array",
+					"default": [],
+					"description": "List of LiteLLM backends to connect to. Each backend requires a unique name and a base URL.",
+					"items": {
+						"type": "object",
+						"required": [
+							"name",
+							"url"
+						],
+						"properties": {
+							"name": {
+								"type": "string",
+								"description": "Unique name for the backend."
+							},
+							"url": {
+								"type": "string",
+								"description": "Base URL for the LiteLLM proxy server."
+							},
+							"apiKeySecretRef": {
+								"type": "string",
+								"description": "Reference name for the API key in SecretStorage."
+							},
+							"enabled": {
+								"type": "boolean",
+								"default": true,
+								"description": "Whether this backend is currently enabled."
+							}
+						}
+					}
+				},
 				"litellm-connector.apiKeySecretRef": {
 					"type": "string",
 					"default": "default",
@@ -170,12 +201,17 @@
 				"litellm-connector.modelOverrides": {
 					"type": "object",
 					"default": {},
-					"description": "Override or add tags for specific models. Key is the Model ID (e.g. 'gpt-4o'), value is an array of tags (e.g. ['inline-completions']).",
+					"description": "Override or add tags for specific models. Key is the Model ID (e.g. 'gpt-4o'), value is a comma-separated list of tags (e.g. 'inline-completions,chat,tools').",
 					"additionalProperties": {
-						"type": "array",
-						"items": {
-							"type": "string"
-						}
+						"type": "string"
+					}
+				},
+				"litellm-connector.modelCapabilitiesOverrides": {
+					"type": "object",
+					"default": {},
+					"description": "Override model capabilities (toolCalling, imageInput) reported to VS Code. Key is the Model ID (e.g. 'gpt-4o'), value is a comma-separated list of capabilities to ENABLE (e.g. 'toolCalling,imageInput').",
+					"additionalProperties": {
+						"type": "string"
 					}
 				},
 				"litellm-connector.inactivityTimeout": {
@@ -203,34 +239,27 @@
 	},
 	"main": "./dist/extension.js",
 	"browser": "./dist/web/extension.js",
-	"enabledApiProposals": [
-		"chatProvider",
-		"languageModelCapabilities",
-		"languageModelProxy",
-		"languageModelSystem",
-		"languageModelThinkingPart",
-		"languageModelToolResultAudience",
-		"languageModelToolSupportsModel"
-	],
 	"scripts": {
 		"clean": "rm -rf ./dist ./out ./coverage ./test-results",
 		"clean:build": "rm -rf ./dist ./out",
 		"clean:tests": "rm -rf ./coverage ./test-results",
+		"precompile": "npm run clean",
 		"compile": "tsc -p ./",
 		"vscode:pack:dev": "npm run clean:build && tsc --noEmit && node esbuild.js && npx vsce package",
 		"vscode:pack": "npm run clean:build && tsc --noEmit && node esbuild.js --production && npx vsce package",
-		"package:marketplace": "cp README.md README.github.md && cp README.marketplace.md README.md && npm run vscode:pack && mv README.github.md README.md",
+		"package:marketplace": "node scripts/package-marketplace.mjs",
 		"download-api": "dts main && mv vscode.d.ts src/ && dts dev && mv vscode.proposed.*.d.ts src/",
 		"postinstall": "npm run download-api",
-		"lint": "eslint --fix",
-		"lint:check": "eslint",
-		"format": "prettier --write .",
-		"format:check": "prettier --check .",
+		"lint": "eslint",
+		"lint:fix": "eslint --fix",
+		"format": "prettier --check .",
+		"format:fix": "prettier --write .",
 		"watch": "tsc -watch -p ./",
 		"pretest": "npm run compile",
 		"test": "xvfb-run vscode-test --args=\"--no-sandbox\"",
-		"test:report": "export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && npm run test",
-		"test:coverage": "npm run clean && npm run pretest && node -e \"const fs = require('fs'); const path = require('path'); const coveragePath = path.join(process.cwd(), 'coverage'); if (fs.existsSync(coveragePath)) fs.rmSync(coveragePath, { recursive: true, force: true });\" && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && xvfb-run vscode-test --args=\"--no-sandbox\" --coverage --coverage-output coverage --coverage-reporter lcovonly --coverage-reporter html --coverage-reporter text-summary",
+		"test:report": "npm run pretest && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && npm run test",
+		"pretest:coverage": "npm run compile",
+		"test:coverage": "node -e \"const fs = require('fs'); const path = require('path'); const coveragePath = path.join(process.cwd(), 'coverage'); if (fs.existsSync(coveragePath)) fs.rmSync(coveragePath, { recursive: true, force: true });\" && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && xvfb-run vscode-test --args=\"--no-sandbox\" --coverage --coverage-output coverage --coverage-reporter lcovonly --coverage-reporter html --coverage-reporter text-summary",
 		"bump-version": "node scripts/bump-version.js"
 	},
 	"devDependencies": {
@@ -249,10 +278,26 @@
 		"mocha-junit-reporter": "^2.2.1",
 		"mocha-multi-reporters": "^1.5.0",
 		"ovsx": "^0.10.6",
+		"posthog-js": "^1.364.7",
+		"posthog-node": "^5.28.11",
 		"prettier": "^3.1.0",
 		"rimraf": "^6.0.1",
 		"sinon": "^21.0.1",
-		"typescript": "^5.9.2",
-		"typescript-eslint": "^8.39.0"
-	}
+		"typescript": "^6.0.3",
+		"typescript-eslint": "^8.39.0",
+		"zx": "^8.8.5"
+	},
+	"dependencies": {
+		"posthog-js": "^1.364.7",
+		"posthog-node": "^5.28.11"
+	},
+	"enabledApiProposals": [
+		"chatProvider",
+		"languageModelCapabilities",
+		"languageModelProxy",
+		"languageModelSystem",
+		"languageModelThinkingPart",
+		"languageModelToolResultAudience",
+		"languageModelToolSupportsModel"
+	]
 }

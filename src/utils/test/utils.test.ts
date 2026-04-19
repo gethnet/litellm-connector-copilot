@@ -4,12 +4,51 @@ import {
     convertMessages,
     convertTools,
     isToolResultPart,
+    normalizeToolCallId,
+    stripMarkdownCodeBlocks,
     tryParseJSONObject,
     validateRequest,
     validateTools,
+    normalizeMessagesForV2Pipeline,
+    convertV2MessagesToProviderMessages,
+    convertV2MessagesToTransportMessages,
+    convertV2MessagesToOpenAI,
+    validateV2Messages,
 } from "../../utils";
+import type { OpenAIChatMessage } from "../../types";
 
 suite("Utility Unit Tests", () => {
+    test("normalizeToolCallId handles edge cases", () => {
+        // Empty ID
+        assert.ok(normalizeToolCallId("").startsWith("fc_"));
+
+        // Already valid ID
+        assert.strictEqual(normalizeToolCallId("fc_abc"), "fc_abc");
+
+        // Too long ID starting with fc_
+        const longFc = "fc_" + "a".repeat(50);
+        const normFc = normalizeToolCallId(longFc);
+        assert.ok(normFc.length <= 40);
+        assert.ok(normFc.startsWith("fc_"));
+
+        // ID with prefix call_ or tc_
+        assert.ok(normalizeToolCallId("call_abc").startsWith("fc_abc_"));
+        assert.ok(normalizeToolCallId("tc_abc").startsWith("fc_abc_"));
+
+        // ID with special characters
+        assert.ok(normalizeToolCallId("some!@#id").startsWith("fc_some___id_"));
+    });
+
+    test("stripMarkdownCodeBlocks handles various formats", () => {
+        assert.strictEqual(stripMarkdownCodeBlocks("just text"), "just text");
+        assert.strictEqual(stripMarkdownCodeBlocks("```\ncontent\n```"), "content");
+        assert.strictEqual(stripMarkdownCodeBlocks("```python\nprint(1)\n```"), "print(1)");
+        assert.strictEqual(stripMarkdownCodeBlocks("```\na\n```\n\n```\nb\n```"), "a\n\nb");
+
+        // Backticks but no complete block
+        assert.strictEqual(stripMarkdownCodeBlocks("text with `backticks`"), "text with `backticks`");
+    });
+
     test("convertMessages handles text and images", () => {
         const imgData = new Uint8Array(Buffer.from("abc"));
         const messages: vscode.LanguageModelChatMessage[] = [
@@ -267,5 +306,121 @@ suite("Utility Unit Tests", () => {
     test("tryParseJSONObject rejects empty and arrays", () => {
         assert.deepStrictEqual(tryParseJSONObject(""), { ok: false });
         assert.deepStrictEqual(tryParseJSONObject("[]"), { ok: false });
+    });
+
+    test("validateRequest handles edge cases", () => {
+        // No messages
+        assert.throws(() => validateRequest([]));
+
+        // Empty message content list
+        assert.throws(() =>
+            validateRequest([{ role: vscode.LanguageModelChatMessageRole.User, content: [], name: undefined }])
+        );
+    });
+
+    test("convertMessages handles various data parts", () => {
+        const jsonPart = new vscode.LanguageModelDataPart(Buffer.from('{"a":1}'), "application/json");
+        const textPart = new vscode.LanguageModelDataPart(Buffer.from("extra text"), "text/plain");
+        const cachePart = new vscode.LanguageModelDataPart(Buffer.from("cache"), "cache_control");
+
+        const msgs = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [jsonPart, textPart, cachePart],
+                name: undefined,
+            },
+        ];
+
+        const out = convertMessages(msgs) as unknown as OpenAIChatMessage[];
+        assert.strictEqual(out.length, 1);
+        assert.ok(out[0].content?.toString().includes('{"a":1}'));
+        assert.ok(out[0].content?.toString().includes("extra text"));
+    });
+
+    test("convertMessages handles tool call with missing id and input", () => {
+        const toolCall = new vscode.LanguageModelToolCallPart("", "mytool", undefined as unknown as object);
+        const msgs = [
+            {
+                role: vscode.LanguageModelChatMessageRole.Assistant,
+                content: [toolCall],
+                name: undefined,
+            },
+        ];
+
+        const out = convertMessages(msgs) as unknown as OpenAIChatMessage[];
+        assert.ok(out[0].tool_calls?.[0].id.startsWith("fc_"));
+        assert.strictEqual(out[0].tool_calls?.[0].function.arguments, "{}");
+    });
+
+    test("V2 pipeline utility functions", () => {
+        const v2Msgs = normalizeMessagesForV2Pipeline([
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [
+                    new vscode.LanguageModelTextPart("hi"),
+                    new vscode.LanguageModelDataPart(Buffer.from("data"), "text/plain"),
+                ],
+                name: "user1",
+            } as unknown as vscode.LanguageModelChatMessage,
+        ]);
+
+        assert.strictEqual(v2Msgs.length, 1);
+        assert.strictEqual(v2Msgs[0].role, "user");
+        assert.strictEqual(v2Msgs[0].content.length, 2);
+
+        const providerMsgs = convertV2MessagesToProviderMessages(v2Msgs);
+        assert.strictEqual(providerMsgs.length, 1);
+        assert.ok(providerMsgs[0].content[1] instanceof vscode.LanguageModelDataPart);
+
+        const transportMsgs = convertV2MessagesToTransportMessages(v2Msgs);
+        assert.strictEqual(transportMsgs.length, 1);
+        assert.ok(transportMsgs[0].content[1] instanceof vscode.LanguageModelTextPart);
+
+        assert.doesNotThrow(() => validateV2Messages(v2Msgs));
+    });
+
+    test("V2 pipeline handles tool calls and results", () => {
+        const v2Msgs = normalizeMessagesForV2Pipeline([
+            {
+                role: vscode.LanguageModelChatMessageRole.Assistant,
+                content: [new vscode.LanguageModelToolCallPart("c1", "t1", { a: 1 })],
+                name: "assistant",
+            } as unknown as vscode.LanguageModelChatMessage,
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelToolResultPart("c1", ["ok"])],
+                name: "user",
+            } as unknown as vscode.LanguageModelChatMessage,
+        ]);
+
+        assert.strictEqual(v2Msgs[0].content[0].type, "tool_call");
+        assert.strictEqual(v2Msgs[1].content[0].type, "tool_result");
+
+        const openai = convertV2MessagesToOpenAI(v2Msgs);
+        assert.strictEqual(openai[0].role, "assistant");
+        assert.ok(openai[0].tool_calls);
+        assert.strictEqual(openai[1].role, "tool");
+    });
+
+    test("V2 pipeline handles thinking parts", () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ThinkingPart = (vscode as any).LanguageModelThinkingPart;
+        if (!ThinkingPart) {
+            return;
+        }
+
+        const v2Msgs = normalizeMessagesForV2Pipeline([
+            {
+                role: vscode.LanguageModelChatMessageRole.Assistant,
+                content: [new ThinkingPart("reasoning", "id1")],
+                name: "assistant",
+            } as unknown as vscode.LanguageModelChatMessage,
+        ]);
+
+        assert.strictEqual(v2Msgs[0].content[0].type, "thinking");
+
+        const transport = convertV2MessagesToTransportMessages(v2Msgs);
+        assert.ok(transport[0].content[0] instanceof vscode.LanguageModelTextPart);
+        assert.strictEqual((transport[0].content[0] as vscode.LanguageModelTextPart).value, "reasoning");
     });
 });
