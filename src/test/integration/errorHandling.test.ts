@@ -117,6 +117,18 @@ suite("LiteLLM Error Handling Unit Tests", function () {
     test("provideLanguageModelChatResponse handles unsupported parameter error from LiteLLM (when retry also fails)", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
+        type ProviderWithConfig = {
+            _configManager: {
+                isConfigured: () => Promise<boolean>;
+                getConfig: () => Promise<{ url: string; inactivityTimeout?: number }>;
+            };
+        };
+        const providerWithConfig = provider as unknown as ProviderWithConfig;
+        sandbox.stub(providerWithConfig._configManager, "isConfigured").resolves(true);
+        sandbox
+            .stub(providerWithConfig._configManager, "getConfig")
+            .resolves({ url: "http://localhost:4000", inactivityTimeout: 60 });
+
         // Mock LiteLLMClient.chat to throw an error
         const errorText = JSON.stringify({
             error: {
@@ -168,6 +180,18 @@ suite("LiteLLM Error Handling Unit Tests", function () {
 
     test("provideLanguageModelChatResponse handles generic 400 error", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        type ProviderWithConfig = {
+            _configManager: {
+                isConfigured: () => Promise<boolean>;
+                getConfig: () => Promise<{ url: string; inactivityTimeout?: number }>;
+            };
+        };
+        const providerWithConfig = provider as unknown as ProviderWithConfig;
+        sandbox.stub(providerWithConfig._configManager, "isConfigured").resolves(true);
+        sandbox
+            .stub(providerWithConfig._configManager, "getConfig")
+            .resolves({ url: "http://localhost:4000", inactivityTimeout: 60 });
 
         const apiError = new Error(`LiteLLM API error: 400 Bad Request\nSomething went wrong`);
         sandbox.stub(LiteLLMClient.prototype, "chat").rejects(apiError);
