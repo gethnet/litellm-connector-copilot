@@ -3,52 +3,72 @@
 All notable changes to this project will be documented in this file.
 
 
-## [1.6.0-rc2] - 2026-04-12
+## [1.6.0] - 2026-04-12
 
-### 🚧 Development snapshot
-* Multi-repo support for commit message generation.
+### 🎊 New Features
 
-### 🛠️ Bug Fixes
-* **Multi-repo commit generation**: Fixed an issue where commit messages were always generated from the first repository in the workspace. The extension now correctly identifies the active repository from the SCM context.
+* 🌍 **Multi-Backend Aggregation**: Connect to multiple LiteLLM instances simultaneously (e.g., Local Llama + Cloud GPT-4 + Internal Proxy). Models from different backends are automatically namespaced (e.g., `cloud/gpt-4o`, `local/llama-3`) and appear in the model picker with clear backend labels.
+  - New `MultiBackendClient` adapter handles routing, discovery, and request dispatch across backends.
+  - New `litellm-connector.backends` configuration setting with full add/edit/remove/toggle UI via **Manage Multiple Backends** command.
+  - Legacy single-backend configuration (`baseUrl`/`apiKey`) auto-migrates to `backends[0]` transparently.
+
+* 📊 **PostHog Telemetry & Observability**: Non-identifiable data collection with opt-in/opt-out via `vscode.env.isTelemetryEnabled`.
+  - `TelemetryService` with typed capture methods for request lifecycle, feature usage, errors, and model usage.
+  - `PostHogAdapter` (Node) and `PostHogAdapter` (Web) implementing `IPostHogAdapter` interface.
+  - `PostHogHook` bridges the v2 observability `HookSystem` to PostHog telemetry events.
+  - Automatic enrichment of every event with `distinctId`, `extension_version`, `vscode_version`, `ui_kind`, `os`.
+  - Aggregated feature usage reporting on 15-minute intervals to reduce noise.
+  - Sourcemap upload script for PostHog error symbolication.
+
+* 🔧 **Model Capability Overrides**: Manually override VS Code's capability detection (`toolCalling`, `imageInput`) when LiteLLM's auto-detection is incorrect. Configure via `litellm-connector.modelCapabilitiesOverrides` setting with comma-separated values (e.g., `"toolCalling, imageInput"` or `"tools, vision"`).
+
+* 🧠 **V2 Chat Provider (Experimental)**: Supports VS Code's newer Language Model APIs including `LanguageModelThinkingPart` for reasoning/thinking models. Emits structured text, thinking, data, and tool-call parts to the progress callback.
+
+* ✍️ **Multi-Repo Commit Message Generation**: `generateCommitMessage` command now correctly identifies the active repository via SCM `rootUri`. Works reliably in multi-repo workspaces.
   - Added `rootUri` to `Repository` interface in `GitUtils`.
   - Added `findRepositoryByRootUri` to `GitUtils` for precise repository matching.
   - Updated `generateCommitMessage` command to use the correct repository for both diff retrieval and input box updates.
 
-### 🧪 Testing & validation
-* ✅ Added multi-repo regression tests for `GitUtils` and `generateCommitMessage` command.
-
-
-## [1.6.0-rc1] - 2026-04-04
-
-### 🚧 Development snapshot
-* Consolidate the current 1.6 pre-release work on rc1.
-
-### 🎊 New Features
-* Telemetry / Non-identifable data collection & reporting.
-* Multiple Backend / LiteLLM instances supported - Legacy Method.
-* **Model Capability Overrides**: Add configuration to manually override VS Code's capability detection (toolCalling, imageInput) when LiteLLM's auto-detection is incorrect. Configure via `litellm-connector.modelCapabilitiesOverrides` setting with comma-separated values (e.g., `"toolCalling, imageInput"` or `"tools, vision"`).
-
 ### 🛠️ Bug Fixes
-* �️ Keep commit-message generation failures visible in both local logs and telemetry.
+
+* 🛠️ Keep commit-message generation failures visible in both local logs and telemetry.
 * 🧭 Propagate request IDs through PostHog request telemetry for better event correlation.
 * ⚙️ Fixed undefined silent flag which blocked the ability to configure litellm as a new instance.
-* 🛠️ Fixed issues with the nuke command leaving stale models behind when resetting the users configuration.
-* 🛠️ Stablized telemetry id and re-scoped unhandled exception detection and handling to be properly aligned with best practices.
+* 🛠️ Fixed issues with the nuke command leaving stale models behind when resetting user configuration.
+* 🛠️ Stabilized telemetry ID and re-scoped unhandled exception detection and handling to be properly aligned with best practices.
 
-### 📊 Telemetry & observability
-* �️ Add telemetry feature-usage reporting for chat, completions, inline completions, commit generation, and model picker usage.
+### 📊 Telemetry & Observability
+
+* 🛠️ Add telemetry feature-usage reporting for chat, completions, inline completions, commit generation, and model picker usage.
 * 🔔 Capture feature toggle snapshots and toggle-change events from config changes so opt-in behavior is visible in telemetry.
 * 🧭 Extend telemetry exception capture with caller context and add tests for the new feature-usage events.
 
-### 🧪 Testing & validation
-* ✅ Add regression coverage for commit-provider exception reporting and request ID propagation in telemetry events.
+### 🧩 Configuration & Commands
 
-### 🧩 Configuration & commands
-* ⚙️ Teach `ConfigManager` to report feature-toggle state after config changes.
-* 🚦 Wire telemetry into model-management and reset/check commands so command execution is tracked consistently.
-* 📝 Emit a feature-usage snapshot during extension activation after configuration loads.
-* ✅ Add coverage for `ConfigManager` feature-toggle reporting and `TelemetryService` feature event helpers.
-* 🛠️ Update telemetry and config tests to verify caller metadata and new event payloads.
+* ⚙️ `ConfigManager` now reports feature-toggle state after config changes.
+* 🚦 Telemetry wired into model-management and reset/check commands for consistent tracking.
+* 📝 Feature-usage snapshot emitted during extension activation after configuration loads.
+* New `litellm-connector.backends` setting for multi-backend configuration (array of `{name, url, apiKeySecretRef, enabled}`).
+* New `litellm-connector.modelCapabilitiesOverrides` setting for per-model capability overrides.
+
+### 🧪 Testing & Validation
+
+* ✅ Multi-repo regression tests for `GitUtils` and `generateCommitMessage` command.
+* ✅ `MultiBackendClient`, `ResponsesAdapter`, `TokenUtils`, `ConfigManager`, and telemetry service test coverage.
+* ✅ PostHog adapter tests for both Node and Web, including disabled/pre-initialize paths.
+* ✅ Model capability override tests for `capabilitiesToVSCode` and `getModelTags`.
+* ✅ Shared test mocks (`createMockSecrets`, `createMockModel`, `createMockOutputChannel`) stabilized across test suites.
+* ✅ Regression coverage for commit-provider exception reporting and request ID propagation in telemetry events.
+* ✅ Coverage for `ConfigManager` feature-toggle reporting and `TelemetryService` feature event helpers.
+
+### 🔧 Build & Tooling
+
+* `package-marketplace.mjs` script for stripping proposals and swapping READMEs during VSIX packaging.
+* `scripts/upload-posthog-sourcemaps.mjs` for PostHog error symbolication.
+* `scripts/versionUtils.mjs` with shared semver parsing and bump logic.
+* Post-session validation hook (`.github/hooks/post-session-validation.json`).
+* Agent planning infrastructure (`plan-generation.instructions.md`, `Project Planner.agent.md`).
+* CI workflow streamlined: combined lint/format/test into single step, upgraded Codecov to v6.
 
 
 ## [1.5.0] - 2026-03-20
@@ -262,8 +282,9 @@ There have been a tremendous amount of backend work done with this update to mak
 
 ---
 
-[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v1.6.0-dev10...HEAD
-[1.6.0-dev10]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.6.0-dev10
+[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v1.6.0...HEAD
+[1.6.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.6.0
+[1.5.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.5.0
 [1.4.6]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.4.6
 [1.4.4]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.4.4
 [1.4.2]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.4.2
