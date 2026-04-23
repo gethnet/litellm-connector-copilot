@@ -51,15 +51,37 @@ export async function showModelPicker(provider: LiteLLMProviderBase, options: Mo
             return;
         }
 
+        /**
+         * Extracts the backend name from a model's tooltip without fragile regex.
+         * Tooltip format: "Provider:model contributed by BACKEND_NAME via Extension Name"
+         * Returns the BACKEND_NAME, or fallback to vendor if available.
+         */
+        function extractBackendNameFromTooltip(tooltip: string | undefined, fallback: string | undefined): string {
+            if (!tooltip) {
+                return fallback || "";
+            }
+
+            // Find "contributed by" and "via" boundaries without relying on exact spacing
+            const startMarker = "contributed by ";
+            const endMarker = " via";
+
+            const startIdx = tooltip.indexOf(startMarker);
+            const endIdx = tooltip.indexOf(endMarker, startIdx);
+
+            if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+                return tooltip.substring(startIdx + startMarker.length, endIdx).trim();
+            }
+
+            return fallback || "";
+        }
+
         const items: vscode.QuickPickItem[] = models.map((m) => {
-            const mAny = m as unknown as { vendor?: string; tags?: string[] };
+            const mAny = m as unknown as { vendor?: string; tags?: string[]; tooltip?: string; detail?: string };
             return {
                 label: m.name,
-                // Keep routing value as the internal VS Code model id.
-                // QuickPickItem has no separate value field, so we encode it in the description.
-                // Instead, we update later by selecting label -> id mapping.
-                description: mAny.vendor || "",
-                detail: mAny.tags?.join(", ") || "",
+                // Extract backend name from tooltip using robust parsing, fallback to vendor field
+                description: extractBackendNameFromTooltip(mAny.tooltip, mAny.vendor),
+                detail: mAny.detail || "",
             };
         });
 

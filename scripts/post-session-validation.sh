@@ -27,12 +27,12 @@ run_check() {
 FAILED_CHECKS=()
 
 # Run format check
-if ! run_check "npm run format:check" "format check"; then
+if ! run_check "npm run format" "format check"; then
     FAILED_CHECKS+=("format")
 fi
 
 # Run lint check
-if ! run_check "npm run lint:check" "lint check"; then
+if ! run_check "npm run lint" "lint check"; then
     FAILED_CHECKS+=("lint")
 fi
 

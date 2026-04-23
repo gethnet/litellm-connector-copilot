@@ -16,7 +16,7 @@ Create a detailed implementation plan for the requested task, following the repo
 - Prefer workspace-specific paths and exact file references.
 - Include required reading, test-first sequencing, validation commands, and rollback guidance.
 - Keep the plan actionable for an autonomous implementation agent.
-- Output the plan following the standard structure so the user can save it in `.plans/`.
+- Save the plan within `.plans/pending` as `<PLAN_NAME>.prompt.md`
 
 ## Task
 {{$input}}

@@ -31,6 +31,8 @@ import {
     deriveCapabilitiesFromModelInfo,
     capabilitiesToVSCode,
     getModelTags as getDerivedModelTags,
+    formatProviderName,
+    formatModelName,
 } from "../utils/modelCapabilities";
 import type { DerivedModelCapabilities } from "../utils/modelCapabilities";
 import type { V2ChatMessage } from "./v2Types";
@@ -230,24 +232,14 @@ export abstract class LiteLLMProviderBase {
                 const capabilities = capabilitiesToVSCode(derived, capOverride);
                 const tags = getDerivedModelTags(modelId, derived, config.modelOverrides, capOverride);
 
-                const formatTokens = (num: number): string => {
-                    if (num >= 1000000) {
-                        return `${(num / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
-                    }
-                    if (num >= 1000) {
-                        return `${Math.floor(num / 1000)}K`;
-                    }
-                    return num.toString();
-                };
-
-                const inputDesc = formatTokens(derived.rawContextWindow);
-                const outputDesc = formatTokens(derived.maxOutputTokens);
-                const tooltip = `${entry.backendName} · ${modelInfo?.litellm_provider ?? "LiteLLM"} (${modelInfo?.mode ?? "responses"}) — Context: ${inputDesc} in / ${outputDesc} out`;
-
-                // User-facing model label for multi-backend environments.
-                // VS Code expects `id` to be stable and routable, so we keep `id` as the namespaced id.
-                // The human-facing label is exposed via `name`.
-                const displayId = `${entry.backendName}:${entry.model_name ?? modelId}`;
+                const providerName = formatProviderName(modelInfo?.litellm_provider ?? "litellm");
+                const modelName = formatModelName(entry.model_name ?? modelId);
+                const isSingleBackend = this._activeBackendNames.length <= 1;
+                const backendDisplay = isSingleBackend ? "LiteLLM" : entry.backendName;
+                const displayId = `${providerName}:${modelName}`;
+                // Fallback since json import fails in some environments
+                const extensionName = "LiteLLM Connector for Copilot";
+                const tooltip = `${providerName}:${modelName} contributed by ${backendDisplay} via ${extensionName}`;
 
                 // Derive family from provider to help Copilot shape requests correctly
                 const provider = modelInfo?.litellm_provider?.toLowerCase();
@@ -262,7 +254,7 @@ export abstract class LiteLLMProviderBase {
                     id: modelId,
                     name: displayId,
                     tooltip,
-                    detail: `Backend: ${entry.backendName} | Context: ${inputDesc} | Output: ${outputDesc}`,
+                    detail: "",
                     family: family,
                     version: "1.0.0",
                     maxInputTokens: derived.rawContextWindow,
