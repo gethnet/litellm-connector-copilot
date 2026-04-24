@@ -273,7 +273,7 @@
 		"@vscode/test-cli": "^0.0.12",
 		"@vscode/test-electron": "^2.5.2",
 		"@vscode/vsce": "^3.7.0",
-		"esbuild": "^0.27.3",
+		"esbuild": "^0.28.0",
 		"eslint": "^10.0.0",
 		"mocha-junit-reporter": "^2.2.1",
 		"mocha-multi-reporters": "^1.5.0",
