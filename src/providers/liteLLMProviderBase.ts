@@ -31,8 +31,6 @@ import {
     deriveCapabilitiesFromModelInfo,
     capabilitiesToVSCode,
     getModelTags as getDerivedModelTags,
-    formatProviderName,
-    formatModelName,
 } from "../utils/modelCapabilities";
 import type { DerivedModelCapabilities } from "../utils/modelCapabilities";
 import type { V2ChatMessage } from "./v2Types";
@@ -232,32 +230,33 @@ export abstract class LiteLLMProviderBase {
                 const capabilities = capabilitiesToVSCode(derived, capOverride);
                 const tags = getDerivedModelTags(modelId, derived, config.modelOverrides, capOverride);
 
-                const providerName = formatProviderName(modelInfo?.litellm_provider ?? "litellm");
-                const modelName = formatModelName(entry.model_name ?? modelId);
+                const rawProvider = modelInfo?.litellm_provider ?? "litellm";
+                const rawModelName = entry.model_name ?? modelId;
+
                 const isSingleBackend = this._activeBackendNames.length <= 1;
-                const backendDisplay = isSingleBackend ? "LiteLLM" : entry.backendName;
-                const displayId = `${providerName}:${modelName}`;
-                // Fallback since json import fails in some environments
+                const backendDisplay = isSingleBackend ? "LiteLLM" : "LiteLLM: " + entry.backendName;
                 const extensionName = "LiteLLM Connector for Copilot";
-                const tooltip = `${providerName}:${modelName} contributed by ${backendDisplay} via ${extensionName}`;
+                const tooltip = `Provider: ${rawProvider}, Model: ${rawModelName} contributed by ${backendDisplay} via ${extensionName}`;
 
                 // Derive family from provider to help Copilot shape requests correctly
-                const provider = modelInfo?.litellm_provider?.toLowerCase();
+                const providerLower = rawProvider.toLowerCase();
                 let family = "litellm";
-                if (provider === "openai") {
+                if (providerLower === "openai") {
                     family = "gpt4";
-                } else if (provider === "anthropic") {
+                } else if (providerLower === "anthropic") {
                     family = "claude";
                 }
 
                 const info = {
                     id: modelId,
-                    name: displayId,
+                    name: rawModelName,
+                    vendor: rawProvider,
+                    backendName: backendDisplay,
                     tooltip,
-                    detail: "",
+                    detail: backendDisplay,
                     family: family,
                     version: "1.0.0",
-                    maxInputTokens: derived.rawContextWindow,
+                    maxInputTokens: derived.maxInputTokens,
                     maxOutputTokens: derived.maxOutputTokens,
                     capabilities,
                     tags,

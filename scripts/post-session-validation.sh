@@ -56,7 +56,7 @@ if [ ${#FAILED_CHECKS[@]} -gt 0 ]; then
 {
   "decision": "fail",
   "reason": "Post-session validation failed: ${FAILED_LIST}",
-  "systemMessage": "Agent session ended with validation failures. Please resolve the following issues before continuing:\n\n${FAILURE_DETAILS}\nRun the following commands to see details:\n- npm run format:check\n- npm run lint:check  \n- npm run test:coverage\n\nFix the issues and try again."
+  "systemMessage": "Agent session ended with validation failures. Please resolve the following issues before continuing:\n\n${FAILURE_DETAILS}\nRun the following commands to see details:\n- npm run format\n- npm run lint  \n- npm run test:coverage\n\nFix the issues and try again."
 }
 EOF
     exit 2  # Blocking error

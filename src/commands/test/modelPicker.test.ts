@@ -35,8 +35,8 @@ suite("ModelPicker Unit Tests", () => {
 
     test("showModelPicker updates configuration on selection", async () => {
         const mockModels = [
-            { id: "model-1", name: "model-1" },
-            { id: "model-2", name: "model-2" },
+            { id: "model-1", name: "model-1", backendName: "LiteLLM" },
+            { id: "model-2", name: "model-2", backendName: "cloud" },
         ];
         mockProvider.discoverModels.resolves(mockModels as unknown as vscode.LanguageModelChatInformation[]);
         mockProvider.getConfigManager.returns({
@@ -64,6 +64,9 @@ suite("ModelPicker Unit Tests", () => {
         });
 
         assert.strictEqual(quickPickStub.calledOnce, true);
+        const quickPickItems = quickPickStub.firstCall.args[0] as vscode.QuickPickItem[];
+        assert.strictEqual(quickPickItems[0].description, "LiteLLM");
+        assert.strictEqual(quickPickItems[1].description, "cloud");
         assert.strictEqual(configUpdateStub.calledOnce, true);
         assert.strictEqual(configUpdateStub.firstCall.args[0], "testKey");
         assert.strictEqual(configUpdateStub.firstCall.args[1], "model-1");

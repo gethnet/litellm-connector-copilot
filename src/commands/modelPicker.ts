@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { formatModelDisplayLabel, type ExtendedModelInformation } from "../utils/modelCapabilities";
 import type { LiteLLMProviderBase } from "../providers/liteLLMProviderBase";
 import { Logger } from "../utils/logger";
 import type { TelemetryService } from "../telemetry/telemetryService";
@@ -51,37 +52,12 @@ export async function showModelPicker(provider: LiteLLMProviderBase, options: Mo
             return;
         }
 
-        /**
-         * Extracts the backend name from a model's tooltip without fragile regex.
-         * Tooltip format: "Provider:model contributed by BACKEND_NAME via Extension Name"
-         * Returns the BACKEND_NAME, or fallback to vendor if available.
-         */
-        function extractBackendNameFromTooltip(tooltip: string | undefined, fallback: string | undefined): string {
-            if (!tooltip) {
-                return fallback || "";
-            }
-
-            // Find "contributed by" and "via" boundaries without relying on exact spacing
-            const startMarker = "contributed by ";
-            const endMarker = " via";
-
-            const startIdx = tooltip.indexOf(startMarker);
-            const endIdx = tooltip.indexOf(endMarker, startIdx);
-
-            if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-                return tooltip.substring(startIdx + startMarker.length, endIdx).trim();
-            }
-
-            return fallback || "";
-        }
-
         const items: vscode.QuickPickItem[] = models.map((m) => {
-            const mAny = m as unknown as { vendor?: string; tags?: string[]; tooltip?: string; detail?: string };
+            const mExtended = m as ExtendedModelInformation;
             return {
-                label: m.name,
-                // Extract backend name from tooltip using robust parsing, fallback to vendor field
-                description: extractBackendNameFromTooltip(mAny.tooltip, mAny.vendor),
-                detail: mAny.detail || "",
+                label: formatModelDisplayLabel(mExtended),
+                description: mExtended.backendName || mExtended.detail || "",
+                detail: mExtended.tooltip || "",
             };
         });
 
