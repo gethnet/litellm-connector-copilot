@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { formatModelDisplayLabel, type ExtendedModelInformation } from "../utils/modelCapabilities";
 
 import type { LiteLLMChatProvider } from "../providers";
 import { Logger } from "../utils/logger";
@@ -54,12 +55,13 @@ export function registerSelectInlineCompletionModelCommand(provider: LiteLLMChat
                 .slice()
                 .sort((a, b) => a.id.localeCompare(b.id))
                 .map((m) => {
-                    const tags = (m as ModelWithOptionalTags).tags ?? [];
+                    const mExtended = m as ExtendedModelInformation;
+                    const tags = mExtended.tags ?? [];
                     return {
-                        label: m.name,
-                        description: m.name !== m.id ? m.name : undefined,
-                        detail: tags.length ? `tags: ${tags.join(", ")}` : m.tooltip,
-                        modelId: m.id,
+                        label: formatModelDisplayLabel(mExtended),
+                        description: mExtended.name !== mExtended.id ? mExtended.name : undefined,
+                        detail: tags.length ? `tags: ${tags.join(", ")}` : mExtended.tooltip,
+                        modelId: mExtended.id,
                     };
                 }),
             {

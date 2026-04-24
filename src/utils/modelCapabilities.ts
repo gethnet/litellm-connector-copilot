@@ -107,3 +107,31 @@ export function getModelTags(
 
     return Array.from(tags);
 }
+
+/**
+ * Type definition for extended properties on LanguageModelChatInformation.
+ */
+export type ExtendedModelInformation = vscode.LanguageModelChatInformation & {
+    vendor?: string;
+    backendName?: string;
+    tags?: string[];
+    detail?: string;
+    tooltip?: string;
+};
+
+/**
+ * Centralized helper to format how a model is displayed in UI surfaces.
+ * Uses raw string values.
+ *
+ * @param modelOrName The extended model information object, or the raw model name string.
+ * @param vendor Optional raw provider/vendor name (used only if modelOrName is a string).
+ * @returns A consistent UI label
+ */
+export function formatModelDisplayLabel(modelOrName: ExtendedModelInformation | string, vendor?: string): string {
+    if (typeof modelOrName === "string") {
+        return vendor ? `[${vendor}] ${modelOrName}` : modelOrName;
+    }
+
+    const modelVendor = modelOrName.vendor;
+    return modelVendor ? `[${modelVendor}] ${modelOrName.name}` : modelOrName.name;
+}

@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.6.1] - 2026-04-23
+
+### ✨ Features
+
+* **Model Display Labels**: Added `ExtendedModelInformation` type and `formatModelDisplayLabel` helper to centralize model UI labeling and vendor display.
+* **Provider Metadata**: Updated `LiteLLMProviderBase` to expose `rawModelName`, `vendor`, `backendName`, `tooltip` and `detail` so consumers render consistent model info.
+* **Token Normalization**: Normalized provider handling and token fields by using `providerLower` for family derivation and `derived.maxInputTokens` for maxInputTokens.
+
+### 🐛 Fixes
+
+* **Post-Session Scripts**: Updated post-session validation message to recommend running `npm run format` and `npm run lint` (removed `:check` variants) so commands match current scripts.
+
+### 🧹 Chores & Tests
+
+* Bumped package.json version to 1.6.1-dev5.
+* Adjusted unit tests to validate new display label formatting and backendName/description values.
 
 ## [1.6.0] - 2026-04-12
 

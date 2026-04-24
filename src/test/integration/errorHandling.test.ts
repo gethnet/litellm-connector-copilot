@@ -117,12 +117,12 @@ suite("LiteLLM Error Handling Unit Tests", function () {
     test("provideLanguageModelChatResponse handles unsupported parameter error from LiteLLM (when retry also fails)", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
-        type ProviderWithConfig = {
+        interface ProviderWithConfig {
             _configManager: {
                 isConfigured: () => Promise<boolean>;
                 getConfig: () => Promise<{ url: string; inactivityTimeout?: number }>;
             };
-        };
+        }
         const providerWithConfig = provider as unknown as ProviderWithConfig;
         sandbox.stub(providerWithConfig._configManager, "isConfigured").resolves(true);
         sandbox
@@ -181,12 +181,12 @@ suite("LiteLLM Error Handling Unit Tests", function () {
     test("provideLanguageModelChatResponse handles generic 400 error", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
-        type ProviderWithConfig = {
+        interface ProviderWithConfig {
             _configManager: {
                 isConfigured: () => Promise<boolean>;
                 getConfig: () => Promise<{ url: string; inactivityTimeout?: number }>;
             };
-        };
+        }
         const providerWithConfig = provider as unknown as ProviderWithConfig;
         sandbox.stub(providerWithConfig._configManager, "isConfigured").resolves(true);
         sandbox

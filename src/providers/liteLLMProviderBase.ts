@@ -230,42 +230,33 @@ export abstract class LiteLLMProviderBase {
                 const capabilities = capabilitiesToVSCode(derived, capOverride);
                 const tags = getDerivedModelTags(modelId, derived, config.modelOverrides, capOverride);
 
-                const formatTokens = (num: number): string => {
-                    if (num >= 1000000) {
-                        return `${(num / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
-                    }
-                    if (num >= 1000) {
-                        return `${Math.floor(num / 1000)}K`;
-                    }
-                    return num.toString();
-                };
+                const rawProvider = modelInfo?.litellm_provider ?? "litellm";
+                const rawModelName = entry.model_name ?? modelId;
 
-                const inputDesc = formatTokens(derived.rawContextWindow);
-                const outputDesc = formatTokens(derived.maxOutputTokens);
-                const tooltip = `${entry.backendName} · ${modelInfo?.litellm_provider ?? "LiteLLM"} (${modelInfo?.mode ?? "responses"}) — Context: ${inputDesc} in / ${outputDesc} out`;
-
-                // User-facing model label for multi-backend environments.
-                // VS Code expects `id` to be stable and routable, so we keep `id` as the namespaced id.
-                // The human-facing label is exposed via `name`.
-                const displayId = `${entry.backendName}:${entry.model_name ?? modelId}`;
+                const isSingleBackend = this._activeBackendNames.length <= 1;
+                const backendDisplay = isSingleBackend ? "LiteLLM" : "LiteLLM: " + entry.backendName;
+                const extensionName = "LiteLLM Connector for Copilot";
+                const tooltip = `Provider: ${rawProvider}, Model: ${rawModelName} contributed by ${backendDisplay} via ${extensionName}`;
 
                 // Derive family from provider to help Copilot shape requests correctly
-                const provider = modelInfo?.litellm_provider?.toLowerCase();
+                const providerLower = rawProvider.toLowerCase();
                 let family = "litellm";
-                if (provider === "openai") {
+                if (providerLower === "openai") {
                     family = "gpt4";
-                } else if (provider === "anthropic") {
+                } else if (providerLower === "anthropic") {
                     family = "claude";
                 }
 
                 const info = {
                     id: modelId,
-                    name: displayId,
+                    name: rawModelName,
+                    vendor: rawProvider,
+                    backendName: backendDisplay,
                     tooltip,
-                    detail: `Backend: ${entry.backendName} | Context: ${inputDesc} | Output: ${outputDesc}`,
+                    detail: backendDisplay,
                     family: family,
                     version: "1.0.0",
-                    maxInputTokens: derived.rawContextWindow,
+                    maxInputTokens: derived.maxInputTokens,
                     maxOutputTokens: derived.maxOutputTokens,
                     capabilities,
                     tags,

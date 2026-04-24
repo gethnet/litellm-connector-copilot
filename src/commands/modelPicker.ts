@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { formatModelDisplayLabel, type ExtendedModelInformation } from "../utils/modelCapabilities";
 import type { LiteLLMProviderBase } from "../providers/liteLLMProviderBase";
 import { Logger } from "../utils/logger";
 import type { TelemetryService } from "../telemetry/telemetryService";
@@ -52,14 +53,11 @@ export async function showModelPicker(provider: LiteLLMProviderBase, options: Mo
         }
 
         const items: vscode.QuickPickItem[] = models.map((m) => {
-            const mAny = m as unknown as { vendor?: string; tags?: string[] };
+            const mExtended = m as ExtendedModelInformation;
             return {
-                label: m.name,
-                // Keep routing value as the internal VS Code model id.
-                // QuickPickItem has no separate value field, so we encode it in the description.
-                // Instead, we update later by selecting label -> id mapping.
-                description: mAny.vendor || "",
-                detail: mAny.tags?.join(", ") || "",
+                label: formatModelDisplayLabel(mExtended),
+                description: mExtended.backendName || mExtended.detail || "",
+                detail: mExtended.tooltip || "",
             };
         });
 

@@ -1,5 +1,10 @@
 import * as assert from "assert";
-import { capabilitiesToVSCode, getModelTags } from "../modelCapabilities";
+import {
+    capabilitiesToVSCode,
+    getModelTags,
+    formatModelDisplayLabel,
+    type ExtendedModelInformation,
+} from "../modelCapabilities";
 import type { ModelCapabilityOverride } from "../../types";
 
 suite("modelCapabilities", () => {
@@ -184,7 +189,7 @@ suite("modelCapabilities", () => {
             assert.ok(tags.includes("pdf"), "should have pdf tag from override");
         });
 
-        test("merges tag overrides and capability overrides together", () => {
+        test("override merges tag overrides and capability overrides together", () => {
             const derived = {
                 supportsTools: false,
                 supportsVision: false,
@@ -199,8 +204,24 @@ suite("modelCapabilities", () => {
             const tagOverrides = { "gpt-4o": ["custom-tag"] };
             const capabilityOverrides: ModelCapabilityOverride = { toolCalling: true };
             const tags = getModelTags("gpt-4o", derived, tagOverrides, capabilityOverrides);
-            assert.ok(tags.includes("tools"), "Should include tools from capability override");
-            assert.ok(tags.includes("custom-tag"), "Should include custom-tag from tag override");
+            assert.ok(tags.includes("tools"), "Should include tools tag from capability override");
+            assert.ok(tags.includes("custom-tag"), "Should include custom tag from tag overrides");
+        });
+    });
+
+    suite("formatModelDisplayLabel", () => {
+        test("formats strings correctly", () => {
+            assert.strictEqual(formatModelDisplayLabel("gpt-4o", "openai"), "[openai] gpt-4o");
+            assert.strictEqual(formatModelDisplayLabel("gpt-4o"), "gpt-4o");
+            assert.strictEqual(formatModelDisplayLabel("gpt-4o", ""), "gpt-4o");
+        });
+
+        test("formats model objects correctly", () => {
+            const mockModel = { name: "gpt-4o", vendor: "openai" } as unknown as ExtendedModelInformation;
+            assert.strictEqual(formatModelDisplayLabel(mockModel), "[openai] gpt-4o");
+
+            const mockModelNoVendor = { name: "gpt-4o" } as unknown as ExtendedModelInformation;
+            assert.strictEqual(formatModelDisplayLabel(mockModelNoVendor), "gpt-4o");
         });
     });
 });

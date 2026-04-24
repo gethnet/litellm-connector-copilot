@@ -63,6 +63,7 @@ suite("LiteLLM model display", () => {
 
         assert.strictEqual(models.length, 1);
         assert.strictEqual(models[0].id, "cloud/gpt-4o");
-        assert.strictEqual(models[0].name, "cloud:gpt-4o");
+        assert.strictEqual(models[0].name, "gpt-4o");
+        assert.strictEqual((models[0] as unknown as { vendor: string }).vendor, "openai");
     });
 });
