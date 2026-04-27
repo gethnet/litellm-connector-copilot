@@ -5,6 +5,258 @@ declare const suite: (name: string, fn: () => void) => void;
 declare const test: (name: string, fn: () => void) => void;
 
 suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
+    test("should clear buffered tool calls when stream aborts before finish", () => {
+        const state = createInitialStreamingState();
+
+        // Start buffering a tool call but never send finish_reason
+        interpretStreamEvent(
+            {
+                choices: [
+                    {
+                        delta: {
+                            tool_calls: [
+                                {
+                                    index: 0,
+                                    id: "call_stale",
+                                    function: { name: "tool", arguments: "{" },
+                                },
+                            ],
+                        },
+                    },
+                ],
+            },
+            state
+        );
+
+        // Simulate abort/reset for a new request on same connection
+        state.toolCallBuffers.clear();
+        state.completedToolCallIndices.clear();
+        state.emittedTextToolCallIds.clear();
+
+        // Next request reuses index 0; should not be corrupted by stale args
+        interpretStreamEvent(
+            {
+                choices: [
+                    {
+                        delta: {
+                            tool_calls: [
+                                {
+                                    index: 0,
+                                    id: "call_fresh",
+                                    function: { name: "tool", arguments: '{"ok":true}' },
+                                },
+                            ],
+                        },
+                    },
+                ],
+            },
+            state
+        );
+
+        const parts = interpretStreamEvent({ choices: [{ finish_reason: "tool_calls" }] }, state);
+        const toolCall = parts.find((p) => p.type === "tool_call");
+        assert.ok(toolCall && toolCall.type === "tool_call");
+        if (toolCall && toolCall.type === "tool_call") {
+            assert.strictEqual(toolCall.args, '{"ok":true}');
+        }
+    });
+
+    test("should emit thinking before text and tool calls when mixed in one chunk", () => {
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent(
+            {
+                choices: [
+                    {
+                        delta: {
+                            content: "hi",
+                            tool_calls: [
+                                {
+                                    index: 0,
+                                    id: "call_order",
+                                    function: { name: "tool", arguments: "{}" },
+                                },
+                            ],
+                        },
+                        // Simulate thinking surfaced in /responses style alongside OpenAI delta
+                    },
+                ],
+                type: "response.output_reasoning.delta",
+                delta: "thought",
+            },
+            state
+        );
+
+        const order = parts.map((p) => p.type);
+        assert.deepStrictEqual(order, ["thinking", "text"]);
+    });
+
+    test("should parse LiteLLM /responses tool calls and flush on completed", () => {
+        const state = createInitialStreamingState();
+
+        // Tool call arrives in fragments
+        interpretStreamEvent(
+            {
+                type: "response.output_tool_call.delta",
+                delta: { id: "call-resp", name: "tc_responses", arguments: "{" },
+            },
+            state
+        );
+        interpretStreamEvent(
+            {
+                type: "response.output_tool_call.delta",
+                delta: { id: "call-resp", arguments: '"x":1}' },
+            },
+            state
+        );
+
+        const parts = interpretStreamEvent(
+            {
+                type: "response.completed",
+                response: { usage: { input_tokens: 1, output_tokens: 2 } },
+            },
+            state
+        );
+
+        const toolCall = parts.find((p) => p.type === "tool_call");
+        assert.ok(toolCall && toolCall.type === "tool_call");
+        if (toolCall && toolCall.type === "tool_call") {
+            assert.strictEqual(toolCall.name, "tc_responses");
+            assert.strictEqual(toolCall.args, '{"x":1}');
+        }
+
+        const usage = parts.find((p) => p.type === "data");
+        assert.ok(usage, "expected usage data part to be emitted");
+    });
+
+    test("should flush /responses tool calls on output_item.done when no completed frame", () => {
+        const state = createInitialStreamingState();
+
+        interpretStreamEvent(
+            {
+                type: "response.output_tool_call.delta",
+                delta: { id: "call-resp-2", name: "tc2", arguments: "{" },
+            },
+            state
+        );
+        interpretStreamEvent(
+            {
+                type: "response.output_tool_call.delta",
+                delta: { id: "call-resp-2", arguments: '"y":true}' },
+            },
+            state
+        );
+
+        const parts = interpretStreamEvent({ type: "response.output_item.done" }, state);
+        const toolCall = parts.find((p) => p.type === "tool_call");
+        assert.ok(toolCall && toolCall.type === "tool_call");
+        if (toolCall && toolCall.type === "tool_call") {
+            assert.strictEqual(toolCall.name, "tc2");
+            assert.strictEqual(toolCall.args, '{"y":true}');
+        }
+    });
+
+    test("should parse Gemini native tool call shape", () => {
+        const state = createInitialStreamingState();
+        const parts = interpretStreamEvent(
+            {
+                candidates: [
+                    {
+                        content: {
+                            parts: [
+                                {
+                                    functionCall: {
+                                        name: "gem_tool",
+                                        args: { city: "Paris" },
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                ],
+            },
+            state
+        );
+
+        const toolCall = parts.find((p) => p.type === "tool_call");
+        assert.ok(toolCall && toolCall.type === "tool_call");
+        if (toolCall && toolCall.type === "tool_call") {
+            assert.strictEqual(toolCall.name, "gem_tool");
+            assert.strictEqual(toolCall.args, '{"city":"Paris"}');
+        }
+    });
+
+    test("should pass through VS Code DataPart carrier objects and return immediately", () => {
+        const state = createInitialStreamingState();
+        const parts = interpretStreamEvent(
+            {
+                $mid: 1,
+                mimeType: "application/vnd.cache-control+json",
+                data: "ZXBoZW1lcmFs",
+            },
+            state
+        );
+
+        assert.strictEqual(parts.length, 1);
+        const [part] = parts;
+        assert.strictEqual(part.type, "data");
+        if (part.type === "data") {
+            assert.strictEqual(part.mimeType, "application/vnd.cache-control+json");
+        }
+    });
+
+    test("should normalize tool call ids on update and merge name/args", () => {
+        const state = createInitialStreamingState();
+
+        // Initial fragment with raw id
+        interpretStreamEvent(
+            {
+                choices: [
+                    {
+                        delta: {
+                            tool_calls: [
+                                {
+                                    index: 0,
+                                    id: "rawId",
+                                    function: { name: "tool", arguments: "{" },
+                                },
+                            ],
+                        },
+                    },
+                ],
+            },
+            state
+        );
+
+        // Update with same raw id to trigger normalization + name update + args concat
+        interpretStreamEvent(
+            {
+                choices: [
+                    {
+                        delta: {
+                            tool_calls: [
+                                {
+                                    index: 0,
+                                    id: "rawId",
+                                    function: { name: "toolUpdated", arguments: '"value"}' },
+                                },
+                            ],
+                        },
+                    },
+                ],
+            },
+            state
+        );
+
+        const parts = interpretStreamEvent({ choices: [{ finish_reason: "tool_calls" }] }, state);
+        const toolCall = parts.find((p) => p.type === "tool_call");
+        assert.ok(toolCall && toolCall.type === "tool_call");
+        if (toolCall && toolCall.type === "tool_call") {
+            assert.strictEqual(toolCall.name, "toolUpdated");
+            assert.strictEqual(toolCall.args, '{"value"}');
+            assert.ok(toolCall.id?.startsWith("fc_"));
+        }
+    });
     test("should flush tool calls only when finish_reason is present (current behavior verification)", () => {
         const state = createInitialStreamingState();
 

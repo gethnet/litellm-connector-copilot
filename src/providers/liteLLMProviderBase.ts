@@ -21,7 +21,12 @@ import {
 import { MultiBackendClient, parseNamespacedModelId } from "../adapters/multiBackendClient";
 import { ResponsesClient } from "../adapters/responsesClient";
 import { transformToResponsesFormat } from "../adapters/responsesAdapter";
-import { countTokens, trimMessagesToFitBudget } from "../adapters/tokenUtils";
+import {
+    countTokens,
+    trimMessagesToFitBudget,
+    estimateToolTokens,
+    isContextOverflowError,
+} from "../adapters/tokenUtils";
 import { countTokensForV2Messages, trimV2MessagesForBudget } from "../adapters/tokenUtils";
 import { ConfigManager } from "../config/configManager";
 import { Logger } from "../utils/logger";
@@ -713,6 +718,58 @@ export abstract class LiteLLMProviderBase {
         }
 
         return multiClient.chat(request.model, request, modelInfo?.mode, token, modelInfo);
+    }
+
+    /**
+     * Sends a LiteLLM request with a single retry on context overflow. The first attempt uses the
+     * standard buffered budget. On overflow, we re-trim messages with a hard cap equal to the raw
+     * model max input (minus tool tokens) and retry once. If the retry also overflows, surface a
+     * LanguageModelError so VS Code can trigger compaction and re-send.
+     */
+    protected async sendRequestWithRetry(
+        request: OpenAIChatCompletionRequest,
+        messages: readonly LanguageModelChatRequestMessage[],
+        model: LanguageModelChatInformation,
+        options: ProvideLanguageModelChatResponseOptions,
+        progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+        token: vscode.CancellationToken,
+        caller?: string,
+        modelInfo?: LiteLLMModelInfo
+    ): Promise<ReadableStream<Uint8Array>> {
+        try {
+            return await this.sendRequestToLiteLLM(request, progress, token, caller, modelInfo);
+        } catch (err) {
+            if (!isContextOverflowError(err)) {
+                throw err;
+            }
+
+            Logger.warn("[sendRequestWithRetry] Context overflow detected, retrying with aggressive trim", err);
+
+            // Build a new request with hard budget override equal to raw limit minus tool tokens
+            const toolConfig = convertTools(options);
+            const hardBudget = Math.max(1, model.maxInputTokens - estimateToolTokens(toolConfig.tools));
+            const trimmedMessages = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo, hardBudget);
+            const retrimmedRequest = await this.buildOpenAIChatRequest(
+                trimmedMessages,
+                model,
+                options,
+                modelInfo,
+                caller
+            );
+
+            try {
+                return await this.sendRequestToLiteLLM(retrimmedRequest, progress, token, caller, modelInfo);
+            } catch (retryErr) {
+                if (isContextOverflowError(retryErr)) {
+                    const contextError = new vscode.LanguageModelError(
+                        "Context window exceeded. The conversation is too long for this model."
+                    );
+                    (contextError as { code?: string }).code = "ContextExceeded";
+                    throw contextError;
+                }
+                throw retryErr;
+            }
+        }
     }
 
     protected isParameterSupported(param: string, modelInfo: LiteLLMModelInfo | undefined, modelId?: string): boolean {

@@ -62,8 +62,11 @@ export class LiteLLMChatProviderV2 extends LiteLLMProviderBase implements vscode
             const requestBody = await this.buildV2ChatRequest(normalizedMessages, model, options, modelInfo, caller);
             const tokensIn = this.countTokensForV2Messages(normalizedMessages, model.id, modelInfo);
 
-            const stream = await this.sendRequestToLiteLLM(
+            const stream = await this.sendRequestWithRetry(
                 requestBody,
+                normalizedMessages as unknown as readonly vscode.LanguageModelChatRequestMessage[],
+                model,
+                options,
                 progress as vscode.Progress<vscode.LanguageModelResponsePart>,
                 token,
                 caller,

@@ -210,3 +210,4 @@ $RECYCLE.BIN/
 *.lnk
 .plans/**/*.*
 .plans
+.devcontainer/devcontainer-lock.json

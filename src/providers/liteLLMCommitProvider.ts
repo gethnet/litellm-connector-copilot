@@ -97,8 +97,16 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
                 },
             };
 
-            const stream = await this.sendRequestToLiteLLM(
+            const stream = await this.sendRequestWithRetry(
                 requestBody,
+                messages,
+                model,
+                {
+                    modelOptions: options.modelOptions,
+                    tools: [],
+                    toolMode: vscode.LanguageModelChatToolMode.Auto,
+                    requestInitiator: "commit-message",
+                } as vscode.ProvideLanguageModelChatResponseOptions,
                 nullProgress,
                 token,
                 "scm-generator",

@@ -74,6 +74,40 @@ suite("ModelPicker Unit Tests", () => {
         assert.strictEqual(onSelectSpy.calledWith("model-1"), true);
     });
 
+    test("showModelPicker resolves selection when label includes vendor prefix", async () => {
+        const mockModels = [{ id: "backend::gpt-4", name: "gpt-4", vendor: "openai", backendName: "primary" }];
+        mockProvider.discoverModels.resolves(mockModels as unknown as vscode.LanguageModelChatInformation[]);
+        mockProvider.getConfigManager.returns({
+            getConfig: async () => ({ testKey: undefined }) as unknown as LiteLLMConfig,
+        } as unknown as ConfigManager);
+
+        const configUpdateStub = sandbox.stub();
+        sandbox.stub(vscode.workspace, "getConfiguration").callsFake(
+            () =>
+                ({
+                    get: sandbox.stub().returns(undefined),
+                    update: configUpdateStub,
+                }) as unknown as vscode.WorkspaceConfiguration
+        );
+
+        const quickPickStub = sandbox
+            .stub(vscode.window, "showQuickPick")
+            .callsFake(async (items: readonly vscode.QuickPickItem[] | Thenable<readonly vscode.QuickPickItem[]>) => {
+                const resolved = await items;
+                return resolved[0];
+            });
+
+        await showModelPicker(mockProvider as unknown as LiteLLMProviderBase, {
+            title: "Test Picker",
+            settingKey: "testKey",
+        });
+
+        const quickPickItems = quickPickStub.firstCall.args[0] as vscode.QuickPickItem[];
+        assert.strictEqual(quickPickItems[0].label, "[openai] gpt-4");
+        assert.strictEqual(configUpdateStub.calledOnce, true);
+        assert.strictEqual(configUpdateStub.firstCall.args[1], "backend::gpt-4");
+    });
+
     test("showModelPicker clears configuration on 'Clear Selection'", async () => {
         mockProvider.discoverModels.resolves([{ id: "model-1" }] as unknown as vscode.LanguageModelChatInformation[]);
         mockProvider.getConfigManager.returns({

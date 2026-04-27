@@ -171,23 +171,31 @@ export function trimMessagesToFitBudget(
     messages: readonly vscode.LanguageModelChatRequestMessage[],
     tools: { type: string; function: { name: string; description?: string; parameters?: object } }[] | undefined,
     model: vscode.LanguageModelChatInformation,
-    modelInfo?: LiteLLMModelInfo
+    modelInfo?: LiteLLMModelInfo,
+    hardBudgetOverride?: number
 ): readonly vscode.LanguageModelChatRequestMessage[] {
     const toolTokenCount = estimateToolTokens(tools);
     const tokenLimit = Math.max(1, model.maxInputTokens);
-    // Apply a flat safety buffer to avoid context overflow due to tokenizer variance,
-    // provider-side framing, and other hidden tokens.
-    //
-    // This is intentionally applied to *all* models (not just Anthropic) because
-    // overflow failures are catastrophic and the 5% reduction is a small tradeoff.
-    const bufferedLimit = Math.max(1, Math.floor(tokenLimit * 0.95));
 
-    // Keep an additional small margin for Anthropic-style models which tend to be
-    // stricter about context limits.
-    const safetyLimit = isAnthropicModel(model.id, modelInfo)
-        ? Math.max(1, Math.floor(bufferedLimit * 0.98))
-        : bufferedLimit;
-    const budget = safetyLimit - toolTokenCount;
+    const budgetLimit =
+        hardBudgetOverride !== undefined
+            ? Math.max(1, Math.floor(hardBudgetOverride))
+            : (() => {
+                  // Apply a flat safety buffer to avoid context overflow due to tokenizer variance,
+                  // provider-side framing, and other hidden tokens.
+                  //
+                  // This is intentionally applied to *all* models (not just Anthropic) because
+                  // overflow failures are catastrophic and the 5% reduction is a small tradeoff.
+                  const bufferedLimit = Math.max(1, Math.floor(tokenLimit * 0.95));
+
+                  // Keep an additional small margin for Anthropic-style models which tend to be
+                  // stricter about context limits.
+                  return isAnthropicModel(model.id, modelInfo)
+                      ? Math.max(1, Math.floor(bufferedLimit * 0.98))
+                      : bufferedLimit;
+              })();
+
+    const budget = budgetLimit - toolTokenCount;
     if (budget <= 0) {
         throw new Error("Message exceeds token limit.");
     }
@@ -255,19 +263,54 @@ export function trimMessagesToFitBudget(
     return selected;
 }
 
+/**
+ * Detects whether an error represents a context overflow / max tokens condition.
+ */
+export function isContextOverflowError(err: unknown): boolean {
+    if (!err || typeof err !== "object") {
+        return false;
+    }
+
+    const errorObj = err as { code?: unknown; message?: unknown; type?: unknown };
+    const code = typeof errorObj.code === "string" ? errorObj.code : undefined;
+    const message = typeof errorObj.message === "string" ? errorObj.message : undefined;
+    const type = typeof errorObj.type === "string" ? errorObj.type : undefined;
+
+    if (code === "context_length_exceeded" || code === "tokens_exceeded") {
+        return true;
+    }
+
+    if (type === "invalid_request_error" && message && message.toLowerCase().includes("maximum context length")) {
+        return true;
+    }
+
+    if (message && /maximum context length|context length exceeded/i.test(message)) {
+        return true;
+    }
+
+    return false;
+}
+
 export function trimV2MessagesForBudget(
     messages: readonly V2ChatMessage[],
     tools: { type: string; function: { name: string; description?: string; parameters?: object } }[] | undefined,
     model: vscode.LanguageModelChatInformation,
-    modelInfo?: LiteLLMModelInfo
+    modelInfo?: LiteLLMModelInfo,
+    hardBudgetOverride?: number
 ): readonly V2ChatMessage[] {
     const toolTokenCount = estimateToolTokens(tools);
     const tokenLimit = Math.max(1, model.maxInputTokens);
-    const bufferedLimit = Math.max(1, Math.floor(tokenLimit * 0.95));
-    const safetyLimit = isAnthropicModel(model.id, modelInfo)
-        ? Math.max(1, Math.floor(bufferedLimit * 0.98))
-        : bufferedLimit;
-    const budget = safetyLimit - toolTokenCount;
+    const budgetLimit =
+        hardBudgetOverride !== undefined
+            ? Math.max(1, Math.floor(hardBudgetOverride))
+            : (() => {
+                  const bufferedLimit = Math.max(1, Math.floor(tokenLimit * 0.95));
+                  return isAnthropicModel(model.id, modelInfo)
+                      ? Math.max(1, Math.floor(bufferedLimit * 0.98))
+                      : bufferedLimit;
+              })();
+
+    const budget = budgetLimit - toolTokenCount;
     if (budget <= 0) {
         throw new Error("Message exceeds token limit.");
     }
