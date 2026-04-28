@@ -402,6 +402,94 @@ suite("Utility Unit Tests", () => {
         assert.strictEqual(openai[1].role, "tool");
     });
 
+    test("V2 validation allows tool results followed by adjacent user text", () => {
+        const v2Msgs = normalizeMessagesForV2Pipeline([
+            {
+                role: vscode.LanguageModelChatMessageRole.Assistant,
+                content: [new vscode.LanguageModelToolCallPart("write-1", "write_file", { path: "src/example.ts" })],
+                name: "assistant",
+            } as unknown as vscode.LanguageModelChatMessage,
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [
+                    new vscode.LanguageModelToolResultPart("write-1", ["Wrote src/example.ts"]),
+                    new vscode.LanguageModelTextPart("The file write completed successfully."),
+                ],
+                name: "user",
+            } as unknown as vscode.LanguageModelChatMessage,
+        ]);
+
+        assert.doesNotThrow(() => validateV2Messages(v2Msgs));
+    });
+
+    test("V2 conversion keeps tool result before adjacent trailing text", () => {
+        const v2Msgs = normalizeMessagesForV2Pipeline([
+            {
+                role: vscode.LanguageModelChatMessageRole.Assistant,
+                content: [new vscode.LanguageModelToolCallPart("write-2", "write_file", { path: "src/example.ts" })],
+                name: "assistant",
+            } as unknown as vscode.LanguageModelChatMessage,
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [
+                    new vscode.LanguageModelToolResultPart("write-2", ["Wrote src/example.ts"]),
+                    new vscode.LanguageModelTextPart("No follow-up read is required."),
+                ],
+                name: "user",
+            } as unknown as vscode.LanguageModelChatMessage,
+        ]);
+
+        const openai = convertV2MessagesToOpenAI(v2Msgs);
+
+        assert.strictEqual(openai.length, 3);
+        assert.strictEqual(openai[0].role, "assistant");
+        assert.ok(openai[0].tool_calls);
+        assert.strictEqual(openai[1].role, "tool");
+        assert.strictEqual(openai[1].content, "Wrote src/example.ts");
+        assert.strictEqual(openai[2].role, "user");
+        assert.strictEqual(openai[2].content, "No follow-up read is required.");
+    });
+
+    test("V2 conversion serializes structured tool results without flat concatenation", () => {
+        const v2Msgs = normalizeMessagesForV2Pipeline([
+            {
+                role: vscode.LanguageModelChatMessageRole.Assistant,
+                content: [new vscode.LanguageModelToolCallPart("write-3", "write_file", { path: "src/example.ts" })],
+                name: "assistant",
+            } as unknown as vscode.LanguageModelChatMessage,
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [
+                    new vscode.LanguageModelToolResultPart("write-3", [
+                        new vscode.LanguageModelTextPart("write result"),
+                        { status: "success", path: "src/example.ts", bytesWritten: 42 },
+                    ]),
+                ],
+                name: "user",
+            } as unknown as vscode.LanguageModelChatMessage,
+        ]);
+
+        const openai = convertV2MessagesToOpenAI(v2Msgs);
+        const toolContent = openai[1].content;
+
+        assert.strictEqual(typeof toolContent, "string");
+        assert.notStrictEqual(
+            toolContent,
+            'write result{"status":"success","path":"src/example.ts","bytesWritten":42}'
+        );
+
+        const parsed = JSON.parse(toolContent as string) as {
+            type: string;
+            content: Array<{ type: string; text?: string; value?: unknown }>;
+        };
+        assert.strictEqual(parsed.type, "tool_result");
+        assert.deepStrictEqual(parsed.content[0], { type: "text", text: "write result" });
+        assert.deepStrictEqual(parsed.content[1], {
+            type: "json",
+            value: { status: "success", path: "src/example.ts", bytesWritten: 42 },
+        });
+    });
+
     test("V2 pipeline handles thinking parts", () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ThinkingPart = (vscode as any).LanguageModelThinkingPart;

@@ -17,7 +17,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "1.6.2-dev5",
+	"version": "1.6.2-dev6",
 	"preview": true,
 	"engines": {
 		"vscode": "^1.114.0"

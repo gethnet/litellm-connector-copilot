@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { convertV2MessagesToOpenAI as convertV2MessagesToOpenAIDirect } from "./adapters/v2OpenAIMessageConverter";
 import type { V2ChatMessage, V2MessagePart } from "./providers/v2Types";
 import type {
     OpenAIChatMessage,
@@ -486,7 +487,10 @@ export function convertV2MessagesToProviderMessages(
 }
 
 export function convertV2MessagesToOpenAI(messages: readonly V2ChatMessage[]): OpenAIChatMessage[] {
-    return convertMessages(convertV2MessagesToTransportMessages(messages));
+    return convertV2MessagesToOpenAIDirect(messages, {
+        normalizeToolCallId,
+        isCacheControlMimeType,
+    });
 }
 
 export function convertV2MessagesToTransportMessages(
@@ -549,39 +553,56 @@ export function convertV2MessagesToTransportMessages(
 
 export function validateV2Messages(messages: readonly V2ChatMessage[]): void {
     Logger.info("Entering validateV2Messages", { messageCount: messages.length });
-    const downgraded = messages.map((message, idx) => ({
-        role: message.role,
-        name: message.name,
-        content: message.content
-            .filter((part) => {
-                if (part.type === "thinking") {
-                    Logger.debug(`Filtering out thinking part for validation in message ${idx}`);
-                    return false;
-                }
-                return true;
-            })
-            .map((part) => {
-                switch (part.type) {
-                    case "text":
-                        return new vscode.LanguageModelTextPart(part.text);
-                    case "data":
-                        return new vscode.LanguageModelDataPart(part.data, part.mimeType);
-                    case "tool_call":
-                        return new vscode.LanguageModelToolCallPart(
-                            part.callId,
-                            part.name,
-                            (part.input ?? {}) as Record<string, unknown>
-                        );
-                    case "tool_result":
-                        return new vscode.LanguageModelToolResultPart(part.callId, [...part.content]);
-                    default:
-                        return undefined;
-                }
-            })
-            .filter((part): part is vscode.LanguageModelInputPart => part !== undefined),
-    })) as vscode.LanguageModelChatRequestMessage[];
 
-    validateRequest(downgraded);
+    messages.forEach((message, i) => {
+        if (message.content.length === 0) {
+            Logger.error(`Validation failed: V2 message at index ${i} has empty content`);
+            throw new Error("Invalid request: empty message content.");
+        }
+
+        if (lmcr_toString(message.role as vscode.LanguageModelChatMessageRole) !== "assistant") {
+            return;
+        }
+
+        const pendingToolCallIds = new Set(
+            message.content
+                .filter((part): part is Extract<V2MessagePart, { type: "tool_call" }> => part.type === "tool_call")
+                .map((part) => part.callId)
+        );
+
+        if (pendingToolCallIds.size === 0) {
+            return;
+        }
+
+        let nextMessageIdx = i + 1;
+        const errMsg =
+            "Invalid request: Tool call part must be followed by a User message with a LanguageModelToolResultPart with a matching callId.";
+
+        while (pendingToolCallIds.size > 0) {
+            const nextMessage = messages[nextMessageIdx++];
+            if (!nextMessage || lmcr_toString(nextMessage.role as vscode.LanguageModelChatMessageRole) !== "user") {
+                Logger.error("Validation failed: missing V2 tool result for call IDs:", Array.from(pendingToolCallIds));
+                throw new Error(errMsg);
+            }
+
+            for (const part of nextMessage.content) {
+                if (pendingToolCallIds.size === 0) {
+                    break;
+                }
+
+                if (part.type !== "tool_result") {
+                    Logger.error("Validation failed: expected V2 tool result part before adjacent text/data", {
+                        messageIndex: nextMessageIdx - 1,
+                        partType: part.type,
+                        pendingToolCallIds: Array.from(pendingToolCallIds),
+                    });
+                    throw new Error(errMsg);
+                }
+
+                pendingToolCallIds.delete(part.callId);
+            }
+        }
+    });
 }
 
 /**
