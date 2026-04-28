@@ -250,7 +250,12 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
         assert.strictEqual(request.messages[0].content, "thinking...internal reasoning");
     });
 
-    test("V2 data stays distinct until transport shaping and cache_control becomes transport text", () => {
+    test("V2 data stays distinct until transport shaping and cache_control is dropped at transport", () => {
+        // cache_control is opaque prompt-caching metadata (e.g. Anthropic "ephemeral"
+        // markers). It must never be decoded and injected as message text, because
+        // AI/LLMs fixate on the stray "ephemeral" / "json_cache" / "$mid" fragments
+        // and derail the current task. The transport layer must silently drop these
+        // parts while still carrying adjacent real text parts intact.
         const normalized = normalizeMessagesForV2Pipeline([
             {
                 role: vscode.LanguageModelChatMessageRole.User,
@@ -311,7 +316,10 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
                     ["user", "system"].includes(request.messages[0].role),
                     `Unexpected role: ${request.messages[0].role}`
                 );
-                assert.strictEqual(request.messages[0].content, "ephemeralvisible text");
+                // Must equal "visible text" only. If "ephemeral" leaks in, the
+                // cache_control metadata is being injected as raw text into the
+                // LLM payload — that is the exact bug this test guards.
+                assert.strictEqual(request.messages[0].content, "visible text");
             });
     });
 

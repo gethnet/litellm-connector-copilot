@@ -4,6 +4,7 @@ import { isAnthropicModel } from "../utils/modelUtils";
 import { selectTokenizer } from "./tokenizers/selectTokenizer";
 import type { V2ChatMessage } from "../providers/v2Types";
 import type { TelemetryService } from "../telemetry/telemetryService";
+import { isCacheControlMimeType } from "../utils";
 
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16000;
 export const DEFAULT_CONTEXT_LENGTH = 128000;
@@ -100,11 +101,15 @@ export function countTokensForV2Messages(
                     );
                     break;
                 case "data":
-                    if (
-                        part.mimeType.startsWith("text/") ||
-                        part.mimeType.includes("json") ||
-                        part.mimeType === "cache_control"
-                    ) {
+                    // Skip cache_control parts — they are dropped at the
+                    // transport layer (see decodeV2DataPart / convertMessages)
+                    // and must not inflate the token budget. Checked BEFORE the
+                    // JSON branch so that "application/vnd.cache-control+json"
+                    // variants are also skipped.
+                    if (isCacheControlMimeType(part.mimeType)) {
+                        break;
+                    }
+                    if (part.mimeType.startsWith("text/") || part.mimeType.includes("json")) {
                         total += countTokens(Buffer.from(part.data).toString("utf-8"), modelId, modelInfo);
                     }
                     break;
