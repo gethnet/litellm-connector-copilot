@@ -107,19 +107,56 @@ export class LiteLLMChatProviderV2 extends LiteLLMProviderBase implements vscode
                 caller,
             });
         } catch (err) {
-            Logger.error("V2 Chat request failed", err);
+            const durationMs = LiteLLMTelemetry.endTimer(startTime);
+            const message = err instanceof Error ? err.message : String(err);
+
+            Logger.error(
+                `V2 Chat request failed | RequestID: ${requestId} | Model: ${model.id} | Duration: ${durationMs}ms`,
+                err
+            );
+
+            if (this._telemetryService) {
+                this._telemetryService.captureRequestFailed({
+                    request_id: requestId,
+                    caller,
+                    model: model.id,
+                    endpoint: "unknown",
+                    durationMs,
+                    errorType: message,
+                });
+            }
+
+            LiteLLMTelemetry.reportMetric({
+                requestId,
+                model: model.id,
+                durationMs,
+                status: "failure",
+                error: message,
+                caller,
+            });
             throw err;
         }
     }
 
     private async *decodeStream(stream: ReadableStream<Uint8Array>, token: vscode.CancellationToken) {
         const { decodeSSE } = await import("../adapters/sse/sseDecoder.js");
+        let badFrames = 0;
         for await (const payload of decodeSSE(stream, token)) {
             try {
                 yield JSON.parse(payload);
-            } catch {
+            } catch (parseErr) {
+                badFrames += 1;
+                if (badFrames <= 3) {
+                    Logger.warn(`[decodeStream] Failed to parse SSE frame`, {
+                        preview: typeof payload === "string" ? payload.slice(0, 120) : "<non-string>",
+                        error: parseErr instanceof Error ? parseErr.message : String(parseErr),
+                    });
+                }
                 continue;
             }
+        }
+        if (badFrames > 3) {
+            Logger.warn(`[decodeStream] ${badFrames} SSE frames failed to parse (additional bad frames suppressed)`);
         }
     }
 }

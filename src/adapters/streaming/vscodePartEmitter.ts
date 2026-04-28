@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { Logger } from "../../utils/logger";
 import type { EmittedPart } from "./liteLLMStreamInterpreter";
 
 export function emitV2PartsToVSCode(
@@ -29,9 +30,13 @@ export function emitV2PartsToVSCode(
                     try {
                         const args = part.args ? JSON.parse(part.args) : {};
                         progress.report(new vscode.LanguageModelToolCallPart(part.id, part.name, args));
-                    } catch (e) {
-                        // Log the error but don't crash the entire response stream
-                        console.error(`Failed to parse tool call arguments for ${part.name}:`, e);
+                    } catch (parseErr) {
+                        Logger.warn(`[vscodePartEmitter] Failed to parse tool call arguments`, {
+                            toolName: part.name,
+                            id: part.id,
+                            argsPreview: typeof part.args === "string" ? part.args.slice(0, 160) : "<non-string>",
+                            error: parseErr instanceof Error ? parseErr.message : String(parseErr),
+                        });
                         // Fallback: emit with raw string if the consumer can handle it, or empty object
                         progress.report(new vscode.LanguageModelToolCallPart(part.id, part.name, {}));
                     }
