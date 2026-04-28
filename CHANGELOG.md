@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.6.2] - 2026-04-28
+
+### ✨ Features
+
+* **V2 Responses Pipeline**: Overhauled the V2 responses conversion and validation to handle `LanguageModelDataPart`, `LanguageModelThinkingPart`, and other VS Code internal carrier objects properly.
+
+### 🐛 Fixes
+
+* **Streaming Error Logging**: Improved streaming error logging and telemetry to capture more granular details on connection drops and parse failures.
+* **Cache Control Handling**: Dropped `cache_control` metadata from transport and token counting to prevent `{"$mid":24,"mimeType":"cache_control","data":"ZXBoZW1lcmFs"}` carrier objects from corrupting prompts or inflating the token budget.
+
 ## [1.6.1] - 2026-04-23
 
 ### ✨ Features
