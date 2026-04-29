@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { convertV2MessagesToOpenAI as convertV2MessagesToOpenAIDirect } from "./adapters/v2OpenAIMessageConverter";
 import type { V2ChatMessage, V2MessagePart } from "./providers/v2Types";
 import type {
     OpenAIChatMessage,
@@ -245,7 +246,13 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                 textParts.push(part.value);
             } else if (part instanceof vscode.LanguageModelDataPart) {
                 // Handle image and other data parts
-                if (part.mimeType.startsWith("image/")) {
+                if (isCacheControlMimeType(part.mimeType)) {
+                    // Drop cache_control metadata unconditionally (see
+                    // isCacheControlMimeType doc for rationale). This branch runs
+                    // BEFORE the JSON branch so that MIME types like
+                    // "application/vnd.cache-control+json" cannot slip through.
+                    Logger.trace(`[convertMessages] Dropping cache_control part (mimeType: ${part.mimeType})`);
+                } else if (part.mimeType.startsWith("image/")) {
                     // Convert image data to base64 for OpenAI vision API
                     let base64Data: string;
                     if (part.data instanceof Uint8Array) {
@@ -269,13 +276,6 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                     // Handle explicit text data parts
                     const textStr = Buffer.from(part.data).toString("utf-8");
                     textParts.push(textStr);
-                } else if (part.mimeType === "cache_control") {
-                    // Handle cache_control data parts (e.g. for prompt caching)
-                    // We log this for now to verify it's being received;
-                    // actual implementation depends on the specific provider support in LiteLLM.
-                    Logger.trace(
-                        `[convertMessages] Received cache_control part: ${Buffer.from(part.data).toString("utf-8")}`
-                    );
                 }
             } else if (part instanceof vscode.LanguageModelToolCallPart) {
                 const id = normalizeToolCallId(
@@ -336,8 +336,29 @@ function toUint8Array(data: unknown): Uint8Array {
     return Buffer.from(JSON.stringify(data ?? null), "utf-8");
 }
 
+/**
+ * Returns true for any MIME type that represents opaque prompt-caching metadata
+ * rather than message content. These parts must be silently dropped at the
+ * transport layer — decoding them produces strings like "ephemeral" or a raw
+ * {"$mid":...,"mimeType":"cache_control",...} carrier object that, once injected
+ * into user/assistant content, causes LLMs to fixate on the stray fragment and
+ * abandon the active task.
+ */
+export function isCacheControlMimeType(mimeType: string): boolean {
+    if (mimeType === "cache_control") {
+        return true;
+    }
+    // Match any vnd.*cache-control* variant, regardless of suffix (+json, +text, etc.)
+    return /cache[-_]control/i.test(mimeType);
+}
+
 function decodeV2DataPart(part: Extract<V2MessagePart, { type: "data" }>): string | undefined {
-    if (part.mimeType.startsWith("text/") || part.mimeType.includes("json") || part.mimeType === "cache_control") {
+    // Drop cache_control parts unconditionally — see isCacheControlMimeType for
+    // why injecting this metadata into LLM message text is harmful.
+    if (isCacheControlMimeType(part.mimeType)) {
+        return undefined;
+    }
+    if (part.mimeType.startsWith("text/") || part.mimeType.includes("json")) {
         return Buffer.from(part.data).toString("utf-8");
     }
     return undefined;
@@ -466,7 +487,10 @@ export function convertV2MessagesToProviderMessages(
 }
 
 export function convertV2MessagesToOpenAI(messages: readonly V2ChatMessage[]): OpenAIChatMessage[] {
-    return convertMessages(convertV2MessagesToTransportMessages(messages));
+    return convertV2MessagesToOpenAIDirect(messages, {
+        normalizeToolCallId,
+        isCacheControlMimeType,
+    });
 }
 
 export function convertV2MessagesToTransportMessages(
@@ -529,39 +553,56 @@ export function convertV2MessagesToTransportMessages(
 
 export function validateV2Messages(messages: readonly V2ChatMessage[]): void {
     Logger.info("Entering validateV2Messages", { messageCount: messages.length });
-    const downgraded = messages.map((message, idx) => ({
-        role: message.role,
-        name: message.name,
-        content: message.content
-            .filter((part) => {
-                if (part.type === "thinking") {
-                    Logger.debug(`Filtering out thinking part for validation in message ${idx}`);
-                    return false;
-                }
-                return true;
-            })
-            .map((part) => {
-                switch (part.type) {
-                    case "text":
-                        return new vscode.LanguageModelTextPart(part.text);
-                    case "data":
-                        return new vscode.LanguageModelDataPart(part.data, part.mimeType);
-                    case "tool_call":
-                        return new vscode.LanguageModelToolCallPart(
-                            part.callId,
-                            part.name,
-                            (part.input ?? {}) as Record<string, unknown>
-                        );
-                    case "tool_result":
-                        return new vscode.LanguageModelToolResultPart(part.callId, [...part.content]);
-                    default:
-                        return undefined;
-                }
-            })
-            .filter((part): part is vscode.LanguageModelInputPart => part !== undefined),
-    })) as vscode.LanguageModelChatRequestMessage[];
 
-    validateRequest(downgraded);
+    messages.forEach((message, i) => {
+        if (message.content.length === 0) {
+            Logger.error(`Validation failed: V2 message at index ${i} has empty content`);
+            throw new Error("Invalid request: empty message content.");
+        }
+
+        if (lmcr_toString(message.role as vscode.LanguageModelChatMessageRole) !== "assistant") {
+            return;
+        }
+
+        const pendingToolCallIds = new Set(
+            message.content
+                .filter((part): part is Extract<V2MessagePart, { type: "tool_call" }> => part.type === "tool_call")
+                .map((part) => part.callId)
+        );
+
+        if (pendingToolCallIds.size === 0) {
+            return;
+        }
+
+        let nextMessageIdx = i + 1;
+        const errMsg =
+            "Invalid request: Tool call part must be followed by a User message with a LanguageModelToolResultPart with a matching callId.";
+
+        while (pendingToolCallIds.size > 0) {
+            const nextMessage = messages[nextMessageIdx++];
+            if (!nextMessage || lmcr_toString(nextMessage.role as vscode.LanguageModelChatMessageRole) !== "user") {
+                Logger.error("Validation failed: missing V2 tool result for call IDs:", Array.from(pendingToolCallIds));
+                throw new Error(errMsg);
+            }
+
+            for (const part of nextMessage.content) {
+                if (pendingToolCallIds.size === 0) {
+                    break;
+                }
+
+                if (part.type !== "tool_result") {
+                    Logger.error("Validation failed: expected V2 tool result part before adjacent text/data", {
+                        messageIndex: nextMessageIdx - 1,
+                        partType: part.type,
+                        pendingToolCallIds: Array.from(pendingToolCallIds),
+                    });
+                    throw new Error(errMsg);
+                }
+
+                pendingToolCallIds.delete(part.callId);
+            }
+        }
+    });
 }
 
 /**

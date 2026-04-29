@@ -6,6 +6,12 @@
         "command": "./scripts/post-session-validation.sh",
         "timeout": 300
       }
+    ],
+    "SubagentStop": [
+      {
+        "type": "command",
+        "command": "./scripts/post-session-validation.sh"
+      }
     ]
   }
 }

@@ -11,6 +11,7 @@ import {
     getStaticPromptTokenCount,
     countTokensForV2Messages,
     trimV2MessagesForBudget,
+    isContextOverflowError,
 } from "../tokenUtils";
 import type { LiteLLMModelInfo, OpenAIFunctionToolDef } from "../../types";
 import type { V2ChatMessage } from "../../providers/v2Types";
@@ -122,6 +123,45 @@ suite("TokenUtils Unit Tests", () => {
         assert.strictEqual(trimmed.length, 2);
         assert.strictEqual(trimmed[0], systemMsg);
         assert.strictEqual(trimmed[1], newMsg);
+    });
+
+    test("trimMessagesToFitBudget respects hardBudgetOverride without buffer", () => {
+        const systemMsg = {
+            role: 3 as unknown as vscode.LanguageModelChatMessageRole,
+            content: [new vscode.LanguageModelTextPart("System prompt")],
+        } as unknown as vscode.LanguageModelChatRequestMessage;
+
+        const recentMsg = {
+            role: vscode.LanguageModelChatMessageRole.User,
+            content: [new vscode.LanguageModelTextPart("Short")],
+        } as unknown as vscode.LanguageModelChatRequestMessage;
+
+        const olderMsg = {
+            role: vscode.LanguageModelChatMessageRole.User,
+            content: [new vscode.LanguageModelTextPart("Older message that should drop")],
+        } as unknown as vscode.LanguageModelChatRequestMessage;
+
+        const modelInfo = {
+            id: "test",
+            maxInputTokens: 1000, // large, but override will constrain
+        } as vscode.LanguageModelChatInformation;
+
+        // Without override, buffered budget keeps system + both messages.
+        const defaultTrimmed = trimMessagesToFitBudget([systemMsg, olderMsg, recentMsg], undefined, modelInfo);
+        assert.strictEqual(defaultTrimmed.length, 3);
+
+        // With a small hard override (8 tokens), only system + recent should remain.
+        const overridden = trimMessagesToFitBudget(
+            [systemMsg, olderMsg, recentMsg],
+            undefined,
+            modelInfo,
+            undefined,
+            8
+        );
+
+        assert.strictEqual(overridden.length, 2);
+        assert.strictEqual(overridden[0], systemMsg);
+        assert.strictEqual(overridden[1], recentMsg);
     });
 
     test("trimMessagesToFitBudget throws if budget is too small", () => {
@@ -288,5 +328,29 @@ suite("TokenUtils Unit Tests", () => {
             content: [{ type: "text", text: "way too long system message" }],
         } as unknown as V2ChatMessage;
         assert.throws(() => trimV2MessagesForBudget([sysMsg], undefined, modelInfo), /Message exceeds token limit/);
+    });
+
+    test("isContextOverflowError matches known patterns", () => {
+        const codeError = Object.assign(new Error("overflow"), { code: "context_length_exceeded" });
+        const tokenError = Object.assign(new Error("overflow"), { code: "tokens_exceeded" });
+        const messageError = new Error("This model's maximum context length is 50 tokens");
+        const typedError = Object.assign(new Error("overflow"), {
+            type: "invalid_request_error",
+            message: "maximum context length exceeded",
+        });
+
+        assert.strictEqual(isContextOverflowError(codeError), true);
+        assert.strictEqual(isContextOverflowError(tokenError), true);
+        assert.strictEqual(isContextOverflowError(messageError), true);
+        assert.strictEqual(isContextOverflowError(typedError), true);
+    });
+
+    test("isContextOverflowError ignores unrelated errors", () => {
+        const networkError = Object.assign(new Error("timeout"), { code: "ETIMEDOUT" });
+        const badRequest = Object.assign(new Error("invalid"), { status: 400, message: "invalid input" });
+
+        assert.strictEqual(isContextOverflowError(networkError), false);
+        assert.strictEqual(isContextOverflowError(badRequest), false);
+        assert.strictEqual(isContextOverflowError("plain string"), false);
     });
 });

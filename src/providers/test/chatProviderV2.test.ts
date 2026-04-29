@@ -5,6 +5,8 @@ import * as vscode from "vscode";
 import { LiteLLMChatProviderV2 } from "../liteLLMChatProviderV2";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 import { normalizeMessagesForV2Pipeline, convertV2MessagesToProviderMessages } from "../../utils";
+import { Logger } from "../../utils/logger";
+import type { TelemetryService } from "../../telemetry/telemetryService";
 
 suite("LiteLLM Chat Provider V2 Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -250,7 +252,12 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
         assert.strictEqual(request.messages[0].content, "thinking...internal reasoning");
     });
 
-    test("V2 data stays distinct until transport shaping and cache_control becomes transport text", () => {
+    test("V2 data stays distinct until transport shaping and cache_control is dropped at transport", () => {
+        // cache_control is opaque prompt-caching metadata (e.g. Anthropic "ephemeral"
+        // markers). It must never be decoded and injected as message text, because
+        // AI/LLMs fixate on the stray "ephemeral" / "json_cache" / "$mid" fragments
+        // and derail the current task. The transport layer must silently drop these
+        // parts while still carrying adjacent real text parts intact.
         const normalized = normalizeMessagesForV2Pipeline([
             {
                 role: vscode.LanguageModelChatMessageRole.User,
@@ -311,7 +318,10 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
                     ["user", "system"].includes(request.messages[0].role),
                     `Unexpected role: ${request.messages[0].role}`
                 );
-                assert.strictEqual(request.messages[0].content, "ephemeralvisible text");
+                // Must equal "visible text" only. If "ephemeral" leaks in, the
+                // cache_control metadata is being injected as raw text into the
+                // LLM payload — that is the exact bug this test guards.
+                assert.strictEqual(request.messages[0].content, "visible text");
             });
     });
 
@@ -442,5 +452,90 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
         assert.strictEqual(results.length, 2);
         assert.deepStrictEqual(results[0], { a: 1 });
         assert.deepStrictEqual(results[1], { b: 2 });
+    });
+
+    test("provideLanguageModelChatResponse reports telemetry on request failure", async () => {
+        const provider = new LiteLLMChatProviderV2(mockSecrets, userAgent);
+
+        const telemetryStub = {
+            captureRequestFailed: sinon.stub(),
+            captureRequestCompleted: sinon.stub(),
+        } as unknown as TelemetryService;
+        provider.setTelemetryService(telemetryStub);
+
+        const model = {
+            id: "m",
+            maxInputTokens: 100,
+            maxOutputTokens: 100,
+        } as unknown as vscode.LanguageModelChatInformation;
+        const options = { requestInitiator: "test" } as unknown as vscode.ProvideLanguageModelChatResponseOptions;
+        const progress = { report: () => {} } as vscode.Progress<vscode.LanguageModelResponsePart>;
+
+        sandbox
+            .stub(
+                provider as unknown as { sendRequestWithRetry: () => Promise<ReadableStream<Uint8Array>> },
+                "sendRequestWithRetry"
+            )
+            .rejects(new Error("network timeout"));
+
+        await assert.rejects(
+            () =>
+                provider.provideLanguageModelChatResponse(
+                    model,
+                    [
+                        {
+                            role: vscode.LanguageModelChatMessageRole.User,
+                            name: undefined,
+                            content: [new vscode.LanguageModelTextPart("hi")],
+                        },
+                    ],
+                    options,
+                    progress,
+                    new vscode.CancellationTokenSource().token
+                ),
+            (err: unknown) => err instanceof Error && err.message === "network timeout"
+        );
+
+        sinon.assert.calledOnce(telemetryStub.captureRequestFailed as sinon.SinonStub);
+        const arg = (telemetryStub.captureRequestFailed as sinon.SinonStub).firstCall.args[0] as {
+            model: string;
+            caller: string;
+            errorType: string;
+        };
+        assert.strictEqual(arg.model, "m");
+        assert.strictEqual(arg.caller, "chat-v2");
+        assert.ok(typeof arg.errorType === "string" && arg.errorType.length > 0);
+    });
+
+    test("decodeStream logs warning when JSON parse fails", async () => {
+        const provider = new LiteLLMChatProviderV2(mockSecrets, userAgent);
+        const warnStub = sinon.stub(Logger, "warn");
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+            start(controller) {
+                controller.enqueue(encoder.encode("data: invalid\n\n"));
+                controller.enqueue(encoder.encode('data: {"ok":true}\n\n'));
+                controller.close();
+            },
+        }) as unknown as ReadableStream<Uint8Array>;
+
+        const results: unknown[] = [];
+        try {
+            for await (const chunk of (
+                provider as unknown as {
+                    decodeStream: (
+                        s: ReadableStream<Uint8Array>,
+                        t: vscode.CancellationToken
+                    ) => AsyncGenerator<unknown>;
+                }
+            ).decodeStream(stream, new vscode.CancellationTokenSource().token)) {
+                results.push(chunk);
+            }
+        } finally {
+            warnStub.restore();
+        }
+
+        assert.deepStrictEqual(results, [{ ok: true }]);
+        sinon.assert.called(warnStub);
     });
 });

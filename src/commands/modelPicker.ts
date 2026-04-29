@@ -52,12 +52,13 @@ export async function showModelPicker(provider: LiteLLMProviderBase, options: Mo
             return;
         }
 
-        const items: vscode.QuickPickItem[] = models.map((m) => {
+        const items: Array<vscode.QuickPickItem & { id?: string }> = models.map((m) => {
             const mExtended = m as ExtendedModelInformation;
             return {
                 label: formatModelDisplayLabel(mExtended),
                 description: mExtended.backendName || mExtended.detail || "",
                 detail: mExtended.tooltip || "",
+                id: mExtended.id,
             };
         });
 
@@ -96,7 +97,7 @@ export async function showModelPicker(provider: LiteLLMProviderBase, options: Mo
             return;
         }
 
-        const selectedId = models.find((m) => m.name === selected.label)?.id;
+        const selectedId = (selected as { id?: string }).id ?? models.find((m) => m.name === selected.label)?.id;
         if (!selectedId) {
             vscode.window.showErrorMessage("Selected model could not be resolved.");
             return;

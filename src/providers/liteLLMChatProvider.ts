@@ -183,9 +183,18 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
 
             let stream: ReadableStream<Uint8Array>;
             try {
-                // Note: sendRequestToLiteLLM may fully handle /responses by emitting directly to progress.
+                // Note: sendRequestWithRetry may fully handle /responses by emitting directly to progress.
                 // In that case it returns an already-closed stream.
-                stream = await this.sendRequestToLiteLLM(requestBody, trackingProgress, token, caller, modelInfo);
+                stream = await this.sendRequestWithRetry(
+                    requestBody,
+                    messages,
+                    modelToUse,
+                    options,
+                    trackingProgress,
+                    token,
+                    caller,
+                    modelInfo
+                );
             } catch (err: unknown) {
                 if (token.isCancellationRequested) {
                     throw new Error("Operation cancelled by user", { cause: err });
@@ -209,8 +218,11 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                             throw new Error("Operation cancelled by user", { cause: err });
                         }
                         try {
-                            stream = await this.sendRequestToLiteLLM(
+                            stream = await this.sendRequestWithRetry(
                                 requestBody,
+                                messages,
+                                modelToUse,
+                                options,
                                 trackingProgress,
                                 token,
                                 caller,
