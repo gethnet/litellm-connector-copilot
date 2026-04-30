@@ -1,6 +1,6 @@
 export type { V2EmittedPart as EmittedPart } from "../../providers/v2Types";
 import type { V2EmittedPart as EmittedPart } from "../../providers/v2Types";
-import { normalizeToolCallId } from "../../utils";
+import { isCacheControlMimeType, normalizeToolCallId } from "../../utils";
 import { StructuredLogger } from "../../observability/structuredLogger";
 
 export interface StreamingState {
@@ -36,8 +36,16 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
     const finishParts: EmittedPart[] = [];
     const data = json as Record<string, unknown>;
 
-    // 0. Handle VS Code DataPart carrier objects (e.g. cache_control)
+    // 0. Handle VS Code DataPart carrier objects. Cache-control carrier parts
+    // are opaque prompt-cache metadata; if re-emitted, VS Code can preserve
+    // them into the next request and the LLM sees the carrier instead of the
+    // user's task. Literal text mentioning cache_control still flows through
+    // the normal text branches below.
     if (typeof data.$mid === "number" && typeof data.mimeType === "string") {
+        if (isCacheControlMimeType(data.mimeType)) {
+            StructuredLogger.trace("stream.cache_control_carrier_dropped", { mimeType: data.mimeType });
+            return [];
+        }
         dataParts.push({
             type: "data",
             mimeType: data.mimeType,

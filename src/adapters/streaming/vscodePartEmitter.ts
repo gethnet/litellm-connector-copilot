@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { Logger } from "../../utils/logger";
+import { isCacheControlMimeType } from "../../utils";
 import type { EmittedPart } from "./liteLLMStreamInterpreter";
 
 export function emitV2PartsToVSCode(
@@ -12,6 +13,13 @@ export function emitV2PartsToVSCode(
                 progress.report(new vscode.LanguageModelTextPart(part.value));
                 break;
             case "data":
+                // Defense-in-depth: the interpreter drops cache-control carrier
+                // objects, but this boundary is the last chance to prevent VS Code
+                // from recycling opaque prompt-cache metadata into future LLM input.
+                if (isCacheControlMimeType(part.mimeType)) {
+                    Logger.trace(`[vscodePartEmitter] Dropping cache_control data part (mimeType: ${part.mimeType})`);
+                    break;
+                }
                 progress.report(vscode.LanguageModelDataPart.json(part.value, part.mimeType));
                 break;
             case "thinking": {

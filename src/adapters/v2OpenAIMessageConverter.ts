@@ -114,7 +114,7 @@ export function convertV2MessagesToOpenAI(
 
                     const emittedIndex = out.length;
                     const normalizedCallId = options.normalizeToolCallId(part.callId);
-                    const content = serializeToolResultContent(part.content);
+                    const content = serializeToolResultContent(part.content, options);
                     out.push({ role: "tool", tool_call_id: normalizedCallId, content });
                     StructuredLogger.trace("v2.convert.message_emitted", {
                         messageIndex,
@@ -216,9 +216,9 @@ function buildMessageContent(
     return items;
 }
 
-function serializeToolResultContent(content: ReadonlyArray<unknown>): string {
+function serializeToolResultContent(content: ReadonlyArray<unknown>, options: V2OpenAIConversionOptions): string {
     const serialized = content
-        .map(serializeToolResultItem)
+        .map((item) => serializeToolResultItem(item, options))
         .filter((item): item is SerializedToolResultContent => !!item);
 
     if (serialized.length === 0) {
@@ -232,7 +232,10 @@ function serializeToolResultContent(content: ReadonlyArray<unknown>): string {
     return JSON.stringify({ type: "tool_result", content: serialized });
 }
 
-function serializeToolResultItem(item: unknown): SerializedToolResultContent | undefined {
+function serializeToolResultItem(
+    item: unknown,
+    options: V2OpenAIConversionOptions
+): SerializedToolResultContent | undefined {
     if (item instanceof vscode.LanguageModelTextPart) {
         return { type: "text", text: item.value };
     }
@@ -242,6 +245,10 @@ function serializeToolResultItem(item: unknown): SerializedToolResultContent | u
     }
 
     if (item instanceof vscode.LanguageModelDataPart) {
+        if (options.isCacheControlMimeType(item.mimeType)) {
+            StructuredLogger.trace("v2.convert.tool_result_cache_control_dropped", { mimeType: item.mimeType });
+            return undefined;
+        }
         return {
             type: "data",
             mimeType: item.mimeType,

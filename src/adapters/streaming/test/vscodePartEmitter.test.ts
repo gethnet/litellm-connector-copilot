@@ -41,4 +41,30 @@ suite("vscodePartEmitter", () => {
         assert.strictEqual(part.callId, "call_1");
         assert.deepStrictEqual(part.input, {});
     });
+
+    test("suppresses cache-control data parts before reporting to VS Code", () => {
+        const reported: unknown[] = [];
+        const progress = {
+            report: (p: unknown) => reported.push(p),
+        } as vscode.Progress<vscode.LanguageModelResponsePart>;
+
+        emitV2PartsToVSCode(
+            [
+                {
+                    type: "data",
+                    mimeType: "application/vnd.cache-control+json",
+                    value: { $mid: 24, mimeType: "cache_control", data: "ZXBoZW1lcmFs" },
+                },
+                { type: "text", value: "cache_control is legitimate text here" },
+            ],
+            progress
+        );
+
+        assert.strictEqual(reported.length, 1);
+        assert.ok(reported[0] instanceof vscode.LanguageModelTextPart);
+        assert.strictEqual(
+            (reported[0] as vscode.LanguageModelTextPart).value,
+            "cache_control is legitimate text here"
+        );
+    });
 });

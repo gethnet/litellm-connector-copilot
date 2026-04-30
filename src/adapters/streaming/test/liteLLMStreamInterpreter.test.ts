@@ -186,7 +186,7 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
         }
     });
 
-    test("should pass through VS Code DataPart carrier objects and return immediately", () => {
+    test("should suppress cache-control VS Code DataPart carrier objects", () => {
         const state = createInitialStreamingState();
         const parts = interpretStreamEvent(
             {
@@ -197,11 +197,25 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
             state
         );
 
+        assert.deepStrictEqual(parts, []);
+    });
+
+    test("should pass through non-cache-control VS Code DataPart carrier objects", () => {
+        const state = createInitialStreamingState();
+        const parts = interpretStreamEvent(
+            {
+                $mid: 2,
+                mimeType: "application/vnd.litellm.usage+json",
+                data: { promptTokens: 1, completionTokens: 2 },
+            },
+            state
+        );
+
         assert.strictEqual(parts.length, 1);
         const [part] = parts;
         assert.strictEqual(part.type, "data");
         if (part.type === "data") {
-            assert.strictEqual(part.mimeType, "application/vnd.cache-control+json");
+            assert.strictEqual(part.mimeType, "application/vnd.litellm.usage+json");
         }
     });
 

@@ -3,10 +3,6 @@ import { defineConfig } from '@vscode/test-cli';
 
 export default defineConfig({
   files: 'out/**/*.test.js',
-  installExtensions: [
-    'GitHub.copilot',
-    'GitHub.copilot-chat'
-  ],
   mocha: {
     ui: 'tdd',
     timeout: 20000,
