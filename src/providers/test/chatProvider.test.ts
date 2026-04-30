@@ -621,10 +621,18 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
             kind: string;
             promptTokens: number;
             completionTokens: number;
+            totalTokens: number;
+            reasoningTokens: number;
+            promptTokensDetails: Record<string, never>;
+            completionTokensDetails: Record<string, never>;
         };
         assert.strictEqual(payload.kind, "usage");
         assert.ok(payload.promptTokens > 0);
         assert.ok(payload.completionTokens > 0);
+        assert.strictEqual(payload.totalTokens, payload.promptTokens + payload.completionTokens);
+        assert.strictEqual(payload.reasoningTokens, 0);
+        assert.deepStrictEqual(payload.promptTokensDetails, {});
+        assert.deepStrictEqual(payload.completionTokensDetails, {});
         assert.ok(debugStub.calledWithMatch(sinon.match(/experimental usage data part/i)));
     });
 

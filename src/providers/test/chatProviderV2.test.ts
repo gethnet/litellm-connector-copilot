@@ -50,7 +50,7 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
                         );
                         controller.enqueue(
                             encoder.encode(
-                                'data: {"type":"response.completed","response":{"usage":{"input_tokens":12,"output_tokens":4}}}\n\n'
+                                'data: {"type":"response.completed","response":{"usage":{"input_tokens":12,"input_tokens_details":{"cached_tokens":10},"output_tokens":4,"output_tokens_details":{"reasoning_tokens":2,"accepted_prediction_tokens":1,"rejected_prediction_tokens":0},"total_tokens":16}}}\n\n'
                             )
                         );
                         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
@@ -111,6 +111,35 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
             reported.some((part) => part instanceof vscode.LanguageModelDataPart),
             "Expected data part on V2 path"
         );
+
+        const usagePart = reported.find((part) => part instanceof vscode.LanguageModelDataPart);
+        assert.ok(usagePart, "Expected usage data part on V2 path");
+        if (!(usagePart instanceof vscode.LanguageModelDataPart)) {
+            return;
+        }
+
+        const payload = JSON.parse(Buffer.from(usagePart.data).toString("utf-8")) as {
+            kind: string;
+            promptTokens: number;
+            completionTokens: number;
+            totalTokens?: number;
+            reasoningTokens?: number;
+            promptTokensDetails?: { cachedTokens?: number };
+            completionTokensDetails?: {
+                acceptedPredictionTokens?: number;
+                rejectedPredictionTokens?: number;
+            };
+        };
+        assert.strictEqual(payload.kind, "usage");
+        assert.strictEqual(payload.promptTokens, 12);
+        assert.strictEqual(payload.completionTokens, 4);
+        assert.strictEqual(payload.totalTokens, 16);
+        assert.strictEqual(payload.reasoningTokens, 2);
+        assert.deepStrictEqual(payload.promptTokensDetails, { cachedTokens: 10 });
+        assert.deepStrictEqual(payload.completionTokensDetails, {
+            acceptedPredictionTokens: 1,
+            rejectedPredictionTokens: 0,
+        });
     });
 
     test("provideLanguageModelChatResponse falls back to a data usage part instead of thinking metadata", async () => {
@@ -173,6 +202,24 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
 
         const dataParts = reported.filter((part) => part instanceof vscode.LanguageModelDataPart);
         assert.ok(dataParts.length > 0, "Expected fallback usage data part on V2 path");
+
+        const usagePart = dataParts[0] as vscode.LanguageModelDataPart;
+        const payload = JSON.parse(Buffer.from(usagePart.data).toString("utf-8")) as {
+            kind: string;
+            promptTokens: number;
+            completionTokens: number;
+            totalTokens: number;
+            reasoningTokens: number;
+            promptTokensDetails: Record<string, never>;
+            completionTokensDetails: Record<string, never>;
+        };
+        assert.strictEqual(payload.kind, "usage");
+        assert.ok(payload.promptTokens > 0);
+        assert.ok(payload.completionTokens > 0);
+        assert.strictEqual(payload.totalTokens, payload.promptTokens + payload.completionTokens);
+        assert.strictEqual(payload.reasoningTokens, 0);
+        assert.deepStrictEqual(payload.promptTokensDetails, {});
+        assert.deepStrictEqual(payload.completionTokensDetails, {});
 
         const thinkingCtor = (vscode as unknown as { LanguageModelThinkingPart?: new (...args: unknown[]) => unknown })
             .LanguageModelThinkingPart;

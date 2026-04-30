@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { createEstimatedUsagePayload } from "../adapters/usageData";
 import { LiteLLMProviderBase } from "./liteLLMProviderBase";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
@@ -16,16 +17,9 @@ export class LiteLLMChatProviderV2 extends LiteLLMProviderBase implements vscode
         promptTokens: number,
         completionTokens: number
     ): void {
+        const payload = createEstimatedUsagePayload(promptTokens, completionTokens);
         progress.report(
-            vscode.LanguageModelDataPart.json(
-                {
-                    kind: "usage",
-                    promptTokens,
-                    completionTokens,
-                    details: `V2 Context: ${promptTokens} | Output: ${completionTokens}`,
-                },
-                "application/vnd.litellm.usage+json"
-            )
+            new vscode.LanguageModelDataPart(Buffer.from(JSON.stringify(payload)), "application/vnd.litellm.usage+json")
         );
     }
 
@@ -75,7 +69,9 @@ export class LiteLLMChatProviderV2 extends LiteLLMProviderBase implements vscode
 
             let assistantText = "";
             const state = createInitialStreamingState();
-            let usageFromResponse: { inputTokens?: number; outputTokens?: number } | undefined;
+            let usageFromResponse:
+                | { inputTokens?: number; outputTokens?: number; totalTokens?: number; reasoningTokens?: number }
+                | undefined;
 
             for await (const chunk of this.decodeStream(stream, token)) {
                 const parts = interpretStreamEvent(chunk, state);

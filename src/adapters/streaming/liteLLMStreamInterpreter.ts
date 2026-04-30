@@ -1,5 +1,6 @@
 export type { V2EmittedPart as EmittedPart } from "../../providers/v2Types";
 import type { V2EmittedPart as EmittedPart } from "../../providers/v2Types";
+import { createUsagePayload, normalizeUsageFromRaw } from "../usageData";
 import { isCacheControlMimeType, normalizeToolCallId } from "../../utils";
 import { StructuredLogger } from "../../observability/structuredLogger";
 
@@ -189,13 +190,13 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
     }
     if (data.type === "response.completed") {
         const response = data.response as { usage?: { input_tokens?: number; output_tokens?: number } } | undefined;
-        responseParts.push({
-            type: "response",
-            usage: {
-                inputTokens: response?.usage?.input_tokens,
-                outputTokens: response?.usage?.output_tokens,
-            },
-        });
+        const normalizedUsage = normalizeUsageFromRaw(response?.usage);
+        if (normalizedUsage) {
+            responseParts.push({
+                type: "response",
+                usage: normalizedUsage,
+            });
+        }
         // Flush buffered /responses tool calls
         for (const id of state.responseToolCallOrder) {
             const buffer = state.responseToolCallBuffers.get(id);
@@ -219,15 +220,11 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
         }
         state.responseToolCallBuffers.clear();
         state.responseToolCallOrder = [];
-        if (typeof response?.usage?.input_tokens === "number" || typeof response?.usage?.output_tokens === "number") {
+        if (normalizedUsage) {
             dataParts.push({
                 type: "data",
                 mimeType: "application/vnd.litellm.usage+json",
-                value: {
-                    kind: "usage",
-                    promptTokens: response?.usage?.input_tokens,
-                    completionTokens: response?.usage?.output_tokens,
-                },
+                value: createUsagePayload(normalizedUsage),
             });
         }
     }

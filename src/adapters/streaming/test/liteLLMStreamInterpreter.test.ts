@@ -113,7 +113,19 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
         const parts = interpretStreamEvent(
             {
                 type: "response.completed",
-                response: { usage: { input_tokens: 1, output_tokens: 2 } },
+                response: {
+                    usage: {
+                        input_tokens: 1,
+                        input_tokens_details: { cached_tokens: 1 },
+                        output_tokens: 2,
+                        output_tokens_details: {
+                            reasoning_tokens: 1,
+                            accepted_prediction_tokens: 0,
+                            rejected_prediction_tokens: 0,
+                        },
+                        total_tokens: 3,
+                    },
+                },
             },
             state
         );
@@ -127,6 +139,82 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
 
         const usage = parts.find((p) => p.type === "data");
         assert.ok(usage, "expected usage data part to be emitted");
+        if (usage && usage.type === "data") {
+            const parsed = usage.value;
+            assert.deepStrictEqual(parsed, {
+                kind: "usage",
+                promptTokens: 1,
+                completionTokens: 2,
+                totalTokens: 3,
+                reasoningTokens: 1,
+                promptTokensDetails: { cachedTokens: 1 },
+                completionTokensDetails: {
+                    acceptedPredictionTokens: 0,
+                    rejectedPredictionTokens: 0,
+                },
+            });
+        }
+    });
+
+    test("preserves detailed usage metrics from response.completed frames", () => {
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent(
+            {
+                type: "response.completed",
+                response: {
+                    usage: {
+                        input_tokens: 12,
+                        input_tokens_details: { cached_tokens: 10 },
+                        output_tokens: 4,
+                        output_tokens_details: {
+                            reasoning_tokens: 2,
+                            accepted_prediction_tokens: 1,
+                            rejected_prediction_tokens: 0,
+                        },
+                        total_tokens: 16,
+                    },
+                },
+            },
+            state
+        );
+
+        const responsePart = parts.find((part) => part.type === "response");
+        assert.ok(responsePart && responsePart.type === "response", "expected response usage part to be emitted");
+        if (!responsePart || responsePart.type !== "response") {
+            return;
+        }
+
+        assert.deepStrictEqual(responsePart.usage, {
+            inputTokens: 12,
+            outputTokens: 4,
+            totalTokens: 16,
+            reasoningTokens: 2,
+            promptTokensDetails: { cachedTokens: 10 },
+            completionTokensDetails: {
+                acceptedPredictionTokens: 1,
+                rejectedPredictionTokens: 0,
+            },
+        });
+
+        const usageDataPart = parts.find((part) => part.type === "data");
+        assert.ok(usageDataPart && usageDataPart.type === "data", "expected usage data payload part to be emitted");
+        if (!usageDataPart || usageDataPart.type !== "data") {
+            return;
+        }
+
+        assert.deepStrictEqual(usageDataPart.value, {
+            kind: "usage",
+            promptTokens: 12,
+            completionTokens: 4,
+            totalTokens: 16,
+            reasoningTokens: 2,
+            promptTokensDetails: { cachedTokens: 10 },
+            completionTokensDetails: {
+                acceptedPredictionTokens: 1,
+                rejectedPredictionTokens: 0,
+            },
+        });
     });
 
     test("should flush /responses tool calls on output_item.done when no completed frame", () => {

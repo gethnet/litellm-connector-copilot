@@ -215,6 +215,41 @@ export interface LiteLLMTokenCounterRequest {
  */
 export interface LiteLLMTokenCounterResponse {
     token_count: number;
+    promptTokens?: number;
+    completionTokens?: number;
+}
+
+export interface LiteLLMUsagePromptTokensDetails {
+    cachedTokens?: number;
+}
+
+export interface LiteLLMUsageCompletionTokensDetails {
+    reasoningTokens?: number;
+    acceptedPredictionTokens?: number;
+    rejectedPredictionTokens?: number;
+}
+
+export interface LiteLLMUsagePayload {
+    kind: "usage";
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+    reasoningTokens?: number;
+    promptTokensDetails?: LiteLLMUsagePromptTokensDetails;
+    completionTokensDetails?: LiteLLMUsageCompletionTokensDetails;
+    details?: string;
+    metadata?: {
+        details: string;
+    };
+}
+
+export interface LiteLLMResponseUsage {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    reasoningTokens?: number;
+    promptTokensDetails?: LiteLLMUsagePromptTokensDetails;
+    completionTokensDetails?: LiteLLMUsageCompletionTokensDetails;
 }
 
 /**

@@ -176,7 +176,7 @@ suite("ResponsesClient sendResponsesRequest", () => {
         );
         const sse = [
             'data: {"type":"response.output_text.delta","delta":"Hello"}\n\n',
-            'data: {"type":"response.completed","response":{"usage":{"input_tokens":12,"output_tokens":4}}}\n\n',
+            'data: {"type":"response.completed","response":{"usage":{"input_tokens":12,"input_tokens_details":{"cached_tokens":10},"output_tokens":4,"output_tokens_details":{"reasoning_tokens":2,"accepted_prediction_tokens":1,"rejected_prediction_tokens":0},"total_tokens":16}}}\n\n',
             "data: [DONE]\n\n",
         ];
         fetchStub.resolves(new Response(readableFromStrings(sse), { status: 200 }));
@@ -196,10 +196,24 @@ suite("ResponsesClient sendResponsesRequest", () => {
             kind: string;
             promptTokens: number;
             completionTokens: number;
+            totalTokens?: number;
+            reasoningTokens?: number;
+            promptTokensDetails?: { cachedTokens?: number };
+            completionTokensDetails?: {
+                acceptedPredictionTokens?: number;
+                rejectedPredictionTokens?: number;
+            };
         };
         assert.strictEqual(payload.kind, "usage");
         assert.strictEqual(payload.promptTokens, 12);
         assert.strictEqual(payload.completionTokens, 4);
+        assert.strictEqual(payload.totalTokens, 16);
+        assert.strictEqual(payload.reasoningTokens, 2);
+        assert.deepStrictEqual(payload.promptTokensDetails, { cachedTokens: 10 });
+        assert.deepStrictEqual(payload.completionTokensDetails, {
+            acceptedPredictionTokens: 1,
+            rejectedPredictionTokens: 0,
+        });
         assert.ok(debugStub.calledWithMatch(sinon.match(/experimental usage data part/i)));
     });
 

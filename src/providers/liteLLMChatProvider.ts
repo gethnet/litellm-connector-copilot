@@ -9,6 +9,7 @@ import type {
     ProvideLanguageModelChatResponseOptions,
 } from "vscode";
 
+import { createEstimatedUsagePayload } from "../adapters/usageData";
 import { tryParseJSONObject } from "../utils";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
@@ -35,41 +36,10 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         tokensIn: number,
         tokensOut: number
     ): void {
-        Logger.debug(
-            `Emitting experimental usage data part | promptTokens: ${tokensIn} | completionTokens: ${tokensOut}`
-        );
-        const detailsString = `Context: ${tokensIn} tokens | Output: ${tokensOut} tokens`;
-
-        // 1. Try direct DTO injection (bypassing type system)
-        try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (progress as any).report({
-                kind: "usage",
-                promptTokens: tokensIn,
-                completionTokens: tokensOut,
-                details: detailsString,
-                metadata: {
-                    details: detailsString,
-                },
-            });
-        } catch (e) {
-            Logger.trace("Direct usage DTO injection failed", e);
-        }
-
-        // 2. Keep the DataPart probe as fallback
+        const payload = createEstimatedUsagePayload(tokensIn, tokensOut);
+        Logger.debug("Emitting experimental usage data part", payload);
         progress.report(
-            vscode.LanguageModelDataPart.json(
-                {
-                    kind: "usage",
-                    promptTokens: tokensIn,
-                    completionTokens: tokensOut,
-                    details: detailsString,
-                    metadata: {
-                        details: detailsString,
-                    },
-                },
-                "application/vnd.litellm.usage+json"
-            )
+            new vscode.LanguageModelDataPart(Buffer.from(JSON.stringify(payload)), "application/vnd.litellm.usage+json")
         );
     }
 
