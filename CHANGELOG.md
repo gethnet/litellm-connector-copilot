@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.6.3] - 2026-04-30
+
+### 🐛 Fixes
+
+* **Cache Control Handling**: Suppressed `cache_control` data parts at the VS Code streaming boundary and nested tool-result conversion paths, preventing `application/vnd.cache-control+json` carrier objects from being re-emitted into future LLM input while preserving legitimate text mentions for debugging and code generation.
+
+### 🧪 Tests
+
+* Replaced the streaming regression test that previously codified cache-control carrier pass-through with suppression coverage, plus guards for non-cache-control data parts and tool-result metadata stripping.
+
 ## [1.6.2] - 2026-04-28
 
 ### ✨ Features
