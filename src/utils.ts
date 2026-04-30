@@ -797,6 +797,14 @@ function collectToolResultText(pr: { content?: ReadonlyArray<unknown> }): string
     for (const c of pr.content ?? []) {
         if (c instanceof vscode.LanguageModelTextPart) {
             text += c.value;
+        } else if (c instanceof vscode.LanguageModelDataPart) {
+            if (isCacheControlMimeType(c.mimeType)) {
+                Logger.trace(`[collectToolResultText] Dropping cache_control part (mimeType: ${c.mimeType})`);
+                continue;
+            }
+            if (c.mimeType.startsWith("text/") || c.mimeType.includes("json")) {
+                text += Buffer.from(c.data).toString("utf-8");
+            }
         } else if (typeof c === "string") {
             text += c;
         } else {

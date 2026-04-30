@@ -616,5 +616,64 @@ suite("Utility Unit Tests", () => {
             assert.ok(content.includes('{"a":1}'));
             assert.ok(content.includes("plain"));
         });
+
+        test("V2 tool result serialization drops cache_control data parts but keeps text", () => {
+            const v2Msgs = normalizeMessagesForV2Pipeline([
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    name: undefined,
+                    content: [new vscode.LanguageModelToolCallPart("call-1", "tool", {})],
+                } as unknown as vscode.LanguageModelChatMessage,
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [
+                        new vscode.LanguageModelToolResultPart("call-1", [
+                            new vscode.LanguageModelDataPart(Buffer.from("ephemeral"), "cache_control"),
+                            new vscode.LanguageModelDataPart(
+                                Buffer.from('{"$mid":24,"mimeType":"cache_control","data":"ZXBoZW1lcmFs"}'),
+                                "application/vnd.cache-control+json"
+                            ),
+                            new vscode.LanguageModelTextPart("real tool output"),
+                        ]),
+                    ],
+                } as unknown as vscode.LanguageModelChatMessage,
+            ]);
+
+            const out = convertV2MessagesToOpenAI(v2Msgs);
+            const serialized = JSON.stringify(out);
+
+            assert.ok(serialized.includes("real tool output"));
+            assert.ok(!serialized.includes("ephemeral"), "cache_control payload must not leak");
+            assert.ok(!serialized.includes("cache_control"), "cache_control marker must not leak");
+            assert.ok(!serialized.includes("ZXBoZW1lcmFs"), "carrier base64 must not leak");
+        });
+
+        test("V1 tool result serialization drops cache_control data parts but keeps text", () => {
+            const msgs: vscode.LanguageModelChatMessage[] = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    name: undefined,
+                    content: [new vscode.LanguageModelToolCallPart("call-1", "tool", {})],
+                },
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [
+                        new vscode.LanguageModelToolResultPart("call-1", [
+                            new vscode.LanguageModelDataPart(Buffer.from("ephemeral"), "cache_control"),
+                            new vscode.LanguageModelTextPart("real tool output"),
+                        ]),
+                    ],
+                },
+            ];
+
+            const out = convertMessages(msgs);
+            const serialized = JSON.stringify(out);
+
+            assert.ok(serialized.includes("real tool output"));
+            assert.ok(!serialized.includes("ephemeral"), "cache_control payload must not leak");
+            assert.ok(!serialized.includes("cache_control"), "cache_control marker must not leak");
+        });
     });
 });
