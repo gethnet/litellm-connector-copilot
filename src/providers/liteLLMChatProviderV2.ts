@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
-import { createEstimatedUsagePayload } from "../adapters/usageData";
+import { createUsagePayload } from "../adapters/usageData";
+import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../types";
 import { LiteLLMProviderBase } from "./liteLLMProviderBase";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
@@ -17,7 +18,14 @@ export class LiteLLMChatProviderV2 extends LiteLLMProviderBase implements vscode
         promptTokens: number,
         completionTokens: number
     ): void {
-        const payload = createEstimatedUsagePayload(promptTokens, completionTokens);
+        const payload = createUsagePayload({
+            inputTokens: promptTokens,
+            outputTokens: completionTokens,
+            totalTokens: promptTokens + completionTokens,
+            reasoningTokens: 0,
+            promptTokensDetails: {},
+            completionTokensDetails: {},
+        });
         progress.report(
             new vscode.LanguageModelDataPart(Buffer.from(JSON.stringify(payload)), "application/vnd.litellm.usage+json")
         );
@@ -28,6 +36,21 @@ export class LiteLLMChatProviderV2 extends LiteLLMProviderBase implements vscode
         token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelChatInformation[]> {
         return this.discoverModels(options, token);
+    }
+
+    protected override async sendRequestToLiteLLM(
+        request: OpenAIChatCompletionRequest,
+        _progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+        token: vscode.CancellationToken,
+        _caller?: string,
+        modelInfo?: LiteLLMModelInfo
+    ): Promise<ReadableStream<Uint8Array>> {
+        if (modelInfo?.mode === "responses") {
+            return this.sendRawResponsesRequestToLiteLLM(request, token, modelInfo);
+        }
+
+        const multiClient = await this.getOrCreateMultiBackendClient();
+        return multiClient.chat(request.model, request, modelInfo?.mode, token, modelInfo);
     }
 
     async provideLanguageModelChatResponse(

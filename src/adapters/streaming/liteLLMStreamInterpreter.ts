@@ -127,19 +127,18 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                     let isJsonValid = true;
                     try {
                         JSON.parse(buffer.args);
-                    } catch {
+                    } catch (err) {
                         isJsonValid = false;
                         StructuredLogger.warn("stream.tool_call_args_invalid_json", {
                             toolName: buffer.name,
                             normalizedId: buffer.id,
                             index,
+                            finishReason,
+                            error: err instanceof Error ? err.message : String(err),
                         });
                     }
 
-                    // Only emit invalid JSON tool calls when finish_reason is tool_calls
-                    const allowEmit = isJsonValid || finishReason === "tool_calls";
-
-                    if (!isDuplicate && allowEmit) {
+                    if (!isDuplicate && isJsonValid) {
                         toolCallParts.push({
                             type: "tool_call",
                             index,
@@ -153,6 +152,11 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                             normalizedId: buffer.id,
                             index,
                             finishReason,
+                        });
+                    } else if (!isJsonValid) {
+                        toolCallParts.push({
+                            type: "error",
+                            message: `Malformed tool call arguments for ${buffer.name} (id=${buffer.id})`,
                         });
                     }
                     state.completedToolCallIndices.add(index);

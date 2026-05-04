@@ -196,6 +196,15 @@ export class ResponsesClient {
                         const parsed = tryParseJSONObject(args);
                         if (parsed.ok) {
                             progress.report(new vscode.LanguageModelToolCallPart(callId, name, parsed.value));
+                        } else {
+                            // Log a warning instead of silently dropping the tool call.
+                            // Silent drops are invisible in logs and make agentic corruption
+                            // extremely hard to diagnose.
+                            Logger.warn("[responsesClient] Dropping tool call due to invalid JSON arguments", {
+                                id: callId,
+                                toolName: name,
+                                argsPreview: args.slice(0, 160),
+                            });
                         }
                     }
 
@@ -209,6 +218,14 @@ export class ResponsesClient {
                         if (parsed.ok) {
                             // If upstream doesn't provide an id, emit a deterministic placeholder.
                             progress.report(new vscode.LanguageModelToolCallPart("anonymous", name, parsed.value));
+                        } else {
+                            Logger.warn(
+                                "[responsesClient] Dropping anonymous tool call due to invalid JSON arguments",
+                                {
+                                    toolName: name,
+                                    argsPreview: args.slice(0, 160),
+                                }
+                            );
                         }
                     }
                 }

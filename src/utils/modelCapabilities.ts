@@ -13,6 +13,34 @@ export interface DerivedModelCapabilities {
     rawContextWindow: number;
 }
 
+function stripBackendNamespace(modelId: string): string {
+    const slashIndex = modelId.indexOf("/");
+    return slashIndex >= 0 ? modelId.slice(slashIndex + 1) : modelId;
+}
+
+function normalizeFamilyCandidate(value: string | undefined): string | undefined {
+    const trimmed = value?.trim();
+    if (!trimmed || trimmed === "unknown") {
+        return undefined;
+    }
+    return stripBackendNamespace(trimmed);
+}
+
+/**
+ * VS Code's family selector should describe the concrete model line, not just a broad provider.
+ * Returning generic values like `gpt4` or `claude` makes model selectors and request shaping less precise.
+ */
+export function deriveModelFamily(modelId: string, modelInfo?: LiteLLMModelInfo, modelName?: string): string {
+    return (
+        normalizeFamilyCandidate(modelName) ??
+        normalizeFamilyCandidate(modelInfo?.key) ??
+        normalizeFamilyCandidate(modelInfo?.id) ??
+        normalizeFamilyCandidate(modelId) ??
+        normalizeFamilyCandidate(modelInfo?.litellm_provider) ??
+        "litellm"
+    );
+}
+
 export function deriveCapabilitiesFromModelInfo(
     modelId: string,
     modelInfo?: LiteLLMModelInfo

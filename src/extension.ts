@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { LiteLLMChatProvider } from "./providers";
+import { LiteLLMChatProvider, LiteLLMChatProviderV2, type LiteLLMProviderBase } from "./providers";
 import { ConfigManager } from "./config/configManager";
 import {
     registerManageConfigCommand,
@@ -114,7 +114,7 @@ export function activate(context: vscode.ExtensionContext) {
     void configManager.getConfig().then((config) => {
         telemetryService.captureFeatureUsageSnapshot({
             "inline-completions": config.inlineCompletionsEnabled ?? false,
-            "responses-api": config.v2ApiEnabled ?? false,
+            "responses-api": config.enableResponsesApi ?? false,
             "commit-message": !!(config.commitModelIdOverride && config.commitModelIdOverride.length > 0),
             "usage-data": config.experimentalEmitUsageData ?? false,
             caching: !config.disableCaching,
@@ -122,33 +122,47 @@ export function activate(context: vscode.ExtensionContext) {
         });
     });
 
-    // Legacy providers (will be removed after v2 migration)
-    // @deprecated - Will be replaced by v2 baseline providers
+    // V1 Provider / flow
     const chatProviderV1 = new LiteLLMChatProvider(context.secrets, ua);
-    // @deprecated - Will be replaced by v2 baseline providers
+    const chatProviderV2 = new LiteLLMChatProviderV2(context.secrets, ua);
+
     const commitProvider = new LiteLLMCommitMessageProvider(context.secrets, ua);
 
     // Bridge to providers
     chatProviderV1.setTelemetryService(telemetryService);
+    chatProviderV2.setTelemetryService(telemetryService);
     commitProvider.setTelemetryService(telemetryService);
 
-    // Track active provider registration for hot-swap
-    const activeProvider: LiteLLMChatProvider = chatProviderV1;
     let chatProviderRegistration: vscode.Disposable | undefined;
 
-    const registerProvider = () => {
+    const getActiveProvider = async (): Promise<{
+        provider: LiteLLMProviderBase & vscode.LanguageModelChatProvider;
+        useResponsesApi: boolean;
+    }> => {
+        const config = await configManager.getConfig();
+        const useResponsesApi = config.enableResponsesApi === true;
+        return {
+            provider: useResponsesApi ? chatProviderV2 : chatProviderV1,
+            useResponsesApi,
+        };
+    };
+
+    const registerProvider = (
+        provider: LiteLLMProviderBase & vscode.LanguageModelChatProvider,
+        useResponsesApi: boolean
+    ) => {
         try {
             if (chatProviderRegistration) {
                 Logger.info("Disposing existing LanguageModelChatProvider registration...");
                 chatProviderRegistration.dispose();
                 chatProviderRegistration = undefined;
             }
-
-            Logger.info("Registering LanguageModelChatProvider...");
-            chatProviderRegistration = vscode.lm.registerLanguageModelChatProvider(
-                "litellm-connector",
-                activeProvider as unknown as vscode.LanguageModelChatProvider
+            Logger.info(
+                useResponsesApi
+                    ? "Registering LanguageModelChatProvider V2/Responses API..."
+                    : "Registering LanguageModelChatProvider..."
             );
+            chatProviderRegistration = vscode.lm.registerLanguageModelChatProvider("litellm-connector", provider);
             if (chatProviderRegistration) {
                 context.subscriptions.push(chatProviderRegistration);
                 Logger.info("Provider registered successfully.");
@@ -160,46 +174,31 @@ export function activate(context: vscode.ExtensionContext) {
         }
     };
 
+    const registerCurrentProvider = async () => {
+        const { provider, useResponsesApi } = await getActiveProvider();
+        registerProvider(provider, useResponsesApi);
+    };
+
     // Register based on initial config
-    void configManager.getConfig().then(() => {
+    void configManager.getConfig().then((config) => {
+        const useResponsesApi = config.enableResponsesApi === true;
+        const activeProvider = useResponsesApi ? chatProviderV2 : chatProviderV1;
         // Register the LiteLLM provider under the vendor id used in package.json
-        registerProvider();
+        registerProvider(activeProvider, useResponsesApi);
 
         // Management commands to configure base URL and API key
         try {
             context.subscriptions.push(
-                registerManageConfigCommand(
-                    context,
-                    configManager,
-                    activeProvider as unknown as LiteLLMChatProvider,
-                    telemetryService
-                )
+                registerManageConfigCommand(context, configManager, activeProvider, telemetryService)
             );
-            context.subscriptions.push(
-                registerManageBackendsCommand(
-                    configManager,
-                    activeProvider as unknown as LiteLLMChatProvider,
-                    telemetryService
-                )
-            );
-            context.subscriptions.push(
-                registerShowModelsCommand(activeProvider as unknown as LiteLLMChatProvider, telemetryService)
-            );
-            context.subscriptions.push(
-                registerReloadModelsCommand(activeProvider as unknown as LiteLLMChatProvider, telemetryService)
-            );
+            context.subscriptions.push(registerManageBackendsCommand(configManager, activeProvider, telemetryService));
+            context.subscriptions.push(registerShowModelsCommand(activeProvider, telemetryService));
+            context.subscriptions.push(registerReloadModelsCommand(activeProvider, telemetryService));
             context.subscriptions.push(registerCheckConnectionCommand(configManager, telemetryService));
             context.subscriptions.push(
-                registerResetConfigCommand(
-                    configManager,
-                    activeProvider as unknown as LiteLLMChatProvider,
-                    telemetryService,
-                    registerProvider
-                )
+                registerResetConfigCommand(configManager, activeProvider, telemetryService, registerCurrentProvider)
             );
-            context.subscriptions.push(
-                registerSelectInlineCompletionModelCommand(activeProvider as unknown as LiteLLMChatProvider)
-            );
+            context.subscriptions.push(registerSelectInlineCompletionModelCommand(activeProvider));
             context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider, telemetryService));
             context.subscriptions.push(
                 vscode.commands.registerCommand("litellm-connector.generateCommitMessage.selectModel", async () => {

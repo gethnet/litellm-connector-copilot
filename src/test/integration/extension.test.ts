@@ -4,7 +4,7 @@ import * as sinon from "sinon";
 
 import * as extension from "../../extension";
 import { ConfigManager } from "../../config/configManager";
-import { LiteLLMChatProvider } from "../../providers";
+import { LiteLLMChatProvider, LiteLLMChatProviderV2 } from "../../providers";
 import { InlineCompletionsRegistrar } from "../../inlineCompletions/registerInlineCompletions";
 import { createMockSecrets, createMockOutputChannel } from "../utils/testMocks";
 
@@ -18,6 +18,10 @@ suite("Extension Activation Unit Tests", () => {
     teardown(() => {
         sandbox.restore();
     });
+
+    async function waitForActivationRegistration(): Promise<void> {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+    }
 
     test("activate registers providers and commands", async () => {
         const mockSecrets = createMockSecrets();
@@ -58,6 +62,60 @@ suite("Extension Activation Unit Tests", () => {
         assert.ok(initStub.calledOnce);
         // Should have pushed registrar + lm registration + multiple command disposables.
         assert.ok(context.subscriptions.length >= 2);
+    });
+
+    test("activate registers V1 provider when responses API is disabled", async () => {
+        const mockSecrets = createMockSecrets();
+        const context = {
+            subscriptions: [],
+            secrets: mockSecrets,
+        } as unknown as vscode.ExtensionContext;
+
+        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
+        sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
+        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
+        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
+        sandbox.stub(ConfigManager.prototype, "getConfig").resolves({ url: "", enableResponsesApi: false });
+        sandbox.stub(vscode.window, "showInformationMessage");
+        sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
+
+        const registerStub = sandbox
+            .stub(vscode.lm, "registerLanguageModelChatProvider")
+            .returns({ dispose() {} } as vscode.Disposable);
+
+        extension.activate(context);
+        await waitForActivationRegistration();
+
+        assert.ok(registerStub.calledOnce, "Expected language model provider registration");
+        const registeredProvider = registerStub.firstCall.args[1];
+        assert.ok(registeredProvider instanceof LiteLLMChatProvider);
+        assert.ok(!(registeredProvider instanceof LiteLLMChatProviderV2));
+    });
+
+    test("activate registers V2 provider when responses API is enabled", async () => {
+        const mockSecrets = createMockSecrets();
+        const context = {
+            subscriptions: [],
+            secrets: mockSecrets,
+        } as unknown as vscode.ExtensionContext;
+
+        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
+        sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
+        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
+        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
+        sandbox.stub(ConfigManager.prototype, "getConfig").resolves({ url: "", enableResponsesApi: true });
+        sandbox.stub(vscode.window, "showInformationMessage");
+        sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
+
+        const registerStub = sandbox
+            .stub(vscode.lm, "registerLanguageModelChatProvider")
+            .returns({ dispose() {} } as vscode.Disposable);
+
+        extension.activate(context);
+        await waitForActivationRegistration();
+
+        assert.ok(registerStub.calledOnce, "Expected language model provider registration");
+        assert.ok(registerStub.firstCall.args[1] instanceof LiteLLMChatProviderV2);
     });
 
     test("activate prompts classic config flow when not configured", async () => {

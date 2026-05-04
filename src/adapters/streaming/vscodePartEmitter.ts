@@ -39,14 +39,13 @@ export function emitV2PartsToVSCode(
                         const args = part.args ? JSON.parse(part.args) : {};
                         progress.report(new vscode.LanguageModelToolCallPart(part.id, part.name, args));
                     } catch (parseErr) {
-                        Logger.warn(`[vscodePartEmitter] Failed to parse tool call arguments`, {
+                        Logger.warn(`[vscodePartEmitter] Dropping tool call with invalid arguments`, {
                             toolName: part.name,
                             id: part.id,
                             argsPreview: typeof part.args === "string" ? part.args.slice(0, 160) : "<non-string>",
                             error: parseErr instanceof Error ? parseErr.message : String(parseErr),
                         });
-                        // Fallback: emit with raw string if the consumer can handle it, or empty object
-                        progress.report(new vscode.LanguageModelToolCallPart(part.id, part.name, {}));
+                        // Do not forward corrupted tool calls to VS Code; drop for safety.
                     }
                 }
                 break;
@@ -55,6 +54,11 @@ export function emitV2PartsToVSCode(
             case "finish":
                 // VS Code doesn't have a specific finish part in the progress stream,
                 // it's inferred by the end of the stream.
+                break;
+            case "error":
+                // Error parts are informational signals from the interpreter (e.g. malformed tool-call args).
+                // Log them here so they are visible; VS Code has no dedicated error-part type in the stream.
+                Logger.warn(`[vscodePartEmitter] Stream error part received`, { message: part.message });
                 break;
         }
     }

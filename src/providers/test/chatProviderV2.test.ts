@@ -4,6 +4,7 @@ import * as vscode from "vscode";
 
 import { LiteLLMChatProviderV2 } from "../liteLLMChatProviderV2";
 import { LiteLLMClient } from "../../adapters/litellmClient";
+import { ResponsesClient } from "../../adapters/responsesClient";
 import { normalizeMessagesForV2Pipeline, convertV2MessagesToProviderMessages } from "../../utils";
 import { Logger } from "../../utils/logger";
 import type { TelemetryService } from "../../telemetry/telemetryService";
@@ -142,7 +143,7 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
         });
     });
 
-    test("provideLanguageModelChatResponse falls back to a data usage part instead of thinking metadata", async () => {
+    test("provideLanguageModelChatResponse falls back to an enhanced usage data part instead of thinking metadata", async () => {
         const provider = new LiteLLMChatProviderV2(mockSecrets, userAgent);
 
         interface ProviderWithConfigManager {
@@ -229,6 +230,121 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
                 "Did not expect thinking fallback for usage metadata"
             );
         }
+    });
+
+    test("provideLanguageModelChatResponse handles raw responses streams through the V2 emitter", async () => {
+        const provider = new LiteLLMChatProviderV2(mockSecrets, userAgent) as LiteLLMChatProviderV2 & {
+            _modelInfoCache: Map<string, { mode?: string }>;
+            _activeBackendNames: string[];
+        };
+
+        interface ProviderWithConfigManager {
+            _configManager: {
+                getConfig: () => Promise<{ url: string; experimentalEmitUsageData?: boolean }>;
+                resolveBackends: () => Promise<Array<{ name: string; url: string; apiKey?: string; enabled: boolean }>>;
+            };
+        }
+        const providerWithConfig = provider as unknown as ProviderWithConfigManager;
+        sandbox
+            .stub(providerWithConfig._configManager, "getConfig")
+            .resolves({ url: "http://localhost:4000", experimentalEmitUsageData: true });
+        sandbox.stub(providerWithConfig._configManager, "resolveBackends").resolves([
+            {
+                name: "default",
+                url: "http://localhost:4000",
+                apiKey: "test-key",
+                enabled: true,
+            },
+        ]);
+
+        provider._activeBackendNames = ["default"];
+        provider._modelInfoCache.set("model-1", { mode: "responses" });
+
+        const responsesClientStub = sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest");
+        const encoder = new TextEncoder();
+        const fetchStub = sandbox.stub(globalThis, "fetch").resolves({
+            ok: true,
+            body: new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(
+                        encoder.encode('data: {"type":"response.output_text.delta","delta":"Hello"}\n\n')
+                    );
+                    controller.enqueue(
+                        encoder.encode('data: {"type":"response.output_reasoning.delta","delta":"Thinking"}\n\n')
+                    );
+                    controller.enqueue(
+                        encoder.encode(
+                            'data: {"type":"response.completed","response":{"usage":{"input_tokens":5,"output_tokens":3,"output_tokens_details":{"reasoning_tokens":1},"total_tokens":8}}}\n\n'
+                        )
+                    );
+                    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                    controller.close();
+                },
+            }),
+        } as Response);
+
+        const model: vscode.LanguageModelChatInformation = {
+            id: "model-1",
+            name: "model-1",
+            tooltip: "",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 1000,
+            maxOutputTokens: 1000,
+            capabilities: { toolCalling: true, imageInput: false },
+        };
+
+        const reported: vscode.LanguageModelResponsePart[] = [];
+        await provider.provideLanguageModelChatResponse(
+            model,
+            [
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [new vscode.LanguageModelTextPart("hi")],
+                },
+            ],
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+            },
+            { report: (part) => reported.push(part) },
+            new vscode.CancellationTokenSource().token
+        );
+
+        assert.strictEqual(
+            responsesClientStub.called,
+            false,
+            "V2 must not delegate stream emission to ResponsesClient"
+        );
+        assert.strictEqual(fetchStub.calledOnce, true);
+        assert.ok(
+            reported.some((part) => part instanceof vscode.LanguageModelTextPart && part.value === "Hello"),
+            "Expected V2 to emit response text from the raw /responses stream"
+        );
+        const ThinkingPart = (vscode as unknown as { LanguageModelThinkingPart?: new (...args: unknown[]) => unknown })
+            .LanguageModelThinkingPart;
+        assert.ok(
+            ThinkingPart && reported.some((part) => part instanceof ThinkingPart),
+            "Expected V2 to preserve reasoning as a thinking part"
+        );
+
+        const usagePart = reported.find(
+            (part): part is vscode.LanguageModelDataPart => part instanceof vscode.LanguageModelDataPart
+        );
+        assert.ok(usagePart, "Expected enhanced usage data part");
+        const usage = JSON.parse(Buffer.from(usagePart.data).toString("utf-8")) as {
+            promptTokens?: number;
+            completionTokens?: number;
+            totalTokens?: number;
+            reasoningTokens?: number;
+        };
+        assert.strictEqual(usage.promptTokens, 5);
+        assert.strictEqual(usage.completionTokens, 3);
+        assert.strictEqual(usage.totalTokens, 8);
+        assert.strictEqual(usage.reasoningTokens, 1);
     });
 
     test("V2 thinking stays distinct until final transport shaping", async () => {

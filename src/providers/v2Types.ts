@@ -19,4 +19,5 @@ export type V2EmittedPart =
     | { type: "thinking"; value: string | string[]; id?: string; metadata?: Record<string, unknown> }
     | { type: "tool_call"; index: number; id?: string; name?: string; args: string }
     | { type: "finish"; reason?: string }
-    | { type: "response"; usage?: { inputTokens?: number; outputTokens?: number } };
+    | { type: "response"; usage?: { inputTokens?: number; outputTokens?: number } }
+    | { type: "error"; message: string };

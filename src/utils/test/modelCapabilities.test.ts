@@ -3,11 +3,34 @@ import {
     capabilitiesToVSCode,
     getModelTags,
     formatModelDisplayLabel,
+    deriveModelFamily,
     type ExtendedModelInformation,
 } from "../modelCapabilities";
 import type { ModelCapabilityOverride } from "../../types";
 
 suite("modelCapabilities", () => {
+    suite("deriveModelFamily", () => {
+        test("uses precise model names instead of generic provider families", () => {
+            assert.strictEqual(deriveModelFamily("cloud/gpt-4o", { litellm_provider: "openai" }, "gpt-4o"), "gpt-4o");
+            assert.strictEqual(
+                deriveModelFamily("anthropic/claude-3-5-sonnet-20241022", { litellm_provider: "anthropic" }),
+                "claude-3-5-sonnet-20241022"
+            );
+            assert.strictEqual(
+                deriveModelFamily("local/codellama:13b", { litellm_provider: "ollama" }, "codellama:13b"),
+                "codellama:13b"
+            );
+        });
+
+        test("falls back to provider only when no model name is available", () => {
+            assert.strictEqual(
+                deriveModelFamily("unknown", { litellm_provider: "custom-provider" }),
+                "custom-provider"
+            );
+            assert.strictEqual(deriveModelFamily("unknown", undefined), "litellm");
+        });
+    });
+
     suite("capabilitiesToVSCode", () => {
         test("returns derived capabilities when no overrides", () => {
             const derived = {

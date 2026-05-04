@@ -85,11 +85,17 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
                 const normalizedId = toolCallIdMap.get(toolCallId) || normalizeToolCallId(toolCallId);
                 Logger.debug(`[responsesAdapter] Adding function_call_output (id: ${normalizedId})`);
                 const toolContent = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+
+                // If we have tool definitions, try to surface the name for synthesized calls that
+                // will be created later if the corresponding function_call is missing.
+                const toolNameFromDefs = requestBody.tools?.find((t) => t.function.name)?.function.name;
                 inputArray.push({
                     type: "function_call_output",
                     call_id: normalizedId,
                     output: toolContent || "Success",
-                });
+                    // hint for later synthesis; not part of LiteLLM schema but carried through locally
+                    name: toolNameFromDefs,
+                } as LiteLLMResponseInputItem & { name?: string });
             }
         }
     }
@@ -114,19 +120,21 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
         } else if (item.type === "function_call_output") {
             const call_id = item.call_id;
             if (!seenCallIds.has(call_id)) {
-                // Synthesize missing call
-                Logger.warn(`[responsesAdapter] Synthesizing missing call for output id: ${call_id}`);
-
-                // Try to find the actual tool name from the tools array if possible
-                // This helps avoid generic "Tool 1" labels in the UI
-                const toolDef = requestBody.tools?.find((t) => t.function.name !== undefined);
-                const name = toolDef?.function.name || "previous_tool_call";
-
+                // Synthesize missing call.
+                // IMPORTANT: Do NOT use a real tool name from requestBody.tools as the fallback.
+                // Picking the first (or any) tool definition name injects a misleading tool name
+                // into the model context, which can cause the model to interpret the result
+                // as belonging to the wrong tool and act on false context.
+                // Use "unknown_tool" as a neutral sentinel that is clearly synthetic.
+                Logger.warn(`[responsesAdapter] Synthesizing missing function_call for orphaned output`, {
+                    call_id,
+                });
+                const inferredName = (item as { name?: string }).name;
                 finalInputArray.push({
                     type: "function_call",
                     id: call_id,
                     call_id: call_id,
-                    name: name,
+                    name: inferredName || "unknown_tool",
                     arguments: "{}",
                 });
                 seenCallIds.add(call_id);

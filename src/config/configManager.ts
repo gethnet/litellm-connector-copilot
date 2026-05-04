@@ -159,9 +159,11 @@ export class ConfigManager {
             .getConfiguration()
             .get<string>(ConfigManager.SCM_COMMIT_MSG_MODEL_ID_KEY, "")
             .trim();
-        const v2ApiEnabled = vscode.workspace
+        const enableResponsesApi = vscode.workspace
             .getConfiguration()
             .get<boolean>(ConfigManager.ENABLE_RESPONSES_API, false);
+        /** @deprecated */
+        const v2ApiEnabled = enableResponsesApi;
 
         return {
             url,
@@ -182,6 +184,7 @@ export class ConfigManager {
                       ? modelIdOverride
                       : undefined,
             commitModelIdOverride: `${scmGitCompletionsModelId}`,
+            enableResponsesApi,
             v2ApiEnabled,
         };
     }
@@ -228,7 +231,7 @@ export class ConfigManager {
         const config = await this.getConfig();
         const toggles: Array<[string, boolean]> = [
             ["inline-completions", config.inlineCompletionsEnabled ?? false],
-            ["responses-api", config.v2ApiEnabled ?? false],
+            ["responses-api", config.enableResponsesApi ?? false],
             ["commit-message", !!(config.commitModelIdOverride && config.commitModelIdOverride.length > 0)],
             ["usage-data", config.experimentalEmitUsageData ?? false],
             ["caching", !config.disableCaching],

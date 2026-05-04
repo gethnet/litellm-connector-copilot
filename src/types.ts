@@ -140,7 +140,11 @@ export interface LiteLLMConfig {
     /** Model id to use for LiteLLM commit message generation. */
     commitModelIdOverride?: string;
 
+    /** Use the modern Responses API / V2 chat flow */
+    enableResponsesApi?: boolean;
+
     /** Experimental: enable V2 Chat Provider using proposed VS Code APIs. */
+    /** @deprecated use enableResponsesApi instead */
     v2ApiEnabled?: boolean;
 
     /** When enabled, send default values for temperature, frequency_penalty, and presence_penalty if not provided by VS Code. */

@@ -65,6 +65,11 @@ suite("ResponsesClient sendResponsesRequest", () => {
         });
     }
 
+    function makeSSEStream(events: string[]): ReadableStream<Uint8Array> {
+        const chunks = events.map((e) => `data: ${e}\n\n`);
+        return readableFromStrings(chunks);
+    }
+
     setup(() => {
         fetchStub = sinon.stub(global, "fetch");
     });
@@ -345,5 +350,52 @@ suite("ResponsesClient sendResponsesRequest", () => {
             20
         );
         assert.ok(progress.report.calledTwice);
+    });
+
+    test("logs a warning when tool call is silently dropped due to invalid JSON args", async () => {
+        // Regression: responsesClient previously dropped tool calls with bad JSON silently.
+        // After fix it must log a warn so the failure is visible.
+        const warnStub = sinon.stub(Logger, "warn");
+
+        const ssePayloads = [
+            JSON.stringify({
+                type: "response.output_item.done",
+                item: {
+                    type: "function_call",
+                    call_id: "broken_call",
+                    name: "broken_tool",
+                    arguments: '{"a":',
+                },
+            }),
+        ];
+
+        fetchStub.resolves({
+            ok: true,
+            body: makeSSEStream(ssePayloads),
+        } as unknown as Response);
+
+        const { progress, reported } = makeProgress();
+        const token = {
+            isCancellationRequested: false,
+            onCancellationRequested: () => ({ dispose: () => {} }),
+        } as vscode.CancellationToken;
+        const client = makeClient();
+        await client.sendResponsesRequest(makeRequest(), progress, token);
+
+        // Tool call must NOT be emitted
+        const toolCallParts = reported.filter((p) => p instanceof vscode.LanguageModelToolCallPart);
+        assert.strictEqual(toolCallParts.length, 0, "Must not emit tool call with invalid JSON args");
+
+        // Warning must be logged
+        sinon.assert.called(warnStub);
+        const warnArgs = warnStub.args.find(
+            (a) =>
+                (a[0] as string).includes("broken_tool") ||
+                (a[0] as string).includes("invalid") ||
+                (a[0] as string).includes("drop")
+        );
+        assert.ok(warnArgs, "Must log a warning that includes context about the dropped tool call");
+
+        warnStub.restore();
     });
 });

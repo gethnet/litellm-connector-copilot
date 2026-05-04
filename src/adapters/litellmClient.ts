@@ -343,6 +343,10 @@ export class LiteLLMClient {
 
             try {
                 const response = await fetch(url, { ...init, signal: controller.signal });
+                // Defense: some tests use minimal stubs; ensure we have a shape we can read.
+                if (!response) {
+                    throw new Error("fetch returned undefined response");
+                }
                 if (response.ok || attempt >= maxRetries || response.status < 500 || response.status >= 600) {
                     return response;
                 }

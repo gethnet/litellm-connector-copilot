@@ -1,15 +1,17 @@
 import * as vscode from "vscode";
 import { formatModelDisplayLabel, type ExtendedModelInformation } from "../utils/modelCapabilities";
 
-import type { LiteLLMChatProvider } from "../providers";
+import type { LiteLLMProviderBase } from "../providers";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
 
 const INLINE_COMPLETIONS_MODEL_ID_KEY = "litellm-connector.inlineCompletions.modelId";
 
 type ModelWithOptionalTags = vscode.LanguageModelChatInformation & { tags?: readonly string[] };
+type ModelDiscoveryProvider = LiteLLMProviderBase &
+    Pick<vscode.LanguageModelChatProvider, "provideLanguageModelChatInformation">;
 
-export function registerSelectInlineCompletionModelCommand(provider: LiteLLMChatProvider): vscode.Disposable {
+export function registerSelectInlineCompletionModelCommand(provider: ModelDiscoveryProvider): vscode.Disposable {
     return vscode.commands.registerCommand("litellm-connector.inlineCompletions.selectModel", async () => {
         const requestId = `ic_select_${Math.random().toString(36).slice(2, 10)}`;
         LiteLLMTelemetry.reportMetric({

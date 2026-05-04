@@ -36,6 +36,7 @@ import {
     deriveCapabilitiesFromModelInfo,
     capabilitiesToVSCode,
     getModelTags as getDerivedModelTags,
+    deriveModelFamily,
 } from "../utils/modelCapabilities";
 import type { DerivedModelCapabilities } from "../utils/modelCapabilities";
 import type { V2ChatMessage } from "./v2Types";
@@ -243,14 +244,7 @@ export abstract class LiteLLMProviderBase {
                 const extensionName = "LiteLLM Connector for Copilot";
                 const tooltip = `Provider: ${rawProvider}, Model: ${rawModelName} contributed by ${backendDisplay} via ${extensionName}`;
 
-                // Derive family from provider to help Copilot shape requests correctly
-                const providerLower = rawProvider.toLowerCase();
-                let family = "litellm";
-                if (providerLower === "openai") {
-                    family = "gpt4";
-                } else if (providerLower === "anthropic") {
-                    family = "claude";
-                }
+                const family = deriveModelFamily(modelId, modelInfo, rawModelName);
 
                 const info = {
                     id: modelId,
@@ -662,6 +656,82 @@ export abstract class LiteLLMProviderBase {
         return countTokensForV2Messages(input, modelId, modelInfo);
     }
 
+    protected async getOrCreateMultiBackendClient(): Promise<MultiBackendClient> {
+        let multiClient = this.getMultiBackendClient();
+        if (multiClient) {
+            return multiClient;
+        }
+
+        const backends = await this._configManager.resolveBackends();
+        if (backends.length === 0) {
+            throw new Error("LiteLLM configuration not found. Please configure at least one backend.");
+        }
+        multiClient = new MultiBackendClient(backends, this.userAgent);
+        if (this._telemetryService) {
+            multiClient.setTelemetryService(this._telemetryService);
+        }
+        this._multiBackendClient = multiClient;
+        this._activeBackendNames = backends.map((b) => b.name);
+        return multiClient;
+    }
+
+    protected async sendRawResponsesRequestToLiteLLM(
+        request: OpenAIChatCompletionRequest,
+        token: vscode.CancellationToken,
+        modelInfo?: LiteLLMModelInfo
+    ): Promise<ReadableStream<Uint8Array>> {
+        const backend = this.resolveModelBackend(request.model);
+        const backends = await this._configManager.resolveBackends();
+        const targetBackend = backends.find((b) => b.name === (backend?.backendName ?? "default"));
+        if (!targetBackend) {
+            throw new Error(`Cannot resolve backend for responses model "${request.model}".`);
+        }
+
+        const responsesRequest = transformToResponsesFormat(request);
+        if (backend) {
+            responsesRequest.model = backend.originalModelId;
+        }
+
+        const controller = new AbortController();
+        const disposable = token.onCancellationRequested(() => controller.abort());
+        try {
+            const headers: Record<string, string> = {
+                "Content-Type": "application/json",
+                "User-Agent": this.userAgent,
+            };
+            if (targetBackend.apiKey) {
+                headers.Authorization = `Bearer ${targetBackend.apiKey}`;
+                headers["X-API-Key"] = targetBackend.apiKey;
+            }
+
+            const response = await fetch(`${targetBackend.url}/responses`, {
+                method: "POST",
+                headers,
+                body: JSON.stringify(responsesRequest),
+                signal: controller.signal,
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`LiteLLM Responses API error: ${response.status} ${response.statusText}\n${errorText}`);
+            }
+
+            if (!response.body) {
+                throw new Error("No response body from LiteLLM Responses API");
+            }
+
+            void modelInfo;
+            return response.body as ReadableStream<Uint8Array>;
+        } catch (err) {
+            if (err instanceof Error && err.name === "AbortError") {
+                throw new Error("Operation cancelled by user", { cause: err });
+            }
+            throw err;
+        } finally {
+            disposable.dispose();
+        }
+    }
+
     /** Sends a request to LiteLLM, with /responses fallback when applicable. */
     protected async sendRequestToLiteLLM(
         request: OpenAIChatCompletionRequest,
@@ -670,16 +740,7 @@ export abstract class LiteLLMProviderBase {
         caller?: string,
         modelInfo?: LiteLLMModelInfo
     ): Promise<ReadableStream<Uint8Array>> {
-        let multiClient = this.getMultiBackendClient();
-        if (!multiClient) {
-            const backends = await this._configManager.resolveBackends();
-            if (backends.length === 0) {
-                throw new Error("LiteLLM configuration not found. Please configure at least one backend.");
-            }
-            multiClient = new MultiBackendClient(backends, this.userAgent);
-            this._multiBackendClient = multiClient;
-            this._activeBackendNames = backends.map((b) => b.name);
-        }
+        const multiClient = await this.getOrCreateMultiBackendClient();
 
         const backend = this.resolveModelBackend(request.model);
 

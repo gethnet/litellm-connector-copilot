@@ -340,7 +340,7 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
                                 {
                                     index: 0,
                                     id: "rawId",
-                                    function: { name: "toolUpdated", arguments: '"value"}' },
+                                    function: { name: "toolUpdated", arguments: '"value":true}' },
                                 },
                             ],
                         },
@@ -355,7 +355,7 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
         assert.ok(toolCall && toolCall.type === "tool_call");
         if (toolCall && toolCall.type === "tool_call") {
             assert.strictEqual(toolCall.name, "toolUpdated");
-            assert.strictEqual(toolCall.args, '{"value"}');
+            assert.strictEqual(toolCall.args, '{"value":true}');
             assert.ok(toolCall.id?.startsWith("fc_"));
         }
     });
@@ -454,6 +454,115 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
                 '{{"a":1}',
                 "Tool call arguments should not be corrupted by previous turns"
             );
+        }
+    });
+
+    test("should NOT emit tool_call when finish_reason is tool_calls and args are invalid JSON", () => {
+        // Regression: previously allowEmit = isJsonValid || finishReason === "tool_calls"
+        // silently forwarded malformed args to the emitter. Now it must hard-block.
+        const state = createInitialStreamingState();
+
+        // Buffer a tool call with malformed (incomplete) args
+        interpretStreamEvent(
+            {
+                choices: [
+                    {
+                        delta: {
+                            tool_calls: [
+                                {
+                                    index: 0,
+                                    id: "call_bad",
+                                    function: { name: "bad_tool", arguments: '{"city":' },
+                                },
+                            ],
+                        },
+                    },
+                ],
+            },
+            state
+        );
+
+        // finish_reason arrives but args are still malformed
+        const parts = interpretStreamEvent({ choices: [{ finish_reason: "tool_calls" }] }, state);
+
+        const toolCallParts = parts.filter((p) => p.type === "tool_call");
+        assert.strictEqual(
+            toolCallParts.length,
+            0,
+            "Must NOT emit a tool_call when args are invalid JSON, regardless of finish_reason"
+        );
+
+        // finish part should still be emitted so the stream terminates cleanly
+        const finishParts = parts.filter((p) => p.type === "finish");
+        assert.strictEqual(finishParts.length, 1, "Must still emit a finish part");
+    });
+
+    test("should emit an error part when finish_reason is tool_calls and args are invalid JSON", () => {
+        // After fixing the allowEmit gate, the interpreter must surface an error part
+        // so the caller knows the tool call was corrupted and can fail fast.
+        const state = createInitialStreamingState();
+
+        interpretStreamEvent(
+            {
+                choices: [
+                    {
+                        delta: {
+                            tool_calls: [
+                                {
+                                    index: 0,
+                                    id: "call_bad",
+                                    function: { name: "bad_tool", arguments: '{"city":' },
+                                },
+                            ],
+                        },
+                    },
+                ],
+            },
+            state
+        );
+
+        const parts = interpretStreamEvent({ choices: [{ finish_reason: "tool_calls" }] }, state);
+
+        const errorParts = parts.filter((p) => p.type === "error");
+        assert.strictEqual(errorParts.length, 1, "Must emit exactly one error part for a corrupted tool call");
+        if (errorParts[0].type === "error") {
+            assert.ok(
+                errorParts[0].message.includes("bad_tool"),
+                "Error message should include the tool name for debuggability"
+            );
+        }
+    });
+
+    test("should still emit valid tool_calls when finish_reason is tool_calls", () => {
+        // Regression guard: fixing allowEmit must not break the normal happy path
+        const state = createInitialStreamingState();
+
+        interpretStreamEvent(
+            {
+                choices: [
+                    {
+                        delta: {
+                            tool_calls: [
+                                {
+                                    index: 0,
+                                    id: "call_good",
+                                    function: { name: "good_tool", arguments: '{"city":"London"}' },
+                                },
+                            ],
+                        },
+                    },
+                ],
+            },
+            state
+        );
+
+        const parts = interpretStreamEvent({ choices: [{ finish_reason: "tool_calls" }] }, state);
+
+        const toolCallParts = parts.filter((p) => p.type === "tool_call");
+        assert.strictEqual(toolCallParts.length, 1, "Must still emit valid tool_calls");
+        if (toolCallParts[0].type === "tool_call") {
+            assert.strictEqual(toolCallParts[0].name, "good_tool");
+            assert.strictEqual(toolCallParts[0].args, '{"city":"London"}');
         }
     });
 

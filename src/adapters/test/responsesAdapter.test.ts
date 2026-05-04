@@ -42,6 +42,33 @@ suite("Responses Adapter Unit Tests", () => {
         assert.strictEqual(functionOutput?.call_id, normalizeToolCallId("orphaned_id"));
     });
 
+    test("synthesized function_call uses 'unknown_tool' fallback name, not the first tool definition", () => {
+        // Regression: previously used requestBody.tools[0].function.name as the synthesized name,
+        // injecting a misleading tool name into the model context.
+        // After fix: synthesized calls must use "unknown_tool" as the fallback name.
+        const toolDef: OpenAIFunctionToolDef = {
+            type: "function",
+            function: { name: "real_tool", description: "does real stuff", parameters: {} },
+        };
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [
+                { role: "user", content: "hi" },
+                { role: "tool", tool_call_id: "orphaned_id", content: "result" },
+            ] as OpenAIChatMessage[],
+            tools: [toolDef],
+        });
+
+        const input = body.input as Record<string, unknown>[];
+        const synthesizedCall = input.find((i) => i.type === "function_call");
+        assert.ok(synthesizedCall, "Should have synthesized a function_call");
+        assert.strictEqual(
+            synthesizedCall?.name,
+            "unknown_tool",
+            "Synthesized call must use 'unknown_tool', not the first tool definition name"
+        );
+    });
+
     test("transformToResponsesFormat skips empty messages", () => {
         const body = transformToResponsesFormat({
             model: "m",

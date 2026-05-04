@@ -1,13 +1,16 @@
 import * as vscode from "vscode";
 import type { ConfigManager } from "../config/configManager";
-import type { LiteLLMChatProvider } from "../providers";
+import type { LiteLLMProviderBase } from "../providers";
 import { MultiBackendClient } from "../adapters";
 import type { LiteLLMBackend } from "../types";
 import type { TelemetryService } from "../telemetry/telemetryService";
 
+type ModelDiscoveryProvider = LiteLLMProviderBase &
+    Pick<vscode.LanguageModelChatProvider, "provideLanguageModelChatInformation">;
+
 function createConfigHandler(
     configManager: ConfigManager,
-    provider?: LiteLLMChatProvider,
+    provider?: ModelDiscoveryProvider,
     telemetryService?: TelemetryService
 ) {
     return async () => {
@@ -119,7 +122,7 @@ function createConfigHandler(
 export function registerManageConfigCommand(
     context: vscode.ExtensionContext,
     configManager: ConfigManager,
-    provider?: LiteLLMChatProvider,
+    provider?: ModelDiscoveryProvider,
     telemetryService?: TelemetryService
 ) {
     return vscode.commands.registerCommand(
@@ -130,7 +133,7 @@ export function registerManageConfigCommand(
 
 export function registerManageBackendsCommand(
     configManager: ConfigManager,
-    provider?: LiteLLMChatProvider,
+    provider?: ModelDiscoveryProvider,
     telemetryService?: TelemetryService
 ) {
     return vscode.commands.registerCommand("litellm-connector.manageBackends", async () => {
@@ -169,7 +172,7 @@ export function registerManageBackendsCommand(
 
 async function addNewBackend(
     configManager: ConfigManager,
-    provider?: LiteLLMChatProvider,
+    provider?: ModelDiscoveryProvider,
     telemetryService?: TelemetryService
 ) {
     const name = await vscode.window.showInputBox({
@@ -221,7 +224,7 @@ async function addNewBackend(
 async function manageExistingBackend(
     configManager: ConfigManager,
     backend: LiteLLMBackend,
-    provider?: LiteLLMChatProvider,
+    provider?: ModelDiscoveryProvider,
     telemetryService?: TelemetryService
 ) {
     const items: (vscode.QuickPickItem & { id: string })[] = [
@@ -292,7 +295,7 @@ async function manageExistingBackend(
     }
 }
 
-export function registerShowModelsCommand(provider: LiteLLMChatProvider, telemetryService?: TelemetryService) {
+export function registerShowModelsCommand(provider: LiteLLMProviderBase, telemetryService?: TelemetryService) {
     return vscode.commands.registerCommand("litellm-connector.showModels", async () => {
         if (telemetryService) {
             telemetryService.captureCommandExecuted("litellm-connector.showModels");
@@ -336,7 +339,7 @@ export function registerShowModelsCommand(provider: LiteLLMChatProvider, telemet
     });
 }
 
-export function registerReloadModelsCommand(provider: LiteLLMChatProvider, telemetryService?: TelemetryService) {
+export function registerReloadModelsCommand(provider: ModelDiscoveryProvider, telemetryService?: TelemetryService) {
     return vscode.commands.registerCommand("litellm-connector.reloadModels", async () => {
         if (telemetryService) {
             telemetryService.captureCommandExecuted("litellm-connector.reloadModels");
@@ -414,9 +417,9 @@ export function registerCheckConnectionCommand(configManager: ConfigManager, tel
 
 export function registerResetConfigCommand(
     configManager: ConfigManager,
-    provider?: LiteLLMChatProvider,
+    provider?: LiteLLMProviderBase,
     telemetryService?: TelemetryService,
-    reRegisterProvider?: () => void
+    reRegisterProvider?: () => void | Promise<void>
 ) {
     return vscode.commands.registerCommand("litellm-connector.reset", async () => {
         if (telemetryService) {
@@ -438,7 +441,7 @@ export function registerResetConfigCommand(
 
                 // Hard reset the provider registration to force VS Code to drop cached models
                 if (reRegisterProvider) {
-                    reRegisterProvider();
+                    await reRegisterProvider();
                 }
 
                 vscode.window.showInformationMessage("LiteLLM configuration has been reset.");
