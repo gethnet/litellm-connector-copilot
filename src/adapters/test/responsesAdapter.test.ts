@@ -248,7 +248,7 @@ suite("Responses Adapter Unit Tests", () => {
 
         const input = body.input as Record<string, unknown>[];
         assert.strictEqual(input[0].type, "function_call");
-        assert.strictEqual(input[0].name, "my_tool");
+        assert.strictEqual(input[0].name, "unknown_tool");
     });
 
     test("transformToResponsesFormat handles system message with array content", () => {

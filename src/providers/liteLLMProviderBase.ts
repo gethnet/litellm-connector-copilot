@@ -494,6 +494,8 @@ export abstract class LiteLLMProviderBase {
             caller
         );
         const toolConfig = convertTools({ ...options, tools: toolRedaction.tools });
+        // Shared trim helpers preserve cache-aware boundaries, so both chat and V2 flows
+        // keep the same request prefix behavior without duplicating policy here.
         const messagesToUse = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo);
 
         const openaiMessages = convertMessages(messagesToUse);
@@ -575,6 +577,8 @@ export abstract class LiteLLMProviderBase {
         const config = await this._configManager.getConfig();
 
         const toolConfig = convertTools(options);
+        // Shared trim helpers preserve cache-aware boundaries, so the V2 path uses the
+        // same prefix retention policy as the chat path.
         const trimmedMessages = trimV2MessagesForBudget(messages, toolConfig.tools, model, modelInfo);
         validateV2Messages(trimmedMessages);
 
@@ -809,6 +813,8 @@ export abstract class LiteLLMProviderBase {
             // Build a new request with hard budget override equal to raw limit minus tool tokens
             const toolConfig = convertTools(options);
             const hardBudget = Math.max(1, model.maxInputTokens - estimateToolTokens(toolConfig.tools));
+            // Retry trimming uses the same cache-aware helper so the fallback request keeps
+            // the same prefix/tail policy as the initial request.
             const trimmedMessages = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo, hardBudget);
             const retrimmedRequest = await this.buildOpenAIChatRequest(
                 trimmedMessages,

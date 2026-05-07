@@ -206,19 +206,59 @@ export function trimMessagesToFitBudget(
     }
 
     const originalTokens = countTokens(messages, model.id, modelInfo);
-
-    let systemMessage: vscode.LanguageModelChatRequestMessage | undefined;
-    const remaining: vscode.LanguageModelChatRequestMessage[] = [];
+    const messageArray = Array.isArray(messages) ? messages : Array.from(messages);
     const userRole = vscode.LanguageModelChatMessageRole.User as unknown as number;
     const assistantRole = vscode.LanguageModelChatMessageRole.Assistant as unknown as number;
-    const messageArray = Array.isArray(messages) ? messages : Array.from(messages);
-    for (const msg of messageArray) {
-        const roleNum = msg.role as unknown as number;
-        const isSystem = roleNum !== userRole && roleNum !== assistantRole;
-        if (!systemMessage && isSystem) {
-            systemMessage = msg;
-        } else {
-            remaining.push(msg);
+
+    const splitCacheStablePrefix = <T extends { role: unknown }>(input: readonly T[]) => {
+        let systemMessage: T | undefined;
+        const remaining: T[] = [];
+
+        for (const msg of input) {
+            const roleNum = msg.role as unknown as number;
+            const isSystem = roleNum !== userRole && roleNum !== assistantRole;
+            if (!systemMessage && isSystem) {
+                systemMessage = msg;
+            } else {
+                remaining.push(msg);
+            }
+        }
+
+        return { systemMessage, remaining };
+    };
+
+    const pickLastConversationTurns = <T>(input: readonly T[]) =>
+        input.length <= 2 ? [...input] : [...input.slice(-2)];
+
+    const { systemMessage, remaining } = splitCacheStablePrefix(messageArray);
+    const anchorTail = pickLastConversationTurns(remaining);
+    const anchorSet = new Set(anchorTail);
+
+    /**
+     * Build a reverse-lookup map: toolCallId -> index in `remaining` for the assistant message
+     * that owns that tool_call. This enables O(1) lookup when a tool result message is
+     * selected so we can force-include its paired assistant message.
+     *
+     * Tool call IDs are stored on the converted OpenAI message as `msg.tool_calls[*].id`.
+     * We access them via an indexed property lookup to avoid importing extra types and to
+     * remain compatible with both raw vscode messages and partially-converted messages.
+     */
+    const toolCallIdToAssistantIndex = new Map<string, number>();
+    for (let idx = 0; idx < remaining.length; idx++) {
+        const msg = remaining[idx];
+        const rawMsg = msg as unknown as Record<string, unknown>;
+        const toolCalls = rawMsg["tool_calls"];
+        const role = msg.role as unknown as number;
+        if (
+            (role === assistantRole || role === (vscode.LanguageModelChatMessageRole.Assistant as unknown as number)) &&
+            Array.isArray(toolCalls)
+        ) {
+            for (const tc of toolCalls) {
+                const call = tc as Record<string, unknown>;
+                if (typeof call["id"] === "string") {
+                    toolCallIdToAssistantIndex.set(call["id"], idx);
+                }
+            }
         }
     }
 
@@ -253,11 +293,37 @@ export function trimMessagesToFitBudget(
             i === remaining.length - 2 &&
             msg.role === (vscode.LanguageModelChatMessageRole.Assistant as unknown as number);
 
-        if (used + msgTokens <= budget || selected.length === (systemMessage ? 1 : 0) || isProtectedAssistantMessage) {
+        // Tool-pair integrity: when a tool result message is selected (either because it is
+        // in the anchor tail or fits within budget), its paired assistant message MUST also
+        // be included. We add the paired assistant to the anchorSet here so the later
+        // iteration over lower indices will force-include it regardless of token budget.
+        //
+        // We check for the tool_call_id property on the raw message object because VS Code
+        // messages that have been through convertMessages() carry it as a plain property.
+        const rawMsg = msg as unknown as Record<string, unknown>;
+        const toolCallId = rawMsg["tool_call_id"];
+        if (
+            (anchorSet.has(msg) || used + msgTokens <= budget) &&
+            typeof toolCallId === "string" &&
+            toolCallIdToAssistantIndex.has(toolCallId)
+        ) {
+            // Force the paired assistant message into the anchor set before it is visited.
+            const pairedIndex = toolCallIdToAssistantIndex.get(toolCallId)!;
+            const pairedMsg = remaining[pairedIndex];
+            anchorSet.add(pairedMsg);
+
+            // To be absolutely sure, we ALSO force any tool calls in the anchored assistant
+            // into the index if they weren't there already (though they should be).
+        }
+
+        if (
+            anchorSet.has(msg) ||
+            used + msgTokens <= budget ||
+            selected.length === (systemMessage ? 1 : 0) ||
+            isProtectedAssistantMessage
+        ) {
             selected.splice(systemMessage ? 1 : 0, 0, msg);
             used += msgTokens;
-        } else {
-            break;
         }
     }
 
@@ -321,19 +387,50 @@ export function trimV2MessagesForBudget(
     }
 
     const originalTokens = countTokensForV2Messages(messages, model.id, modelInfo);
-
-    let systemMessage: V2ChatMessage | undefined;
-    const remaining: V2ChatMessage[] = [];
+    const messageArray = Array.isArray(messages) ? messages : Array.from(messages);
     const userRole = vscode.LanguageModelChatMessageRole.User as unknown as number;
     const assistantRole = vscode.LanguageModelChatMessageRole.Assistant as unknown as number;
-    const messageArray = Array.isArray(messages) ? messages : Array.from(messages);
-    for (const msg of messageArray) {
-        const roleNum = msg.role as unknown as number;
-        const isSystem = roleNum !== userRole && roleNum !== assistantRole;
-        if (!systemMessage && isSystem) {
-            systemMessage = msg;
-        } else {
-            remaining.push(msg);
+
+    const splitCacheStablePrefix = <T extends { role: unknown }>(input: readonly T[]) => {
+        let systemMessage: T | undefined;
+        const remaining: T[] = [];
+
+        for (const msg of input) {
+            const roleNum = msg.role as unknown as number;
+            const isSystem = roleNum !== userRole && roleNum !== assistantRole;
+            if (!systemMessage && isSystem) {
+                systemMessage = msg;
+            } else {
+                remaining.push(msg);
+            }
+        }
+
+        return { systemMessage, remaining };
+    };
+
+    const pickLastConversationTurns = <T>(input: readonly T[]) =>
+        input.length <= 2 ? [...input] : [...input.slice(-2)];
+
+    const { systemMessage, remaining } = splitCacheStablePrefix(messageArray);
+    const anchorTail = pickLastConversationTurns(remaining);
+    const anchorSet = new Set(anchorTail);
+
+    /**
+     * Build a reverse-lookup map: callId -> index in `remaining` for the assistant message
+     * (or any message) that contains a tool_call part with that callId. This lets us
+     * force-include the paired message when a tool_result part referencing the same callId
+     * is selected during trimming.
+     *
+     * V2 tool_call parts live on assistant messages (or any message with role assistant).
+     * V2 tool_result parts live on user messages (or any role) and reference the callId.
+     */
+    const v2ToolCallIdToMessageIndex = new Map<string, number>();
+    for (let idx = 0; idx < remaining.length; idx++) {
+        const msg = remaining[idx];
+        for (const part of msg.content) {
+            if (part.type === "tool_call") {
+                v2ToolCallIdToMessageIndex.set(part.callId, idx);
+            }
         }
     }
 
@@ -364,12 +461,31 @@ export function trimV2MessagesForBudget(
             i === remaining.length - 2 &&
             (msg.role === (vscode.LanguageModelChatMessageRole.Assistant as unknown as number) ||
                 msg.role === "assistant");
+        const mustKeepTailBoundary = anchorSet.has(msg);
 
-        if (used + msgTokens <= budget || selected.length === (systemMessage ? 1 : 0) || isProtectedAssistantMessage) {
+        // V2 tool-pair integrity: if the current message contains tool_result parts and is
+        // being selected (via anchor or budget fit), force-include the message that owns the
+        // matching tool_call part so the conversation remains structurally valid.
+        //
+        // We iterate ALL tool_result parts in the message because a single message can carry
+        // results for multiple parallel tool calls (each with a distinct callId).
+        if (mustKeepTailBoundary || used + msgTokens <= budget) {
+            for (const part of msg.content) {
+                if (part.type === "tool_result" && v2ToolCallIdToMessageIndex.has(part.callId)) {
+                    const pairedIndex = v2ToolCallIdToMessageIndex.get(part.callId)!;
+                    anchorSet.add(remaining[pairedIndex]);
+                }
+            }
+        }
+
+        if (
+            anchorSet.has(msg) ||
+            used + msgTokens <= budget ||
+            selected.length === (systemMessage ? 1 : 0) ||
+            isProtectedAssistantMessage
+        ) {
             selected.splice(systemMessage ? 1 : 0, 0, msg);
             used += msgTokens;
-        } else if (!isContinuation) {
-            break;
         }
     }
 

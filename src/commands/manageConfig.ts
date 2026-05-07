@@ -8,6 +8,9 @@ import type { TelemetryService } from "../telemetry/telemetryService";
 type ModelDiscoveryProvider = LiteLLMProviderBase &
     Pick<vscode.LanguageModelChatProvider, "provideLanguageModelChatInformation">;
 
+type BackendQuickPickItem = vscode.QuickPickItem & { backend?: LiteLLMBackend };
+type BackendEntryQuickPickItem = vscode.QuickPickItem & { backend: LiteLLMBackend };
+
 function createConfigHandler(
     configManager: ConfigManager,
     provider?: ModelDiscoveryProvider,
@@ -137,35 +140,59 @@ export function registerManageBackendsCommand(
     telemetryService?: TelemetryService
 ) {
     return vscode.commands.registerCommand("litellm-connector.manageBackends", async () => {
-        const backends = await configManager.listBackends();
+        let activeBackendName: string | undefined;
 
-        const items: vscode.QuickPickItem[] = [
-            { label: "$(add) Add Backend", alwaysShow: true },
-            { label: "$(sync) Check All Connections", alwaysShow: true },
-            ...backends.map((b) => ({
+        while (true) {
+            const backends = await configManager.listBackends();
+
+            const backendItems: BackendEntryQuickPickItem[] = backends.map((b) => ({
                 label: `${b.enabled !== false ? "$(check)" : "$(x)"} ${b.name}`,
                 description: b.url,
                 detail: b.enabled !== false ? "Enabled" : "Disabled",
                 backend: b,
-            })),
-        ];
+            }));
 
-        const picked = await vscode.window.showQuickPick(items, {
-            title: "LiteLLM Backend Management",
-            placeHolder: "Select a backend to manage or add a new one",
-        });
+            const items: BackendQuickPickItem[] = [
+                { label: "$(add) Add Backend", alwaysShow: true },
+                { label: "$(sync) Check All Connections", alwaysShow: true },
+                ...backendItems,
+            ];
 
-        if (!picked) {
-            return;
-        }
+            const picked = await vscode.window.showQuickPick(items, {
+                title: "LiteLLM Backend Management",
+                placeHolder: "Select a backend to manage or add a new one",
+                ...(activeBackendName
+                    ? { activeItems: backendItems.filter((item) => item.backend.name === activeBackendName) }
+                    : {}),
+            });
 
-        if (picked.label.includes("Add Backend")) {
-            await addNewBackend(configManager, provider, telemetryService);
-        } else if (picked.label.includes("Check All Connections")) {
-            await vscode.commands.executeCommand("litellm-connector.checkConnection");
-        } else {
-            const backend = (picked as vscode.QuickPickItem & { backend: LiteLLMBackend }).backend;
-            await manageExistingBackend(configManager, backend, provider, telemetryService);
+            if (!picked) {
+                return;
+            }
+
+            if (picked.label.includes("Add Backend")) {
+                activeBackendName = undefined;
+                await addNewBackend(configManager, provider, telemetryService);
+                continue;
+            }
+
+            if (picked.label.includes("Check All Connections")) {
+                activeBackendName = undefined;
+                await vscode.commands.executeCommand("litellm-connector.checkConnection");
+                continue;
+            }
+
+            const backend = (picked as BackendQuickPickItem).backend;
+            if (!backend) {
+                return;
+            }
+
+            activeBackendName = backend.name;
+            const shouldReopen = await manageExistingBackend(configManager, backend, provider, telemetryService);
+
+            if (!shouldReopen) {
+                return;
+            }
         }
     });
 }
@@ -226,7 +253,7 @@ async function manageExistingBackend(
     backend: LiteLLMBackend,
     provider?: ModelDiscoveryProvider,
     telemetryService?: TelemetryService
-) {
+): Promise<boolean> {
     const items: (vscode.QuickPickItem & { id: string })[] = [
         {
             label: backend.enabled !== false ? "$(x) Disable Backend" : "$(check) Enable Backend",
@@ -242,7 +269,7 @@ async function manageExistingBackend(
     });
 
     if (!picked) {
-        return;
+        return true;
     }
 
     const action = picked.id;
@@ -252,18 +279,31 @@ async function manageExistingBackend(
         if (telemetryService) {
             telemetryService.captureConfigChanged("backend.enabled", "manage-backends");
         }
-    } else if (action === "edit_url") {
+        return true;
+    }
+
+    if (action === "edit_url") {
         const newUrl = await vscode.window.showInputBox({
             title: `Update URL for "${backend.name}"`,
             value: backend.url,
         });
-        if (newUrl) {
-            await configManager.updateBackend(backend.name, { url: newUrl.trim() });
+        if (newUrl === undefined) {
+            return false;
+        }
+
+        const trimmedUrl = newUrl.trim();
+        if (trimmedUrl.length > 0) {
+            await configManager.updateBackend(backend.name, { url: trimmedUrl });
             if (telemetryService) {
                 telemetryService.captureConfigChanged("backend.url", "manage-backends");
             }
+            await refreshModelsAfterBackendChange(configManager, provider);
         }
-    } else if (action === "edit_key") {
+
+        return true;
+    }
+
+    if (action === "edit_key") {
         const newKey = await vscode.window.showInputBox({
             title: `Update API Key for "${backend.name}"`,
             password: true,
@@ -273,8 +313,13 @@ async function manageExistingBackend(
             if (telemetryService) {
                 telemetryService.captureConfigChanged("backend.apiKey", "manage-backends");
             }
+            await refreshModelsAfterBackendChange(configManager, provider);
         }
-    } else if (action === "remove") {
+
+        return true;
+    }
+
+    if (action === "remove") {
         const confirm = await vscode.window.showWarningMessage(
             `Are you sure you want to remove the backend "${backend.name}"?`,
             { modal: true },
@@ -286,12 +331,29 @@ async function manageExistingBackend(
                 const currentBackends = await configManager.listBackends();
                 telemetryService.captureBackendRemoved(currentBackends.length);
             }
+            await refreshModelsAfterBackendChange(configManager, provider);
+            return false;
         }
     }
 
-    if (provider) {
-        provider.clearModelCache();
+    return true;
+}
+
+async function refreshModelsAfterBackendChange(
+    configManager: ConfigManager,
+    provider?: ModelDiscoveryProvider
+): Promise<void> {
+    if (!provider) {
+        return;
+    }
+
+    provider.clearModelCache();
+
+    try {
         await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
+        provider.refreshModelInformation();
+    } catch (err) {
+        console.error("Failed to refresh models after backend change", err);
     }
 }
 

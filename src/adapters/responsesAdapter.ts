@@ -86,15 +86,10 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
                 Logger.debug(`[responsesAdapter] Adding function_call_output (id: ${normalizedId})`);
                 const toolContent = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
 
-                // If we have tool definitions, try to surface the name for synthesized calls that
-                // will be created later if the corresponding function_call is missing.
-                const toolNameFromDefs = requestBody.tools?.find((t) => t.function.name)?.function.name;
                 inputArray.push({
                     type: "function_call_output",
                     call_id: normalizedId,
                     output: toolContent || "Success",
-                    // hint for later synthesis; not part of LiteLLM schema but carried through locally
-                    name: toolNameFromDefs,
                 } as LiteLLMResponseInputItem & { name?: string });
             }
         }
@@ -134,7 +129,7 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
                     type: "function_call",
                     id: call_id,
                     call_id: call_id,
-                    name: inferredName || "unknown_tool",
+                    name: inferredName && inferredName.trim() ? inferredName.trim() : "unknown_tool",
                     arguments: "{}",
                 });
                 seenCallIds.add(call_id);
@@ -168,7 +163,7 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
     };
 
     if (requestBody.tools) {
-        responsesBody.tools = requestBody.tools
+        const validTools = requestBody.tools
             .map((tool) => {
                 const func = tool.function;
                 if (!func.name || !func.parameters) {
@@ -179,12 +174,16 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
                 }
                 return {
                     type: "function" as const,
-                    name: func.name,
-                    description: func.description || "", // Allow empty description
+                    name: func.name.trim(),
+                    description: func.description || "",
                     parameters: func.parameters,
                 };
             })
             .filter((t): t is LiteLLMResponseTool => t !== null);
+
+        if (validTools.length > 0) {
+            responsesBody.tools = validTools;
+        }
     }
 
     if (requestBody.tool_choice && responsesBody.tools) {
