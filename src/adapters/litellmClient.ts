@@ -166,7 +166,7 @@ export class LiteLLMClient {
                 const errorType = err instanceof Error ? err.name : "FetchError";
                 this._telemetryService.captureConnectionError("chat", errorType);
             }
-            throw err;
+            throw this.wrapNetworkError(err, request.model, endpoint);
         }
 
         // Handle unsupported parameters by stripping them and retrying once
@@ -441,5 +441,25 @@ export class LiteLLMClient {
             }
         }
         return undefined;
+    }
+
+    private wrapNetworkError(error: unknown, model: string, endpoint: string): Error {
+        if (!(error instanceof Error)) {
+            return new Error(`LiteLLM request failed for ${model} at ${endpoint}: ${String(error)}`);
+        }
+
+        const isFetchFailure =
+            error.name === "TypeError" ||
+            error.message.toLowerCase().includes("fetch failed") ||
+            error.message.toLowerCase().includes("network error");
+
+        if (!isFetchFailure) {
+            return error;
+        }
+
+        return new Error(
+            `LiteLLM request failed for ${model} at ${endpoint}. The request could not reach the server or the connection was interrupted.`,
+            { cause: error }
+        );
     }
 }

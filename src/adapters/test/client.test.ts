@@ -432,4 +432,19 @@ suite("LiteLLM Client Unit Tests", () => {
 
         await assert.rejects(() => client.chat({ model: "m", messages: [] }), /No response body/);
     });
+
+    test("chat wraps fetch failures with a LiteLLM-specific transport error", async () => {
+        const client = new LiteLLMClient(config, userAgent);
+        sandbox.stub(global, "fetch").rejects(new TypeError("fetch failed"));
+
+        await assert.rejects(
+            () => client.chat({ model: "m", messages: [] }),
+            (err: unknown) =>
+                err instanceof Error &&
+                err.message.includes("LiteLLM request failed for m at /chat/completions") &&
+                err.message.includes("could not reach the server") &&
+                err.cause instanceof TypeError &&
+                err.cause.message === "fetch failed"
+        );
+    });
 });
