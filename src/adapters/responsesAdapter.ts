@@ -9,13 +9,30 @@ import { normalizeToolCallId } from "../utils";
 import { Logger } from "../utils/logger";
 
 /**
+ * Options for transforming to responses format.
+ */
+export interface TransformToResponsesOptions {
+    /**
+     * Whether the model supports system messages.
+     * If false, system message content will be moved to the first user message.
+     * @default true
+     */
+    supportsSystemMessages?: boolean;
+}
+
+/**
  * Transform a chat/completions request body to the responses API format.
  * The responses API uses "input" (array format) instead of "messages".
  * Tools use the SAME standard OpenAI format as chat/completions.
  * @param requestBody The original chat/completions request body
+ * @param options Optional configuration for the transformation
  * @returns Transformed request body for the responses endpoint
  */
-export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequest): LiteLLMResponsesRequest {
+export function transformToResponsesFormat(
+    requestBody: OpenAIChatCompletionRequest,
+    options: TransformToResponsesOptions = {}
+): LiteLLMResponsesRequest {
+    const supportsSystemMessages = options.supportsSystemMessages ?? true;
     const messages = requestBody.messages;
     const inputArray: (OpenAIChatMessageContentItem | LiteLLMResponseInputItem)[] = [];
     let instructions: string | undefined;
@@ -149,11 +166,49 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
     // UNLESS it's the very end of the conversation and we want the model to generate.
     // However, if we have a function_call at the end, we should probably ensure it's valid.
 
+    // Handle system message support: if model doesn't support system messages,
+    // move instructions content to the first user message
+    let finalInstructions: string | undefined = instructions;
+    let finalInput = finalInputArray;
+
+    if (!supportsSystemMessages && instructions) {
+        Logger.warn(
+            "[responsesAdapter] Model does not support system messages, moving instructions to first user message"
+        );
+
+        // Remove any existing instructions and prepend to first user message
+        finalInstructions = undefined;
+
+        // Find the first user message and prepend the instructions
+        if (finalInputArray.length > 0) {
+            const firstItem = finalInputArray[0];
+            if (firstItem.type === "message" && firstItem.role === "user") {
+                // Prepend instructions to the first user message
+                finalInput = [
+                    {
+                        ...firstItem,
+                        content: `${instructions}\n\n${firstItem.content}`,
+                    },
+                    ...finalInputArray.slice(1),
+                ];
+            } else {
+                // No user message at start, insert a new one
+                finalInput = [
+                    { type: "message" as const, role: "user" as const, content: instructions },
+                    ...finalInputArray,
+                ];
+            }
+        } else {
+            // No input items, create a user message with instructions
+            finalInput = [{ type: "message" as const, role: "user" as const, content: instructions }];
+        }
+    }
+
     const responsesBody: LiteLLMResponsesRequest = {
         model: requestBody.model,
-        input: finalInputArray,
+        input: finalInput,
         stream: requestBody.stream,
-        instructions,
+        instructions: finalInstructions,
         max_tokens: requestBody.max_tokens,
         temperature: requestBody.temperature,
         top_p: requestBody.top_p,

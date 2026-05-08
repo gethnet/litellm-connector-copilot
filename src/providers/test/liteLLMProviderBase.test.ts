@@ -414,7 +414,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.ok(tags.includes("custom-tag"), "User-defined override tags should be included in result");
     });
 
-    test("stripUnsupportedParametersFromRequest removes known unsupported params", () => {
+    test("stripUnsupportedParametersFromRequest removes known unsupported params", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const strip = (
             provider as unknown as {
@@ -422,7 +422,7 @@ suite("LiteLLM Provider Unit Tests", () => {
                     requestBody: Record<string, unknown>,
                     modelInfo: unknown,
                     modelId?: string
-                ) => void;
+                ) => Promise<void>;
             }
         ).stripUnsupportedParametersFromRequest.bind(provider);
 
@@ -433,14 +433,20 @@ suite("LiteLLM Provider Unit Tests", () => {
         };
 
         const modelInfo = { supported_openai_params: ["temperature", "stop", "frequency_penalty"] };
-        strip(requestBody, modelInfo, "gpt-5.1-codex-mini");
+        // We removed hardcoded gpt-5.1-codex-mini entries, and without model card it defaults to true
+        // So we mock getModelFeatures to return specific features for this test.
+        sandbox.stub(provider as any, "getModelFeatures").resolves({
+            supportedParams: new Set(["stop"]),
+        });
+
+        await strip(requestBody, modelInfo, "gpt-5.1-codex-mini");
 
         assert.strictEqual(requestBody.temperature, undefined);
         assert.strictEqual(requestBody.frequency_penalty, undefined);
         assert.deepStrictEqual(requestBody.stop, ["\n"]);
     });
 
-    test("stripUnsupportedParametersFromRequest handles o1 models", () => {
+    test("stripUnsupportedParametersFromRequest handles o1 models", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const strip = (
             provider as unknown as {
@@ -448,7 +454,7 @@ suite("LiteLLM Provider Unit Tests", () => {
                     requestBody: Record<string, unknown>,
                     modelInfo: unknown,
                     modelId?: string
-                ) => void;
+                ) => Promise<void>;
             }
         ).stripUnsupportedParametersFromRequest.bind(provider);
 
@@ -459,8 +465,12 @@ suite("LiteLLM Provider Unit Tests", () => {
             max_tokens: 1000,
         };
 
+        sandbox.stub(provider as any, "getModelFeatures").resolves({
+            supportedParams: new Set(["max_tokens"]),
+        });
+
         // o1 models shouldn't have temperature, top_p, or penalties
-        strip(requestBody, undefined, "o1-mini");
+        await strip(requestBody, undefined, "o1-mini");
 
         assert.strictEqual(requestBody.temperature, undefined);
         assert.strictEqual(requestBody.top_p, undefined);
@@ -468,7 +478,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(requestBody.max_tokens, 1000);
     });
 
-    test("stripUnsupportedParametersFromRequest handles gpt-5-mini models", () => {
+    test("stripUnsupportedParametersFromRequest handles gpt-5-mini models", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const strip = (
             provider as unknown as {
@@ -476,7 +486,7 @@ suite("LiteLLM Provider Unit Tests", () => {
                     requestBody: Record<string, unknown>,
                     modelInfo: unknown,
                     modelId?: string
-                ) => void;
+                ) => Promise<void>;
             }
         ).stripUnsupportedParametersFromRequest.bind(provider);
 
@@ -487,8 +497,12 @@ suite("LiteLLM Provider Unit Tests", () => {
             max_tokens: 1000,
         };
 
+        sandbox.stub(provider as any, "getModelFeatures").resolves({
+            supportedParams: new Set(["max_tokens"]),
+        });
+
         // gpt-5-mini models shouldn't have temperature, top_p, or penalties
-        strip(requestBody, undefined, "gpt-5-mini");
+        await strip(requestBody, undefined, "gpt-5-mini");
 
         assert.strictEqual(requestBody.temperature, undefined);
         assert.strictEqual(requestBody.top_p, undefined);
@@ -908,11 +922,11 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(result.tools.length, 2);
     });
 
-    test("isParameterSupported returns false when parameter probe cache indicates unsupported", () => {
+    test("isParameterSupported returns false when parameter probe cache indicates unsupported", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const isSupported = (
             provider as unknown as {
-                isParameterSupported: (param: string, modelInfo: unknown, modelId?: string) => boolean;
+                isParameterSupported: (param: string, modelInfo: unknown, modelId?: string) => Promise<boolean>;
             }
         ).isParameterSupported.bind(provider);
 
@@ -922,22 +936,29 @@ suite("LiteLLM Provider Unit Tests", () => {
             new Set(["temperature"])
         );
 
-        assert.strictEqual(isSupported("temperature", { supported_openai_params: ["temperature"] }, "gpt-5.2"), false);
+        assert.strictEqual(
+            await isSupported("temperature", { supported_openai_params: ["temperature"] }, "gpt-5.2"),
+            false
+        );
     });
 
-    test("isParameterSupported returns false when modelId matches known model limitations substring", () => {
+    test("isParameterSupported returns false when modelId matches known model limitations substring", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const isSupported = (
             provider as unknown as {
-                isParameterSupported: (param: string, modelInfo: unknown, modelId?: string) => boolean;
+                isParameterSupported: (param: string, modelInfo: unknown, modelId?: string) => Promise<boolean>;
             }
         ).isParameterSupported.bind(provider);
 
+        sandbox.stub(provider as any, "getModelFeatures").resolves({
+            supportedParams: new Set(["max_tokens"]),
+        });
+
         // Use a model id that should match a known limitations key via substring.
-        assert.strictEqual(isSupported("temperature", undefined, "o1-preview"), false);
+        assert.strictEqual(await isSupported("temperature", undefined, "o1-preview"), false);
     });
 
-    test("stripUnsupportedParametersFromRequest removes cache keys inside extra_body and deletes empty containers", () => {
+    test("stripUnsupportedParametersFromRequest removes cache keys inside extra_body and deletes empty containers", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const strip = (
             provider as unknown as {
@@ -945,7 +966,7 @@ suite("LiteLLM Provider Unit Tests", () => {
                     requestBody: Record<string, unknown>,
                     modelInfo: unknown,
                     modelId?: string
-                ) => void;
+                ) => Promise<void>;
             }
         ).stripUnsupportedParametersFromRequest.bind(provider);
 
@@ -954,7 +975,9 @@ suite("LiteLLM Provider Unit Tests", () => {
             extra_body: { cache: { "no-cache": true, no_cache: true } },
         };
 
-        strip(requestBody, undefined, "any");
+        sandbox.stub(provider as any, "getModelFeatures").resolves(undefined);
+
+        await strip(requestBody, undefined, "any");
 
         assert.ok(!("cache" in requestBody));
         assert.ok(!("extra_body" in requestBody));
@@ -1014,20 +1037,26 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(count2, remoteCount, "Should return cached remote count on second call");
     });
 
-    test("isParameterSupported returns true when parameter is explicitly supported and not blocked", () => {
+    test("isParameterSupported returns true when parameter is explicitly supported and not blocked", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const isSupported = (
             provider as unknown as {
-                isParameterSupported: (param: string, modelInfo: unknown, modelId?: string) => boolean;
+                isParameterSupported: (param: string, modelInfo: unknown, modelId?: string) => Promise<boolean>;
             }
         ).isParameterSupported.bind(provider);
 
-        const supported = isSupported("temperature", { supported_openai_params: ["temperature", "top_p"] }, "gpt-4.1");
+        sandbox.stub(provider as any, "getModelFeatures").resolves(undefined);
+
+        const supported = await isSupported(
+            "temperature",
+            { supported_openai_params: ["temperature", "top_p"] },
+            "gpt-4.1"
+        );
 
         assert.strictEqual(supported, true);
     });
 
-    test("stripUnsupportedParametersFromRequest preserves supported fields when model has no limitations", () => {
+    test("stripUnsupportedParametersFromRequest preserves supported fields when model has no limitations", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const strip = (
             provider as unknown as {
@@ -1035,7 +1064,7 @@ suite("LiteLLM Provider Unit Tests", () => {
                     requestBody: Record<string, unknown>,
                     modelInfo: unknown,
                     modelId?: string
-                ) => void;
+                ) => Promise<void>;
             }
         ).stripUnsupportedParametersFromRequest.bind(provider);
 
@@ -1045,7 +1074,9 @@ suite("LiteLLM Provider Unit Tests", () => {
             frequency_penalty: 0.2,
         };
 
-        strip(requestBody, { supported_openai_params: ["temperature", "top_p", "frequency_penalty"] }, "gpt-4.1");
+        sandbox.stub(provider as any, "getModelFeatures").resolves(undefined);
+
+        await strip(requestBody, { supported_openai_params: ["temperature", "top_p", "frequency_penalty"] }, "gpt-4.1");
 
         assert.deepStrictEqual(requestBody, {
             temperature: 0.4,

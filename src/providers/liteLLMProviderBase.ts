@@ -21,6 +21,8 @@ import {
 import { MultiBackendClient, parseNamespacedModelId } from "../adapters/multiBackendClient";
 import { ResponsesClient } from "../adapters/responsesClient";
 import { transformToResponsesFormat } from "../adapters/responsesAdapter";
+import { ModelCardClient } from "../adapters/modelCardClient";
+import type { ModelFeatureCapabilities } from "../types/modelCard";
 import {
     countTokens,
     trimMessagesToFitBudget,
@@ -78,12 +80,15 @@ export abstract class LiteLLMProviderBase {
     protected readonly _modelInfoCache = new Map<string, LiteLLMModelInfo | undefined>();
     protected readonly _derivedCapabilitiesCache = new Map<string, DerivedModelCapabilities>();
     protected readonly _parameterProbeCache = new Map<string, Set<string>>();
+    protected readonly _modelFeaturesCache = new Map<string, ModelFeatureCapabilities>();
     protected _lastModelList: LanguageModelChatInformation[] = [];
     protected _modelListFetchedAtMs = 0;
     private _inFlightDiscovery: Promise<vscode.LanguageModelChatInformation[]> | undefined;
 
     protected _multiBackendClient: MultiBackendClient | undefined;
     protected _activeBackendNames: string[] = [];
+
+    protected _modelCardClient: ModelCardClient | undefined;
 
     protected _telemetryService?: TelemetryService;
 
@@ -115,10 +120,69 @@ export abstract class LiteLLMProviderBase {
         this._modelInfoCache.clear();
         this._derivedCapabilitiesCache.clear();
         this._parameterProbeCache.clear();
+        this._modelFeaturesCache.clear();
         this._lastModelList = [];
         this._modelListFetchedAtMs = 0;
+        // Also clear the model card client cache if it exists
+        this._modelCardClient?.clearCache();
         this.refreshModelInformation();
         Logger.info("Cleared cache");
+    }
+
+    /**
+     * Get or create the ModelCardClient.
+     * Lazily initialized on first use to avoid hitting LiteLLM before configuration is ready.
+     */
+    protected async getModelCardClient(): Promise<ModelCardClient> {
+        if (!this._modelCardClient) {
+            await this._configManager.getConfig(); // Ensure config is initialized
+            const resolvedBackends = await this._configManager.resolveBackends();
+
+            // Use the first enabled backend for model card fetching
+            const backend = resolvedBackends.find((b) => b.enabled) ?? resolvedBackends[0];
+
+            if (!backend) {
+                throw new Error("No backend configured for model card fetching");
+            }
+
+            this._modelCardClient = new ModelCardClient(backend.url, backend.apiKey ?? "", this.userAgent);
+            Logger.debug("[LiteLLMProviderBase] Created ModelCardClient");
+        }
+        return this._modelCardClient;
+    }
+
+    /**
+     * Get model feature capabilities, using cache when available.
+     * Falls back to default capabilities if fetching fails.
+     */
+    protected async getModelFeatures(modelId: string): Promise<ModelFeatureCapabilities> {
+        // Check local cache first
+        const cached = this._modelFeaturesCache.get(modelId);
+        if (cached) {
+            return cached;
+        }
+
+        try {
+            const client = await this.getModelCardClient();
+            const features = await client.getModelFeatures(modelId);
+            this._modelFeaturesCache.set(modelId, features);
+            return features;
+        } catch (error) {
+            Logger.warn(`[LiteLLMProviderBase] Failed to get model features for ${modelId}, using defaults`, error);
+            // Return safe defaults - these will cause conservative parameter filtering
+            return {
+                supportedParams: new Set(["max_tokens", "temperature"]),
+                supportsSystemMessages: true,
+                supportsVision: false,
+                supportsTools: false,
+                supportsReasoning: false,
+                supportsPromptCaching: false,
+                supportsNativeStreaming: true,
+                supportsResponseSchema: false,
+                maxInputTokens: 128000,
+                maxOutputTokens: 16000,
+            };
+        }
     }
 
     /** Returns the last discovered model list (may be empty if never fetched). */
@@ -691,7 +755,8 @@ export abstract class LiteLLMProviderBase {
             throw new Error(`Cannot resolve backend for responses model "${request.model}".`);
         }
 
-        const responsesRequest = transformToResponsesFormat(request);
+        const supportsSystemMessages = await this.doesModelSupportSystemMessages(request.model);
+        const responsesRequest = transformToResponsesFormat(request, { supportsSystemMessages });
         if (backend) {
             responsesRequest.model = backend.originalModelId;
         }
@@ -759,7 +824,8 @@ export abstract class LiteLLMProviderBase {
                         { url: targetBackend.url, key: targetBackend.apiKey },
                         this.userAgent
                     );
-                    const responsesRequest = transformToResponsesFormat(request);
+                    const supportsSystemMessages = await this.doesModelSupportSystemMessages(request.model);
+                    const responsesRequest = transformToResponsesFormat(request, { supportsSystemMessages });
                     // Strip prefix for /responses request if needed
                     if (backend) {
                         responsesRequest.model = backend.originalModelId;
@@ -840,6 +906,7 @@ export abstract class LiteLLMProviderBase {
     }
 
     protected isParameterSupported(param: string, modelInfo: LiteLLMModelInfo | undefined, modelId?: string): boolean {
+        // First check the hardcoded limitations (keep for backward compatibility)
         if (modelId) {
             if (KNOWN_PARAMETER_LIMITATIONS[modelId]?.has(param)) {
                 return false;
@@ -851,20 +918,47 @@ export abstract class LiteLLMProviderBase {
             }
         }
 
-        if (!modelInfo) {
-            return true;
-        }
-
+        // Check the cached parameter probe results (from previous failed requests)
         if (modelId && this._parameterProbeCache.has(modelId)) {
             if (this._parameterProbeCache.get(modelId)?.has(param)) {
                 return false;
             }
         }
 
-        if (modelInfo.supported_openai_params) {
+        // NEW: Use model card features if available (from /model/{model_name} endpoint)
+        // This is async but we use the synchronous cache for parameter filtering
+        const cachedFeatures = modelId ? this._modelFeaturesCache.get(modelId) : undefined;
+        if (cachedFeatures) {
+            return cachedFeatures.supportedParams.has(param);
+        }
+
+        // Fall back to model_info.supported_openai_params if available
+        if (modelInfo?.supported_openai_params) {
             return modelInfo.supported_openai_params.includes(param);
         }
 
+        // No model info available - allow the parameter (backward compatible default)
+        // This preserves the original behavior when calling with generic/unknown models
+        return true;
+    }
+
+    /**
+     * Check if the model supports system messages.
+     * Uses model card data if available in cache, falls back to model_info.
+     * Synchronous to avoid triggering fetches from response-building paths.
+     */
+    protected doesModelSupportSystemMessages(modelId: string, modelInfo?: LiteLLMModelInfo): boolean {
+        const cachedFeatures = this._modelFeaturesCache.get(modelId);
+        if (cachedFeatures) {
+            return cachedFeatures.supportsSystemMessages;
+        }
+
+        // Fall back to model_info if available
+        if (modelInfo?.supports_system_messages !== undefined && modelInfo.supports_system_messages !== null) {
+            return modelInfo.supports_system_messages;
+        }
+
+        // Default: assume model supports system messages (conservative for UX)
         return true;
     }
 

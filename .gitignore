@@ -208,6 +208,10 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+# Local Agent Workfolders
 .plans/**/*.*
-.plans
+!.plans/**/.gitkeep
+.investigate/*.*
+!.investigate/.gitkeep
 .devcontainer/devcontainer-lock.json

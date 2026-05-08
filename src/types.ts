@@ -1,4 +1,9 @@
 /**
+ * Re-export model card types for external consumers.
+ */
+export type { LiteLLMModelCard, ModelFeatureCapabilities } from "./types/modelCard";
+
+/**
  * OpenAI function-call entry emitted by assistant messages.
  */
 export interface OpenAIToolCall {

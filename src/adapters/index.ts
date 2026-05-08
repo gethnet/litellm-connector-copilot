@@ -7,3 +7,4 @@ export {
 } from "./multiBackendClient";
 export { ResponsesClient } from "./responsesClient";
 export { transformToResponsesFormat } from "./responsesAdapter";
+export { ModelCardClient } from "./modelCardClient";
