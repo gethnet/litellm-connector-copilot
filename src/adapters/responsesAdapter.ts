@@ -217,6 +217,38 @@ export function transformToResponsesFormat(
         stop: requestBody.stop,
     };
 
+    if (requestBody.reasoning_effort) {
+        responsesBody.reasoning_effort = requestBody.reasoning_effort;
+    }
+
+    if (requestBody.extra_body) {
+        responsesBody.extra_body = requestBody.extra_body;
+    }
+
+    // copy other potential extra parameters
+    const knownKeys = new Set([
+        "model",
+        "messages",
+        "stream",
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+        "tools",
+        "tool_choice",
+        "reasoning_effort",
+        "extra_body",
+    ]);
+
+    for (const key in requestBody) {
+        if (!knownKeys.has(key)) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (responsesBody as any)[key] = (requestBody as any)[key];
+        }
+    }
+
     if (requestBody.tools) {
         const validTools = requestBody.tools
             .map((tool) => {

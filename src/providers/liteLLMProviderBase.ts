@@ -5,6 +5,7 @@ import type {
     ProvideLanguageModelChatResponseOptions,
 } from "vscode";
 
+import { resolveReasoningEffort } from "./reasoningDefaults";
 import type {
     LiteLLMModelInfo,
     OpenAIChatCompletionRequest,
@@ -531,11 +532,11 @@ export abstract class LiteLLMProviderBase {
      * - parameter filtering
      */
     protected async buildOpenAIChatRequest(
-        messages: readonly LanguageModelChatRequestMessage[],
-        model: LanguageModelChatInformation,
-        options: ProvideLanguageModelChatResponseOptions,
-        modelInfo?: LiteLLMModelInfo,
-        caller?: string
+        messages: readonly vscode.LanguageModelChatRequestMessage[],
+        model: vscode.LanguageModelChatInformation,
+        options: vscode.ProvideLanguageModelChatResponseOptions,
+        modelInfo: LiteLLMModelInfo | undefined,
+        caller: string | undefined
     ): Promise<OpenAIChatCompletionRequest> {
         // Log caller and justification for telemetry/debugging
         const telemetry = this.getTelemetryOptions(options);
@@ -605,6 +606,23 @@ export abstract class LiteLLMProviderBase {
         }
         if (this.isParameterSupported("top_p", modelInfo, model.id) && typeof mo.top_p === "number") {
             requestBody.top_p = mo.top_p;
+        }
+
+        // Reasoning effort: hardcoded default of "medium" for reasoning-capable models.
+        // PHASE 1 mitigation — see src/providers/reasoningDefaults.ts for the swap point.
+        // Without this, gpt-5.1-codex-max returns empty {} bodies and gpt-5.3-codex
+        // emits intent text but never produces tool calls or committed output.
+        const features = this._modelFeaturesCache.get(model.id);
+        if (features?.supportsReasoning && this.isParameterSupported("reasoning_effort", modelInfo, model.id)) {
+            const effort = resolveReasoningEffort({
+                modelId: model.id,
+                supportsReasoning: true,
+                supportedEfforts: features.supportedReasoningEfforts,
+                callerOverride: mo.reasoning_effort,
+            });
+            if (effort) {
+                requestBody.reasoning_effort = effort;
+            }
         }
 
         if (toolConfig.tools) {
@@ -686,6 +704,21 @@ export abstract class LiteLLMProviderBase {
         }
         if (this.isParameterSupported("top_p", modelInfo, model.id) && typeof mo.top_p === "number") {
             requestBody.top_p = mo.top_p;
+        }
+
+        // Reasoning effort: hardcoded default for reasoning-capable models.
+        // Mirrors buildOpenAIChatRequest; both pipelines must inject identically.
+        const v2Features = this._modelFeaturesCache.get(model.id);
+        if (v2Features?.supportsReasoning && this.isParameterSupported("reasoning_effort", modelInfo, model.id)) {
+            const effort = resolveReasoningEffort({
+                modelId: model.id,
+                supportsReasoning: true,
+                supportedEfforts: v2Features.supportedReasoningEfforts,
+                callerOverride: mo.reasoning_effort,
+            });
+            if (effort) {
+                requestBody.reasoning_effort = effort;
+            }
         }
 
         if (toolConfig.tools) {
@@ -965,14 +998,20 @@ export abstract class LiteLLMProviderBase {
     protected stripUnsupportedParametersFromRequest(
         requestBody: Record<string, unknown>,
         modelInfo: LiteLLMModelInfo | undefined,
-        modelId?: string
+        modelId: string
     ): void {
+        const supportedParams = modelInfo?.supported_openai_params;
+        if (!supportedParams) {
+            return;
+        }
+
         const paramsToCheck = [
             "temperature",
             "stop",
             "frequency_penalty",
             "presence_penalty",
             "top_p",
+            "reasoning_effort",
             "cache",
             "no_cache",
             "no-cache",

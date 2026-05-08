@@ -277,6 +277,12 @@ export interface OpenAIChatCompletionRequest {
     tools?: OpenAIFunctionToolDef[];
     tool_choice?: string | object;
     /**
+     * Reasoning effort budget for reasoning-capable models (gpt-5.x, codex-*, o1-*).
+     * Omitted for non-reasoning models. LiteLLM forwards this verbatim for passthrough
+     * models, so we MUST set it explicitly when the model supports reasoning.
+     */
+    reasoning_effort?: "minimal" | "low" | "medium" | "high";
+    /**
      * LiteLLM passthrough body.
      * Used for features like caching controls.
      *
@@ -307,6 +313,8 @@ export interface LiteLLMResponsesRequest {
     stop?: string | string[];
     tools?: LiteLLMResponseTool[];
     tool_choice?: string | object;
+    /** See OpenAIChatCompletionRequest.reasoning_effort. */
+    reasoning_effort?: "minimal" | "low" | "medium" | "high";
     /**
      * LiteLLM passthrough body.
      * Used for features like caching controls.

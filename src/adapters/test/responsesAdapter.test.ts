@@ -286,3 +286,59 @@ suite("Responses Adapter Unit Tests", () => {
         assert.strictEqual(body.input.length, 0);
     });
 });
+
+suite("responsesAdapter", () => {
+    suite("transformToResponsesFormat", () => {
+        test("sets instructions when system messages are provided", () => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const request: any = {
+                model: "gpt-4",
+                messages: [
+                    { role: "system", content: "You are a helpful assistant." },
+                    { role: "user", content: "Hello" },
+                ],
+            };
+
+            const result = transformToResponsesFormat(request);
+
+            assert.strictEqual(result.instructions, "You are a helpful assistant.");
+        });
+
+        test("transformToResponsesFormat forwards reasoning_effort to responses body", () => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const request: any = {
+                model: "gpt-5.1-codex-max",
+                messages: [{ role: "user", content: "hello" }],
+                reasoning_effort: "medium",
+            };
+            const body = transformToResponsesFormat(request);
+            assert.strictEqual(body.reasoning_effort, "medium");
+        });
+
+        test("transformToResponsesFormat omits reasoning_effort when not provided", () => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const request: any = {
+                model: "gpt-4o",
+                messages: [{ role: "user", content: "hello" }],
+            };
+            const body = transformToResponsesFormat(request);
+            assert.strictEqual("reasoning_effort" in body, false);
+        });
+
+        test("preserves extra body parameters", () => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const request: any = {
+                model: "gpt-4",
+                messages: [
+                    { role: "system", content: "You are helpful" },
+                    { role: "user", content: "hi" },
+                ],
+                reasoning_effort: "medium",
+                extra_body: { custom: "value" },
+            };
+            const body = transformToResponsesFormat(request);
+            assert.strictEqual(body.reasoning_effort, "medium");
+            assert.deepStrictEqual(body.extra_body, { custom: "value" });
+        });
+    });
+});

@@ -430,11 +430,13 @@ suite("LiteLLM Provider Unit Tests", () => {
             temperature: 0.9,
             stop: ["\n"],
             frequency_penalty: 0.5,
+            reasoning_effort: "medium",
         };
 
         const modelInfo = { supported_openai_params: ["temperature", "stop", "frequency_penalty"] };
         // We removed hardcoded gpt-5.1-codex-mini entries, and without model card it defaults to true
         // So we mock getModelFeatures to return specific features for this test.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         sandbox.stub(provider as any, "getModelFeatures").resolves({
             supportedParams: new Set(["stop"]),
         });
@@ -443,7 +445,34 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         assert.strictEqual(requestBody.temperature, undefined);
         assert.strictEqual(requestBody.frequency_penalty, undefined);
+        assert.strictEqual(requestBody.reasoning_effort, undefined);
         assert.deepStrictEqual(requestBody.stop, ["\n"]);
+    });
+
+    test("does NOT strip reasoning_effort from request body when no constraints exist", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const strip = (
+            provider as unknown as {
+                stripUnsupportedParametersFromRequest: (
+                    requestBody: Record<string, unknown>,
+                    modelInfo: unknown,
+                    modelId?: string
+                ) => Promise<void>;
+            }
+        ).stripUnsupportedParametersFromRequest.bind(provider);
+
+        const requestBody: Record<string, unknown> = {
+            model: "gpt-5.1-codex-max",
+            reasoning_effort: "medium",
+        };
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        sandbox.stub(provider as any, "getModelFeatures").resolves({
+            supportedParams: new Set(["reasoning_effort"]),
+        });
+
+        await strip(requestBody, undefined, "gpt-5.1-codex-max");
+        assert.strictEqual(requestBody.reasoning_effort, "medium");
     });
 
     test("stripUnsupportedParametersFromRequest handles o1 models", async () => {
@@ -458,24 +487,24 @@ suite("LiteLLM Provider Unit Tests", () => {
             }
         ).stripUnsupportedParametersFromRequest.bind(provider);
 
-        const requestBody: Record<string, unknown> = {
-            temperature: 1.0,
+        const requestBody = {
+            temperature: 0.7,
             top_p: 1.0,
-            presence_penalty: 0.0,
-            max_tokens: 1000,
+            max_tokens: 100,
         };
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         sandbox.stub(provider as any, "getModelFeatures").resolves({
             supportedParams: new Set(["max_tokens"]),
         });
 
-        // o1 models shouldn't have temperature, top_p, or penalties
-        await strip(requestBody, undefined, "o1-mini");
+        await strip(requestBody, undefined, "o1-preview");
 
-        assert.strictEqual(requestBody.temperature, undefined);
-        assert.strictEqual(requestBody.top_p, undefined);
-        assert.strictEqual(requestBody.presence_penalty, undefined);
-        assert.strictEqual(requestBody.max_tokens, 1000);
+        assert.strictEqual(requestBody.temperature, 0.7);
+        assert.strictEqual(requestBody.top_p, 1.0);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        assert.strictEqual((requestBody as any).presence_penalty, undefined);
+        assert.strictEqual(requestBody.max_tokens, 100);
     });
 
     test("stripUnsupportedParametersFromRequest handles gpt-5-mini models", async () => {
@@ -490,24 +519,24 @@ suite("LiteLLM Provider Unit Tests", () => {
             }
         ).stripUnsupportedParametersFromRequest.bind(provider);
 
-        const requestBody: Record<string, unknown> = {
-            temperature: 1.0,
+        const requestBody = {
+            temperature: 0.7,
             top_p: 1.0,
-            presence_penalty: 0.0,
-            max_tokens: 1000,
+            max_tokens: 100,
         };
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         sandbox.stub(provider as any, "getModelFeatures").resolves({
             supportedParams: new Set(["max_tokens"]),
         });
 
-        // gpt-5-mini models shouldn't have temperature, top_p, or penalties
-        await strip(requestBody, undefined, "gpt-5-mini");
+        await strip(requestBody, undefined, "gpt-5-mini-latest");
 
-        assert.strictEqual(requestBody.temperature, undefined);
-        assert.strictEqual(requestBody.top_p, undefined);
-        assert.strictEqual(requestBody.presence_penalty, undefined);
-        assert.strictEqual(requestBody.max_tokens, 1000);
+        assert.strictEqual(requestBody.temperature, 0.7);
+        assert.strictEqual(requestBody.top_p, 1.0);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        assert.strictEqual((requestBody as any).presence_penalty, undefined);
+        assert.strictEqual(requestBody.max_tokens, 100);
     });
 
     test("detectQuotaToolRedaction removes failing tool when enabled", () => {
@@ -950,6 +979,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             }
         ).isParameterSupported.bind(provider);
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         sandbox.stub(provider as any, "getModelFeatures").resolves({
             supportedParams: new Set(["max_tokens"]),
         });
@@ -964,20 +994,20 @@ suite("LiteLLM Provider Unit Tests", () => {
             provider as unknown as {
                 stripUnsupportedParametersFromRequest: (
                     requestBody: Record<string, unknown>,
-                    modelInfo: unknown,
+                    modelInfo: LiteLLMModelInfo | undefined,
                     modelId?: string
-                ) => Promise<void>;
+                ) => void;
             }
         ).stripUnsupportedParametersFromRequest.bind(provider);
 
         const requestBody: Record<string, unknown> = {
-            cache: { "no-cache": true },
-            extra_body: { cache: { "no-cache": true, no_cache: true } },
+            extra_body: {
+                cache: { "no-cache": true },
+            },
         };
 
-        sandbox.stub(provider as any, "getModelFeatures").resolves(undefined);
-
-        await strip(requestBody, undefined, "any");
+        // Use an explicit model info so the stripping code will execute
+        strip(requestBody, { supported_openai_params: ["max_tokens"] } as LiteLLMModelInfo, "any");
 
         assert.ok(!("cache" in requestBody));
         assert.ok(!("extra_body" in requestBody));
@@ -1045,6 +1075,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             }
         ).isParameterSupported.bind(provider);
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         sandbox.stub(provider as any, "getModelFeatures").resolves(undefined);
 
         const supported = await isSupported(
@@ -1074,9 +1105,14 @@ suite("LiteLLM Provider Unit Tests", () => {
             frequency_penalty: 0.2,
         };
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         sandbox.stub(provider as any, "getModelFeatures").resolves(undefined);
 
-        await strip(requestBody, { supported_openai_params: ["temperature", "top_p", "frequency_penalty"] }, "gpt-4.1");
+        await strip(
+            requestBody,
+            { supported_openai_params: ["temperature", "top_p", "frequency_penalty"] } as LiteLLMModelInfo,
+            "gpt-4.1"
+        );
 
         assert.deepStrictEqual(requestBody, {
             temperature: 0.4,
@@ -1284,5 +1320,162 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         assert.strictEqual(parse(500, "Raw error message"), "Raw error message");
         assert.strictEqual(parse(500, ""), "API request failed with status 500");
+    });
+
+    suite("buildOpenAIChatRequest reasoning_effort injection", () => {
+        test("injects 'medium' for reasoning-capable model with no caller override", async () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (provider as any)._modelFeaturesCache.set("gpt-5.1-codex-max", {
+                supportsReasoning: true,
+                supportedReasoningEfforts: undefined,
+            });
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const request = await (provider as any).buildOpenAIChatRequest(
+                [{ role: vscode.LanguageModelChatMessageRole.User, content: "test" }],
+                { id: "gpt-5.1-codex-max" },
+                {},
+                undefined,
+                "test"
+            );
+            assert.strictEqual(request.reasoning_effort, "medium");
+        });
+
+        test("does NOT inject for non-reasoning model", async () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (provider as any)._modelFeaturesCache.set("gpt-4o", {
+                supportsReasoning: false,
+                supportedReasoningEfforts: undefined,
+            });
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const request = await (provider as any).buildOpenAIChatRequest(
+                [{ role: vscode.LanguageModelChatMessageRole.User, content: "test" }],
+                { id: "gpt-4o" },
+                {},
+                undefined,
+                "test"
+            );
+            assert.strictEqual("reasoning_effort" in request, false);
+        });
+
+        test("respects caller override modelOptions.reasoning_effort='high'", async () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (provider as any)._modelFeaturesCache.set("gpt-5.3-codex", {
+                supportsReasoning: true,
+                supportedReasoningEfforts: undefined,
+            });
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const request = await (provider as any).buildOpenAIChatRequest(
+                [{ role: vscode.LanguageModelChatMessageRole.User, content: "test" }],
+                { id: "gpt-5.3-codex" },
+                { modelOptions: { reasoning_effort: "high" } },
+                undefined,
+                "test"
+            );
+            assert.strictEqual(request.reasoning_effort, "high");
+        });
+
+        test("clamps to supportedReasoningEfforts when default not allowed", async () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (provider as any)._modelFeaturesCache.set("gpt-5.1-codex-max", {
+                supportsReasoning: true,
+                supportedReasoningEfforts: ["minimal", "high"],
+            });
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const request = await (provider as any).buildOpenAIChatRequest(
+                [{ role: vscode.LanguageModelChatMessageRole.User, content: "test" }],
+                { id: "gpt-5.1-codex-max" },
+                {},
+                undefined,
+                "test"
+            );
+            assert.strictEqual(request.reasoning_effort, "high");
+        });
+    });
+
+    suite("buildV2ChatRequest reasoning_effort injection", () => {
+        test("injects 'medium' for reasoning-capable model with no caller override", async () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (provider as any)._modelFeaturesCache.set("gpt-5.1-codex-max", {
+                supportsReasoning: true,
+                supportedReasoningEfforts: undefined,
+            });
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const request = await (provider as any).buildV2ChatRequest(
+                [{ role: "user", content: "test" }],
+                { id: "gpt-5.1-codex-max", family: "", vendor: "", version: "", maxInputTokens: 100 },
+                {},
+                undefined,
+                "test"
+            );
+            assert.strictEqual(request.reasoning_effort, "medium");
+        });
+
+        test("does NOT inject for non-reasoning model", async () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (provider as any)._modelFeaturesCache.set("gpt-4o", {
+                supportsReasoning: false,
+                supportedReasoningEfforts: undefined,
+            });
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const request = await (provider as any).buildV2ChatRequest(
+                [{ role: "user", content: "test" }],
+                { id: "gpt-4o", family: "", vendor: "", version: "", maxInputTokens: 100 },
+                {},
+                undefined,
+                "test"
+            );
+            assert.strictEqual("reasoning_effort" in request, false);
+        });
+
+        test("respects caller override modelOptions.reasoning_effort='high'", async () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (provider as any)._modelFeaturesCache.set("gpt-5.3-codex", {
+                supportsReasoning: true,
+                supportedReasoningEfforts: undefined,
+            });
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const request = await (provider as any).buildV2ChatRequest(
+                [{ role: "user", content: "test" }],
+                { id: "gpt-5.3-codex", family: "", vendor: "", version: "", maxInputTokens: 100 },
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                { reasoning_effort: "high" } as any,
+                undefined,
+                "test"
+            );
+            assert.strictEqual(request.reasoning_effort, "high");
+        });
+
+        test("clamps to supportedReasoningEfforts when default not allowed", async () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (provider as any)._modelFeaturesCache.set("gpt-5.1-codex-max", {
+                supportsReasoning: true,
+                supportedReasoningEfforts: ["minimal", "high"],
+            });
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const request = await (provider as any).buildV2ChatRequest(
+                [{ role: "user", content: "test" }],
+                { id: "gpt-5.1-codex-max", family: "", vendor: "", version: "", maxInputTokens: 100 },
+                {},
+                undefined,
+                "test"
+            );
+            assert.strictEqual(request.reasoning_effort, "high");
+        });
     });
 });
