@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { LiteLLMChatProvider } from "./providers";
+import { LiteLLMChatProvider, LiteLLMChatProviderV2 } from "./providers";
 import { ConfigManager } from "./config/configManager";
 import {
     registerManageConfigCommand,
@@ -20,6 +20,15 @@ import { InlineCompletionsRegistrar } from "./inlineCompletions/registerInlineCo
 import { TelemetryService } from "./telemetry/telemetryService";
 import { LiteLLMTelemetry } from "./utils/telemetry";
 import { setTelemetryService as setTokenUtilsTelemetryService } from "./adapters/tokenUtils";
+
+/**
+ * Checks if the given VS Code version meets the minimum requirement.
+ */
+function isVersionAtLeast(current: string, minimum: string): boolean {
+    const [cMaj, cMin] = current.split(".").map(Number);
+    const [mMaj, mMin] = minimum.split(".").map(Number);
+    return cMaj > mMaj || (cMaj === mMaj && cMin >= mMin);
+}
 
 // Store the config manager for cleanup on deactivation
 let configManagerInstance: ConfigManager | undefined;
@@ -123,17 +132,28 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     // Legacy providers (will be removed after v2 migration)
-    // @deprecated - Will be replaced by v2 baseline providers
+    // Version-gated provider registration
+    // VS Code 1.119+ uses LiteLLMChatProviderV2 which supports configuration-based discovery
+    // Older versions use LiteLLMChatProvider with legacy workspace settings
+    const vscodeVersion = vscode.version;
+    const useV2Provider = isVersionAtLeast(vscodeVersion, "1.119.0");
+
+    Logger.info(`VS Code version: ${vscodeVersion}, using V2 provider: ${useV2Provider}`);
+
+    // Choose the chat provider based on VS Code version
     const chatProviderV1 = new LiteLLMChatProvider(context.secrets, ua);
+    const chatProviderV2 = new LiteLLMChatProviderV2(context.secrets, ua);
+
     // @deprecated - Will be replaced by v2 baseline providers
     const commitProvider = new LiteLLMCommitMessageProvider(context.secrets, ua);
 
     // Bridge to providers
     chatProviderV1.setTelemetryService(telemetryService);
+    chatProviderV2.setTelemetryService(telemetryService);
     commitProvider.setTelemetryService(telemetryService);
 
     // Track active provider registration for hot-swap
-    const activeProvider: LiteLLMChatProvider = chatProviderV1;
+    const activeProvider = useV2Provider ? chatProviderV2 : chatProviderV1;
     let chatProviderRegistration: vscode.Disposable | undefined;
 
     const registerProvider = () => {

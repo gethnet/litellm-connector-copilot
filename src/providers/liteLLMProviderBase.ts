@@ -7,6 +7,7 @@ import type {
 
 import type {
     LiteLLMModelInfo,
+    LiteLLMModelInfoResponse,
     OpenAIChatCompletionRequest,
     OpenAIFunctionToolDef,
     LiteLLMTokenCounterRequest,
@@ -39,6 +40,7 @@ import {
 } from "../utils/modelCapabilities";
 import type { DerivedModelCapabilities } from "../utils/modelCapabilities";
 import type { V2ChatMessage } from "./v2Types";
+import type { BackendSession } from "./backendSession";
 
 const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
     "claude-3-5-sonnet": new Set(["temperature"]),
@@ -139,10 +141,14 @@ export abstract class LiteLLMProviderBase {
      * the same discovery + tag logic.
      */
     public async discoverModels(
-        options: { silent?: boolean },
+        options: {
+            silent?: boolean;
+            configuration?: Record<string, unknown>;
+            groupName?: string;
+        },
         token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelChatInformation[]> {
-        const silent = options.silent ?? false;
+        const silent = options.silent === true;
 
         if (this._inFlightDiscovery) {
             Logger.trace("Returning in-flight discovery promise");
@@ -151,7 +157,9 @@ export abstract class LiteLLMProviderBase {
 
         const TTL_MS = 30000; // 30 seconds
         const now = Date.now();
-        if (silent && this._lastModelList.length > 0 && now - this._modelListFetchedAtMs < TTL_MS) {
+        // Only use cache for legacy path (no configuration provided)
+        const useCache = silent && this._lastModelList.length > 0 && now - this._modelListFetchedAtMs < TTL_MS;
+        if (useCache && !options.configuration) {
             Logger.trace("Returning cached models (within TTL)");
             if (this._telemetryService) {
                 this._telemetryService.captureModelsCacheHit(this._lastModelList.length);
@@ -161,7 +169,10 @@ export abstract class LiteLLMProviderBase {
 
         this._inFlightDiscovery = (async () => {
             try {
-                return await this._doDiscoverModels({ silent }, token);
+                return await this._doDiscoverModels(
+                    { silent, configuration: options.configuration, groupName: options.groupName },
+                    token
+                );
             } finally {
                 this._inFlightDiscovery = undefined;
             }
@@ -171,11 +182,24 @@ export abstract class LiteLLMProviderBase {
     }
 
     private async _doDiscoverModels(
-        options: { silent: boolean },
+        options: { silent: boolean; configuration?: Record<string, unknown>; groupName?: string },
         token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelChatInformation[]> {
         Logger.trace("discoverModels called");
         try {
+            // VS Code 1.119+ path: configuration-based single-backend discovery
+            if (options.configuration?.baseUrl) {
+                const groupName = options.groupName ?? "default";
+                Logger.info(`Using configuration-based discovery for group: ${groupName}`);
+                const session = this._configManager.convertProviderConfiguration(groupName, options.configuration);
+                if (!session) {
+                    Logger.warn("Configuration provided but convertProviderConfiguration returned undefined");
+                    return [];
+                }
+                return this._discoverModelsFromSession(session, options.silent, token);
+            }
+
+            // Legacy path: use workspace settings / multi-backend
             const config = await this._configManager.getConfig();
             const backends = await this._configManager.resolveBackends();
 
@@ -265,6 +289,21 @@ export abstract class LiteLLMProviderBase {
                     maxOutputTokens: derived.maxOutputTokens,
                     capabilities,
                     tags,
+                    configurationSchema: derived.supportsReasoning
+                        ? {
+                              properties: {
+                                  reasoningEffort: {
+                                      type: "string",
+                                      title: "Reasoning effort",
+                                      description:
+                                          "Select reasoning depth (P1–P5). Higher values may be slower but more thorough.",
+                                      enum: ["P1", "P2", "P3", "P4", "P5"],
+                                      enumItemLabels: ["P1", "P2", "P3", "P4", "P5"],
+                                      default: "P1",
+                                  },
+                              },
+                          }
+                        : undefined,
                 };
 
                 return info as vscode.LanguageModelChatInformation;
@@ -281,6 +320,96 @@ export abstract class LiteLLMProviderBase {
             return infos;
         } catch (err) {
             Logger.error("Failed to fetch models", err);
+            return [];
+        }
+    }
+
+    /**
+     * Discovers models from a single backend session (VS Code 1.119+ configuration path).
+     * Used when VS Code passes configuration directly via options.configuration.
+     */
+    private async _discoverModelsFromSession(
+        session: BackendSession,
+        silent: boolean,
+        token: vscode.CancellationToken
+    ): Promise<vscode.LanguageModelChatInformation[]> {
+        Logger.info(`Discovering models from session: ${session.backendName} (${session.baseUrl})`);
+
+        try {
+            const client = session.client;
+            const models = await client.getModelInfo(token);
+
+            if (!models?.data?.length) {
+                Logger.warn(`No models returned from ${session.baseUrl}`);
+                return [];
+            }
+
+            Logger.info(`Found ${models.data.length} models from ${session.backendName}`);
+
+            // Transform to LanguageModelChatInformation
+            const infos = models.data.map((entry: LiteLLMModelInfoResponse["data"][number]) => {
+                // Add namespaced ID for single-backend case
+                const modelName = entry.model_name;
+                const namespacedId = session.backendName
+                    ? `${session.backendName}/${modelName}`
+                    : (modelName ?? "unknown");
+                const modelInfo = entry.model_info;
+
+                // Cache the model info
+                this._modelInfoCache.set(namespacedId, modelInfo);
+
+                // Use the same derivation logic as the legacy path
+                const derived = deriveCapabilitiesFromModelInfo(namespacedId, modelInfo);
+                this._derivedCapabilitiesCache.set(namespacedId, derived);
+
+                const capabilities = capabilitiesToVSCode(derived, undefined);
+                const tags = getDerivedModelTags(namespacedId, derived, {}, undefined);
+
+                const maxInputTokens = derived.maxInputTokens;
+                const maxOutputTokens = derived.maxOutputTokens;
+
+                return {
+                    id: namespacedId,
+                    name: modelInfo?.id ?? namespacedId,
+                    description: modelInfo?.litellm_provider ?? "",
+                    family: modelInfo?.litellm_provider ?? "litellm",
+                    version: "1.0",
+                    maxInputTokens,
+                    maxOutputTokens,
+                    capabilities,
+                    tags,
+                    configurationSchema: derived.supportsReasoning
+                        ? {
+                              properties: {
+                                  reasoningEffort: {
+                                      type: "string",
+                                      title: "Reasoning effort",
+                                      description:
+                                          "Select reasoning depth (P1–P5). Higher values may be slower but more thorough.",
+                                      enum: ["P1", "P2", "P3", "P4", "P5"],
+                                      enumItemLabels: ["P1", "P2", "P3", "P4", "P5"],
+                                      default: "P1",
+                                  },
+                              },
+                          }
+                        : undefined,
+                } as vscode.LanguageModelChatInformation;
+            });
+
+            // Create a single-backend client for this session
+            this._multiBackendClient = new MultiBackendClient(
+                [{ name: session.backendName, url: session.baseUrl, apiKey: session.apiKey, enabled: true }],
+                this.userAgent
+            );
+            this._activeBackendNames = [session.backendName];
+
+            // Store in cache for this session only
+            this._lastModelList = infos;
+            this._modelListFetchedAtMs = Date.now();
+
+            return infos;
+        } catch (err) {
+            Logger.error(`Failed to fetch models from session ${session.backendName}`, err);
             return [];
         }
     }
@@ -453,15 +582,37 @@ export abstract class LiteLLMProviderBase {
     protected getTelemetryOptions(options: vscode.ProvideLanguageModelChatResponseOptions): {
         caller?: string;
         justification?: string;
+        modelConfiguration?: Record<string, unknown>;
     } {
         const opt = options as vscode.ProvideLanguageModelChatResponseOptions & {
             caller?: string;
             justification?: string;
+            modelConfiguration?: Record<string, unknown>;
         };
         return {
             caller: opt.caller,
             justification: opt.justification,
+            modelConfiguration: opt.modelConfiguration,
         };
+    }
+
+    /**
+     * Extracts reasoning effort from the modelConfiguration (preferred) or from modelOptions.
+     * Returns undefined when not provided.
+     */
+    protected getReasoningEffort(options: ProvideLanguageModelChatResponseOptions): string | undefined {
+        const telemetry = this.getTelemetryOptions(options);
+        const reasoningFromConfig = telemetry.modelConfiguration?.reasoningEffort;
+        if (typeof reasoningFromConfig === "string") {
+            return reasoningFromConfig;
+        }
+
+        const reasoningFromOptions = (options.modelOptions as Record<string, unknown> | undefined)?.reasoningEffort;
+        if (typeof reasoningFromOptions === "string") {
+            return reasoningFromOptions;
+        }
+
+        return undefined;
     }
 
     /**
@@ -515,6 +666,8 @@ export abstract class LiteLLMProviderBase {
             Logger.trace(`[buildOpenAIChatRequest] Tool IDs in request: ${ids.join(", ")}`);
         }
 
+        const reasoningEffort = this.getReasoningEffort(options);
+
         const requestBody: OpenAIChatCompletionRequest = {
             model: model.id,
             messages: openaiMessages,
@@ -523,6 +676,7 @@ export abstract class LiteLLMProviderBase {
                 typeof options.modelOptions?.max_tokens === "number"
                     ? Math.min(options.modelOptions.max_tokens, model.maxOutputTokens)
                     : model.maxOutputTokens,
+            ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
         };
 
         const mo = (options.modelOptions as Record<string, unknown>) ?? {};
@@ -594,6 +748,8 @@ export abstract class LiteLLMProviderBase {
 
         const transportMessages = convertV2MessagesToProviderMessages(trimmedMessages);
 
+        const reasoningEffort = this.getReasoningEffort(options);
+
         const requestBody: OpenAIChatCompletionRequest = {
             model: model.id,
             messages: convertV2MessagesToOpenAI(trimmedMessages),
@@ -602,6 +758,7 @@ export abstract class LiteLLMProviderBase {
                 typeof options.modelOptions?.max_tokens === "number"
                     ? Math.min(options.modelOptions.max_tokens, model.maxOutputTokens)
                     : model.maxOutputTokens,
+            ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
         };
 
         const mo = (options.modelOptions as Record<string, unknown>) ?? {};

@@ -1,6 +1,9 @@
 import * as vscode from "vscode";
 import type { LiteLLMBackend, LiteLLMConfig, ResolvedBackend } from "../types";
 import type { TelemetryService } from "../telemetry/telemetryService";
+import { LiteLLMClient } from "../adapters/litellmClient";
+import type { BackendSession } from "../providers/backendSession";
+import { Logger } from "../utils/logger";
 
 export class ConfigManager {
     private static readonly BASE_URL_KEY = "litellm-connector.baseUrl";
@@ -22,7 +25,29 @@ export class ConfigManager {
 
     private _telemetryService?: TelemetryService;
 
-    constructor(private readonly secrets: vscode.SecretStorage) {}
+    private readonly secrets: vscode.SecretStorage;
+
+    constructor(secrets: vscode.SecretStorage) {
+        this.secrets = ConfigManager.ensureSecretStorage(secrets);
+    }
+
+    /**
+     * Ensures a usable SecretStorage implementation even in tests that provide partial stubs.
+     */
+    private static ensureSecretStorage(secrets: vscode.SecretStorage | undefined): vscode.SecretStorage {
+        if (secrets && typeof secrets.get === "function" && typeof secrets.store === "function") {
+            return secrets;
+        }
+
+        const emitter = new vscode.EventEmitter<vscode.SecretStorageChangeEvent>();
+        return {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            keys: async () => [],
+            onDidChange: emitter.event,
+        } satisfies vscode.SecretStorage;
+    }
 
     public setTelemetryService(service: TelemetryService): void {
         this._telemetryService = service;
@@ -277,6 +302,32 @@ export class ConfigManager {
         }
 
         return [];
+    }
+
+    /**
+     * Convert VS Code 1.119+ provider configuration (from options.configuration)
+     * into a BackendSession. Returns undefined if baseUrl is absent.
+     *
+     * This supports the new per-group configuration system where VS Code passes
+     * configuration directly via options.configuration in provideLanguageModelChatResponse.
+     */
+    convertProviderConfiguration(
+        groupName: string,
+        configuration: Record<string, unknown>
+    ): BackendSession | undefined {
+        const baseUrl = configuration.baseUrl as string | undefined;
+        if (!baseUrl) {
+            Logger.debug("convertProviderConfiguration: no baseUrl in configuration");
+            return undefined;
+        }
+
+        const userAgent = "litellm-vscode-chat/vscode-1.119+";
+        return {
+            backendName: groupName,
+            baseUrl,
+            apiKey: configuration.apiKey as string | undefined,
+            client: new LiteLLMClient({ url: baseUrl, key: configuration.apiKey as string | undefined }, userAgent),
+        };
     }
 
     /**

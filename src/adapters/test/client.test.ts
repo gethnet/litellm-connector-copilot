@@ -315,24 +315,15 @@ suite("LiteLLM Client Unit Tests", () => {
                     return null;
                 },
             },
-        };
+        } as Response;
 
-        const successResponse = {
-            ok: true,
+        const successResponse = new Response(new ReadableStream(), {
             status: 200,
             statusText: "OK",
-            body: new ReadableStream(),
-            clone: function () {
-                return this;
-            },
-            headers: { get: () => null },
-        };
+        });
 
-        const firstAttempt = Promise.resolve(rateLimitResponse as unknown as Response);
-        const secondAttempt = Promise.resolve(successResponse as unknown as Response);
-
-        fetchStub.onCall(0).returns(firstAttempt);
-        fetchStub.onCall(1).returns(secondAttempt);
+        fetchStub.onCall(0).resolves(rateLimitResponse);
+        fetchStub.onCall(1).resolves(successResponse);
 
         await client.chat({ model: "m", messages: [] });
 
@@ -343,22 +334,12 @@ suite("LiteLLM Client Unit Tests", () => {
         const client = new LiteLLMClient(config, userAgent);
         const fetchStub = sandbox.stub(global, "fetch");
 
-        const serverErrorResponse = {
-            ok: false,
+        const serverErrorResponse = new Response("Service Unavailable", {
             status: 503,
-            clone: function () {
-                return this;
-            },
-            text: async () => "Service Unavailable",
-            headers: { get: () => null },
-        };
+            statusText: "Service Unavailable",
+        });
 
-        const successResponse = {
-            ok: true,
-            status: 200,
-            body: new ReadableStream(),
-            headers: { get: () => null },
-        };
+        const successResponse = new Response(new ReadableStream(), { status: 200, statusText: "OK" });
 
         fetchStub.onCall(0).resolves(serverErrorResponse as unknown as Response);
         fetchStub.onCall(1).resolves(successResponse as unknown as Response);
@@ -372,15 +353,7 @@ suite("LiteLLM Client Unit Tests", () => {
         const client = new LiteLLMClient(config, userAgent);
         const fetchStub = sandbox.stub(global, "fetch");
 
-        const badRequestResponse = {
-            ok: false,
-            status: 401,
-            clone: function () {
-                return this;
-            },
-            text: async () => "Unauthorized",
-            headers: { get: () => null },
-        };
+        const badRequestResponse = new Response("Unauthorized", { status: 401, statusText: "Unauthorized" });
 
         fetchStub.resolves(badRequestResponse as unknown as Response);
 

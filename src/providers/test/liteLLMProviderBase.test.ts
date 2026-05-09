@@ -8,6 +8,7 @@ import { ResponsesClient } from "../../adapters/responsesClient";
 import type { ConfigManager } from "../../config/configManager";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, ResolvedBackend } from "../../types";
 import { createMockSecrets } from "../../test/utils/testMocks";
+import type { BackendSession } from "../backendSession";
 
 suite("LiteLLM Provider Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -168,6 +169,113 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(request.temperature, 0.5, "Should use provided temperature 0.5");
         assert.strictEqual(request.frequency_penalty, 0.8, "Should use provided frequency_penalty 0.8");
         assert.strictEqual(request.presence_penalty, 0.1, "Should use default presence_penalty 0.1");
+    });
+
+    test("buildOpenAIChatRequest applies reasoning effort from modelConfiguration", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const build = (provider as any).buildOpenAIChatRequest.bind(provider);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const configManager = (provider as any)._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+
+        const model = {
+            id: "reasoning-model",
+            maxInputTokens: 8192,
+            maxOutputTokens: 4096,
+        } as vscode.LanguageModelChatInformation;
+
+        const modelInfo: LiteLLMModelInfo = { supports_reasoning: true };
+
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("hello")],
+                name: undefined,
+            },
+        ];
+
+        const request = await build(
+            messages,
+            model,
+            {
+                modelOptions: {},
+                modelConfiguration: { reasoningEffort: "P3" },
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+            modelInfo
+        );
+
+        assert.strictEqual(request.reasoning?.effort, "P3");
+    });
+
+    test("buildV2ChatRequest applies reasoning effort from modelOptions fallback", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const build = (provider as any).buildV2ChatRequest.bind(provider);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const configManager = (provider as any)._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+
+        const model = {
+            id: "reasoning-model",
+            maxInputTokens: 8192,
+            maxOutputTokens: 4096,
+        } as vscode.LanguageModelChatInformation;
+
+        const modelInfo: LiteLLMModelInfo = { supports_reasoning: true };
+
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("hello")],
+                name: undefined,
+            },
+        ];
+
+        const request = await build(
+            messages,
+            model,
+            {
+                modelOptions: { reasoningEffort: "P4" },
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+            modelInfo
+        );
+
+        assert.strictEqual(request.reasoning?.effort, "P4");
+    });
+
+    test("discoverModels attaches reasoning configuration schema when supported", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        // Stub configuration-based discovery
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const configManager = (provider as any)._configManager as ConfigManager;
+        const session: BackendSession = {
+            backendName: "group1",
+            baseUrl: "http://localhost:4000",
+            apiKey: "k",
+            client: {
+                // Minimal mock satisfying the interface without using `any`
+                getModelInfo: sandbox
+                    .stub()
+                    .resolves({ data: [{ model_name: "m1", model_info: { supports_reasoning: true } }] }),
+            } as unknown as BackendSession["client"],
+        };
+        sandbox.stub(configManager, "convertProviderConfiguration").returns(session);
+
+        const models = await provider.discoverModels(
+            { configuration: { baseUrl: "http://localhost:4000" } },
+            new vscode.CancellationTokenSource().token
+        );
+
+        assert.ok(
+            models[0].configurationSchema,
+            "Expected configurationSchema to be present for reasoning-capable model"
+        );
+        const props = models[0].configurationSchema?.properties as Record<string, unknown> | undefined;
+        assert.ok(props?.reasoningEffort, "Expected reasoningEffort property in configuration schema");
     });
 
     test("clearModelCache resets model list and caches", () => {

@@ -343,6 +343,9 @@ export class LiteLLMClient {
 
             try {
                 const response = await fetch(url, { ...init, signal: controller.signal });
+                if (!response) {
+                    throw new Error("No response returned from fetch");
+                }
                 if (response.ok || attempt >= maxRetries || response.status < 500 || response.status >= 600) {
                     return response;
                 }
