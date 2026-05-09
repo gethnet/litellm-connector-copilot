@@ -175,20 +175,32 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
     if (data.type === "response.output_reasoning.delta" && typeof data.delta === "string") {
         thinkingParts.push({ type: "thinking", value: data.delta });
     }
-    if (typeof data.type === "string" && data.type.startsWith("response.output_tool_call")) {
-        const delta = data.delta as Record<string, unknown> | undefined;
-        const id = typeof delta?.id === "string" ? delta.id : undefined;
-        if (id) {
-            const existing = state.responseToolCallBuffers.get(id) ?? { id, name: undefined, args: "" };
-            if (typeof delta?.name === "string") {
-                existing.name = delta.name;
-            }
-            if (typeof delta?.arguments === "string") {
-                existing.args += delta.arguments;
-            }
-            state.responseToolCallBuffers.set(id, existing);
-            if (!state.responseToolCallOrder.includes(id)) {
-                state.responseToolCallOrder.push(id);
+    // The OpenAI Responses API (and LiteLLM's proxy) emits tool call arguments via
+    // "response.output_item.delta" events with item.type === "function_call".
+    // NOTE: "response.output_tool_call.*" is an invented name that does not appear in
+    // the real API; it was previously used here by mistake.
+    if (data.type === "response.output_item.delta") {
+        const item = data.item as Record<string, unknown> | undefined;
+        if (item?.type === "function_call") {
+            // call_id is the stable identifier; fall back to id if missing.
+            const callId =
+                typeof item.call_id === "string" ? item.call_id : typeof item.id === "string" ? item.id : undefined;
+            if (callId) {
+                const existing = state.responseToolCallBuffers.get(callId) ?? {
+                    id: callId,
+                    name: undefined,
+                    args: "",
+                };
+                if (typeof item.name === "string") {
+                    existing.name = item.name;
+                }
+                if (typeof item.arguments === "string") {
+                    existing.args += item.arguments;
+                }
+                state.responseToolCallBuffers.set(callId, existing);
+                if (!state.responseToolCallOrder.includes(callId)) {
+                    state.responseToolCallOrder.push(callId);
+                }
             }
         }
     }
@@ -233,7 +245,37 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
         }
     }
     if (data.type === "response.output_item.done") {
-        // Flush any pending /responses tool calls on item completion
+        // If the done event itself carries a complete function_call item (some LiteLLM versions
+        // deliver the full item on done rather than streaming deltas), merge it into the buffer
+        // so the flush below picks it up regardless of whether deltas arrived first.
+        const doneItem = data.item as Record<string, unknown> | undefined;
+        if (doneItem?.type === "function_call") {
+            const callId =
+                typeof doneItem.call_id === "string"
+                    ? doneItem.call_id
+                    : typeof doneItem.id === "string"
+                      ? doneItem.id
+                      : undefined;
+            if (callId) {
+                const existing = state.responseToolCallBuffers.get(callId) ?? {
+                    id: callId,
+                    name: undefined,
+                    args: "",
+                };
+                if (typeof doneItem.name === "string" && !existing.name) {
+                    existing.name = doneItem.name;
+                }
+                if (typeof doneItem.arguments === "string" && !existing.args) {
+                    existing.args = doneItem.arguments;
+                }
+                state.responseToolCallBuffers.set(callId, existing);
+                if (!state.responseToolCallOrder.includes(callId)) {
+                    state.responseToolCallOrder.push(callId);
+                }
+            }
+        }
+
+        // Flush buffered /responses tool calls accumulated via delta + done events
         for (const id of state.responseToolCallOrder) {
             const buffer = state.responseToolCallBuffers.get(id);
             if (!buffer) {

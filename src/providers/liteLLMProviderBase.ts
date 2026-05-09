@@ -612,12 +612,23 @@ export abstract class LiteLLMProviderBase {
         // PHASE 1 mitigation — see src/providers/reasoningDefaults.ts for the swap point.
         // Without this, gpt-5.1-codex-max returns empty {} bodies and gpt-5.3-codex
         // emits intent text but never produces tool calls or committed output.
+        //
+        // Cold-cache guard: _modelFeaturesCache is populated lazily by getModelFeatures().
+        // If the cache is empty (first request before any model card fetch), fall back to
+        // modelInfo fields so reasoning_effort is not silently dropped on the first call.
         const features = this._modelFeaturesCache.get(model.id);
-        if (features?.supportsReasoning && this.isParameterSupported("reasoning_effort", modelInfo, model.id)) {
+        const supportsReasoning =
+            features?.supportsReasoning ??
+            (modelInfo as Record<string, unknown> | undefined)?.supports_reasoning === true;
+        const effortParamSupported =
+            features?.supportedParams !== undefined
+                ? features.supportedParams.has("reasoning_effort")
+                : this.isParameterSupported("reasoning_effort", modelInfo, model.id);
+        if (supportsReasoning && effortParamSupported) {
             const effort = resolveReasoningEffort({
                 modelId: model.id,
                 supportsReasoning: true,
-                supportedEfforts: features.supportedReasoningEfforts,
+                supportedEfforts: features?.supportedReasoningEfforts,
                 callerOverride: mo.reasoning_effort,
             });
             if (effort) {
@@ -708,12 +719,20 @@ export abstract class LiteLLMProviderBase {
 
         // Reasoning effort: hardcoded default for reasoning-capable models.
         // Mirrors buildOpenAIChatRequest; both pipelines must inject identically.
+        // Cold-cache guard mirrors buildOpenAIChatRequest — see comment there for rationale.
         const v2Features = this._modelFeaturesCache.get(model.id);
-        if (v2Features?.supportsReasoning && this.isParameterSupported("reasoning_effort", modelInfo, model.id)) {
+        const v2SupportsReasoning =
+            v2Features?.supportsReasoning ??
+            (modelInfo as Record<string, unknown> | undefined)?.supports_reasoning === true;
+        const v2EffortParamSupported =
+            v2Features?.supportedParams !== undefined
+                ? v2Features.supportedParams.has("reasoning_effort")
+                : this.isParameterSupported("reasoning_effort", modelInfo, model.id);
+        if (v2SupportsReasoning && v2EffortParamSupported) {
             const effort = resolveReasoningEffort({
                 modelId: model.id,
                 supportsReasoning: true,
-                supportedEfforts: v2Features.supportedReasoningEfforts,
+                supportedEfforts: v2Features?.supportedReasoningEfforts,
                 callerOverride: mo.reasoning_effort,
             });
             if (effort) {

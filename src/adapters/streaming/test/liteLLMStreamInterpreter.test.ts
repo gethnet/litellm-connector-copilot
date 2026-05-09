@@ -94,18 +94,19 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
     test("should parse LiteLLM /responses tool calls and flush on completed", () => {
         const state = createInitialStreamingState();
 
-        // Tool call arrives in fragments
+        // Tool call arrives via real response.output_item.delta events (item.type === "function_call").
+        // "response.output_tool_call.*" does NOT exist in the OpenAI/LiteLLM Responses API.
         interpretStreamEvent(
             {
-                type: "response.output_tool_call.delta",
-                delta: { id: "call-resp", name: "tc_responses", arguments: "{" },
+                type: "response.output_item.delta",
+                item: { type: "function_call", call_id: "call-resp", name: "tc_responses", arguments: "{" },
             },
             state
         );
         interpretStreamEvent(
             {
-                type: "response.output_tool_call.delta",
-                delta: { id: "call-resp", arguments: '"x":1}' },
+                type: "response.output_item.delta",
+                item: { type: "function_call", call_id: "call-resp", arguments: '"x":1}' },
             },
             state
         );
@@ -222,15 +223,15 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
 
         interpretStreamEvent(
             {
-                type: "response.output_tool_call.delta",
-                delta: { id: "call-resp-2", name: "tc2", arguments: "{" },
+                type: "response.output_item.delta",
+                item: { type: "function_call", call_id: "call-resp-2", name: "tc2", arguments: "{" },
             },
             state
         );
         interpretStreamEvent(
             {
-                type: "response.output_tool_call.delta",
-                delta: { id: "call-resp-2", arguments: '"y":true}' },
+                type: "response.output_item.delta",
+                item: { type: "function_call", call_id: "call-resp-2", arguments: '"y":true}' },
             },
             state
         );
@@ -241,6 +242,34 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
         if (toolCall && toolCall.type === "tool_call") {
             assert.strictEqual(toolCall.name, "tc2");
             assert.strictEqual(toolCall.args, '{"y":true}');
+        }
+    });
+
+    test("should parse tool call delivered entirely in a single output_item.done event (no prior deltas)", () => {
+        // Some LiteLLM versions deliver the complete function_call on the done event
+        // without any preceding delta events. The interpreter must handle this without
+        // requiring prior delta buffering.
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent(
+            {
+                type: "response.output_item.done",
+                item: {
+                    type: "function_call",
+                    call_id: "call-done-only",
+                    name: "done_only_tool",
+                    arguments: '{"z":42}',
+                },
+            },
+            state
+        );
+
+        const toolCall = parts.find((p) => p.type === "tool_call");
+        assert.ok(toolCall && toolCall.type === "tool_call", "expected tool_call part from done-only delivery");
+        if (toolCall && toolCall.type === "tool_call") {
+            assert.strictEqual(toolCall.name, "done_only_tool");
+            assert.strictEqual(toolCall.args, '{"z":42}');
+            assert.strictEqual(toolCall.id, "call-done-only");
         }
     });
 

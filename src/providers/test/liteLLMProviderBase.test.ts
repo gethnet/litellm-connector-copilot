@@ -1323,12 +1323,15 @@ suite("LiteLLM Provider Unit Tests", () => {
     });
 
     suite("buildOpenAIChatRequest reasoning_effort injection", () => {
+        // Cache stubs must include supportedParams so isParameterSupported doesn't crash
+        // when it checks other params (temperature, etc.) during request building.
         test("injects 'medium' for reasoning-capable model with no caller override", async () => {
             const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (provider as any)._modelFeaturesCache.set("gpt-5.1-codex-max", {
                 supportsReasoning: true,
                 supportedReasoningEfforts: undefined,
+                supportedParams: new Set(["reasoning_effort", "max_tokens", "temperature"]),
             });
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1348,6 +1351,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             (provider as any)._modelFeaturesCache.set("gpt-4o", {
                 supportsReasoning: false,
                 supportedReasoningEfforts: undefined,
+                supportedParams: new Set(["reasoning_effort", "max_tokens", "temperature"]),
             });
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1367,6 +1371,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             (provider as any)._modelFeaturesCache.set("gpt-5.3-codex", {
                 supportsReasoning: true,
                 supportedReasoningEfforts: undefined,
+                supportedParams: new Set(["reasoning_effort", "max_tokens", "temperature"]),
             });
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1386,6 +1391,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             (provider as any)._modelFeaturesCache.set("gpt-5.1-codex-max", {
                 supportsReasoning: true,
                 supportedReasoningEfforts: ["minimal", "high"],
+                supportedParams: new Set(["reasoning_effort", "max_tokens", "temperature"]),
             });
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1401,17 +1407,21 @@ suite("LiteLLM Provider Unit Tests", () => {
     });
 
     suite("buildV2ChatRequest reasoning_effort injection", () => {
+        // V2 messages require content as V2MessagePart[], not a plain string.
+        const v2Msg = [{ role: "user", name: undefined, content: [{ type: "text", text: "test" }] }];
+
         test("injects 'medium' for reasoning-capable model with no caller override", async () => {
             const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (provider as any)._modelFeaturesCache.set("gpt-5.1-codex-max", {
                 supportsReasoning: true,
                 supportedReasoningEfforts: undefined,
+                supportedParams: new Set(["reasoning_effort", "max_tokens", "temperature"]),
             });
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const request = await (provider as any).buildV2ChatRequest(
-                [{ role: "user", content: "test" }],
+                v2Msg,
                 { id: "gpt-5.1-codex-max", family: "", vendor: "", version: "", maxInputTokens: 100 },
                 {},
                 undefined,
@@ -1426,11 +1436,12 @@ suite("LiteLLM Provider Unit Tests", () => {
             (provider as any)._modelFeaturesCache.set("gpt-4o", {
                 supportsReasoning: false,
                 supportedReasoningEfforts: undefined,
+                supportedParams: new Set(["reasoning_effort", "max_tokens", "temperature"]),
             });
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const request = await (provider as any).buildV2ChatRequest(
-                [{ role: "user", content: "test" }],
+                v2Msg,
                 { id: "gpt-4o", family: "", vendor: "", version: "", maxInputTokens: 100 },
                 {},
                 undefined,
@@ -1445,14 +1456,15 @@ suite("LiteLLM Provider Unit Tests", () => {
             (provider as any)._modelFeaturesCache.set("gpt-5.3-codex", {
                 supportsReasoning: true,
                 supportedReasoningEfforts: undefined,
+                supportedParams: new Set(["reasoning_effort", "max_tokens", "temperature"]),
             });
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const request = await (provider as any).buildV2ChatRequest(
-                [{ role: "user", content: "test" }],
+                v2Msg,
                 { id: "gpt-5.3-codex", family: "", vendor: "", version: "", maxInputTokens: 100 },
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                { reasoning_effort: "high" } as any,
+                { modelOptions: { reasoning_effort: "high" } } as any,
                 undefined,
                 "test"
             );
@@ -1465,17 +1477,93 @@ suite("LiteLLM Provider Unit Tests", () => {
             (provider as any)._modelFeaturesCache.set("gpt-5.1-codex-max", {
                 supportsReasoning: true,
                 supportedReasoningEfforts: ["minimal", "high"],
+                supportedParams: new Set(["reasoning_effort", "max_tokens", "temperature"]),
             });
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const request = await (provider as any).buildV2ChatRequest(
-                [{ role: "user", content: "test" }],
+                v2Msg,
                 { id: "gpt-5.1-codex-max", family: "", vendor: "", version: "", maxInputTokens: 100 },
                 {},
                 undefined,
                 "test"
             );
             assert.strictEqual(request.reasoning_effort, "high");
+        });
+    });
+
+    suite("cold-cache reasoning_effort fallback (no model features cache)", () => {
+        // These tests confirm that reasoning_effort is still injected on the very first
+        // request, before any model card fetch has populated _modelFeaturesCache.
+        // Regression guard for the silent-skip bug where a cold cache caused the field
+        // to be omitted, resulting in empty/no-output responses from Codex models.
+
+        test("buildOpenAIChatRequest injects reasoning_effort from modelInfo.supports_reasoning when cache is cold", async () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            // Deliberately leave _modelFeaturesCache empty (cold start)
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const request = await (provider as any).buildOpenAIChatRequest(
+                [{ role: vscode.LanguageModelChatMessageRole.User, content: "test" }],
+                { id: "gpt-5.1-codex-max", maxOutputTokens: 4096 },
+                {},
+                // modelInfo carries supports_reasoning and lists reasoning_effort in supported params
+                {
+                    supports_reasoning: true,
+                    supported_openai_params: ["reasoning_effort", "max_tokens"],
+                },
+                "test"
+            );
+
+            assert.strictEqual(
+                request.reasoning_effort,
+                "medium",
+                "Should inject default reasoning_effort from modelInfo when feature cache is cold"
+            );
+        });
+
+        test("buildOpenAIChatRequest does NOT inject reasoning_effort when modelInfo.supports_reasoning is false and cache is cold", async () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const request = await (provider as any).buildOpenAIChatRequest(
+                [{ role: vscode.LanguageModelChatMessageRole.User, content: "test" }],
+                { id: "gpt-4o", maxOutputTokens: 4096 },
+                {},
+                {
+                    supports_reasoning: false,
+                    supported_openai_params: ["temperature", "max_tokens"],
+                },
+                "test"
+            );
+
+            assert.strictEqual(
+                "reasoning_effort" in request,
+                false,
+                "Should not inject reasoning_effort when model does not support reasoning"
+            );
+        });
+
+        test("buildV2ChatRequest injects reasoning_effort from modelInfo.supports_reasoning when cache is cold", async () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const request = await (provider as any).buildV2ChatRequest(
+                [{ role: "user", name: undefined, content: [{ type: "text", text: "test" }] }],
+                { id: "gpt-5.3-codex", family: "", vendor: "", version: "", maxInputTokens: 100 },
+                {},
+                {
+                    supports_reasoning: true,
+                    supported_openai_params: ["reasoning_effort", "max_tokens"],
+                },
+                "test"
+            );
+
+            assert.strictEqual(
+                request.reasoning_effort,
+                "medium",
+                "V2 should inject default reasoning_effort from modelInfo when feature cache is cold"
+            );
         });
     });
 });
