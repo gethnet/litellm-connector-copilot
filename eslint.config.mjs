@@ -15,13 +15,12 @@ export default defineConfig(
 		'out',
 		'dist',
 		'esbuild.js',
-		'**/*.d.ts'
+		'**/*.d.ts',
+		'coverage'
 	]),
 	{
-		files: ['**/*.{js,mjs,cjs,ts,jsx,tsx}'],
-	},
-	{
-		files: ['**/*.ts', '**/*.tsx'],
+		files: ['src/**/*.{ts,tsx}'],
+		ignores: ['src/**/*.test.{ts,tsx}'],
 		languageOptions: {
 			parserOptions: {
 				project: ['./tsconfig.json'],
@@ -31,8 +30,33 @@ export default defineConfig(
 		rules: {
 			'@typescript-eslint/no-floating-promises': 'error',
 			'@typescript-eslint/no-deprecated': 'off',
-			'@typescript-eslint/ban-tslint-comment': 'warn',
+			'@typescript-eslint/ban-tslint-comment': 'error',
 			'@typescript-eslint/explicit-module-boundary-types': 'off',
+			'@typescript-eslint/no-unsafe-assignment': 'error',
+			'@typescript-eslint/no-unsafe-call': 'error',
+			'@typescript-eslint/no-unsafe-member-access': 'error',
+			'@typescript-eslint/no-unsafe-return': 'error',
+			'@typescript-eslint/no-explicit-any': 'error'
+		}
+	},
+	{
+		files: ['src/**/*.test.{ts,tsx}'],
+		languageOptions: {
+			parserOptions: {
+				project: ['./tsconfig.json'],
+				tsconfigRootDir: import.meta.dirname
+			}
+		},
+		rules: {
+			'@typescript-eslint/no-floating-promises': 'error',
+			'@typescript-eslint/no-deprecated': 'off',
+			'@typescript-eslint/ban-tslint-comment': 'error',
+			'@typescript-eslint/explicit-module-boundary-types': 'off',
+			'@typescript-eslint/no-unsafe-assignment': 'error',
+			'@typescript-eslint/no-unsafe-call': 'error',
+			'@typescript-eslint/no-unsafe-member-access': 'error',
+			'@typescript-eslint/no-unsafe-return': 'error',
+			'@typescript-eslint/no-explicit-any': 'error'
 		}
 	},
 	js.configs.recommended,
@@ -42,11 +66,12 @@ export default defineConfig(
 		plugins: {
 			'@stylistic': stylistic
 		},
+		files: ['**/*.{ts,tsx}'],
 		rules: {
 			'curly': 'error',
 			'@stylistic/semi': ['warn', 'always'],
-			'@typescript-eslint/no-empty-function': 'off',
-			'@typescript-eslint/array-type': 'off',
+			'@typescript-eslint/no-empty-function': 'warn',
+			'@typescript-eslint/array-type': 'warn',
 			'eqeqeq': ["error", "always"],
 			'@typescript-eslint/naming-convention': [
 				'warn',
