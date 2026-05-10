@@ -192,7 +192,7 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
                 options: vscode.ProvideLanguageModelChatResponseOptions,
                 modelInfo?: unknown,
                 caller?: string
-            ) => Promise<{ messages: Array<{ role: string; content?: unknown }> }>;
+            ) => Promise<{ messages: { role: string; content?: unknown }[] }>;
         };
 
         const model: vscode.LanguageModelChatInformation = {
@@ -285,7 +285,7 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
                 options: vscode.ProvideLanguageModelChatResponseOptions,
                 modelInfo?: unknown,
                 caller?: string
-            ) => Promise<{ messages: Array<{ role: string; content?: unknown }> }>;
+            ) => Promise<{ messages: { role: string; content?: unknown }[] }>;
         };
 
         const model: vscode.LanguageModelChatInformation = {

@@ -294,7 +294,7 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                 Logger.trace(
                     `[convertMessages] Tool result: (orig: ${(part as { callId?: string }).callId}, norm: ${callId})`
                 );
-                const content = collectToolResultText(part as { content?: ReadonlyArray<unknown> });
+                const content = collectToolResultText(part as { content?: readonly unknown[] });
                 toolResults.push({ callId, content });
             }
         }
@@ -407,7 +407,7 @@ export function normalizeMessagesForV2Pipeline(
                 content.push({
                     type: "tool_result",
                     callId,
-                    content: (part as { content: ReadonlyArray<unknown> }).content ?? [],
+                    content: (part as { content: readonly unknown[] }).content ?? [],
                 });
                 continue;
             }
@@ -441,7 +441,7 @@ export function convertV2MessagesToProviderMessages(
 ): vscode.LanguageModelChatRequestMessage[] {
     Logger.info("Entering convertV2MessagesToProviderMessages", { messageCount: messages.length });
     const downgraded: vscode.LanguageModelChatRequestMessage[] = messages.map((message, idx) => {
-        const content: Array<vscode.LanguageModelInputPart | unknown> = [];
+        const content: (vscode.LanguageModelInputPart | unknown)[] = [];
 
         for (const part of message.content) {
             switch (part.type) {
@@ -498,7 +498,7 @@ export function convertV2MessagesToTransportMessages(
 ): vscode.LanguageModelChatRequestMessage[] {
     Logger.info("Entering convertV2MessagesToTransportMessages", { messageCount: messages.length });
     return messages.map((message, idx) => {
-        const content: Array<vscode.LanguageModelInputPart | unknown> = [];
+        const content: (vscode.LanguageModelInputPart | unknown)[] = [];
 
         for (const part of message.content) {
             switch (part.type) {
@@ -748,7 +748,7 @@ export function validateRequest(messages: readonly vscode.LanguageModelChatReque
  * Type guard for LanguageModelToolResultPart-like values.
  * @param value Unknown value to test.
  */
-export function isToolResultPart(value: unknown): value is { callId: string; content?: ReadonlyArray<unknown> } {
+export function isToolResultPart(value: unknown): value is { callId: string; content?: readonly unknown[] } {
     if (!value || typeof value !== "object") {
         return false;
     }
@@ -792,7 +792,7 @@ export function mapRole(
  * Concatenate tool result content into a single text string.
  * @param pr Tool result-like object with content array.
  */
-function collectToolResultText(pr: { content?: ReadonlyArray<unknown> }): string {
+function collectToolResultText(pr: { content?: readonly unknown[] }): string {
     let text = "";
     for (const c of pr.content ?? []) {
         if (c instanceof vscode.LanguageModelTextPart) {

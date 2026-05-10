@@ -194,10 +194,10 @@ export interface LiteLLMModelEntry {
  * Response envelope for LiteLLM /model/info endpoint.
  */
 export interface LiteLLMModelInfoResponse {
-    data: Array<{
+    data: {
         model_name?: string;
         model_info?: LiteLLMModelInfo;
-    }>;
+    }[];
 }
 
 /**

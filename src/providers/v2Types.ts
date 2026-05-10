@@ -5,7 +5,7 @@ export type V2MessagePart =
     | { type: "data"; mimeType: string; data: Uint8Array }
     | { type: "thinking"; value: string | string[]; id?: string; metadata?: Record<string, unknown> }
     | { type: "tool_call"; callId: string; name: string; input: unknown }
-    | { type: "tool_result"; callId: string; content: ReadonlyArray<unknown> };
+    | { type: "tool_result"; callId: string; content: readonly unknown[] };
 
 export interface V2ChatMessage {
     role: string | vscode.LanguageModelChatMessageRole;

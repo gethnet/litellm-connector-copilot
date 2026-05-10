@@ -76,7 +76,7 @@ export class ConfigManager {
         const backendsRaw = vscode.workspace
             .getConfiguration()
             .get<
-                Array<{ name: string; url: string; apiKeySecretRef?: string; enabled?: boolean }>
+                { name: string; url: string; apiKeySecretRef?: string; enabled?: boolean }[]
             >(ConfigManager.BACKENDS_KEY, []);
 
         let backends: LiteLLMBackend[] | undefined;
@@ -251,7 +251,7 @@ export class ConfigManager {
             return;
         }
         const config = await this.getConfig();
-        const toggles: Array<[string, boolean]> = [
+        const toggles: [string, boolean][] = [
             ["inline-completions", config.inlineCompletionsEnabled ?? false],
             ["responses-api", config.v2ApiEnabled ?? false],
             ["commit-message", !!(config.commitModelIdOverride && config.commitModelIdOverride.length > 0)],
@@ -334,7 +334,7 @@ export class ConfigManager {
      * Adds a new backend to the configuration.
      */
     async addBackend(backend: LiteLLMBackend, apiKey?: string): Promise<void> {
-        const existing = vscode.workspace.getConfiguration().get<Array<LiteLLMBackend>>(ConfigManager.BACKENDS_KEY, []);
+        const existing = vscode.workspace.getConfiguration().get<LiteLLMBackend[]>(ConfigManager.BACKENDS_KEY, []);
         if (existing.some((b) => b.name === backend.name)) {
             throw new Error(`Backend "${backend.name}" already exists. Use updateBackend() to modify.`);
         }
@@ -353,7 +353,7 @@ export class ConfigManager {
      * Removes a backend by name.
      */
     async removeBackend(name: string): Promise<void> {
-        const existing = vscode.workspace.getConfiguration().get<Array<LiteLLMBackend>>(ConfigManager.BACKENDS_KEY, []);
+        const existing = vscode.workspace.getConfiguration().get<LiteLLMBackend[]>(ConfigManager.BACKENDS_KEY, []);
         const backend = existing.find((b) => b.name === name);
         if (!backend) {
             throw new Error(`Backend "${name}" not found.`);
@@ -371,7 +371,7 @@ export class ConfigManager {
      * Updates an existing backend.
      */
     async updateBackend(name: string, updates: Partial<LiteLLMBackend>, apiKey?: string): Promise<void> {
-        const existing = vscode.workspace.getConfiguration().get<Array<LiteLLMBackend>>(ConfigManager.BACKENDS_KEY, []);
+        const existing = vscode.workspace.getConfiguration().get<LiteLLMBackend[]>(ConfigManager.BACKENDS_KEY, []);
         const index = existing.findIndex((b) => b.name === name);
         if (index === -1) {
             throw new Error(`Backend "${name}" not found.`);
@@ -395,7 +395,7 @@ export class ConfigManager {
      * Lists all configured backends.
      */
     async listBackends(): Promise<LiteLLMBackend[]> {
-        return vscode.workspace.getConfiguration().get<Array<LiteLLMBackend>>(ConfigManager.BACKENDS_KEY, []);
+        return vscode.workspace.getConfiguration().get<LiteLLMBackend[]>(ConfigManager.BACKENDS_KEY, []);
     }
 
     /**
