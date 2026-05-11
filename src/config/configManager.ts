@@ -39,14 +39,33 @@ export class ConfigManager {
             return secrets;
         }
 
-        const emitter = new vscode.EventEmitter<vscode.SecretStorageChangeEvent>();
-        return {
+        // Provide a minimal stub for testing to avoid empty method warnings
+        const stubStorage: vscode.SecretStorage = {
             get: async () => undefined,
-            store: async () => {},
-            delete: async () => {},
+            store: async (_key: string): Promise<void> => {
+                /* no-op: stub for testing */
+            },
+            delete: async (_key: string): Promise<void> => {
+                /* no-op: stub for testing */
+            },
             keys: async () => [],
-            onDidChange: emitter.event,
-        } satisfies vscode.SecretStorage;
+            onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
+        };
+        return stubStorage;
+    }
+
+    /**
+     * Store a secret in the extension's secret storage.
+     */
+    public async store(key: string, value: string): Promise<void> {
+        await this.secrets.store(key, value);
+    }
+
+    /**
+     * Delete a secret from the extension's secret storage.
+     */
+    public async delete(key: string): Promise<void> {
+        await this.secrets.delete(key);
     }
 
     public setTelemetryService(service: TelemetryService): void {

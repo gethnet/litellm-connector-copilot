@@ -449,7 +449,8 @@ export abstract class LiteLLMProviderBase {
 
         // Kick off background refinement without awaiting it
         this.refineTokenCountInBackground(model, text, cacheKey, token).catch((err) => {
-            Logger.trace(`Background token refinement failed (expected during rapid updates): ${err.message}`);
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            Logger.trace(`Background token refinement failed (expected during rapid updates): ${errorMessage}`);
         });
 
         // Return local count immediately to keep UI responsive
@@ -1126,9 +1127,16 @@ export abstract class LiteLLMProviderBase {
 
     protected parseApiError(statusCode: number, errorText: string): string {
         try {
-            const parsed = JSON.parse(errorText);
-            if (parsed.error?.message) {
-                return parsed.error.message;
+            const parsed: unknown = JSON.parse(errorText);
+            // Type guard: check parsed is an object with error property
+            if (parsed && typeof parsed === "object" && "error" in (parsed as Record<string, unknown>)) {
+                const errorObj = (parsed as Record<string, unknown>).error as unknown;
+                if (errorObj && typeof errorObj === "object" && "message" in errorObj) {
+                    const message = (errorObj as Record<string, unknown>).message;
+                    if (typeof message === "string") {
+                        return message;
+                    }
+                }
             }
         } catch {
             // ignore

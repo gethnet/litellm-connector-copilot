@@ -484,7 +484,8 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
         };
         const parts = interpretStreamEvent(chunk, state);
         assert.strictEqual(parts[0].type, "text");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        assert.strictEqual((parts[0] as any).value, "hello");
+        const textPart = parts[0];
+        assert.strictEqual(textPart.type, "text");
+        assert.strictEqual(textPart.value, "hello");
     });
 });

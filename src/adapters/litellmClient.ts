@@ -183,8 +183,13 @@ export class LiteLLMClient {
             ) {
                 Logger.warn(`Detected unsupported parameters for ${request.model}, attempting to strip and retry.`);
 
-                const strippedBody = JSON.parse(JSON.stringify(body));
+                const strippedBody: OpenAIChatCompletionRequest | LiteLLMResponsesRequest = JSON.parse(
+                    JSON.stringify(body)
+                ) as OpenAIChatCompletionRequest | LiteLLMResponsesRequest;
                 const headers = this.getHeaders(request.model, modelInfo);
+
+                // Cast to unknown first for index signature access
+                const stripedAsAny = strippedBody as unknown as Record<string, unknown>;
 
                 // 1. Handle explicit mentions of parameters in the error message
                 // Common patterns: "unsupported parameter: 'temperature'", "unexpected keyword argument 'top_p'"
@@ -192,15 +197,15 @@ export class LiteLLMClient {
                 if (paramMatch && paramMatch[1]) {
                     const paramName = paramMatch[1];
                     Logger.info(`Stripping specific parameter: ${paramName}`);
-                    delete strippedBody[paramName];
+                    delete stripedAsAny[paramName];
                 }
 
                 // Special-case: some providers reject a top-level `cache` object.
                 // LiteLLM proxy caching controls should live under extra_body.cache, but we defensively strip both.
                 if (errorLower.includes("unknown parameter") && errorLower.includes("cache")) {
-                    delete strippedBody.cache;
+                    delete stripedAsAny.cache;
                     if (strippedBody.extra_body && typeof strippedBody.extra_body === "object") {
-                        const eb = strippedBody.extra_body as Record<string, unknown>;
+                        const eb = strippedBody.extra_body as unknown as Record<string, unknown>;
                         if (eb.cache && typeof eb.cache === "object") {
                             const cache = eb.cache as Record<string, unknown>;
                             delete cache["no-cache"];
@@ -218,12 +223,14 @@ export class LiteLLMClient {
 
                 // 2. Always strip caching if mentioned or if it was a likely culprit
                 if (errorLower.includes("no-cache") || errorLower.includes("no_cache")) {
+                    // Cast to unknown first for index signature access
+                    const bodyAny = strippedBody as unknown as Record<string, unknown>;
                     // Legacy (older implementation)
-                    delete strippedBody.no_cache;
-                    delete strippedBody["no-cache"];
+                    delete bodyAny.no_cache;
+                    delete bodyAny["no-cache"];
 
                     // Some backends interpret top-level `cache` as an OpenAI param and reject it
-                    delete strippedBody.cache;
+                    delete bodyAny.cache;
 
                     // Current LiteLLM format: extra_body.cache["no-cache"]
                     if (strippedBody.extra_body && typeof strippedBody.extra_body === "object") {

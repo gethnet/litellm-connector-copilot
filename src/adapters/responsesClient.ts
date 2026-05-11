@@ -49,18 +49,21 @@ export class ResponsesClient {
         );
         const detailsString = `Context: ${promptTokens} tokens | Output: ${completionTokens} tokens`;
 
-        // 1. Try direct DTO injection (bypassing type system)
+        // 1. Try direct DTO injection (bypassing type system) when VS Code supports it.
+        // VS Code does not yet expose a typed usage part, so guard with runtime checks.
         try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (progress as any).report({
-                kind: "usage",
-                promptTokens: promptTokens,
-                completionTokens: completionTokens,
-                details: detailsString,
-                metadata: {
+            const report = (progress as unknown as { report?: (value: unknown) => void }).report;
+            if (typeof report === "function") {
+                report({
+                    kind: "usage",
+                    promptTokens: promptTokens,
+                    completionTokens: completionTokens,
                     details: detailsString,
-                },
-            });
+                    metadata: {
+                        details: detailsString,
+                    },
+                });
+            }
         } catch (e) {
             Logger.trace("Direct usage DTO injection failed", e);
         }

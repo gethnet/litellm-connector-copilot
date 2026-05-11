@@ -22,7 +22,10 @@ suite("ResponsesClient sendResponsesRequest", () => {
         return new ResponsesClient(config, userAgent);
     }
 
-    function makeProgress() {
+    function makeProgress(): {
+        progress: vscode.Progress<vscode.LanguageModelResponsePart>;
+        reported: vscode.LanguageModelResponsePart[];
+    } {
         const reported: vscode.LanguageModelResponsePart[] = [];
         const progress: vscode.Progress<vscode.LanguageModelResponsePart> = {
             report: (part) => reported.push(part),
@@ -37,15 +40,15 @@ suite("ResponsesClient sendResponsesRequest", () => {
         | [string, string][]
         | string[][];
 
-    function normalizeHeaders(headers?: HeaderLike) {
+    function normalizeHeaders(headers?: HeaderLike): Record<string, string> {
         if (!headers) {
-            return {} as Record<string, string>;
+            return {};
         }
         if (headers instanceof Headers) {
             return Object.fromEntries(headers.entries());
         }
         if (Array.isArray(headers)) {
-            return Object.fromEntries(headers);
+            return Object.fromEntries(headers as [string, string][]);
         }
         const normalized: Record<string, string> = {};
         for (const [k, v] of Object.entries(headers)) {
@@ -125,7 +128,7 @@ suite("ResponsesClient sendResponsesRequest", () => {
 
         await assert.rejects(
             () => client.sendResponsesRequest(makeRequest(), progress, new vscode.CancellationTokenSource().token),
-            (err: Error) => err.message.includes("500 Server") && err.message.includes("bad")
+            (err: Error) => err instanceof Error && err.message.includes("500 Server") && err.message.includes("bad")
         );
     });
 

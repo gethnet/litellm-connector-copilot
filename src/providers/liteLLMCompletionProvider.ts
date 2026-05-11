@@ -72,7 +72,11 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
             );
 
             // For completions we don't emit progress parts; we just need the raw stream to extract text.
-            const nullProgress: vscode.Progress<vscode.LanguageModelResponsePart> = { report: () => {} };
+            const nullProgress: vscode.Progress<vscode.LanguageModelResponsePart> = {
+                report: (_part: vscode.LanguageModelResponsePart): void => {
+                    // Intentionally empty: completions don't emit progress parts
+                },
+            };
             const stream = await this.sendRequestWithRetry(
                 requestBody,
                 messages,

@@ -48,11 +48,15 @@ suite("LiteLLM Client Unit Tests", () => {
 
         await client.chat({ model: "gpt-4", messages: [] });
 
-        const args = fetchStub.getCall(0).args;
-        const body = JSON.parse(args[1]!.body as string);
+        const args0 = fetchStub.getCall(0).args;
+        const requestInit = args0[1] as RequestInit | undefined;
+        const bodyStr = requestInit?.body as string | undefined;
+        const body = bodyStr ? (JSON.parse(bodyStr) as Record<string, unknown>) : {};
         assert.strictEqual(body.no_cache, undefined);
         assert.strictEqual(body["no-cache"], undefined);
-        assert.strictEqual(body.extra_body?.cache?.["no-cache"], true);
+        const extraBody = body.extra_body as Record<string, unknown> | undefined;
+        const cache = extraBody?.cache as Record<string, unknown> | undefined;
+        assert.strictEqual(cache?.["no-cache"], true);
     });
 
     test("chat bypasses no_cache for Claude models", async () => {
@@ -64,12 +68,14 @@ suite("LiteLLM Client Unit Tests", () => {
 
         await client.chat({ model: "claude-3-opus", messages: [] });
 
-        const args = fetchStub.getCall(0).args;
-        const body = JSON.parse(args[1]!.body as string);
+        const args0 = fetchStub.getCall(0).args;
+        const requestInit = args0[1] as RequestInit | undefined;
+        const bodyStr = requestInit?.body as string | undefined;
+        const body = bodyStr ? (JSON.parse(bodyStr) as Record<string, unknown>) : {};
         assert.strictEqual(body.no_cache, undefined);
         assert.strictEqual(body["no-cache"], undefined);
         assert.strictEqual(body.extra_body, undefined);
-        const headers = args[1]!.headers as Record<string, string>;
+        const headers = (requestInit?.headers as Record<string, string>) ?? {};
         assert.strictEqual(headers["Cache-Control"], undefined);
     });
 
@@ -111,19 +117,25 @@ suite("LiteLLM Client Unit Tests", () => {
         assert.strictEqual(fetchStub.callCount, 2, "Should have retried");
 
         // First call should have no_cache
-        const firstCallBody = JSON.parse(fetchStub.getCall(0).args[1]!.body as string);
+        const firstCallInit = fetchStub.getCall(0).args[1] as RequestInit | undefined;
+        const firstCallBodyStr = firstCallInit?.body as string | undefined;
+        const firstCallBody = firstCallBodyStr ? (JSON.parse(firstCallBodyStr) as Record<string, unknown>) : {};
         assert.strictEqual(firstCallBody.no_cache, undefined);
         assert.strictEqual(firstCallBody["no-cache"], undefined);
-        assert.strictEqual(firstCallBody.extra_body?.cache?.["no-cache"], true);
-        const firstCallHeaders = fetchStub.getCall(0).args[1]!.headers as Record<string, string>;
+        const firstExtraBody = firstCallBody.extra_body as Record<string, unknown> | undefined;
+        const firstCache = firstExtraBody?.cache as Record<string, unknown> | undefined;
+        assert.strictEqual(firstCache?.["no-cache"], true);
+        const firstCallHeaders = (firstCallInit?.headers as Record<string, string>) ?? {};
         assert.strictEqual(firstCallHeaders["Cache-Control"], "no-cache");
 
         // Second call should NOT have no_cache or Cache-Control
-        const secondCallBody = JSON.parse(fetchStub.getCall(1).args[1]!.body as string);
+        const secondCallInit = fetchStub.getCall(1).args[1] as RequestInit | undefined;
+        const secondCallBodyStr = secondCallInit?.body as string | undefined;
+        const secondCallBody = secondCallBodyStr ? (JSON.parse(secondCallBodyStr) as Record<string, unknown>) : {};
         assert.strictEqual(secondCallBody.no_cache, undefined);
         assert.strictEqual(secondCallBody["no-cache"], undefined);
         assert.strictEqual(secondCallBody.extra_body, undefined);
-        const secondCallHeaders = fetchStub.getCall(1).args[1]!.headers as Record<string, string>;
+        const secondCallHeaders = (secondCallInit?.headers as Record<string, string>) ?? {};
         assert.strictEqual(secondCallHeaders["Cache-Control"], undefined);
     });
 
@@ -154,10 +166,14 @@ suite("LiteLLM Client Unit Tests", () => {
 
         assert.strictEqual(fetchStub.callCount, 2);
 
-        const secondCallBody = JSON.parse(fetchStub.getCall(0).args[1]!.body as string);
+        const secondCallInit = fetchStub.getCall(0).args[1] as RequestInit | undefined;
+        const secondCallBodyStr = secondCallInit?.body as string | undefined;
+        const secondCallBody = secondCallBodyStr ? (JSON.parse(secondCallBodyStr) as Record<string, unknown>) : {};
         assert.strictEqual(secondCallBody.temperature, 1);
 
-        const retryCallBody = JSON.parse(fetchStub.getCall(1).args[1]!.body as string);
+        const retryCallInit = fetchStub.getCall(1).args[1] as RequestInit | undefined;
+        const retryCallBodyStr = retryCallInit?.body as string | undefined;
+        const retryCallBody = retryCallBodyStr ? (JSON.parse(retryCallBodyStr) as Record<string, unknown>) : {};
         assert.strictEqual(retryCallBody.temperature, undefined, "Temperature should have been stripped");
     });
 
@@ -194,15 +210,21 @@ suite("LiteLLM Client Unit Tests", () => {
 
         assert.strictEqual(fetchStub.callCount, 2);
 
-        const firstCallBody = JSON.parse(fetchStub.getCall(0).args[1]!.body as string);
+        const firstCallInit = fetchStub.getCall(0).args[1] as RequestInit | undefined;
+        const firstCallBodyStr = firstCallInit?.body as string | undefined;
+        const firstCallBody = firstCallBodyStr ? (JSON.parse(firstCallBodyStr) as Record<string, unknown>) : {};
         // First call should still contain caching controls due to disableCaching.
-        assert.strictEqual(firstCallBody.extra_body?.cache?.["no-cache"], true);
+        const firstExtraBody = firstCallBody.extra_body as Record<string, unknown> | undefined;
+        const firstCache = firstExtraBody?.cache as Record<string, unknown> | undefined;
+        assert.strictEqual(firstCache?.["no-cache"], true);
 
-        const retryCallBody = JSON.parse(fetchStub.getCall(1).args[1]!.body as string);
+        const retryCallInit = fetchStub.getCall(1).args[1] as RequestInit | undefined;
+        const retryCallBodyStr = retryCallInit?.body as string | undefined;
+        const retryCallBody = retryCallBodyStr ? (JSON.parse(retryCallBodyStr) as Record<string, unknown>) : {};
         assert.strictEqual(retryCallBody.cache, undefined);
         assert.strictEqual(retryCallBody.extra_body, undefined);
 
-        const retryHeaders = fetchStub.getCall(1).args[1]!.headers as Record<string, string>;
+        const retryHeaders = (retryCallInit?.headers as Record<string, string>) ?? {};
         assert.strictEqual(retryHeaders["Cache-Control"], undefined);
     });
 
@@ -272,7 +294,9 @@ suite("LiteLLM Client Unit Tests", () => {
         sandbox.stub(global, "fetch").callsFake(async (_input: string | URL | Request, init?: RequestInit) => {
             abortSignal = init?.signal as AbortSignal | undefined;
             // Never resolve; we expect the abort signal to flip.
-            await new Promise(() => {});
+            await new Promise((_resolve) => {
+                // Keep promise pending
+            });
             return {} as Response;
         });
 
@@ -280,7 +304,11 @@ suite("LiteLLM Client Unit Tests", () => {
         const token = {
             onCancellationRequested: (cb: () => void) => {
                 onCancel = cb;
-                return { dispose() {} };
+                return {
+                    dispose() {
+                        // No-op for mock
+                    },
+                };
             },
         } as unknown as { onCancellationRequested: (cb: () => void) => { dispose(): void } };
 

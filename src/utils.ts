@@ -828,9 +828,9 @@ export function tryParseJSONObject(text: string): { ok: true; value: Record<stri
         if (!text || !/[{]/.test(text)) {
             return { ok: false };
         }
-        const value = JSON.parse(text);
-        if (value && typeof value === "object" && !Array.isArray(value)) {
-            return { ok: true, value };
+        const parsed: unknown = JSON.parse(text);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            return { ok: true, value: parsed as Record<string, unknown> };
         }
         return { ok: false };
     } catch {

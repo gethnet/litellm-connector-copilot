@@ -96,13 +96,18 @@ export function activate(context: vscode.ExtensionContext) {
         // Build a descriptive User-Agent to help quantify API usage
         const ext = vscode.extensions.getExtension("GethNet.litellm-connector-copilot");
         Logger.debug(`Extension object found: ${!!ext}`);
-        const extVersion = ext?.packageJSON?.version ?? "unknown";
-        const vscodeVersion = vscode.version;
+        // Safely extract version with proper type guard
+        let extVersion = "unknown";
+        if (ext && typeof ext.packageJSON === "object" && ext.packageJSON !== null && "version" in ext.packageJSON) {
+            const v = (ext.packageJSON as Record<string, unknown>).version;
+            extVersion = typeof v === "string" ? v : "unknown";
+        }
         // Keep UA minimal: only extension version and VS Code version
-        ua = `litellm-vscode-chat/${extVersion} VSCode/${vscodeVersion}`;
+        const vscodeVersionStr = typeof vscode.version === "string" ? vscode.version : "unknown";
+        ua = `litellm-vscode-chat/${extVersion} VSCode/${vscodeVersionStr}`;
 
         // Capture activation
-        telemetryService.captureExtensionActivated(extVersion, vscodeVersion);
+        telemetryService.captureExtensionActivated(extVersion, vscodeVersionStr);
     } catch (uaErr) {
         Logger.error("Failed to build UA", uaErr);
     }
