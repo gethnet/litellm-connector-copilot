@@ -125,7 +125,7 @@ suite("InlineCompletionsRegistrar Unit Tests", () => {
         let changeHandler: ((e: vscode.ConfigurationChangeEvent) => void) | undefined;
         sandbox.stub(vscode.workspace, "onDidChangeConfiguration").callsFake((cb) => {
             changeHandler = cb;
-            return { dispose() {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         const disposable = { dispose: sandbox.stub() } as unknown as vscode.Disposable;

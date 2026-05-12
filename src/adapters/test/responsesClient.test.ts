@@ -101,7 +101,8 @@ suite("ResponsesClient sendResponsesRequest", () => {
         const body: LiteLLMResponsesRequest = { model: "gpt-4", input: [] };
         fetchStub.resolves(new Response(readableFromStrings([""]), { status: 200 }));
 
-        await client.sendResponsesRequest(body, { report: () => {} }, new vscode.CancellationTokenSource().token);
+        const { progress } = makeProgress();
+        await client.sendResponsesRequest(body, progress, new vscode.CancellationTokenSource().token);
 
         const [, init] = fetchStub.firstCall.args as [string, RequestInit];
         const headers = normalizeHeaders(init?.headers);
@@ -114,7 +115,8 @@ suite("ResponsesClient sendResponsesRequest", () => {
         const body: LiteLLMResponsesRequest = { model: "claude-3-opus", input: [] };
         fetchStub.resolves(new Response(readableFromStrings([""]), { status: 200 }));
 
-        await client.sendResponsesRequest(body, { report: () => {} }, new vscode.CancellationTokenSource().token);
+        const { progress } = makeProgress();
+        await client.sendResponsesRequest(body, progress, new vscode.CancellationTokenSource().token);
 
         const [, init] = fetchStub.firstCall.args as [string, RequestInit];
         const headers = normalizeHeaders(init?.headers);
@@ -319,20 +321,22 @@ suite("ResponsesClient sendResponsesRequest", () => {
 
     test("emitExperimentalUsageData handles report failure", async () => {
         const client = makeClient();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (client as any).config.experimentalEmitUsageData = true;
+        const clientInternal = client as unknown as {
+            config: LiteLLMConfig & { experimentalEmitUsageData?: boolean };
+            emitExperimentalUsageData: (
+                progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+                promptTokens: number,
+                completionTokens: number
+            ) => void;
+        };
+        clientInternal.config.experimentalEmitUsageData = true;
 
         const progress = {
             report: sinon.stub().throws(new Error("crash")),
-        };
+        } as vscode.Progress<vscode.LanguageModelResponsePart> & { report: sinon.SinonStub };
 
         // This should not throw
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (client as any).emitExperimentalUsageData(
-            progress as unknown as vscode.Progress<vscode.LanguageModelResponsePart>,
-            10,
-            20
-        );
+        clientInternal.emitExperimentalUsageData(progress, 10, 20);
         assert.ok(progress.report.calledTwice);
     });
 });

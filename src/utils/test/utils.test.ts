@@ -491,8 +491,13 @@ suite("Utility Unit Tests", () => {
     });
 
     test("V2 pipeline handles thinking parts", () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const ThinkingPart = (vscode as any).LanguageModelThinkingPart;
+        // `LanguageModelThinkingPart` is part of the proposed VS Code API and may
+        // not be present at runtime in older insiders. We probe for it via a
+        // typed view that surfaces it as an optional constructor.
+        const vscodeWithThinking = vscode as unknown as {
+            LanguageModelThinkingPart?: new (text: string, id?: string) => vscode.LanguageModelTextPart;
+        };
+        const ThinkingPart = vscodeWithThinking.LanguageModelThinkingPart;
         if (!ThinkingPart) {
             return;
         }

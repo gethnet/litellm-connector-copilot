@@ -176,6 +176,24 @@ export class TelemetryService implements vscode.Disposable {
         this.capture("request_completed", props);
     }
 
+    captureRequestCompletedWithCache(props: {
+        request_id: string;
+        caller: string;
+        model: string;
+        endpoint: string;
+        durationMs: number;
+        tokensIn: number;
+        tokensOut: number;
+        cacheReadRatio?: number;
+    }): void {
+        // Preserve backward compatibility by falling back to standard captureRequestCompleted
+        const { cacheReadRatio, ...baseProps } = props;
+        this.capture(
+            "request_completed",
+            cacheReadRatio !== undefined ? { ...baseProps, cache_read_ratio: cacheReadRatio } : baseProps
+        );
+    }
+
     captureRequestFailed(props: {
         request_id: string;
         caller: string;

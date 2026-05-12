@@ -179,7 +179,7 @@ export class StructuredLogger {
     /**
      * Shows the output channel.
      */
-    public static show(): void {
-        this.channel?.show();
+    public static show(preserveFocus?: boolean): void {
+        this.channel?.show(preserveFocus);
     }
 }

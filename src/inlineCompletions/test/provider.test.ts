@@ -55,7 +55,7 @@ suite("LiteLLMInlineCompletionProvider Unit Tests", () => {
             {} as vscode.InlineCompletionContext,
             {
                 isCancellationRequested: false,
-                onCancellationRequested: () => ({ dispose() {} }),
+                onCancellationRequested: () => ({ dispose: sandbox.stub() }),
             } as vscode.CancellationToken
         );
 
@@ -88,7 +88,7 @@ suite("LiteLLMInlineCompletionProvider Unit Tests", () => {
             {} as vscode.InlineCompletionContext,
             {
                 isCancellationRequested: false,
-                onCancellationRequested: () => ({ dispose() {} }),
+                onCancellationRequested: () => ({ dispose: sandbox.stub() }),
             } as vscode.CancellationToken
         );
 
@@ -123,7 +123,7 @@ suite("LiteLLMInlineCompletionProvider Unit Tests", () => {
             {} as vscode.InlineCompletionContext,
             {
                 isCancellationRequested: false,
-                onCancellationRequested: () => ({ dispose() {} }),
+                onCancellationRequested: () => ({ dispose: sandbox.stub() }),
             } as vscode.CancellationToken
         );
 
@@ -157,7 +157,7 @@ suite("LiteLLMInlineCompletionProvider Unit Tests", () => {
             {} as vscode.InlineCompletionContext,
             {
                 isCancellationRequested: false,
-                onCancellationRequested: () => ({ dispose() {} }),
+                onCancellationRequested: () => ({ dispose: sandbox.stub() }),
             } as vscode.CancellationToken
         );
 
@@ -191,7 +191,7 @@ suite("LiteLLMInlineCompletionProvider Unit Tests", () => {
             {} as vscode.InlineCompletionContext,
             {
                 isCancellationRequested: false,
-                onCancellationRequested: () => ({ dispose() {} }),
+                onCancellationRequested: () => ({ dispose: sandbox.stub() }),
             } as vscode.CancellationToken
         );
 
@@ -225,7 +225,7 @@ suite("LiteLLMInlineCompletionProvider Unit Tests", () => {
             {} as vscode.InlineCompletionContext,
             {
                 isCancellationRequested: false,
-                onCancellationRequested: () => ({ dispose() {} }),
+                onCancellationRequested: () => ({ dispose: sandbox.stub() }),
             } as vscode.CancellationToken
         );
 
@@ -259,7 +259,7 @@ suite("LiteLLMInlineCompletionProvider Unit Tests", () => {
             {} as vscode.InlineCompletionContext,
             {
                 isCancellationRequested: true,
-                onCancellationRequested: () => ({ dispose() {} }),
+                onCancellationRequested: () => ({ dispose: sandbox.stub() }),
             } as vscode.CancellationToken
         );
 

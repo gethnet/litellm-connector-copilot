@@ -3,6 +3,12 @@ import * as vscode from "vscode";
 export const TEST_USER_AGENT = "GitHubCopilotChat/test VSCode/test";
 
 /**
+ * Shared no-op helper for mock methods that intentionally do nothing.
+ * Centralized so callers can reuse a single deliberate no-op reference.
+ */
+export function noop(): void {}
+
+/**
  * Creates a mock vscode.SecretStorage for tests.
  *
  * @param entries - Optional key/value map. Defaults to `{ baseUrl, apiKey }`.
@@ -58,18 +64,18 @@ export function createMockModel(
 export function createMockOutputChannel(): vscode.LogOutputChannel {
     return {
         name: "mock",
-        log: () => {},
-        trace: () => {},
-        debug: () => {},
-        info: () => {},
-        warn: () => {},
-        error: () => {},
-        show: () => {},
-        hide: () => {},
-        clear: () => {},
-        dispose: () => {},
-        append: () => {},
-        appendLine: () => {},
-        replace: () => {},
+        log: noop,
+        trace: noop,
+        debug: noop,
+        info: noop,
+        warn: noop,
+        error: noop,
+        show: noop,
+        hide: noop,
+        clear: noop,
+        dispose: noop,
+        append: noop,
+        appendLine: noop,
+        replace: noop,
     } as unknown as vscode.LogOutputChannel;
 }

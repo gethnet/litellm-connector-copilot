@@ -57,12 +57,15 @@ suite("PostHogAdapter (Web)", () => {
         });
 
         assert.strictEqual(posthogCaptureExceptionStub.calledOnce, true);
-        const [capturedError, properties] = posthogCaptureExceptionStub.firstCall.args;
+        interface CapturedExceptionProps {
+            feature?: string;
+            level?: string;
+        }
+        const args = posthogCaptureExceptionStub.firstCall.args as [unknown, CapturedExceptionProps];
+        const [capturedError, properties] = args;
         assert.strictEqual(capturedError, error);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        assert.strictEqual((properties as any).feature, "test-feature");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        assert.strictEqual((properties as any).level, "error");
+        assert.strictEqual(properties.feature, "test-feature");
+        assert.strictEqual(properties.level, "error");
     });
 
     test("should identify users", () => {

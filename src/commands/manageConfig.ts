@@ -11,16 +11,23 @@ function createConfigHandler(
     telemetryService?: TelemetryService
 ) {
     return async () => {
+        // OBSOLETE LEGACY COMMAND — scheduled for removal in VS Code 1.125.
+        // This command predates the VS Code 1.120 per-group provider configuration system.
+        // It exists to keep pre-1.119 users working while they migrate. New users should
+        // configure backends via Settings → Language Models → LiteLLM, which routes
+        // configuration through `options.configuration` in our chat provider. When the
+        // minimum supported VS Code is raised to >= 1.125, delete this command (and the
+        // single-backend prompt below) along with the rest of the legacy path.
         const config = await configManager.getConfig();
 
         const items: vscode.QuickPickItem[] = [
             {
                 label: "$(settings-gear) Configure Single Backend (Legacy)",
-                description: "Basic configuration with one URL and API key",
+                description: "Basic configuration with one URL and API key — DEPRECATED, removed in 1.125",
             },
             {
-                label: "$(layers) Manage Multiple Backends",
-                description: "Configure multiple named LiteLLM proxy instances",
+                label: "$(layers) Manage Multiple Backends (Legacy)",
+                description: "Configure multiple named LiteLLM proxy instances — DEPRECATED, removed in 1.125",
             },
         ];
 
@@ -121,7 +128,7 @@ export function registerManageConfigCommand(
     configManager: ConfigManager,
     provider?: LiteLLMChatProvider,
     telemetryService?: TelemetryService
-) {
+): vscode.Disposable {
     return vscode.commands.registerCommand(
         "litellm-connector.manage",
         createConfigHandler(configManager, provider, telemetryService)
@@ -132,7 +139,7 @@ export function registerManageBackendsCommand(
     configManager: ConfigManager,
     provider?: LiteLLMChatProvider,
     telemetryService?: TelemetryService
-) {
+): vscode.Disposable {
     return vscode.commands.registerCommand("litellm-connector.manageBackends", async () => {
         const backends = await configManager.listBackends();
 
@@ -292,7 +299,10 @@ async function manageExistingBackend(
     }
 }
 
-export function registerShowModelsCommand(provider: LiteLLMChatProvider, telemetryService?: TelemetryService) {
+export function registerShowModelsCommand(
+    provider: LiteLLMChatProvider,
+    telemetryService?: TelemetryService
+): vscode.Disposable {
     return vscode.commands.registerCommand("litellm-connector.showModels", async () => {
         if (telemetryService) {
             telemetryService.captureCommandExecuted("litellm-connector.showModels");
@@ -312,7 +322,9 @@ export function registerShowModelsCommand(provider: LiteLLMChatProvider, telemet
         const picked = await vscode.window.showQuickPick(
             models
                 .slice()
-                .sort((a, b) => a.id.localeCompare(b.id))
+                .sort((a: vscode.LanguageModelChatInformation, b: vscode.LanguageModelChatInformation) =>
+                    a.id.localeCompare(b.id)
+                )
                 .map((m) => ({
                     label: m.name,
                     description: m.name !== m.id ? m.name : undefined,
@@ -336,7 +348,10 @@ export function registerShowModelsCommand(provider: LiteLLMChatProvider, telemet
     });
 }
 
-export function registerReloadModelsCommand(provider: LiteLLMChatProvider, telemetryService?: TelemetryService) {
+export function registerReloadModelsCommand(
+    provider: LiteLLMChatProvider,
+    telemetryService?: TelemetryService
+): vscode.Disposable {
     return vscode.commands.registerCommand("litellm-connector.reloadModels", async () => {
         if (telemetryService) {
             telemetryService.captureCommandExecuted("litellm-connector.reloadModels");
@@ -368,7 +383,10 @@ export function registerReloadModelsCommand(provider: LiteLLMChatProvider, telem
     });
 }
 
-export function registerCheckConnectionCommand(configManager: ConfigManager, telemetryService?: TelemetryService) {
+export function registerCheckConnectionCommand(
+    configManager: ConfigManager,
+    telemetryService?: TelemetryService
+): vscode.Disposable {
     return vscode.commands.registerCommand("litellm-connector.checkConnection", async () => {
         if (telemetryService) {
             telemetryService.captureCommandExecuted("litellm-connector.checkConnection");
@@ -417,7 +435,7 @@ export function registerResetConfigCommand(
     provider?: LiteLLMChatProvider,
     telemetryService?: TelemetryService,
     reRegisterProvider?: () => void
-) {
+): vscode.Disposable {
     return vscode.commands.registerCommand("litellm-connector.reset", async () => {
         if (telemetryService) {
             telemetryService.captureCommandExecuted("litellm-connector.reset");

@@ -4,7 +4,7 @@ import * as sinon from "sinon";
 
 import * as extension from "../../extension";
 import { ConfigManager } from "../../config/configManager";
-import { LiteLLMChatProvider } from "../../providers";
+import * as providers from "../../providers";
 import { InlineCompletionsRegistrar } from "../../inlineCompletions/registerInlineCompletions";
 import { createMockSecrets, createMockOutputChannel } from "../utils/testMocks";
 
@@ -51,13 +51,36 @@ suite("Extension Activation Unit Tests", () => {
         sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
 
         // Ensure chat provider can be constructed without side effects.
-        sandbox.stub(LiteLLMChatProvider.prototype, "getLastKnownModels").returns([]);
+        sandbox.stub(providers.LiteLLMChatProvider.prototype, "getLastKnownModels").returns([]);
 
         extension.activate(context);
 
         assert.ok(initStub.calledOnce);
         // Should have pushed registrar + lm registration + multiple command disposables.
         assert.ok(context.subscriptions.length >= 2);
+    });
+
+    test("activate constructs chat provider with secrets and UA", async () => {
+        const mockSecrets = createMockSecrets();
+        const context = {
+            subscriptions: [],
+            secrets: mockSecrets,
+        } as unknown as vscode.ExtensionContext;
+
+        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
+        sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
+        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
+        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
+        sandbox.stub(vscode.window, "showInformationMessage");
+
+        sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
+        const registerProviderStub = sandbox
+            .stub(vscode.lm, "registerLanguageModelChatProvider")
+            .returns({ dispose() {} } as vscode.Disposable);
+
+        extension.activate(context);
+
+        assert.strictEqual(registerProviderStub.calledOnce, true);
     });
 
     test("activate prompts classic config flow when not configured", async () => {

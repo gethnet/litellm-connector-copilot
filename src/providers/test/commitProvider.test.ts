@@ -5,6 +5,28 @@ import { LiteLLMCommitMessageProvider } from "../liteLLMCommitProvider";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 import type { ConfigManager } from "../../config/configManager";
 
+/**
+ * Typed view of the commit-message provider's private surface so tests
+ * can stub/inspect internals without scattering `as any` casts.
+ */
+interface CommitProviderInternals {
+    _configManager: ConfigManager;
+    _lastModelList: vscode.LanguageModelChatInformation[];
+    extractTextFromStream: (
+        stream: ReadableStream<Uint8Array>,
+        token: vscode.CancellationToken,
+        onProgress?: (text: string) => void
+    ) => Promise<string>;
+    resolveCommitModel: (
+        options: Record<string, unknown>,
+        token: vscode.CancellationToken
+    ) => Promise<vscode.LanguageModelChatInformation | undefined>;
+}
+
+function commitInternals(p: LiteLLMCommitMessageProvider): CommitProviderInternals {
+    return p as unknown as CommitProviderInternals;
+}
+
 suite("LiteLLMCommitMessageProvider Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
 
@@ -23,9 +45,9 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
             }
             return undefined;
         },
-        store: async () => {},
-        delete: async () => {},
-        onDidChange: (_listener: (e: vscode.SecretStorageChangeEvent) => unknown) => ({ dispose() {} }),
+        store: async () => undefined,
+        delete: async () => undefined,
+        onDidChange: (_listener: (e: vscode.SecretStorageChangeEvent) => unknown) => ({ dispose: () => undefined }),
     } as unknown as vscode.SecretStorage;
 
     const userAgent = "test-agent";
@@ -34,22 +56,26 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
         const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
 
         // Seed model list
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const providerAny = provider as any;
-        providerAny._lastModelList = [
+        const providerWithCache = provider as unknown as {
+            _lastModelList: vscode.LanguageModelChatInformation[];
+            _configManager: { getConfig: () => Promise<{ url: string; key?: string }> };
+        };
+        providerWithCache._lastModelList = [
             {
                 id: "test-model",
                 name: "Test Model",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
                 maxInputTokens: 1000,
                 maxOutputTokens: 1000,
                 capabilities: { toolCalling: true, imageInput: false },
                 tags: ["scm-generator"],
-            } as unknown as vscode.LanguageModelChatInformation,
+            } as vscode.LanguageModelChatInformation,
         ];
 
         // Mock config
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const configManager = (provider as any)._configManager;
+        const configManager = providerWithCache._configManager;
         sandbox.stub(configManager, "getConfig").resolves({
             url: "http://localhost:4000",
             key: "test-key",
@@ -86,40 +112,108 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
 
     test("resolveCommitModel uses commitModelIdOverride if present", async () => {
         const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const providerAny = provider as any;
-        providerAny._lastModelList = [
-            { id: "m1", tags: [] } as unknown as vscode.LanguageModelChatInformation,
-            { id: "m2", tags: ["scm-generator"] } as unknown as vscode.LanguageModelChatInformation,
+        const providerWithCache = provider as unknown as {
+            _lastModelList: vscode.LanguageModelChatInformation[];
+            resolveCommitModel: (
+                config: { commitModelIdOverride?: string },
+                token: vscode.CancellationToken
+            ) => Promise<vscode.LanguageModelChatInformation>;
+        };
+        providerWithCache._lastModelList = [
+            {
+                id: "m1",
+                name: "m1",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1000,
+                maxOutputTokens: 1000,
+                capabilities: { toolCalling: true, imageInput: false },
+                tags: [],
+            } as vscode.LanguageModelChatInformation,
+            {
+                id: "m2",
+                name: "m2",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1000,
+                maxOutputTokens: 1000,
+                capabilities: { toolCalling: true, imageInput: false },
+                tags: ["scm-generator"],
+            } as vscode.LanguageModelChatInformation,
         ];
 
         const config = { commitModelIdOverride: "m1" };
-        const resolved = await providerAny.resolveCommitModel(config, new vscode.CancellationTokenSource().token);
+        const resolved = await providerWithCache.resolveCommitModel(config, new vscode.CancellationTokenSource().token);
         assert.strictEqual(resolved.id, "m1");
     });
 
     test("resolveCommitModel prefers scm-generator tag", async () => {
         const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const providerAny = provider as any;
-        providerAny._lastModelList = [
-            { id: "m1", tags: [] } as unknown as vscode.LanguageModelChatInformation,
-            { id: "m2", tags: ["scm-generator"] } as unknown as vscode.LanguageModelChatInformation,
+        const providerWithCache = provider as unknown as {
+            _lastModelList: vscode.LanguageModelChatInformation[];
+            resolveCommitModel: (
+                config: Record<string, never>,
+                token: vscode.CancellationToken
+            ) => Promise<vscode.LanguageModelChatInformation>;
+        };
+        providerWithCache._lastModelList = [
+            {
+                id: "m1",
+                name: "m1",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1000,
+                maxOutputTokens: 1000,
+                capabilities: { toolCalling: true, imageInput: false },
+                tags: [],
+            } as vscode.LanguageModelChatInformation,
+            {
+                id: "m2",
+                name: "m2",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1000,
+                maxOutputTokens: 1000,
+                capabilities: { toolCalling: true, imageInput: false },
+                tags: ["scm-generator"],
+            } as vscode.LanguageModelChatInformation,
         ];
 
-        const config = {};
-        const resolved = await providerAny.resolveCommitModel(config, new vscode.CancellationTokenSource().token);
+        const config: Record<string, never> = {};
+        const resolved = await providerWithCache.resolveCommitModel(config, new vscode.CancellationTokenSource().token);
         assert.strictEqual(resolved.id, "m2");
     });
 
     test("resolveCommitModel returns undefined if no match or tag found", async () => {
         const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const providerAny = provider as any;
-        providerAny._lastModelList = [{ id: "m1", tags: [] } as unknown as vscode.LanguageModelChatInformation];
 
-        const config = {};
-        const resolved = await providerAny.resolveCommitModel(config, new vscode.CancellationTokenSource().token);
+        const providerWithCache = provider as unknown as {
+            _lastModelList: vscode.LanguageModelChatInformation[];
+            resolveCommitModel: (
+                config: Record<string, never>,
+                token: vscode.CancellationToken
+            ) => Promise<vscode.LanguageModelChatInformation | undefined>;
+        };
+        providerWithCache._lastModelList = [
+            {
+                id: "m1",
+                name: "m1",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1000,
+                maxOutputTokens: 1000,
+                capabilities: { toolCalling: true, imageInput: false },
+                tags: [],
+            } as vscode.LanguageModelChatInformation,
+        ];
+
+        const config: Record<string, never> = {};
+        const resolved = await providerWithCache.resolveCommitModel(config, new vscode.CancellationTokenSource().token);
         assert.strictEqual(resolved, undefined);
     });
 
@@ -127,22 +221,26 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
         const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
 
         // Seed model list
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const providerAny = provider as any;
-        providerAny._lastModelList = [
+        const providerWithCache = provider as unknown as {
+            _lastModelList: vscode.LanguageModelChatInformation[];
+            _configManager: { getConfig: () => Promise<{ url: string; key?: string }> };
+        };
+        providerWithCache._lastModelList = [
             {
                 id: "test-model",
                 name: "Test Model",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
                 maxInputTokens: 1000,
                 maxOutputTokens: 1000,
                 capabilities: { toolCalling: true, imageInput: false },
                 tags: ["scm-generator"],
-            } as unknown as vscode.LanguageModelChatInformation,
+            } as vscode.LanguageModelChatInformation,
         ];
 
         // Mock config
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const configManager = (provider as any)._configManager;
+        const configManager = providerWithCache._configManager;
         sandbox.stub(configManager, "getConfig").resolves({
             url: "http://localhost:4000",
             key: "test-key",
@@ -181,15 +279,15 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
 
     test("provideCommitMessage handles API error during generation", async () => {
         const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
-        const providerAny = provider as unknown as {
+        const providerWithCacheAndConfig = provider as unknown as {
             _lastModelList: vscode.LanguageModelChatInformation[];
             _configManager: ConfigManager;
         };
-        providerAny._lastModelList = [
+        providerWithCacheAndConfig._lastModelList = [
             { id: "m1", tags: ["scm-generator"] } as unknown as vscode.LanguageModelChatInformation,
         ];
 
-        sandbox.stub(providerAny._configManager, "getConfig").resolves({ url: "u", key: "k" });
+        sandbox.stub(providerWithCacheAndConfig._configManager, "getConfig").resolves({ url: "u", key: "k" });
         sandbox.stub(LiteLLMClient.prototype, "chat").rejects(new Error("API failure"));
 
         await assert.rejects(
@@ -205,15 +303,15 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
 
     test("provideCommitMessage handles empty stream response", async () => {
         const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
-        const providerAny = provider as unknown as {
+        const providerWithCacheAndConfig = provider as unknown as {
             _lastModelList: vscode.LanguageModelChatInformation[];
             _configManager: ConfigManager;
         };
-        providerAny._lastModelList = [
+        providerWithCacheAndConfig._lastModelList = [
             { id: "m1", tags: ["scm-generator"] } as unknown as vscode.LanguageModelChatInformation,
         ];
 
-        sandbox.stub(providerAny._configManager, "getConfig").resolves({ url: "u", key: "k" });
+        sandbox.stub(providerWithCacheAndConfig._configManager, "getConfig").resolves({ url: "u", key: "k" });
         sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
             new ReadableStream({
                 start(controller) {
@@ -309,8 +407,7 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
 
     test("provideCommitMessage throws when config URL is missing", async () => {
         const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const configManager = (provider as any)._configManager;
+        const configManager = commitInternals(provider)._configManager;
         sandbox.stub(configManager, "getConfig").resolves({ url: "" });
 
         await assert.rejects(
@@ -326,11 +423,9 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
 
     test("provideCommitMessage throws when no model available", async () => {
         const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const configManager = (provider as any)._configManager;
+        const configManager = commitInternals(provider)._configManager;
         sandbox.stub(configManager, "getConfig").resolves({ url: "http://url" });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (provider as any)._lastModelList = [];
+        commitInternals(provider)._lastModelList = [];
         sandbox.stub(provider, "discoverModels").resolves([]);
 
         await assert.rejects(
@@ -357,8 +452,7 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
         });
 
         const progress: string[] = [];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const result = await (provider as any).extractTextFromStream(
+        const result = await commitInternals(provider).extractTextFromStream(
             stream,
             new vscode.CancellationTokenSource().token,
             (text: string) => progress.push(text)
@@ -370,19 +464,18 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
 
     test("resolveCommitModel triggers discovery if list is empty", async () => {
         const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (provider as any)._lastModelList = [];
+        commitInternals(provider)._lastModelList = [];
         const discoverStub = sandbox.stub(provider, "discoverModels").callsFake(async () => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (provider as any)._lastModelList = [
+            commitInternals(provider)._lastModelList = [
                 { id: "m1", tags: ["scm-generator"] } as unknown as vscode.LanguageModelChatInformation,
             ];
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            return (provider as any)._lastModelList;
+            return commitInternals(provider)._lastModelList;
         });
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const resolved = await (provider as any).resolveCommitModel({}, new vscode.CancellationTokenSource().token);
+        const resolved = await commitInternals(provider).resolveCommitModel(
+            {},
+            new vscode.CancellationTokenSource().token
+        );
         assert.strictEqual(discoverStub.calledOnce, true);
         assert.strictEqual(resolved?.id, "m1");
     });

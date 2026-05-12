@@ -6,7 +6,7 @@ We investigated and addressed a critical bug where malformed SSE messages (conta
 ## Work Performed
 1.  **Investigation**:
     - Analyzed the SSE decoding pipeline (`src/adapters/sse/sseDecoder.ts`) and found it was incorrectly splitting multiline `data:` events into separate, independent payloads, which caused JSON parsing errors for multiline payloads.
-    - Confirmed this shared path is used by both the legacy and the new `v2` chat and completion providers.
+    - Confirmed this shared path is used by the unified `LiteLLMChatProvider` and the completion provider.
 2.  **Fix**:
     - Refactored `decodeSSE` to correctly aggregate multiline SSE data frames before yielding them.
     - Updated the logic to handle the `[DONE]` marker and multiline payloads as a single unit, ensuring that multi-line JSON events are reassembled before parsing.
@@ -28,4 +28,4 @@ We investigated and addressed a critical bug where malformed SSE messages (conta
    `npm run test -- --runInBand src/adapters/sse/test/sseDecoder.test.ts src/adapters/test/responsesClient.test.ts src/streaming/test/streamInterpreter.test.ts`
 3. **Verify Full Coverage**:
    Once focused tests are clean, execute `npm run test:coverage` to ensure the new logic is fully protected and no regressions were introduced.
-4. **Integration Check**: Verify the `v2` pipeline flows (Chat and Completions) behave as expected against a live proxy if available.
+4. **Integration Check**: Verify the unified chat and completions pipeline flows behave as expected against a live proxy if available.

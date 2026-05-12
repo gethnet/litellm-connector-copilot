@@ -48,8 +48,8 @@ suite("ManageConfig Command Unit Tests", () => {
         const showInfoStub = sandbox.stub(vscode.window, "showInformationMessage");
 
         const provider = {
-            clearModelCache: () => {},
-            discoverModels: async () => [],
+            clearModelCache: sandbox.stub(),
+            discoverModels: sandbox.stub().resolves([]),
             refreshModelInformation: () => {},
         } as unknown as LiteLLMChatProvider;
 
@@ -61,7 +61,7 @@ suite("ManageConfig Command Unit Tests", () => {
             if (id === "litellm-connector.manage") {
                 commandHandler = handler as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerManageConfigCommand(mockContext, mockConfigManager as unknown as ConfigManager, provider);
@@ -97,7 +97,7 @@ suite("ManageConfig Command Unit Tests", () => {
             if (id === "litellm-connector.manage") {
                 commandHandler = handler as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerManageConfigCommand(mockContext, mockConfigManager as unknown as ConfigManager);
@@ -128,7 +128,7 @@ suite("ManageConfig Command Unit Tests", () => {
             if (id === "litellm-connector.manage") {
                 commandHandler = handler as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerManageConfigCommand(mockContext, mockConfigManager as unknown as ConfigManager);
@@ -178,7 +178,7 @@ suite("ManageConfig Command Unit Tests", () => {
             if (id === "litellm-connector.manage") {
                 commandHandler = handler as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerManageConfigCommand(mockContext, mockConfigManager as unknown as ConfigManager);
@@ -220,7 +220,7 @@ suite("ManageConfig Command Unit Tests", () => {
             if (id === "litellm-connector.manage") {
                 commandHandler = handler as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerManageConfigCommand(mockContext, mockConfigManager as unknown as ConfigManager);
@@ -255,7 +255,7 @@ suite("ManageConfig Command Unit Tests", () => {
             if (id === "litellm-connector.manageBackends") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerManageBackendsCommand(configManagerStub as unknown as ConfigManager);
@@ -280,7 +280,7 @@ suite("ManageConfig Command Unit Tests", () => {
             if (id === "litellm-connector.manageBackends") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerManageBackendsCommand(configManagerStub as unknown as ConfigManager);
@@ -301,7 +301,7 @@ suite("ManageConfig Command Unit Tests", () => {
             if (id === "litellm-connector.reset") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerResetConfigCommand(configManagerStub as unknown as ConfigManager, provider);
@@ -335,7 +335,7 @@ suite("Model Commands Unit Tests", () => {
             if (id === "litellm-connector.showModels") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerShowModelsCommand(provider);
@@ -373,7 +373,7 @@ suite("Model Commands Unit Tests", () => {
             if (id === "litellm-connector.showModels") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerShowModelsCommand(provider);
@@ -398,7 +398,7 @@ suite("Model Commands Unit Tests", () => {
         // Avoid actually showing progress UI; run the callback immediately.
         sandbox.stub(vscode.window, "withProgress").callsFake(async (_opts, task) => {
             return task(
-                { report: () => {} } as unknown as vscode.Progress<unknown>,
+                { report: sandbox.stub() } as unknown as vscode.Progress<unknown>,
                 new vscode.CancellationTokenSource().token
             );
         });
@@ -409,7 +409,7 @@ suite("Model Commands Unit Tests", () => {
             if (id === "litellm-connector.reloadModels") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerReloadModelsCommand(provider);
@@ -432,7 +432,7 @@ suite("Model Commands Unit Tests", () => {
 
         sandbox.stub(vscode.window, "withProgress").callsFake(async (_opts, task) => {
             return task(
-                { report: () => {} } as unknown as vscode.Progress<unknown>,
+                { report: sandbox.stub() } as unknown as vscode.Progress<unknown>,
                 new vscode.CancellationTokenSource().token
             );
         });
@@ -443,7 +443,7 @@ suite("Model Commands Unit Tests", () => {
             if (id === "litellm-connector.checkConnection") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerCheckConnectionCommand(configManagerStub as unknown as ConfigManager);
@@ -485,7 +485,7 @@ suite("Model Commands Unit Tests", () => {
             if (id === "litellm-connector.showModels") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerShowModelsCommand(provider);
@@ -513,7 +513,7 @@ suite("Model Commands Unit Tests", () => {
 
         sandbox.stub(vscode.window, "withProgress").callsFake(async (_opts, task) => {
             return task(
-                { report: () => {} } as unknown as vscode.Progress<unknown>,
+                { report: sandbox.stub() } as unknown as vscode.Progress<unknown>,
                 new vscode.CancellationTokenSource().token
             );
         });
@@ -524,7 +524,7 @@ suite("Model Commands Unit Tests", () => {
             if (id === "litellm-connector.reloadModels") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerReloadModelsCommand(provider);
@@ -542,7 +542,7 @@ suite("Model Commands Unit Tests", () => {
 
         sandbox.stub(vscode.window, "withProgress").callsFake(async (_opts, task) => {
             return task(
-                { report: () => {} } as unknown as vscode.Progress<unknown>,
+                { report: sandbox.stub() } as unknown as vscode.Progress<unknown>,
                 new vscode.CancellationTokenSource().token
             );
         });
@@ -553,7 +553,7 @@ suite("Model Commands Unit Tests", () => {
             if (id === "litellm-connector.reloadModels") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerReloadModelsCommand(provider);
@@ -573,7 +573,7 @@ suite("Model Commands Unit Tests", () => {
             if (id === "litellm-connector.checkConnection") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerCheckConnectionCommand(configManagerStub as unknown as ConfigManager);
@@ -589,7 +589,7 @@ suite("Model Commands Unit Tests", () => {
 
         sandbox.stub(vscode.window, "withProgress").callsFake(async (_opts, task) => {
             return task(
-                { report: () => {} } as unknown as vscode.Progress<unknown>,
+                { report: sandbox.stub() } as unknown as vscode.Progress<unknown>,
                 new vscode.CancellationTokenSource().token
             );
         });
@@ -601,7 +601,7 @@ suite("Model Commands Unit Tests", () => {
             if (id === "litellm-connector.checkConnection") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerCheckConnectionCommand(configManagerStub as unknown as ConfigManager);
@@ -627,7 +627,7 @@ suite("Model Commands Unit Tests", () => {
             if (id === "litellm-connector.manageBackends") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerManageBackendsCommand(configManagerStub as unknown as ConfigManager);
@@ -655,7 +655,7 @@ suite("Model Commands Unit Tests", () => {
             if (id === "litellm-connector.manageBackends") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerManageBackendsCommand(configManagerStub as unknown as ConfigManager);
@@ -684,7 +684,7 @@ suite("Model Commands Unit Tests", () => {
             if (id === "litellm-connector.manageBackends") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose: () => {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerManageBackendsCommand(configManagerStub as unknown as ConfigManager);

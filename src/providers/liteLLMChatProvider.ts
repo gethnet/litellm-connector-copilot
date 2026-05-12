@@ -77,10 +77,26 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
     }
 
     async provideLanguageModelChatInformation(
-        options: { silent?: boolean },
+        options: vscode.PrepareLanguageModelChatModelOptions,
         token: CancellationToken
     ): Promise<LanguageModelChatInformation[]> {
-        return this.discoverModels({ silent: options.silent ?? false }, token);
+        // VS Code 1.120 expands the options shape to include `configuration` (per-group BYOK
+        // values configured by the user). We pass the full options through to the base discovery
+        // path so it can choose between configuration-based discovery (1.120 group system) and
+        // legacy workspace-settings discovery transparently.
+        const opts = options as vscode.PrepareLanguageModelChatModelOptions & {
+            silent?: boolean;
+            configuration?: Record<string, unknown>;
+            groupName?: string;
+        };
+        return this.discoverModels(
+            {
+                silent: opts.silent ?? false,
+                configuration: opts.configuration,
+                groupName: opts.groupName,
+            },
+            token
+        );
     }
 
     async provideTokenCount(

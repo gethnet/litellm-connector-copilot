@@ -353,4 +353,122 @@ suite("TokenUtils Unit Tests", () => {
         assert.strictEqual(isContextOverflowError(badRequest), false);
         assert.strictEqual(isContextOverflowError("plain string"), false);
     });
+
+    test("trimV2MessagesForBudget detects cache boundary and trims from front", () => {
+        const cachedMsg = {
+            role: "system",
+            content: [
+                { type: "text", text: "This is system prompt - expensive, should be preserved" },
+                { type: "data", mimeType: "application/vnd.ai.cache-control", data: new Uint8Array() },
+            ],
+        } as unknown as V2ChatMessage;
+
+        const longUserMsg = {
+            role: "user",
+            content: [
+                { type: "text", text: "X".repeat(5000) }, // ~2300 tokens - expensive
+                { type: "data", mimeType: "cache_control", data: new Uint8Array() }, // marks boundary
+            ],
+        } as unknown as V2ChatMessage;
+
+        const recentMsg = {
+            role: "user",
+            content: [{ type: "text", text: "Recent context" }], // ~2 tokens
+        } as unknown as V2ChatMessage;
+
+        const modelInfo = { id: "test", maxInputTokens: 500 } as unknown as vscode.LanguageModelChatInformation;
+
+        // Total cost: cached system (2300) + long user (2300) + recent (2) = ~4602 tokens
+        // Budget: 500 - 0 = 500 tokens
+        // Expected: keep cachedMsg and recentMsg (cached) only
+        const trimmed = trimV2MessagesForBudget([cachedMsg, longUserMsg, recentMsg], undefined, modelInfo);
+
+        assert.strictEqual(trimmed.length, 2);
+        assert.strictEqual(trimmed[0], cachedMsg);
+        assert.strictEqual(trimmed[1], recentMsg);
+    });
+
+    test("trimV2MessagesForBudget preserves cache boundary when budget allows all messages", () => {
+        const cachedMsg = {
+            role: "system",
+            content: [
+                { type: "text", text: "Cached system prompt" },
+                { type: "data", mimeType: "cache_control", data: new Uint8Array() },
+            ],
+        } as unknown as V2ChatMessage;
+
+        const regularMsg = {
+            role: "user",
+            content: [{ type: "text", text: "Regular message" }],
+        } as unknown as V2ChatMessage;
+
+        const modelInfo = { id: "test", maxInputTokens: 10000 } as unknown as vscode.LanguageModelChatInformation;
+
+        // All messages should fit within large budget
+        const trimmed = trimV2MessagesForBudget([cachedMsg, regularMsg], undefined, modelInfo);
+
+        assert.strictEqual(trimmed.length, 2);
+        assert.strictEqual(trimmed[0], cachedMsg);
+        assert.strictEqual(trimmed[1], regularMsg);
+    });
+
+    test("trimV2MessagesForBudget falls back to normal trimming with no cache boundary", () => {
+        const oldMsg = { role: "user", content: [{ type: "text", text: "Old message" }] } as unknown as V2ChatMessage;
+        const oldMsg2 = {
+            role: "user",
+            content: [{ type: "text", text: "Older message" }],
+        } as unknown as V2ChatMessage;
+        const newMsg = { role: "user", content: [{ type: "text", text: "New message" }] } as unknown as V2ChatMessage;
+
+        const modelInfo = { id: "test", maxInputTokens: 100 } as unknown as vscode.LanguageModelChatInformation;
+
+        // Old captures: 13, Older captures: 14, New captures: 11 -> total ~38 tokens
+        // Budget: 100 - 0 = 100 tokens
+        // All should fit: no trimming needed
+        const trimmed = trimV2MessagesForBudget([oldMsg, oldMsg2, newMsg], undefined, modelInfo);
+
+        assert.strictEqual(trimmed.length, 3);
+        assert.strictEqual(trimmed[2], newMsg); // Most recent kept
+    });
+
+    test("trimV2MessagesForBudget handles cache boundary with assistant protect on continue", () => {
+        const cachedMsg = {
+            role: "system",
+            content: [
+                { type: "text", text: "Cached system" },
+                { type: "data", mimeType: "cache_control", data: new Uint8Array() },
+            ],
+        } as unknown as V2ChatMessage;
+
+        const cachedUserMsg = {
+            role: "user",
+            content: [
+                { type: "text", text: "Response content" },
+                { type: "data", mimeType: "cache_control", data: new Uint8Array() },
+            ],
+        } as unknown as V2ChatMessage;
+
+        const assistantMsg = {
+            role: "assistant",
+            content: [{ type: "text", text: "Assistant response" }],
+        } as unknown as V2ChatMessage;
+
+        const continueMsg = {
+            role: "user",
+            content: [{ type: "text", text: "continue" }],
+        } as unknown as V2ChatMessage;
+
+        const modelInfo = { id: "test", maxInputTokens: 500 } as unknown as vscode.LanguageModelChatInformation;
+
+        const trimmed = trimV2MessagesForBudget(
+            [cachedMsg, cachedUserMsg, assistantMsg, continueMsg],
+            undefined,
+            modelInfo
+        );
+
+        // All messages should fit (4 messages within large budget)
+        assert.strictEqual(trimmed.length, 4);
+        assert.strictEqual(trimmed[0], cachedMsg);
+        assert.strictEqual(trimmed[3], continueMsg);
+    });
 });

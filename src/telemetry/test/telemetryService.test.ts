@@ -19,8 +19,7 @@ suite("TelemetryService", () => {
         sandbox.stub(vscode.env, "sessionId").get(() => "test-crash-reporter-id");
 
         telemetryService = new TelemetryService();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (telemetryService as any).adapter = adapterMock;
+        (telemetryService as unknown as { adapter: PostHogAdapter }).adapter = adapterMock;
     });
 
     teardown(() => {
@@ -325,8 +324,7 @@ suite("TelemetryService", () => {
             clock = sandbox.useFakeTimers();
             // Re-create service AFTER fake timers started
             telemetryService = new TelemetryService();
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (telemetryService as any).adapter = adapterMock;
+            (telemetryService as unknown as { adapter: PostHogAdapter }).adapter = adapterMock;
         });
 
         teardown(() => {
@@ -352,7 +350,7 @@ suite("TelemetryService", () => {
             assert.strictEqual(adapterMock.capture.calledOnce, true);
             const event = adapterMock.capture.firstCall.args[0];
             assert.strictEqual(event.event, "feature_used_aggregated");
-            const features = JSON.parse(event.properties.features as string);
+            const features = JSON.parse(event.properties.features as string) as Record<string, number | undefined>;
             assert.strictEqual(features["chat"], 2);
             assert.strictEqual(features["inline-completions"], 1);
             assert.strictEqual(features["other"], undefined); // "other" is in the NEXT aggregation

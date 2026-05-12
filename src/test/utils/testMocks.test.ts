@@ -121,7 +121,13 @@ suite("Test Mocks Unit Tests", () => {
 
         test("returns object with expected UI methods", () => {
             const channel = createMockOutputChannel();
-            assert.strictEqual(typeof channel.show, "function");
+            // The legacy multi-arg `show(column?, preserveFocus?)` overload is deprecated;
+            // we only assert that the modern single-arg `show(preserveFocus?: boolean)`
+            // shape is callable. Reading `channel.show` references both overloads,
+            // which is why we suppress the deprecation warning narrowly here.
+
+            const showFn: (preserveFocus?: boolean) => void = channel.show;
+            assert.strictEqual(typeof showFn, "function");
             assert.strictEqual(typeof channel.hide, "function");
             assert.strictEqual(typeof channel.clear, "function");
             assert.strictEqual(typeof channel.dispose, "function");

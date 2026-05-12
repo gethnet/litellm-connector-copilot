@@ -2,7 +2,7 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import * as sinon from "sinon";
 import { showModelPicker } from "../modelPicker";
-import { LiteLLMProviderBase } from "../../providers/liteLLMProviderBase";
+import type { LiteLLMProviderBase } from "../../providers/liteLLMProviderBase";
 import type { ConfigManager } from "../../config/configManager";
 import type { LiteLLMConfig } from "../../types";
 
@@ -12,8 +12,10 @@ suite("ModelPicker Unit Tests", () => {
 
     setup(() => {
         sandbox = sinon.createSandbox();
-        // LiteLLMProviderBase is abstract, so we need a concrete mock or stub its methods on a dummy
-        mockProvider = sandbox.createStubInstance(LiteLLMProviderBase as unknown as new () => LiteLLMProviderBase);
+        mockProvider = {
+            discoverModels: sandbox.stub(),
+            getConfigManager: sandbox.stub(),
+        } as unknown as sinon.SinonStubbedInstance<LiteLLMProviderBase>;
     });
 
     teardown(() => {

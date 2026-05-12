@@ -235,7 +235,11 @@ function sanitizeSchema(input: unknown, propName?: string): Record<string, unkno
 export function convertMessages(messages: readonly vscode.LanguageModelChatRequestMessage[]): OpenAIChatMessage[] {
     const out: OpenAIChatMessage[] = [];
     for (const m of messages) {
-        const role = mapRole(m);
+        // `lmcr_toString` returns "system" | "user" | "assistant" for the supported
+        // VS Code roles, which matches `Exclude<OpenAIChatRole, "tool">` exactly.
+        // Casting keeps the downstream string narrowing in line 315 typed correctly
+        // and replaces the deprecated `mapRole` helper.
+        const role = lmcr_toString(m.role as vscode.LanguageModelChatMessageRole) as Exclude<OpenAIChatRole, "tool">;
         const textParts: string[] = [];
         const contentItems: OpenAIChatMessageContentItem[] = [];
         const toolCalls: OpenAIToolCall[] = [];

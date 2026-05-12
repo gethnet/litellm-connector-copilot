@@ -37,4 +37,32 @@ suite("ConfigManager", () => {
         const manager = new ConfigManager(secrets);
         assert.strictEqual(manager.convertProviderConfiguration("group-a", { apiKey: "secret" }), undefined);
     });
+
+    test("dispose resolves cleanly", async () => {
+        const secrets = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            keys: async () => [],
+            onDidChange: () => ({ dispose() {} }),
+        } as unknown as vscode.SecretStorage;
+
+        const manager = new ConfigManager(secrets);
+        await assert.doesNotReject(async () => manager.dispose());
+        await assert.doesNotReject(async () => manager.dispose());
+    });
+
+    test("getSecret exposes stored values", async () => {
+        const secrets = {
+            get: async (key: string) => (key === "litellm-connector.apiKey.default" ? "abc" : undefined),
+            store: async () => {},
+            delete: async () => {},
+            keys: async () => [],
+            onDidChange: () => ({ dispose() {} }),
+        } as unknown as vscode.SecretStorage;
+
+        const manager = new ConfigManager(secrets);
+        const secret = await manager.getSecret("litellm-connector.apiKey.default");
+        assert.strictEqual(secret, "abc");
+    });
 });

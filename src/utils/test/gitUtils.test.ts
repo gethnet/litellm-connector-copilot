@@ -101,14 +101,15 @@ suite("GitUtils Unit Tests", () => {
         });
 
         test("prioritizes hunk headers and changes over context", () => {
+            const contextLine = " context";
             const largeDiff = [
                 "--- a/file.ts",
                 "+++ b/file.ts",
                 "@@ -1,100 +1,100 @@",
-                ...Array(50).fill(" context"),
+                ...Array<string>(50).fill(contextLine),
                 "-deleted line",
                 "+added line",
-                ...Array(50).fill(" context"),
+                ...Array<string>(50).fill(contextLine),
             ].join("\n");
 
             const result = GitUtils.compactDiff(largeDiff, 20);

@@ -68,6 +68,10 @@ export class ConfigManager {
         await this.secrets.delete(key);
     }
 
+    public async getSecret(key: string): Promise<string | undefined> {
+        return this.secrets.get(key);
+    }
+
     public setTelemetryService(service: TelemetryService): void {
         this._telemetryService = service;
     }
@@ -109,7 +113,12 @@ export class ConfigManager {
                 enabled: b.enabled !== false,
             }));
         } else if (url) {
-            // Legacy single-backend migration: treat as backends[0]
+            // OBSOLETE LEGACY PATH — remove in VS Code 1.125.
+            // Legacy single-backend migration: pre-1.119 users stored a single backend as
+            // top-level `litellm-connector.url` + `litellm-connector.key`. We promote that
+            // shape to a single-element backends[] so the rest of the pipeline can treat
+            // it uniformly. Once the minimum supported VS Code is >= 1.125, delete this
+            // branch (and the BASE_URL_KEY / API_KEY_KEY handling it depends on).
             backends = [
                 {
                     name: "default",
@@ -227,6 +236,7 @@ export class ConfigManager {
                       : undefined,
             commitModelIdOverride: `${scmGitCompletionsModelId}`,
             v2ApiEnabled,
+            enableResponses: v2ApiEnabled,
         };
     }
 
@@ -286,6 +296,14 @@ export class ConfigManager {
     /**
      * Returns all enabled backends with their API keys resolved from SecretStorage.
      * Falls back to legacy single-backend config if backends array is empty.
+     *
+     * @deprecated OBSOLETE — scheduled for removal in VS Code 1.125. The legacy
+     * workspace-settings backends path (`litellm-connector.backends`,
+     * `litellm-connector.url`/`litellm-connector.key`) is preserved only for users
+     * upgrading from pre-1.119 VS Code. New code paths must use the per-group
+     * configuration delivered via `options.configuration` in the VS Code 1.120
+     * Language Model Chat Provider API. When the minimum supported VS Code is
+     * raised to >= 1.125, delete this method and all of its call sites.
      */
     async resolveBackends(): Promise<ResolvedBackend[]> {
         const config = await this.getConfig();
@@ -423,6 +441,14 @@ export class ConfigManager {
     async isConfigured(): Promise<boolean> {
         const config = await this.getConfig();
         return (config.backends && config.backends.length > 0) || !!config.url;
+    }
+
+    /**
+     * Dispose hook to align with ExtensionContext subscription lifecycle.
+     * Currently a no-op because ConfigManager does not hold disposable resources.
+     */
+    async dispose(): Promise<void> {
+        this._telemetryService = undefined;
     }
 
     /**

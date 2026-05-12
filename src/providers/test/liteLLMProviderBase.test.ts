@@ -10,6 +10,62 @@ import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, ResolvedBackend } f
 import { createMockSecrets } from "../../test/utils/testMocks";
 import type { BackendSession } from "../backendSession";
 
+/**
+ * Typed view of the protected/private members and methods we need to inspect
+ * in tests. Casting `provider as unknown as BaseTestAccess` once eliminates
+ * dozens of `as any` casts and the no-unsafe lint warnings they generate,
+ * while still keeping the production class API hidden in callers.
+ */
+interface BaseTestAccess {
+    _configManager: ConfigManager;
+    _lastModelList: vscode.LanguageModelChatInformation[];
+    _modelListFetchedAtMs: number;
+    _modelInfoCache: Map<string, LiteLLMModelInfo | undefined>;
+    _parameterProbeCache: Map<string, Set<string>>;
+    _doDiscoverModels: (
+        options: { silent?: boolean; configuration?: Record<string, unknown> },
+        token: vscode.CancellationToken
+    ) => Promise<vscode.LanguageModelChatInformation[]>;
+    buildOpenAIChatRequest: (
+        messages: vscode.LanguageModelChatRequestMessage[],
+        model: vscode.LanguageModelChatInformation,
+        options: vscode.ProvideLanguageModelChatResponseOptions,
+        modelInfo?: LiteLLMModelInfo
+    ) => Promise<OpenAIChatCompletionRequest>;
+    buildV2ChatRequest: (
+        messages: vscode.LanguageModelChatRequestMessage[],
+        model: vscode.LanguageModelChatInformation,
+        options: vscode.ProvideLanguageModelChatResponseOptions,
+        modelInfo?: LiteLLMModelInfo
+    ) => Promise<OpenAIChatCompletionRequest>;
+    buildCapabilities: (modelInfo: LiteLLMModelInfo | undefined) => vscode.LanguageModelChatCapabilities;
+    parseApiError: (statusCode: number, errorText: string) => string;
+    getModelTags: (modelId: string, modelInfo?: LiteLLMModelInfo, overrides?: Record<string, string[]>) => string[];
+    stripUnsupportedParametersFromRequest: (
+        requestBody: Record<string, unknown>,
+        modelInfo: LiteLLMModelInfo | undefined,
+        modelId?: string
+    ) => void;
+    detectQuotaToolRedaction: (
+        messages: readonly vscode.LanguageModelChatRequestMessage[],
+        tools: readonly vscode.LanguageModelChatTool[],
+        requestId: string,
+        modelId: string,
+        disableRedaction: boolean
+    ) => { tools: readonly vscode.LanguageModelChatTool[] };
+    isParameterSupported: (param: string, modelInfo: LiteLLMModelInfo | undefined, modelId?: string) => boolean;
+    sanitizeErrorTextForLogs: (text: string) => string;
+    collectMessageText: (m: vscode.LanguageModelChatRequestMessage) => string;
+}
+
+/**
+ * Convenience accessor that performs the single typed cast.
+ * Tests should call `access(provider)` instead of repeating `as unknown as ...`.
+ */
+function access(provider: LiteLLMChatProvider): BaseTestAccess {
+    return provider as unknown as BaseTestAccess;
+}
+
 suite("LiteLLM Provider Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
     let settingsMap: Map<string, unknown>;
@@ -47,11 +103,8 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     test("buildOpenAIChatRequest respects sendDefaultParameters = false (default)", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const build = (provider as any).buildOpenAIChatRequest.bind(provider);
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const configManager = (provider as any)._configManager;
+        const build = access(provider).buildOpenAIChatRequest.bind(provider);
+        const configManager = access(provider)._configManager;
         sandbox.stub(configManager, "getConfig").resolves({
             url: "http://localhost:4000",
             sendDefaultParameters: false,
@@ -93,11 +146,8 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     test("buildOpenAIChatRequest respects sendDefaultParameters = true", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const build = (provider as any).buildOpenAIChatRequest.bind(provider);
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const configManager = (provider as any)._configManager;
+        const build = access(provider).buildOpenAIChatRequest.bind(provider);
+        const configManager = access(provider)._configManager;
         sandbox.stub(configManager, "getConfig").resolves({
             url: "http://localhost:4000",
             sendDefaultParameters: true,
@@ -135,11 +185,8 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     test("buildOpenAIChatRequest prefers modelOptions over defaults", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const build = (provider as any).buildOpenAIChatRequest.bind(provider);
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const configManager = (provider as any)._configManager;
+        const build = access(provider).buildOpenAIChatRequest.bind(provider);
+        const configManager = access(provider)._configManager;
         sandbox.stub(configManager, "getConfig").resolves({
             url: "http://localhost:4000",
             sendDefaultParameters: true,
@@ -173,11 +220,8 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     test("buildOpenAIChatRequest applies reasoning effort from modelConfiguration", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const build = (provider as any).buildOpenAIChatRequest.bind(provider);
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const configManager = (provider as any)._configManager;
+        const build = access(provider).buildOpenAIChatRequest.bind(provider);
+        const configManager = access(provider)._configManager;
         sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
 
         const model = {
@@ -201,21 +245,22 @@ suite("LiteLLM Provider Unit Tests", () => {
             model,
             {
                 modelOptions: {},
-                modelConfiguration: { reasoningEffort: "P3" },
+                modelConfiguration: { reasoningEffort: "medium" },
             } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
             modelInfo
         );
 
-        assert.strictEqual(request.reasoning?.effort, "P3");
+        // Reasoning effort is sent as a flat top-level `reasoning_effort` key — the
+        // canonical OpenAI/LiteLLM-compatible format. Sending the previous nested
+        // `reasoning: { effort }` shape produced 400s from upstream providers because
+        // LiteLLM did not translate it.
+        assert.strictEqual(request.reasoning_effort, "medium");
     });
 
     test("buildV2ChatRequest applies reasoning effort from modelOptions fallback", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const build = (provider as any).buildV2ChatRequest.bind(provider);
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const configManager = (provider as any)._configManager;
+        const build = access(provider).buildV2ChatRequest.bind(provider);
+        const configManager = access(provider)._configManager;
         sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
 
         const model = {
@@ -238,20 +283,93 @@ suite("LiteLLM Provider Unit Tests", () => {
             messages,
             model,
             {
-                modelOptions: { reasoningEffort: "P4" },
+                modelOptions: { reasoning_effort: "xhigh" },
             } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
             modelInfo
         );
 
-        assert.strictEqual(request.reasoning?.effort, "P4");
+        assert.strictEqual(request.reasoning_effort, "xhigh");
     });
 
-    test("discoverModels attaches reasoning configuration schema when supported", async () => {
+    test("buildOpenAIChatRequest omits reasoning_effort when user has not picked one", async () => {
+        // Regression: previously we defaulted to "medium" for any reasoning-capable
+        // model. That caused LiteLLM to forward a `reasoning_effort` field to upstream
+        // providers that did not accept it, producing a "reasoning" 400 error on every
+        // chat. We now only send the field when the user explicitly chose an effort.
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const build = access(provider).buildOpenAIChatRequest.bind(provider);
+        const configManager = access(provider)._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+
+        const model = {
+            id: "reasoning-model",
+            maxInputTokens: 8192,
+            maxOutputTokens: 4096,
+        } as vscode.LanguageModelChatInformation;
+
+        const modelInfo: LiteLLMModelInfo = { supports_reasoning: true };
+
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("hello")],
+                name: undefined,
+            },
+        ];
+
+        const request = await build(
+            messages,
+            model,
+            {
+                modelOptions: {},
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+            modelInfo
+        );
+
+        assert.strictEqual(request.reasoning_effort, undefined);
+        assert.ok(!("reasoning" in request), "Should not emit nested reasoning shape either");
+    });
+
+    test("buildOpenAIChatRequest treats picker 'none' as opt-out and omits reasoning_effort", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const build = access(provider).buildOpenAIChatRequest.bind(provider);
+        const configManager = access(provider)._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+
+        const model = {
+            id: "reasoning-model",
+            maxInputTokens: 8192,
+            maxOutputTokens: 4096,
+        } as vscode.LanguageModelChatInformation;
+
+        const modelInfo: LiteLLMModelInfo = { supports_reasoning: true };
+
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("hello")],
+                name: undefined,
+            },
+        ];
+
+        const request = await build(
+            messages,
+            model,
+            {
+                modelOptions: {},
+                modelConfiguration: { reasoningEffort: "none" },
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+            modelInfo
+        );
+
+        assert.strictEqual(request.reasoning_effort, undefined);
+    });
+
+    test("discoverModels attaches backend metadata and reasoning configuration schema when supported", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
         // Stub configuration-based discovery
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const configManager = (provider as any)._configManager as ConfigManager;
+        const configManager = access(provider)._configManager as ConfigManager;
         const session: BackendSession = {
             backendName: "group1",
             baseUrl: "http://localhost:4000",
@@ -274,8 +392,77 @@ suite("LiteLLM Provider Unit Tests", () => {
             models[0].configurationSchema,
             "Expected configurationSchema to be present for reasoning-capable model"
         );
+        const modelWithBackendMetadata = models[0] as vscode.LanguageModelChatInformation & {
+            _backendName?: string;
+            _backendUrl?: string;
+            _apiKey?: string;
+        };
+        assert.strictEqual(modelWithBackendMetadata._backendName, "group1");
+        assert.strictEqual(modelWithBackendMetadata._backendUrl, "http://localhost:4000");
+        assert.strictEqual(modelWithBackendMetadata._apiKey, "k");
         const props = models[0].configurationSchema?.properties as Record<string, unknown> | undefined;
         assert.ok(props?.reasoningEffort, "Expected reasoningEffort property in configuration schema");
+    });
+
+    test("configurationSchema uses OpenAI reasoning effort values", async () => {
+        const providerForReasoning = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const configManagerForReasoning = (
+            providerForReasoning as unknown as {
+                _configManager: ConfigManager;
+            }
+        )._configManager;
+        const sessionForReasoning: BackendSession = {
+            backendName: "group1",
+            baseUrl: "http://localhost:4000",
+            apiKey: "k",
+            client: {
+                getModelInfo: sandbox
+                    .stub()
+                    .resolves({ data: [{ model_name: "m1", model_info: { supports_reasoning: true } }] }),
+            } as unknown as BackendSession["client"],
+        };
+        sandbox.stub(configManagerForReasoning, "convertProviderConfiguration").returns(sessionForReasoning);
+
+        const models = await providerForReasoning.discoverModels(
+            { configuration: { baseUrl: "http://localhost:4000" } },
+            new vscode.CancellationTokenSource().token
+        );
+
+        const configurationSchema = models[0].configurationSchema;
+        assert.ok(configurationSchema, "Expected configurationSchema to be present");
+
+        const enumValues = (
+            configurationSchema?.properties?.reasoningEffort as {
+                enum: string[];
+                enumItemLabels: string[];
+            }
+        )?.enum;
+
+        const enumItemLabels = (
+            configurationSchema?.properties?.reasoningEffort as {
+                enum: string[];
+                enumItemLabels: string[];
+                default: string;
+            }
+        )?.enumItemLabels;
+        const defaultValue = (
+            configurationSchema?.properties?.reasoningEffort as {
+                enum: string[];
+                enumItemLabels: string[];
+                default: string;
+            }
+        )?.default;
+
+        assert.deepStrictEqual(
+            enumValues,
+            ["none", "minimal", "low", "medium", "high", "xhigh"],
+            "Expected OpenAI-aligned effort values in enum"
+        );
+        assert.ok(
+            enumItemLabels?.includes("Medium"),
+            "Expected 'Medium' effort label to be present in enumItemLabels (capitalized for picker UX)"
+        );
+        assert.strictEqual(defaultValue, "medium");
     });
 
     test("clearModelCache resets model list and caches", () => {
@@ -1228,8 +1415,7 @@ suite("LiteLLM Provider Unit Tests", () => {
     test("discoverModels deduplicates in-flight requests", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         // Stub _doDiscoverModels to take some time
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const doDiscoverStub = sandbox.stub(provider as any, "_doDiscoverModels").callsFake(async () => {
+        const doDiscoverStub = sandbox.stub(access(provider), "_doDiscoverModels").callsFake(async () => {
             await new Promise((resolve) => setTimeout(resolve, 50));
             return [];
         });
@@ -1243,13 +1429,9 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     test("discoverModels respects TTL for silent requests", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (provider as any)._lastModelList = [{ id: "m1" }];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (provider as any)._modelListFetchedAtMs = Date.now();
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const doDiscoverStub = sandbox.stub(provider as any, "_doDiscoverModels");
+        access(provider)._lastModelList = [{ id: "m1" } as vscode.LanguageModelChatInformation];
+        access(provider)._modelListFetchedAtMs = Date.now();
+        const doDiscoverStub = sandbox.stub(access(provider), "_doDiscoverModels");
 
         const models = await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
         assert.strictEqual(models.length, 1);
@@ -1258,13 +1440,11 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     test("discoverModels bypasses TTL for non-silent requests", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (provider as any)._lastModelList = [{ id: "m1" }];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (provider as any)._modelListFetchedAtMs = Date.now();
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const doDiscoverStub = sandbox.stub(provider as any, "_doDiscoverModels").resolves([{ id: "m2" } as any]);
+        access(provider)._lastModelList = [{ id: "m1" } as vscode.LanguageModelChatInformation];
+        access(provider)._modelListFetchedAtMs = Date.now();
+        const doDiscoverStub = sandbox
+            .stub(access(provider), "_doDiscoverModels")
+            .resolves([{ id: "m2" } as vscode.LanguageModelChatInformation]);
 
         const models = await provider.discoverModels({ silent: false }, new vscode.CancellationTokenSource().token);
         assert.strictEqual(models[0].id, "m2");
@@ -1273,13 +1453,10 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     test("_doDiscoverModels triggers config flow when no backends configured and not silent", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const configManager = (provider as any)._configManager;
+        const configManager = access(provider)._configManager;
         sandbox.stub(configManager, "resolveBackends").resolves([]);
         const execStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const models = await (provider as any)._doDiscoverModels(
+        const models = await access(provider)._doDiscoverModels(
             { silent: false },
             new vscode.CancellationTokenSource().token
         );
@@ -1289,12 +1466,9 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     test("_doDiscoverModels handles error gracefully", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const configManager = (provider as any)._configManager;
+        const configManager = access(provider)._configManager;
         sandbox.stub(configManager, "getConfig").rejects(new Error("boom"));
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const models = await (provider as any)._doDiscoverModels(
+        const models = await access(provider)._doDiscoverModels(
             { silent: true },
             new vscode.CancellationTokenSource().token
         );
@@ -1303,8 +1477,7 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     test("getModelTags adds inline-edit for models containing 'coder' or 'code'", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const getModelTags = (provider as any).getModelTags.bind(provider);
+        const getModelTags = access(provider).getModelTags.bind(provider);
 
         assert.ok(getModelTags("my-coder-model").includes("inline-edit"));
         assert.ok(getModelTags("cool-code-model").includes("inline-edit"));
@@ -1312,23 +1485,18 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     test("getModelTags adds tools tag for function-calling or vision models", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const getModelTags = (provider as any).getModelTags.bind(provider);
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        assert.ok(getModelTags("m1", { supports_function_calling: true } as any).includes("tools"));
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        assert.ok(getModelTags("m2", { supports_vision: true } as any).includes("vision"));
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        assert.ok(getModelTags("m3", { supported_openai_params: ["tools"] } as any).includes("tools"));
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        assert.ok(getModelTags("m4", { supported_openai_params: ["tool_choice"] } as any).includes("tools"));
+        const getModelTags = access(provider).getModelTags.bind(provider);
+        assert.ok(getModelTags("m1", { supports_function_calling: true } as LiteLLMModelInfo).includes("tools"));
+        assert.ok(getModelTags("m2", { supports_vision: true } as LiteLLMModelInfo).includes("vision"));
+        assert.ok(getModelTags("m3", { supported_openai_params: ["tools"] } as LiteLLMModelInfo).includes("tools"));
+        assert.ok(
+            getModelTags("m4", { supported_openai_params: ["tool_choice"] } as LiteLLMModelInfo).includes("tools")
+        );
     });
 
     test("sanitizeErrorTextForLogs caps long text and removes prompt wrappers", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const sanitize = (provider as any).sanitizeErrorTextForLogs.bind(provider);
+        const sanitize = access(provider).sanitizeErrorTextForLogs.bind(provider);
 
         const input = "<context>Secret</context><editorContext>Code</editorContext>Some error";
         const output = sanitize(input);
@@ -1356,8 +1524,7 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     test("parseApiError handles non-JSON error text", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const parse = (provider as any).parseApiError.bind(provider);
+        const parse = access(provider).parseApiError.bind(provider);
 
         assert.strictEqual(parse(500, "Raw error message"), "Raw error message");
         assert.strictEqual(parse(500, ""), "API request failed with status 500");

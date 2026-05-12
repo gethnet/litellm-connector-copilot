@@ -2,7 +2,7 @@ import * as assert from "assert";
 import * as sinon from "sinon";
 import * as vscode from "vscode";
 import { StructuredLogger } from "../structuredLogger";
-import type { LogLevel } from "../types";
+import type { LogLevel, LogEvent } from "../types";
 
 suite("StructuredLogger", () => {
     let sandbox: sinon.SinonSandbox;
@@ -21,10 +21,9 @@ suite("StructuredLogger", () => {
      * returns true because all logs are sent to the channel and the channel
      * decides what to display based on the user-selected level.
      */
+
     test("isEnabled always returns true (filtering handled by output channel UI)", () => {
-        // Regardless of setLevel calls, isEnabled should always return true
-        StructuredLogger.setLevel("info" as LogLevel);
-
+        // Regardless of previous state, isEnabled should always return true
         assert.strictEqual(StructuredLogger.isEnabled("trace" as LogLevel), true);
         assert.strictEqual(StructuredLogger.isEnabled("debug" as LogLevel), true);
         assert.strictEqual(StructuredLogger.isEnabled("info" as LogLevel), true);
@@ -32,9 +31,7 @@ suite("StructuredLogger", () => {
         assert.strictEqual(StructuredLogger.isEnabled("error" as LogLevel), true);
     });
 
-    test("isEnabled returns true for all levels when set to trace", () => {
-        StructuredLogger.setLevel("trace" as LogLevel);
-
+    test("isEnabled returns true for all levels when using trace", () => {
         assert.strictEqual(StructuredLogger.isEnabled("trace" as LogLevel), true);
         assert.strictEqual(StructuredLogger.isEnabled("debug" as LogLevel), true);
         assert.strictEqual(StructuredLogger.isEnabled("info" as LogLevel), true);
@@ -42,9 +39,7 @@ suite("StructuredLogger", () => {
         assert.strictEqual(StructuredLogger.isEnabled("error" as LogLevel), true);
     });
 
-    test("isEnabled returns true for all levels when set to error", () => {
-        StructuredLogger.setLevel("error" as LogLevel);
-
+    test("isEnabled returns true for all levels when using error", () => {
         // All levels return true - output channel UI handles filtering
         assert.strictEqual(StructuredLogger.isEnabled("trace" as LogLevel), true);
         assert.strictEqual(StructuredLogger.isEnabled("debug" as LogLevel), true);
@@ -107,7 +102,11 @@ suite("StructuredLogger", () => {
 
         assert.ok((mockChannel.info as sinon.SinonStub).calledOnce);
         const logStr = (mockChannel.info as sinon.SinonStub).firstCall.args[0] as string;
-        const logObj = JSON.parse(logStr);
+        const parsedLog: unknown = JSON.parse(logStr);
+        if (!parsedLog || typeof parsedLog !== "object") {
+            throw new Error("Parsed log is not an object");
+        }
+        const logObj = parsedLog as LogEvent;
 
         assert.strictEqual(logObj.requestId, "req-1");
         assert.strictEqual(logObj.level, "info");
@@ -128,7 +127,11 @@ suite("StructuredLogger", () => {
         StructuredLogger.info("test", { foo: "bar" });
 
         const logStr = (mockChannel.info as sinon.SinonStub).firstCall.args[0] as string;
-        const logObj = JSON.parse(logStr);
+        const parsed: unknown = JSON.parse(logStr);
+        if (!parsed || typeof parsed !== "object") {
+            throw new Error("Parsed log is not an object");
+        }
+        const logObj = parsed as LogEvent;
         assert.strictEqual(logObj.requestId, "no-request");
     });
 
@@ -138,7 +141,7 @@ suite("StructuredLogger", () => {
         } as unknown as vscode.LogOutputChannel;
         (StructuredLogger as unknown as { channel: vscode.LogOutputChannel | undefined }).channel = mockChannel;
 
-        StructuredLogger.show();
+        StructuredLogger.show(false);
         assert.ok((mockChannel.show as sinon.SinonStub).calledOnce);
     });
 

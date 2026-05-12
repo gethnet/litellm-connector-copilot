@@ -80,8 +80,8 @@ Models can use tools and functions to interact with your workspace. Perfect for 
 ### 👁️ **Vision Capabilities**
 Use image-capable models to analyze screenshots, diagrams, and code directly in chat. Upload images and get insights.
 
-- 🧠 **V2 Chat Provider (Experimental)**
-Supports VS Code's newer Language Model APIs including `LanguageModelChatMessage2` and `LanguageModelThinkingPart` for reasoning/thinking models. Emits structured text, thinking, data, and tool-call parts to the progress callback.
+### 🧠 **Rich Response Parts**
+The chat provider emits structured response parts to VS Code — text, thinking/reasoning, data, and tool-call parts — using the VS Code 1.120 Language Model APIs. Reasoning models that produce thinking output render correctly in the chat UI.
 
 ### 🧠 **Smart, Automatic Compatibility**
 The extension automatically handles provider-specific quirks:
@@ -132,7 +132,7 @@ Enable LiteLLM-powered inline completions as an alternative to Copilot's default
 - � **Multi-Repo Commit Generation** – Commit message generation now correctly identifies the active repository in multi-repo workspaces. Generates the right diff from the right repo every time.
 - 🧪 **Telemetry & Observability** – PostHog-backed telemetry for feature-usage tracking, request metrics, and structured JSONL logging. All non-identifiable and opt-in.
 - 🔧 **Model Capability Overrides** – Manually override VS Code's capability detection (`toolCalling`, `imageInput`) when auto-detection is incorrect. Configure via `litellm-connector.modelCapabilitiesOverrides`.
-- 🧠 **V2 Chat Provider** – Experimental support for newer VS Code chat APIs including thinking parts for reasoning models.
+- 🧠 **Rich Chat Response Parts** – Unified chat provider built on the VS Code 1.120 Language Model APIs. Emits structured text, thinking, data, and tool-call parts so reasoning models render correctly in chat.
 - �📊 **Advanced Token Counting** – Smarter budgeting with local estimation, background refinement, and short-lived caching for faster, more accurate context management.
 - 🏎️ **Optimized Model Discovery** – Intelligent discovery throttling with in-flight deduplication and TTL caching to prevent excessive proxy lookups.
 - 🧼 **SCM Message Sanitization** – Clean commit messages by automatically stripping triple backticks and Markdown artifacts.

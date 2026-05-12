@@ -3,6 +3,23 @@ import * as vscode from "vscode";
 import * as sinon from "sinon";
 import { LiteLLMChatProvider } from "../";
 
+/**
+ * Typed view of the private cache fields that throttling tests inspect.
+ * Centralizing the shape avoids `(provider as any).<member>` access.
+ */
+interface DiscoveryThrottlingInternals {
+    _modelListFetchedAtMs: number;
+    _lastModelList: vscode.LanguageModelChatInformation[];
+    _doDiscoverModels: (
+        options: { silent?: boolean },
+        token: vscode.CancellationToken
+    ) => Promise<vscode.LanguageModelChatInformation[]>;
+}
+
+function internals(p: LiteLLMChatProvider): DiscoveryThrottlingInternals {
+    return p as unknown as DiscoveryThrottlingInternals;
+}
+
 suite("LiteLLM Discovery Throttling Tests", () => {
     let sandbox: sinon.SinonSandbox;
     const mockSecrets: vscode.SecretStorage = {
@@ -45,8 +62,7 @@ suite("LiteLLM Discovery Throttling Tests", () => {
 
         // Stub the internal _doDiscoverModels which is what discoverModels calls.
         // This decouples the test from LiteLLMClient and complex async timing.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const doDiscoverStub = sandbox.stub(provider as any, "_doDiscoverModels").returns(requestPromise);
+        const doDiscoverStub = sandbox.stub(internals(provider), "_doDiscoverModels").returns(requestPromise);
 
         // Fire multiple concurrent discovery requests
         const p1 = provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
@@ -68,18 +84,15 @@ suite("LiteLLM Discovery Throttling Tests", () => {
         const mockModels = [{ id: "test-model" }] as vscode.LanguageModelChatInformation[];
 
         // Stub the internal implementation
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const doDiscoverStub = sandbox.stub(provider as any, "_doDiscoverModels").resolves(mockModels);
+        const doDiscoverStub = sandbox.stub(internals(provider), "_doDiscoverModels").resolves(mockModels);
 
         // First call
         await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
         assert.strictEqual(doDiscoverStub.callCount, 1, "First call should hit implementation");
 
         // Manually set the state to simulate time passing (well within 30s TTL)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (provider as any)._modelListFetchedAtMs = Date.now() - 10000;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (provider as any)._lastModelList = mockModels;
+        internals(provider)._modelListFetchedAtMs = Date.now() - 10000;
+        internals(provider)._lastModelList = mockModels;
 
         // Second call immediately after
         const results = await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
@@ -87,8 +100,7 @@ suite("LiteLLM Discovery Throttling Tests", () => {
         assert.deepStrictEqual(results, mockModels);
 
         // Manually set the fetched time to 31 seconds ago (past TTL)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (provider as any)._modelListFetchedAtMs = Date.now() - 31000;
+        internals(provider)._modelListFetchedAtMs = Date.now() - 31000;
 
         await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
         assert.strictEqual(doDiscoverStub.callCount, 2, "Call after TTL should hit implementation again");
@@ -97,14 +109,11 @@ suite("LiteLLM Discovery Throttling Tests", () => {
     test("discoverModels should bypass TTL for non-silent requests", async () => {
         const provider = createProvider();
         const mockModels = [{ id: "test-model" }] as vscode.LanguageModelChatInformation[];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const doDiscoverStub = sandbox.stub(provider as any, "_doDiscoverModels").resolves(mockModels);
+        const doDiscoverStub = sandbox.stub(internals(provider), "_doDiscoverModels").resolves(mockModels);
 
         // Set state to "recently fetched"
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (provider as any)._modelListFetchedAtMs = Date.now() - 5000;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (provider as any)._lastModelList = mockModels;
+        internals(provider)._modelListFetchedAtMs = Date.now() - 5000;
+        internals(provider)._lastModelList = mockModels;
 
         // Non-silent call (force refresh)
         await provider.discoverModels({ silent: false }, new vscode.CancellationTokenSource().token);

@@ -340,71 +340,92 @@ export function trimV2MessagesForBudget(
         throw new Error("Message exceeds token limit.");
     }
 
-    const originalTokens = countTokensForV2Messages(messages, model.id, modelInfo);
-
-    let systemMessage: V2ChatMessage | undefined;
-    const remaining: V2ChatMessage[] = [];
     const messageArray: readonly V2ChatMessage[] = Array.isArray(messages) ? messages : [messages];
-    for (const msg of messageArray) {
-        // Guard: ensure message has required properties before accessing role
-        if (!msg || typeof msg !== "object" || !("role" in msg)) {
-            continue;
-        }
-        const msgObj = msg as { role?: unknown };
-        const roleValue =
-            typeof msgObj.role === "number" ? msgObj.role : typeof msgObj.role === "string" ? msgObj.role : "";
-        const isSystem =
-            roleValue !== vscode.LanguageModelChatMessageRole.User &&
-            roleValue !== vscode.LanguageModelChatMessageRole.Assistant;
-        if (!systemMessage && isSystem) {
-            systemMessage = msg;
-        } else {
-            remaining.push(msg);
-        }
-    }
+    const originalTokens = countTokensForV2Messages(messageArray, model.id, modelInfo);
 
-    const selected: V2ChatMessage[] = [];
-    let used = 0;
+    const messageHasCacheControl = (msg: V2ChatMessage): boolean =>
+        Array.isArray(msg.content) &&
+        msg.content.some(
+            (part) =>
+                part.type === "data" &&
+                typeof (part as { mimeType?: string }).mimeType === "string" &&
+                isCacheControlMimeType((part as { mimeType: string }).mimeType)
+        );
 
-    const lastMessage = remaining.length > 0 ? remaining[remaining.length - 1] : undefined;
+    const cacheSplitIndex = messageArray.findIndex(messageHasCacheControl);
+    const hasCacheControlInHistory = cacheSplitIndex !== -1;
+
+    const lastMessage = messageArray.length > 0 ? messageArray[messageArray.length - 1] : undefined;
     const isContinuation =
         lastMessage &&
-        typeof lastMessage.role === "number" &&
-        lastMessage.role === vscode.LanguageModelChatMessageRole.User &&
+        (lastMessage.role === (vscode.LanguageModelChatMessageRole.User as unknown as number) ||
+            lastMessage.role === "user") &&
         Array.isArray(lastMessage.content) &&
         lastMessage.content.length === 1 &&
         lastMessage.content[0]?.type === "text" &&
         typeof lastMessage.content[0].text === "string" &&
         lastMessage.content[0].text.trim().toLowerCase() === "continue";
 
-    if (systemMessage) {
-        const sysTokens = countTokensForV2Messages(systemMessage, model.id, modelInfo);
-        if (sysTokens > budget) {
-            throw new Error("Message exceeds token limit.");
+    const selected: V2ChatMessage[] = [];
+    let used = 0;
+
+    if (hasCacheControlInHistory) {
+        // Preserve all messages up to and including the cache boundary as cached (zero-cost)
+        const cachedPrefix = messageArray.slice(0, cacheSplitIndex + 1);
+        selected.push(...cachedPrefix);
+
+        const tail = messageArray.slice(cacheSplitIndex + 1);
+        const tailSelected: V2ChatMessage[] = [];
+
+        for (let i = tail.length - 1; i >= 0; i--) {
+            const msg = tail[i];
+            const msgTokens = countTokensForV2Messages(msg, model.id, modelInfo);
+            const isProtectedAssistantMessage =
+                isContinuation &&
+                i === tail.length - 2 &&
+                (msg.role === (vscode.LanguageModelChatMessageRole.Assistant as unknown as number) ||
+                    msg.role === "assistant");
+
+            if (
+                used + msgTokens <= budget ||
+                (tailSelected.length === 0 && selected.length === cachedPrefix.length) ||
+                isProtectedAssistantMessage
+            ) {
+                tailSelected.unshift(msg);
+                used += msgTokens;
+            } else if (!isContinuation) {
+                break;
+            }
         }
-        selected.push(systemMessage);
-        used += sysTokens;
+
+        selected.push(...tailSelected);
+    } else {
+        // No cache boundary: trim from the end, preserving the most recent messages
+        for (let i = messageArray.length - 1; i >= 0; i--) {
+            const msg = messageArray[i];
+            const msgTokens = countTokensForV2Messages(msg, model.id, modelInfo);
+            const isProtectedAssistantMessage =
+                isContinuation &&
+                i === messageArray.length - 2 &&
+                (msg.role === (vscode.LanguageModelChatMessageRole.Assistant as unknown as number) ||
+                    msg.role === "assistant");
+
+            if (used + msgTokens <= budget || selected.length === 0 || isProtectedAssistantMessage) {
+                selected.unshift(msg);
+                used += msgTokens;
+            } else if (!isContinuation) {
+                break;
+            }
+        }
     }
 
-    for (let i = remaining.length - 1; i >= 0; i--) {
-        const msg = remaining[i];
-        const msgTokens = countTokensForV2Messages(msg, model.id, modelInfo);
-        const isProtectedAssistantMessage =
-            isContinuation &&
-            i === remaining.length - 2 &&
-            (msg.role === (vscode.LanguageModelChatMessageRole.Assistant as unknown as number) ||
-                msg.role === "assistant");
-
-        if (used + msgTokens <= budget || selected.length === (systemMessage ? 1 : 0) || isProtectedAssistantMessage) {
-            selected.splice(systemMessage ? 1 : 0, 0, msg);
-            used += msgTokens;
-        } else if (!isContinuation) {
-            break;
-        }
-    }
-
+    const budgetTokens = used;
     if (telemetryServiceInstance && selected.length < messageArray.length) {
-        telemetryServiceInstance.captureTrimExecuted(model.id, "v2-chat", originalTokens, used, budget);
+        telemetryServiceInstance.captureTrimExecuted(model.id, "v2-chat", originalTokens, budgetTokens, budget);
+    }
+
+    if (budgetTokens > budget) {
+        throw new Error("Message exceeds token limit.");
     }
 
     return selected;
