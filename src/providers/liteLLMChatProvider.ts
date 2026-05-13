@@ -18,6 +18,7 @@ import { decodeSSE } from "../adapters/sse/sseDecoder";
 import { createInitialStreamingState, interpretStreamEvent } from "../adapters/streaming/liteLLMStreamInterpreter";
 import type { StreamingState } from "../adapters/streaming/liteLLMStreamInterpreter";
 import { emitPartsToVSCode } from "../adapters/streaming/vscodePartEmitter";
+import type { EffortFallbackCache } from "../utils/reasoningEffortFallback";
 
 /**
  * Chat provider implementation for VS Code's LanguageModelChatProvider.
@@ -29,6 +30,10 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
     // Streaming state
     private _streamingState: StreamingState = createInitialStreamingState();
     private _partialAssistantText = "";
+
+    constructor(secrets: vscode.SecretStorage, userAgent: string, effortFallbackCache?: EffortFallbackCache) {
+        super(secrets, userAgent, effortFallbackCache);
+    }
 
     private emitExperimentalUsageData(
         progress: vscode.Progress<vscode.LanguageModelResponsePart>,

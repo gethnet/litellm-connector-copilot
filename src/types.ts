@@ -52,6 +52,16 @@ export interface ModelCapabilityOverride {
     pdfInput?: boolean;
 }
 
+export type SupportedReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+export interface ModelOverride {
+    match: string;
+    supportsReasoning: boolean | null;
+    reasoningEfforts?: SupportedReasoningEffort[];
+    defaultEffort?: SupportedReasoningEffort;
+    notes?: string;
+}
+
 /**
  * LiteLLM model configuration parameters.
  */
@@ -175,7 +185,12 @@ export interface LiteLLMConfig {
      */
     experimentalEmitUsageData?: boolean;
     disableQuotaToolRedaction?: boolean;
-    modelOverrides?: Record<string, string[]>;
+    /**
+     * Reasoning capability overrides supplied by the user. Mirrors the
+     * `litellm-connector.modelOverrides` configuration array and is merged with
+     * bundled defaults by the override loader.
+     */
+    modelOverrides?: ModelOverride[];
     /**
      * Per-model capability overrides exposed to VS Code.
      * Key is the Model ID (e.g. 'gpt-4o').

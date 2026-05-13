@@ -62,7 +62,6 @@ suite("LiteLLMCompletionProvider Unit Tests", () => {
             disableQuotaToolRedaction: false,
             disableCaching: true,
             inactivityTimeout: 60,
-            modelOverrides: {},
             modelIdOverride: undefined,
         });
 

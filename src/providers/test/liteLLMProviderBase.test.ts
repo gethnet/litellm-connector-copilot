@@ -8,6 +8,7 @@ import { ResponsesClient } from "../../adapters/responsesClient";
 import type { ConfigManager } from "../../config/configManager";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, ResolvedBackend } from "../../types";
 import { createMockSecrets } from "../../test/utils/testMocks";
+import { EffortFallbackCache } from "../../utils/reasoningEffortFallback";
 import type { BackendSession } from "../backendSession";
 
 /**
@@ -16,12 +17,16 @@ import type { BackendSession } from "../backendSession";
  * dozens of `as any` casts and the no-unsafe lint warnings they generate,
  * while still keeping the production class API hidden in callers.
  */
+/**
+ * keep BaseTestAccess up to date with any protected members used in tests so we avoid `any` casts.
+ */
 interface BaseTestAccess {
     _configManager: ConfigManager;
     _lastModelList: vscode.LanguageModelChatInformation[];
     _modelListFetchedAtMs: number;
     _modelInfoCache: Map<string, LiteLLMModelInfo | undefined>;
     _parameterProbeCache: Map<string, Set<string>>;
+    _effortFallbackCache: EffortFallbackCache;
     _doDiscoverModels: (
         options: { silent?: boolean; configuration?: Record<string, unknown> },
         token: vscode.CancellationToken
@@ -56,6 +61,16 @@ interface BaseTestAccess {
     isParameterSupported: (param: string, modelInfo: LiteLLMModelInfo | undefined, modelId?: string) => boolean;
     sanitizeErrorTextForLogs: (text: string) => string;
     collectMessageText: (m: vscode.LanguageModelChatRequestMessage) => string;
+    sendRequestWithRetry: (
+        request: OpenAIChatCompletionRequest,
+        messages: readonly vscode.LanguageModelChatRequestMessage[],
+        model: vscode.LanguageModelChatInformation,
+        options: vscode.ProvideLanguageModelChatResponseOptions,
+        progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+        token: vscode.CancellationToken,
+        caller?: string,
+        modelInfo?: LiteLLMModelInfo
+    ) => Promise<ReadableStream<Uint8Array>>;
 }
 
 /**
@@ -64,6 +79,24 @@ interface BaseTestAccess {
  */
 function access(provider: LiteLLMChatProvider): BaseTestAccess {
     return provider as unknown as BaseTestAccess;
+}
+
+function createReasoningModel(id = "reasoning-model"): vscode.LanguageModelChatInformation {
+    return {
+        id,
+        maxInputTokens: 8192,
+        maxOutputTokens: 4096,
+    } as vscode.LanguageModelChatInformation;
+}
+
+function createMessages(): vscode.LanguageModelChatRequestMessage[] {
+    return [
+        {
+            role: vscode.LanguageModelChatMessageRole.User,
+            content: [new vscode.LanguageModelTextPart("hello")],
+            name: undefined,
+        },
+    ];
 }
 
 suite("LiteLLM Provider Unit Tests", () => {
@@ -224,21 +257,11 @@ suite("LiteLLM Provider Unit Tests", () => {
         const configManager = access(provider)._configManager;
         sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
 
-        const model = {
-            id: "reasoning-model",
-            maxInputTokens: 8192,
-            maxOutputTokens: 4096,
-        } as vscode.LanguageModelChatInformation;
+        const model = createReasoningModel();
 
         const modelInfo: LiteLLMModelInfo = { supports_reasoning: true };
 
-        const messages: vscode.LanguageModelChatRequestMessage[] = [
-            {
-                role: vscode.LanguageModelChatMessageRole.User,
-                content: [new vscode.LanguageModelTextPart("hello")],
-                name: undefined,
-            },
-        ];
+        const messages = createMessages();
 
         const request = await build(
             messages,
@@ -246,7 +269,10 @@ suite("LiteLLM Provider Unit Tests", () => {
             {
                 modelOptions: {},
                 modelConfiguration: { reasoningEffort: "medium" },
-            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+            } satisfies vscode.ProvideLanguageModelChatResponseOptions,
             modelInfo
         );
 
@@ -254,7 +280,101 @@ suite("LiteLLM Provider Unit Tests", () => {
         // canonical OpenAI/LiteLLM-compatible format. Sending the previous nested
         // `reasoning: { effort }` shape produced 400s from upstream providers because
         // LiteLLM did not translate it.
-        assert.strictEqual(request.reasoning_effort, "medium");
+        assert.strictEqual((request as { reasoning_effort?: string }).reasoning_effort, "medium");
+    });
+
+    test("buildOpenAIChatRequest applies picker xhigh when fallback cache is empty", async () => {
+        const cache = new EffortFallbackCache();
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent, cache);
+        const build = access(provider).buildOpenAIChatRequest.bind(provider);
+        const configManager = access(provider)._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+
+        const request = await build(
+            createMessages(),
+            createReasoningModel("gpt-5"),
+            {
+                modelOptions: {},
+                modelConfiguration: { reasoningEffort: "xhigh" },
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+            { supports_reasoning: true }
+        );
+
+        const sendStub = sandbox
+            .stub(access(provider) as unknown as { sendRequestToLiteLLM: unknown }, "sendRequestToLiteLLM")
+            .resolves(
+                new ReadableStream<Uint8Array>({
+                    start(controller) {
+                        controller.close();
+                    },
+                })
+            );
+
+        await access(provider).sendRequestWithRetry(
+            request,
+            createMessages(),
+            createReasoningModel(),
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+            },
+            { report: () => {} },
+            new vscode.CancellationTokenSource().token
+        );
+
+        const firstRequest = sendStub.firstCall.args[0] as OpenAIChatCompletionRequest;
+        assert.strictEqual(firstRequest.reasoning_effort, "xhigh");
+    });
+
+    test("sendRequestWithRetry applies cached lower effort when prior failure recorded", async () => {
+        const cache = new EffortFallbackCache();
+        // Seed a failure for xhigh so the next effective effort is high.
+        cache.recordFailure("gpt-5", "xhigh");
+
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent, cache);
+        const configManager = access(provider)._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+
+        const request = await access(provider).buildOpenAIChatRequest(
+            createMessages(),
+            createReasoningModel("gpt-5"),
+            {
+                modelOptions: {},
+                modelConfiguration: { reasoningEffort: "xhigh" },
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+            { supports_reasoning: true }
+        );
+
+        const observedEfforts: string[] = [];
+        const sendStub = sandbox
+            .stub(access(provider) as unknown as { sendRequestToLiteLLM: unknown }, "sendRequestToLiteLLM")
+            .callsFake(async (req: OpenAIChatCompletionRequest) => {
+                observedEfforts.push((req as { reasoning_effort?: string }).reasoning_effort ?? "");
+                return new ReadableStream<Uint8Array>({
+                    start(controller) {
+                        controller.close();
+                    },
+                });
+            });
+
+        await access(provider).sendRequestWithRetry(
+            request,
+            createMessages(),
+            createReasoningModel(),
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+            },
+            { report: () => {} },
+            new vscode.CancellationTokenSource().token
+        );
+
+        assert.deepStrictEqual(observedEfforts, ["high"]);
+        assert.strictEqual(sendStub.callCount, 1);
     });
 
     test("buildV2ChatRequest applies reasoning effort from modelOptions fallback", async () => {
@@ -336,25 +456,11 @@ suite("LiteLLM Provider Unit Tests", () => {
         const configManager = access(provider)._configManager;
         sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
 
-        const model = {
-            id: "reasoning-model",
-            maxInputTokens: 8192,
-            maxOutputTokens: 4096,
-        } as vscode.LanguageModelChatInformation;
-
         const modelInfo: LiteLLMModelInfo = { supports_reasoning: true };
 
-        const messages: vscode.LanguageModelChatRequestMessage[] = [
-            {
-                role: vscode.LanguageModelChatMessageRole.User,
-                content: [new vscode.LanguageModelTextPart("hello")],
-                name: undefined,
-            },
-        ];
-
         const request = await build(
-            messages,
-            model,
+            createMessages(),
+            createReasoningModel(),
             {
                 modelOptions: {},
                 modelConfiguration: { reasoningEffort: "none" },
@@ -363,6 +469,252 @@ suite("LiteLLM Provider Unit Tests", () => {
         );
 
         assert.strictEqual(request.reasoning_effort, undefined);
+    });
+
+    test("sendRequestWithRetry retries once on reasoning 4xx and succeeds", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent, new EffortFallbackCache());
+        const configManager = access(provider)._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+
+        const request = await access(provider).buildOpenAIChatRequest(
+            createMessages(),
+            createReasoningModel(),
+            {
+                modelOptions: {},
+                modelConfiguration: { reasoningEffort: "xhigh" },
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+            { supports_reasoning: true }
+        );
+
+        const error = { status: 400, message: "reasoning effort unsupported" };
+        const observedEfforts: string[] = [];
+        const sendStub = sandbox
+            .stub(access(provider) as unknown as { sendRequestToLiteLLM: unknown }, "sendRequestToLiteLLM")
+            .callsFake(async (req: OpenAIChatCompletionRequest) => {
+                observedEfforts.push((req as { reasoning_effort?: string }).reasoning_effort ?? "");
+                if (observedEfforts.length === 1) {
+                    throw error;
+                }
+                return new ReadableStream<Uint8Array>({
+                    start(controller) {
+                        controller.close();
+                    },
+                });
+            });
+
+        await access(provider).sendRequestWithRetry(
+            request,
+            createMessages(),
+            createReasoningModel(),
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+            },
+            { report: () => {} },
+            new vscode.CancellationTokenSource().token
+        );
+
+        assert.deepStrictEqual(observedEfforts, ["xhigh", "high"]);
+        assert.strictEqual(sendStub.callCount, 2);
+    });
+
+    test("sendRequestWithRetry notifies once per model and original effort", async () => {
+        const cache = new EffortFallbackCache();
+        cache.clear();
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent, cache);
+        const configManager = access(provider)._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+
+        const requestFactory = async () =>
+            access(provider).buildOpenAIChatRequest(
+                createMessages(),
+                createReasoningModel(),
+                {
+                    modelOptions: {},
+                    modelConfiguration: { reasoningEffort: "xhigh" },
+                } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                { supports_reasoning: true }
+            );
+
+        const showInfoStub = sandbox.stub(vscode.window, "showInformationMessage").resolves();
+
+        const error = { status: 400, message: "reasoning effort unsupported" };
+        const sendStub = sandbox
+            .stub(access(provider) as unknown as { sendRequestToLiteLLM: unknown }, "sendRequestToLiteLLM")
+            .onCall(0)
+            .rejects(error)
+            .onCall(1)
+            .resolves(
+                new ReadableStream<Uint8Array>({
+                    start(controller) {
+                        controller.close();
+                    },
+                })
+            )
+            // Second invocation of sendRequestWithRetry should not trigger a second notification.
+            .onCall(2)
+            .rejects(error)
+            .onCall(3)
+            .resolves(
+                new ReadableStream<Uint8Array>({
+                    start(controller) {
+                        controller.close();
+                    },
+                })
+            );
+
+        const request1 = await requestFactory();
+        await access(provider).sendRequestWithRetry(
+            request1,
+            createMessages(),
+            createReasoningModel(),
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+            },
+            { report: () => {} },
+            new vscode.CancellationTokenSource().token
+        );
+
+        const request2 = await requestFactory();
+        await access(provider).sendRequestWithRetry(
+            request2,
+            createMessages(),
+            createReasoningModel(),
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+            },
+            { report: () => {} },
+            new vscode.CancellationTokenSource().token
+        );
+
+        assert.strictEqual(showInfoStub.callCount, 1);
+        assert.strictEqual(sendStub.callCount, 4);
+    });
+
+    test("sendRequestWithRetry does not retry on non-reasoning 5xx errors", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent, new EffortFallbackCache());
+        const configManager = access(provider)._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+
+        const request = await access(provider).buildOpenAIChatRequest(
+            createMessages(),
+            createReasoningModel(),
+            {
+                modelOptions: {},
+                modelConfiguration: { reasoningEffort: "xhigh" },
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+            { supports_reasoning: true }
+        );
+
+        const error = { status: 500, message: "server error" };
+        const sendStub = sandbox
+            .stub(access(provider) as unknown as { sendRequestToLiteLLM: unknown }, "sendRequestToLiteLLM")
+            .rejects(error);
+
+        await assert.rejects(
+            access(provider).sendRequestWithRetry(
+                request,
+                createMessages(),
+                createReasoningModel(),
+                {
+                    modelOptions: {},
+                    tools: [],
+                    toolMode: vscode.LanguageModelChatToolMode.Auto,
+                    requestInitiator: "test",
+                },
+                { report: () => {} },
+                new vscode.CancellationTokenSource().token
+            )
+        );
+
+        assert.strictEqual(sendStub.callCount, 1);
+    });
+
+    test("sendRequestWithRetry does not retry on 4xx errors that are unrelated to reasoning", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent, new EffortFallbackCache());
+        const configManager = access(provider)._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+
+        const request = await access(provider).buildOpenAIChatRequest(
+            createMessages(),
+            createReasoningModel(),
+            {
+                modelOptions: {},
+                modelConfiguration: { reasoningEffort: "xhigh" },
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+            { supports_reasoning: true }
+        );
+
+        const error = { status: 400, message: "Bad request" };
+        const sendStub = sandbox
+            .stub(access(provider) as unknown as { sendRequestToLiteLLM: unknown }, "sendRequestToLiteLLM")
+            .rejects(error);
+
+        await assert.rejects(
+            access(provider).sendRequestWithRetry(
+                request,
+                createMessages(),
+                createReasoningModel(),
+                {
+                    modelOptions: {},
+                    tools: [],
+                    toolMode: vscode.LanguageModelChatToolMode.Auto,
+                    requestInitiator: "test",
+                },
+                { report: () => {} },
+                new vscode.CancellationTokenSource().token
+            )
+        );
+
+        assert.strictEqual(sendStub.callCount, 1);
+    });
+
+    test("sendRequestWithRetry enforces retry cap of five attempts", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent, new EffortFallbackCache());
+        const configManager = access(provider)._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+
+        const request = await access(provider).buildOpenAIChatRequest(
+            createMessages(),
+            createReasoningModel(),
+            {
+                modelOptions: {},
+                modelConfiguration: { reasoningEffort: "xhigh" },
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+            { supports_reasoning: true }
+        );
+
+        const reasoningError = { status: 400, message: "reasoning effort unsupported" };
+        const sendStub = sandbox
+            .stub(access(provider) as unknown as { sendRequestToLiteLLM: unknown }, "sendRequestToLiteLLM")
+            .rejects(reasoningError);
+
+        await assert.rejects(
+            access(provider).sendRequestWithRetry(
+                request,
+                createMessages(),
+                createReasoningModel(),
+                {
+                    modelOptions: {},
+                    tools: [],
+                    toolMode: vscode.LanguageModelChatToolMode.Auto,
+                    requestInitiator: "test",
+                },
+                { report: () => {} },
+                new vscode.CancellationTokenSource().token
+            ),
+            /reasoning effort unsupported/
+        );
+
+        assert.strictEqual(sendStub.callCount, 5);
     });
 
     test("discoverModels attaches backend metadata and reasoning configuration schema when supported", async () => {
@@ -530,7 +882,6 @@ suite("LiteLLM Provider Unit Tests", () => {
             disableQuotaToolRedaction: false,
             disableCaching: true,
             inactivityTimeout: 60,
-            modelOverrides: {},
             modelIdOverride: "override-model",
         });
 
@@ -922,9 +1273,9 @@ suite("LiteLLM Provider Unit Tests", () => {
         // The provider now uses MultiBackendClient which calls getModelInfo on each backend
         sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({ data: mockData });
 
-        // Stub config manager to return model overrides with namespaced ID
+        // Stub config manager to return namespaced ID data
         interface ConfigManager {
-            getConfig: () => Promise<{ url: string; modelOverrides: Record<string, string[]> }>;
+            getConfig: () => Promise<{ url: string }>;
             resolveBackends: () => Promise<ResolvedBackend[]>;
         }
         interface ProviderWithConfigManager {
@@ -936,10 +1287,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             .resolves([{ name: "default", url: "http://localhost:4000", apiKey: "test-key", enabled: true }]);
         sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
             url: "http://localhost:4000",
-            modelOverrides: {
-                "default/gpt-4": ["scm-generator", "custom-tag"],
-            },
-        } as unknown as { url: string; modelOverrides: Record<string, string[]> });
+        });
 
         const infos = await provider.provideLanguageModelChatInformation({ silent: true }, {
             isCancellationRequested: false,
@@ -948,14 +1296,6 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         assert.strictEqual(infos.length, 1);
         assert.strictEqual(infos[0].id, "default/gpt-4");
-
-        interface ModelInfoWithTags {
-            tags?: string[];
-        }
-        const gpt4 = infos[0] as ModelInfoWithTags;
-        const gpt4Tags = gpt4.tags || [];
-        assert.ok(gpt4Tags.includes("scm-generator"), "Should include scm-generator override tag from config");
-        assert.ok(gpt4Tags.includes("custom-tag"), "Should include custom-tag override tag from config");
     });
 
     test("provideLanguageModelChatInformation applies capability overrides", async () => {
@@ -979,7 +1319,6 @@ suite("LiteLLM Provider Unit Tests", () => {
         interface ConfigManager {
             getConfig: () => Promise<{
                 url: string;
-                modelOverrides: Record<string, string[]>;
                 modelCapabilitiesOverrides: Record<string, { toolCalling?: boolean; imageInput?: boolean }>;
             }>;
             resolveBackends: () => Promise<ResolvedBackend[]>;
@@ -993,14 +1332,9 @@ suite("LiteLLM Provider Unit Tests", () => {
             .resolves([{ name: "default", url: "http://localhost:4000", apiKey: "test-key", enabled: true }]);
         sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
             url: "http://localhost:4000",
-            modelOverrides: {},
             modelCapabilitiesOverrides: {
                 "default/gpt-4": { toolCalling: true, imageInput: true },
             },
-        } as unknown as {
-            url: string;
-            modelOverrides: Record<string, string[]>;
-            modelCapabilitiesOverrides: Record<string, { toolCalling?: boolean; imageInput?: boolean }>;
         });
 
         const infos = await provider.provideLanguageModelChatInformation({ silent: true }, {
@@ -1273,7 +1607,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
         sandbox.stub(provider as unknown as { _configManager: ConfigManager }, "_configManager").value({
-            getConfig: async () => ({ url: "http://localhost:4000", modelOverrides: {} }),
+            getConfig: async () => ({ url: "http://localhost:4000" }),
             resolveBackends: async () => [
                 { name: "default", url: "http://localhost:4000", apiKey: "test-key", enabled: true },
             ],
@@ -1373,15 +1707,14 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         interface ProviderWithConfigManager {
             _configManager: {
-                getConfig: () => Promise<{ url: string; modelOverrides: Record<string, string[]> }>;
+                getConfig: () => Promise<{ url: string }>;
                 resolveBackends: () => Promise<ResolvedBackend[]>;
             };
         }
         const providerWithConfig = provider as unknown as ProviderWithConfigManager;
         sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
             url: "http://localhost:4000",
-            modelOverrides: {},
-        } as unknown as { url: string; modelOverrides: Record<string, string[]> });
+        });
         sandbox.stub(providerWithConfig._configManager, "resolveBackends").resolves([]);
 
         const infos = await provider.provideLanguageModelChatInformation(

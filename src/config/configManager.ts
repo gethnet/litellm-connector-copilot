@@ -1,9 +1,10 @@
 import * as vscode from "vscode";
-import type { LiteLLMBackend, LiteLLMConfig, ResolvedBackend } from "../types";
+import type { LiteLLMBackend, LiteLLMConfig, ModelOverride, ResolvedBackend } from "../types";
 import type { TelemetryService } from "../telemetry/telemetryService";
 import { LiteLLMClient } from "../adapters/litellmClient";
 import type { BackendSession } from "../providers/backendSession";
 import { Logger } from "../utils/logger";
+import { loadUserOverrides } from "./modelOverrides";
 
 export class ConfigManager {
     private static readonly BASE_URL_KEY = "litellm-connector.baseUrl";
@@ -15,7 +16,6 @@ export class ConfigManager {
     private static readonly DISABLE_CACHING_KEY = "litellm-connector.disableCaching";
     private static readonly EXPERIMENTAL_EMIT_USAGE_DATA_KEY = "litellm-connector.emitUsageData";
     private static readonly DISABLE_QUOTA_TOOL_REDACTION_KEY = "litellm-connector.disableQuotaToolRedaction";
-    private static readonly MODEL_OVERRIDES_KEY = "litellm-connector.modelOverrides";
     private static readonly MODEL_CAPABILITIES_OVERRIDES_KEY = "litellm-connector.modelCapabilitiesOverrides";
     private static readonly MODEL_ID_OVERRIDE_KEY = "litellm-connector.modelIdOverride";
     private static readonly INLINE_COMPLETIONS_ENABLED_KEY = "litellm-connector.inlineCompletions.enabled";
@@ -85,22 +85,22 @@ export class ConfigManager {
      * Retrieves the current LiteLLM configuration from secret storage.
      */
     async getConfig(): Promise<LiteLLMConfig> {
+        const workspaceConfig = vscode.workspace.getConfiguration();
+
         // Base URL is stored in plain-text settings (global user settings).
-        const url = vscode.workspace.getConfiguration().get<string>(ConfigManager.BASE_URL_KEY, "").trim();
+        const url = workspaceConfig.get<string>(ConfigManager.BASE_URL_KEY, "").trim();
 
         // API key is stored in SecretStorage. Settings only store a reference to which secret entry to use.
-        const apiKeySecretRef = vscode.workspace
-            .getConfiguration()
-            .get<string>(ConfigManager.API_KEY_SECRET_REF_KEY, ConfigManager.DEFAULT_API_KEY_SECRET_REF)
-            .trim();
-        const key = await this.secrets.get(this.getApiKeySecretStorageKey(apiKeySecretRef));
+        const apiKeySecretRef = workspaceConfig.get<string>(
+            ConfigManager.API_KEY_SECRET_REF_KEY,
+            ConfigManager.DEFAULT_API_KEY_SECRET_REF
+        );
+        const key = await this.secrets.get(this.getApiKeySecretStorageKey(apiKeySecretRef?.trim() ?? ""));
 
         // Read multi-backend array from settings
-        const backendsRaw = vscode.workspace
-            .getConfiguration()
-            .get<
-                { name: string; url: string; apiKeySecretRef?: string; enabled?: boolean }[]
-            >(ConfigManager.BACKENDS_KEY, []);
+        const backendsRaw = workspaceConfig.get<
+            { name: string; url: string; apiKeySecretRef?: string; enabled?: boolean }[]
+        >(ConfigManager.BACKENDS_KEY, []);
 
         let backends: LiteLLMBackend[] | undefined;
 
@@ -129,41 +129,22 @@ export class ConfigManager {
             ];
         }
 
-        const inactivityTimeout = vscode.workspace
-            .getConfiguration()
-            .get<number>(ConfigManager.INACTIVITY_TIMEOUT_KEY, 60);
-        const disableCaching = vscode.workspace
-            .getConfiguration()
-            .get<boolean>(ConfigManager.DISABLE_CACHING_KEY, true);
-        const experimentalEmitUsageData = vscode.workspace
-            .getConfiguration()
-            .get<boolean>(ConfigManager.EXPERIMENTAL_EMIT_USAGE_DATA_KEY, false);
-        const disableQuotaToolRedaction = vscode.workspace
-            .getConfiguration()
-            .get<boolean>(ConfigManager.DISABLE_QUOTA_TOOL_REDACTION_KEY, false);
-        const modelOverridesRaw = vscode.workspace
-            .getConfiguration()
-            .get<Record<string, string | string[]>>(ConfigManager.MODEL_OVERRIDES_KEY, {});
+        const inactivityTimeout = workspaceConfig.get<number>(ConfigManager.INACTIVITY_TIMEOUT_KEY, 60);
+        const disableCaching = workspaceConfig.get<boolean>(ConfigManager.DISABLE_CACHING_KEY, true);
+        const experimentalEmitUsageData = workspaceConfig.get<boolean>(
+            ConfigManager.EXPERIMENTAL_EMIT_USAGE_DATA_KEY,
+            false
+        );
+        const disableQuotaToolRedaction = workspaceConfig.get<boolean>(
+            ConfigManager.DISABLE_QUOTA_TOOL_REDACTION_KEY,
+            false
+        );
+        const modelOverrides: ModelOverride[] = loadUserOverrides(workspaceConfig);
 
-        const modelOverrides: Record<string, string[]> = {};
-        if (modelOverridesRaw && typeof modelOverridesRaw === "object" && !Array.isArray(modelOverridesRaw)) {
-            for (const [modelId, tagsValue] of Object.entries(modelOverridesRaw)) {
-                if (Array.isArray(tagsValue)) {
-                    // Legacy format: Array of tags
-                    modelOverrides[modelId] = tagsValue.map(String);
-                } else if (typeof tagsValue === "string") {
-                    // New format: Comma-separated string (for table UI support)
-                    modelOverrides[modelId] = tagsValue
-                        .split(",")
-                        .map((tag) => tag.trim())
-                        .filter((tag) => tag.length > 0);
-                }
-            }
-        }
-
-        const modelCapabilitiesOverridesRaw = vscode.workspace
-            .getConfiguration()
-            .get<Record<string, string | string[]>>(ConfigManager.MODEL_CAPABILITIES_OVERRIDES_KEY, {});
+        const modelCapabilitiesOverridesRaw = workspaceConfig.get<Record<string, string | string[]>>(
+            ConfigManager.MODEL_CAPABILITIES_OVERRIDES_KEY,
+            {}
+        );
 
         const modelCapabilitiesOverrides: Record<string, { toolCalling?: boolean; imageInput?: boolean }> = {};
         if (
@@ -197,24 +178,18 @@ export class ConfigManager {
             }
         }
 
-        const modelIdOverride = vscode.workspace
-            .getConfiguration()
-            .get<string>(ConfigManager.MODEL_ID_OVERRIDE_KEY, "")
-            .trim();
-        const inlineCompletionsEnabled = vscode.workspace
-            .getConfiguration()
-            .get<boolean>(ConfigManager.INLINE_COMPLETIONS_ENABLED_KEY, false);
-        const inlineCompletionsModelId = vscode.workspace
-            .getConfiguration()
-            .get<string>(ConfigManager.INLINE_COMPLETIONS_MODEL_ID_KEY, "")
-            .trim();
-        const scmGitCompletionsModelId = vscode.workspace
-            .getConfiguration()
+        const modelIdOverride = workspaceConfig.get<string>(ConfigManager.MODEL_ID_OVERRIDE_KEY, "").trim();
+        const inlineCompletionsEnabled = workspaceConfig.get<boolean>(
+            ConfigManager.INLINE_COMPLETIONS_ENABLED_KEY,
+            false
+        );
+        const inlineCompletionsModelId = workspaceConfig.get<string>(ConfigManager.INLINE_COMPLETIONS_MODEL_ID_KEY, "");
+        const scmGitCompletionsModelId = workspaceConfig
             .get<string>(ConfigManager.SCM_COMMIT_MSG_MODEL_ID_KEY, "")
             .trim();
-        const v2ApiEnabled = vscode.workspace
-            .getConfiguration()
-            .get<boolean>(ConfigManager.ENABLE_RESPONSES_API, false);
+        const v2ApiEnabled = workspaceConfig.get<boolean>(ConfigManager.ENABLE_RESPONSES_API, false);
+
+        const trimmedInlineModelId = inlineCompletionsModelId?.trim() ?? "";
 
         return {
             url,
@@ -229,8 +204,8 @@ export class ConfigManager {
             modelIdOverride: modelIdOverride.length > 0 ? modelIdOverride : undefined,
             inlineCompletionsEnabled,
             inlineCompletionsModelId:
-                inlineCompletionsModelId.length > 0
-                    ? inlineCompletionsModelId
+                trimmedInlineModelId.length > 0
+                    ? trimmedInlineModelId
                     : modelIdOverride.length > 0
                       ? modelIdOverride
                       : undefined,

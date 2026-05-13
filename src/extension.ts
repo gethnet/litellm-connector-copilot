@@ -20,6 +20,7 @@ import { InlineCompletionsRegistrar } from "./inlineCompletions/registerInlineCo
 import { TelemetryService } from "./telemetry/telemetryService";
 import { LiteLLMTelemetry } from "./utils/telemetry";
 import { setTelemetryService as setTokenUtilsTelemetryService } from "./adapters/tokenUtils";
+import { EffortFallbackCache } from "./utils/reasoningEffortFallback";
 
 // Store the config manager for cleanup on deactivation
 let configManagerInstance: ConfigManager | undefined;
@@ -109,6 +110,8 @@ export function activate(context: vscode.ExtensionContext): void {
     const configManager = configManagerInstance;
     configManager.setTelemetryService(telemetryService);
 
+    const effortFallbackCache = new EffortFallbackCache();
+
     // Track feature adoption
     telemetryService.captureFeatureAdoption("chat");
     telemetryService.captureFeatureAdoption("inline-completions");
@@ -129,11 +132,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // VS Code 1.120+ uses the unified chat provider with per-group configuration support.
 
-    const activeProvider = new LiteLLMChatProvider(context.secrets, ua);
+    const activeProvider = new LiteLLMChatProvider(context.secrets, ua, effortFallbackCache);
     activeProvider.setTelemetryService(telemetryService);
 
     // Commit message provider (version-agnostic)
-    const commitProvider = new LiteLLMCommitMessageProvider(context.secrets, ua);
+    const commitProvider = new LiteLLMCommitMessageProvider(context.secrets, ua, effortFallbackCache);
     commitProvider.setTelemetryService(telemetryService);
 
     // Track active provider registration for hot-swap
@@ -166,6 +169,16 @@ export function activate(context: vscode.ExtensionContext): void {
     // Register provider and commands immediately (do not await config)
     registerProvider();
 
+    // Proactively nudge VS Code to call provideLanguageModelChatInformation immediately after
+    // registration.  Without this, model discovery (and reasoning-effort schema population) is
+    // deferred until the user first opens the model picker.  Firing the change event right after
+    // registration causes VS Code to eagerly re-query the provider — this time with the correct
+    // per-group options.configuration values, so reasoning capabilities populate on first load.
+    setImmediate(() => {
+        Logger.info("Post-registration: nudging VS Code to refresh model information...");
+        activeProvider.refreshModelInformation();
+    });
+
     try {
         context.subscriptions.push(
             registerManageConfigCommand(context, configManager, activeProvider, telemetryService)
@@ -195,7 +208,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     // Stable inline completions (optional; disabled by default)
-    const inlineRegistrar = new InlineCompletionsRegistrar(context.secrets, ua, context);
+    const inlineRegistrar = new InlineCompletionsRegistrar(context.secrets, ua, context, effortFallbackCache);
     inlineRegistrar.setTelemetryService(telemetryService);
     inlineRegistrar.initialize();
     context.subscriptions.push(inlineRegistrar);

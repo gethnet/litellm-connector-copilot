@@ -4,11 +4,11 @@ import {
     getModelTags,
     formatModelDisplayLabel,
     getSupportedReasoningEfforts,
+    getDefaultReasoningEffort,
     buildReasoningEffortConfigurationSchema,
     type ExtendedModelInformation,
 } from "../modelCapabilities";
-import type { ModelCapabilityOverride } from "../../types";
-import type { LiteLLMModelInfo } from "../../types";
+import type { LiteLLMModelInfo, ModelCapabilityOverride, SupportedReasoningEffort } from "../../types";
 
 suite("modelCapabilities", () => {
     suite("capabilitiesToVSCode", () => {
@@ -229,142 +229,81 @@ suite("modelCapabilities", () => {
     });
 
     suite("getSupportedReasoningEfforts", () => {
+        const canonicalGpt5Efforts: SupportedReasoningEffort[] = ["none", "minimal", "low", "medium", "high", "xhigh"];
+        const claudeEfforts: SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
+        const canonicalCatchAllEfforts: SupportedReasoningEffort[] = [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+        ];
+
+        test("returns the canonical GPT-5 effort ladder for gpt-5-mini", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                id: "gpt-5-mini",
+                name: "GPT-5 Mini",
+                supports_reasoning: true,
+            };
+
+            const result = getSupportedReasoningEfforts(modelInfo, "gpt-5-mini");
+
+            assert.deepStrictEqual(result, canonicalGpt5Efforts);
+        });
+
+        test("returns canonical GPT-5 ladder even when only xhigh is flagged", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                id: "gpt-5.4-mini",
+                name: "GPT-5.4 Mini",
+                supports_reasoning: true,
+                supports_xhigh_reasoning_effort: true,
+            };
+
+            const result = getSupportedReasoningEfforts(modelInfo, "gpt-5.4-mini");
+
+            assert.deepStrictEqual(result, canonicalGpt5Efforts);
+        });
+
+        test("returns Claude ladder for claude-haiku-4-5", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                id: "claude-haiku-4-5",
+                name: "Claude Haiku 4.5",
+                supports_reasoning: true,
+            };
+
+            const result = getSupportedReasoningEfforts(modelInfo, "claude-haiku-4-5");
+
+            assert.deepStrictEqual(result, claudeEfforts);
+        });
+
+        test("falls back to canonical efforts for other models", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                id: "local-proxy-model",
+                name: "Local Proxy Model",
+                supports_reasoning: true,
+            };
+
+            const result = getSupportedReasoningEfforts(modelInfo, "local-proxy-model");
+
+            assert.deepStrictEqual(result, canonicalCatchAllEfforts);
+        });
+
         test("returns empty array for undefined modelInfo", () => {
-            const result = getSupportedReasoningEfforts(undefined);
+            const result = getSupportedReasoningEfforts(undefined, "unknown-model");
             assert.deepStrictEqual(result, []);
         });
 
-        test("returns empty array for model with no reasoning fields", () => {
+        test("returns empty array when reasoning support is disabled even for catch-all ids", () => {
             const modelInfo: LiteLLMModelInfo = {
-                id: "gpt-4",
-                name: "GPT-4",
-                supports_vision: true,
+                id: "gpt-5-mini",
+                name: "GPT-5 Mini",
+                supports_reasoning: false,
             };
-            const result = getSupportedReasoningEfforts(modelInfo);
+
+            const result = getSupportedReasoningEfforts(modelInfo, "gpt-5-mini");
+
             assert.deepStrictEqual(result, []);
-        });
-
-        test("returns none plus minimal effort from supports_minimal_reasoning_effort", () => {
-            const modelInfo: LiteLLMModelInfo = {
-                id: "gpt-4o-mini",
-                name: "GPT-4o Mini",
-                supports_reasoning: true,
-                supports_minimal_reasoning_effort: true,
-            };
-            const result = getSupportedReasoningEfforts(modelInfo);
-            assert.deepStrictEqual(result, ["none", "minimal"]);
-        });
-
-        test("returns none plus low effort from supports_low_reasoning_effort", () => {
-            const modelInfo: LiteLLMModelInfo = {
-                id: "gpt-4",
-                name: "GPT-4",
-                supports_reasoning: true,
-                supports_low_reasoning_effort: true,
-            };
-            const result = getSupportedReasoningEfforts(modelInfo);
-            assert.deepStrictEqual(result, ["none", "low"]);
-        });
-
-        test("maps supports_xlow_reasoning_effort to low", () => {
-            const modelInfo: LiteLLMModelInfo = {
-                id: "gpt-4-turbo",
-                name: "GPT-4 Turbo",
-                supports_reasoning: true,
-                supports_xlow_reasoning_effort: true,
-            };
-            const result = getSupportedReasoningEfforts(modelInfo);
-            assert.deepStrictEqual(result, ["none", "low"]);
-        });
-
-        test("returns none plus high effort from supports_high_reasoning_effort", () => {
-            const modelInfo: LiteLLMModelInfo = {
-                id: "gpt-4o",
-                name: "GPT-4o",
-                supports_reasoning: true,
-                supports_high_reasoning_effort: true,
-            };
-            const result = getSupportedReasoningEfforts(modelInfo);
-            assert.deepStrictEqual(result, ["none", "high"]);
-        });
-
-        test("returns none plus xhigh effort from supports_xhigh_reasoning_effort", () => {
-            const modelInfo: LiteLLMModelInfo = {
-                id: "gpt-4-turbo-preview",
-                name: "GPT-4 Turbo Preview",
-                supports_reasoning: true,
-                supports_xhigh_reasoning_effort: true,
-            };
-            const result = getSupportedReasoningEfforts(modelInfo);
-            assert.deepStrictEqual(result, ["none", "xhigh"]);
-        });
-
-        test("returns the full OpenAI-aligned effort set for general reasoning support", () => {
-            const modelInfo: LiteLLMModelInfo = {
-                id: "claude-3",
-                name: "Claude 3",
-                supports_reasoning: true,
-            };
-            const result = getSupportedReasoningEfforts(modelInfo);
-            assert.deepStrictEqual(
-                result,
-                ["none", "minimal", "low", "medium", "high", "xhigh"] as const,
-                "Should return default efforts for general reasoning support"
-            );
-        });
-
-        test("respects alias support_xlow as low", () => {
-            const modelInfo: LiteLLMModelInfo = {
-                id: "test-model-xlow",
-                name: "Test Model XLow",
-                supports_reasoning: true,
-                supports_xlow_reasoning_effort: true,
-            };
-            const result = getSupportedReasoningEfforts(modelInfo);
-            assert.ok(result.includes("low"), "Should support low effort when supports_xlow_reasoning_effort is true");
-            assert.ok(!result.includes("high"), "Should not include high when only xlow is set");
-        });
-
-        test("respects alias support_xhigh as xhigh", () => {
-            const modelInfo: LiteLLMModelInfo = {
-                id: "test-model-xhigh",
-                name: "Test Model XHigh",
-                supports_reasoning: true,
-                supports_xhigh_reasoning_effort: true,
-            };
-            const result = getSupportedReasoningEfforts(modelInfo);
-            assert.ok(
-                result.includes("xhigh"),
-                "Should support xhigh effort when supports_xhigh_reasoning_effort is true"
-            );
-            assert.ok(!result.includes("low"), "Should not include low when only xhigh is set");
-        });
-
-        test("returns every explicitly supported level once", () => {
-            const modelInfo: LiteLLMModelInfo = {
-                id: "multi-level-model",
-                name: "Multi-Level Model",
-                supports_reasoning: true,
-                supports_minimal_reasoning_effort: true,
-                supports_low_reasoning_effort: true,
-                supports_high_reasoning_effort: true,
-                supports_xhigh_reasoning_effort: true,
-            };
-            const result = getSupportedReasoningEfforts(modelInfo);
-            assert.deepStrictEqual(result, ["none", "minimal", "low", "high", "xhigh"]);
-        });
-
-        test("ignores generic defaults when specific levels are provided", () => {
-            const modelInfo: LiteLLMModelInfo = {
-                id: "specific-model",
-                name: "Specific Model",
-                supports_reasoning: true,
-                supports_low_reasoning_effort: true,
-            };
-            const result = getSupportedReasoningEfforts(modelInfo);
-            assert.deepStrictEqual(result, ["none", "low"]);
-            assert.ok(!result.includes("medium"), "Should not include medium when specific level is set");
-            assert.ok(!result.includes("high"), "Should not include high when only low is set");
         });
     });
 
@@ -421,12 +360,24 @@ suite("modelCapabilities", () => {
             assert.strictEqual(descs?.[4], "Maximum reasoning depth but slower");
         });
 
-        test("default is medium when supported, otherwise first non-none entry", () => {
-            const withMedium = buildReasoningEffortConfigurationSchema(["none", "low", "medium", "high"]);
-            assert.strictEqual(withMedium?.properties.reasoningEffort.default, "medium");
+        test("defaults to minimal for canonical reasoning configuration", () => {
+            const canonicalEfforts: SupportedReasoningEffort[] = ["none", "minimal", "low", "medium", "high"];
 
-            const withoutMedium = buildReasoningEffortConfigurationSchema(["none", "low", "high"]);
-            assert.strictEqual(withoutMedium?.properties.reasoningEffort.default, "low");
+            const defaultEffort = getDefaultReasoningEffort(canonicalEfforts, "any-other-model");
+            const schema = buildReasoningEffortConfigurationSchema(canonicalEfforts, "any-other-model");
+
+            assert.strictEqual(defaultEffort, "minimal");
+            assert.strictEqual(schema?.properties.reasoningEffort.default, "minimal");
+        });
+
+        test("defaults to medium for Claude reasoning configuration", () => {
+            const claudeEfforts: SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
+
+            const defaultEffort = getDefaultReasoningEffort(claudeEfforts, "claude-haiku-4-5");
+            const schema = buildReasoningEffortConfigurationSchema(claudeEfforts, "claude-haiku-4-5");
+
+            assert.strictEqual(defaultEffort, "medium");
+            assert.strictEqual(schema?.properties.reasoningEffort.default, "medium");
         });
     });
 });

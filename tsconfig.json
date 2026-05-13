@@ -10,6 +10,7 @@
 		"strict": true /* enable all strict type-checking options */,
 		"outDir": "out",
 		"skipLibCheck": true /* Skip type checking of declaration files */,
+		"resolveJsonModule": true,
 		"types": [
 			"node",
 			"mocha"

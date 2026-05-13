@@ -17,7 +17,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "2.0.0-dev6",
+	"version": "2.0.0-dev9",
 	"preview": true,
 	"engines": {
 		"vscode": "^1.120.0"
@@ -219,11 +219,55 @@
 					"description": "Disable per-turn tool redaction when a quota error is detected in chat history. Leave off to keep redaction enabled."
 				},
 				"litellm-connector.modelOverrides": {
-					"type": "object",
-					"default": {},
-					"description": "Override or add tags for specific models. Key is the Model ID (e.g. 'gpt-4o'), value is a comma-separated list of tags (e.g. 'inline-completions,chat,tools').",
-					"additionalProperties": {
-						"type": "string"
+					"type": "array",
+					"default": [],
+					"description": "User-supplied model overrides for reasoning capabilities. Merged on top of bundled overrides (user entries take precedence on regex match). Each entry: { match: string (regex), supportsReasoning?: boolean|null, reasoningEfforts?: string[], defaultEffort?: string, notes?: string }.",
+					"items": {
+						"type": "object",
+						"properties": {
+							"match": {
+								"type": "string",
+								"description": "Regex pattern matched against the model id."
+							},
+							"supportsReasoning": {
+								"type": [
+									"boolean",
+									"null"
+								],
+								"description": "Override reasoning support. null = inherit from proxy."
+							},
+							"reasoningEfforts": {
+								"type": "array",
+								"items": {
+									"type": "string",
+									"enum": [
+										"none",
+										"minimal",
+										"low",
+										"medium",
+										"high",
+										"xhigh"
+									]
+								}
+							},
+							"defaultEffort": {
+								"type": "string",
+								"enum": [
+									"none",
+									"minimal",
+									"low",
+									"medium",
+									"high",
+									"xhigh"
+								]
+							},
+							"notes": {
+								"type": "string"
+							}
+						},
+						"required": [
+							"match"
+						]
 					}
 				},
 				"litellm-connector.modelCapabilitiesOverrides": {
@@ -279,7 +323,7 @@
 		"test": "xvfb-run vscode-test --args=\"--no-sandbox\"",
 		"test:report": "npm run pretest && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && npm run test",
 		"pretest:coverage": "npm run compile",
-		"test:coverage": "node -e \"const fs = require('fs'); const path = require('path'); const coveragePath = path.join(process.cwd(), 'coverage'); if (fs.existsSync(coveragePath)) fs.rmSync(coveragePath, { recursive: true, force: true });\" && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && xvfb-run vscode-test --args=\"--no-sandbox\" --coverage --coverage-output coverage --coverage-reporter lcovonly --coverage-reporter html --coverage-reporter text-summary",
+		"test:coverage": "node -e \"const fs = require('fs'); const path = require('path'); const { spawnSync } = require('child_process'); const coveragePath = path.join(process.cwd(), 'coverage'); if (fs.existsSync(coveragePath)) fs.rmSync(coveragePath, { recursive: true, force: true }); process.env.VSCODE_TEST_RESULTS_DIR = path.join(process.cwd(), 'test-results'); fs.mkdirSync(process.env.VSCODE_TEST_RESULTS_DIR, { recursive: true }); const testArgs = ['vscode-test', '--args=--no-sandbox', '--coverage', '--coverage-output', 'coverage', '--coverage-reporter', 'lcovonly', '--coverage-reporter', 'html', '--coverage-reporter', 'text-summary']; const hasXvfb = process.platform === 'linux' && spawnSync('sh', ['-lc', 'command -v xvfb-run >/dev/null 2>&1']).status === 0; const cmd = hasXvfb ? 'xvfb-run' : testArgs[0]; const args = hasXvfb ? testArgs : testArgs.slice(1); const result = spawnSync(cmd, args, { stdio: 'inherit', env: process.env }); if (typeof result.status === 'number') process.exit(result.status); process.exit(1);\"",
 		"bump-version": "node scripts/bump-version.js"
 	},
 	"devDependencies": {

@@ -1,5 +1,6 @@
 import type * as vscode from "vscode";
-import type { LiteLLMModelInfo, ModelCapabilityOverride } from "../types";
+import type { LiteLLMModelInfo, ModelCapabilityOverride, SupportedReasoningEffort } from "../types";
+import { getDefaultEffort, getEffectiveEfforts } from "../config/modelOverrides";
 
 export interface DerivedModelCapabilities {
     supportsTools: boolean;
@@ -12,8 +13,6 @@ export interface DerivedModelCapabilities {
     maxOutputTokens: number;
     rawContextWindow: number;
 }
-
-export type SupportedReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export function deriveCapabilitiesFromModelInfo(
     modelId: string,
@@ -160,28 +159,39 @@ export type ExtendedModelInformation = vscode.LanguageModelChatInformation & {
  * @param modelInfo LiteLLM model information with reasoning capabilities
  * @returns Array of supported reasoning effort strings
  */
-export function getSupportedReasoningEfforts(modelInfo?: LiteLLMModelInfo): readonly SupportedReasoningEffort[] {
+function hasReasoningSignal(modelInfo?: LiteLLMModelInfo): boolean {
     if (!modelInfo) {
+        return false;
+    }
+    if (modelInfo.supports_reasoning) {
+        return true;
+    }
+    return Object.keys(LITELLM_REASONING_EFFORT_MAPPING).some(
+        (key) => modelInfo[key as keyof LiteLLMModelInfo] === true
+    );
+}
+
+export function getSupportedReasoningEfforts(
+    modelInfo?: LiteLLMModelInfo,
+    modelId?: string,
+    config?: vscode.WorkspaceConfiguration
+): readonly SupportedReasoningEffort[] {
+    if (!modelInfo && !modelId) {
         return [];
     }
 
-    const explicitlySupportedEfforts = new Set<SupportedReasoningEffort>();
-    for (const [litellmField, mappedEffort] of Object.entries(LITELLM_REASONING_EFFORT_MAPPING)) {
-        if (modelInfo[litellmField as keyof LiteLLMModelInfo] === true) {
-            explicitlySupportedEfforts.add(mappedEffort);
+    if (modelInfo?.supports_reasoning === false) {
+        return [];
+    }
+
+    if (modelId) {
+        const overrideEfforts = getEffectiveEfforts(modelId, modelInfo, config);
+        if (overrideEfforts.length > 0) {
+            return overrideEfforts;
         }
     }
 
-    if (explicitlySupportedEfforts.size > 0) {
-        return [
-            "none",
-            ...DEFAULT_REASONING_EFFORTS.filter(
-                (effort) => effort !== "none" && explicitlySupportedEfforts.has(effort)
-            ),
-        ];
-    }
-
-    if (modelInfo.supports_reasoning === true) {
+    if (hasReasoningSignal(modelInfo)) {
         return DEFAULT_REASONING_EFFORTS;
     }
 
@@ -189,10 +199,20 @@ export function getSupportedReasoningEfforts(modelInfo?: LiteLLMModelInfo): read
 }
 
 export function getDefaultReasoningEffort(
-    supportedEfforts: readonly SupportedReasoningEffort[]
+    supportedEfforts: readonly SupportedReasoningEffort[],
+    modelId?: string,
+    modelInfo?: LiteLLMModelInfo,
+    config?: vscode.WorkspaceConfiguration
 ): SupportedReasoningEffort | undefined {
     if (supportedEfforts.length === 0) {
         return undefined;
+    }
+
+    if (modelId) {
+        const overrideDefault = getDefaultEffort(modelId, modelInfo, config);
+        if (overrideDefault) {
+            return overrideDefault;
+        }
     }
 
     if (supportedEfforts.includes("medium")) {
@@ -225,7 +245,12 @@ function getEffortDescription(effort: SupportedReasoningEffort): string {
     }
 }
 
-export function buildReasoningEffortConfigurationSchema(supportedEfforts: readonly SupportedReasoningEffort[]):
+export function buildReasoningEffortConfigurationSchema(
+    supportedEfforts: readonly SupportedReasoningEffort[],
+    modelId?: string,
+    modelInfo?: LiteLLMModelInfo,
+    config?: vscode.WorkspaceConfiguration
+):
     | {
           properties: {
               reasoningEffort: {
@@ -250,7 +275,7 @@ export function buildReasoningEffortConfigurationSchema(supportedEfforts: readon
         return undefined;
     }
 
-    const defaultEffort = getDefaultReasoningEffort(supportedEfforts);
+    const defaultEffort = getDefaultReasoningEffort(supportedEfforts, modelId, modelInfo, config);
     return {
         properties: {
             reasoningEffort: {

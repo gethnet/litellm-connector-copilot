@@ -42,6 +42,13 @@ import {
     getSupportedReasoningEfforts,
 } from "../utils/modelCapabilities";
 import type { DerivedModelCapabilities } from "../utils/modelCapabilities";
+import type { SupportedReasoningEffort } from "../types";
+import {
+    EffortFallbackCache,
+    hasShownReasoningFallbackNotification,
+    isReasoningError,
+    markReasoningFallbackNotified,
+} from "../utils/reasoningEffortFallback";
 import type { V2ChatMessage } from "./v2Types";
 import type { BackendSession } from "./backendSession";
 
@@ -94,6 +101,7 @@ export abstract class LiteLLMProviderBase {
     protected readonly _modelInfoCache = new Map<string, LiteLLMModelInfo | undefined>();
     protected readonly _derivedCapabilitiesCache = new Map<string, DerivedModelCapabilities>();
     protected readonly _parameterProbeCache = new Map<string, Set<string>>();
+    protected readonly _effortFallbackCache: EffortFallbackCache;
     protected _lastModelList: LanguageModelChatInformation[] = [];
     protected _modelListFetchedAtMs = 0;
     private _inFlightDiscovery: Promise<vscode.LanguageModelChatInformation[]> | undefined;
@@ -114,9 +122,11 @@ export abstract class LiteLLMProviderBase {
 
     constructor(
         protected readonly secrets: vscode.SecretStorage,
-        protected readonly userAgent: string
+        protected readonly userAgent: string,
+        effortFallbackCache?: EffortFallbackCache
     ) {
         this._configManager = new ConfigManager(secrets);
+        this._effortFallbackCache = effortFallbackCache ?? new EffortFallbackCache();
     }
 
     public setTelemetryService(service: TelemetryService): void {
@@ -220,7 +230,9 @@ export abstract class LiteLLMProviderBase {
             `[reasoning] ${modelId}: attaching configurationSchema with efforts [${supportedEfforts.join(", ")}].`
         );
         return buildReasoningEffortConfigurationSchema(
-            supportedEfforts as ReturnType<typeof getSupportedReasoningEfforts>
+            supportedEfforts as ReturnType<typeof getSupportedReasoningEfforts>,
+            undefined,
+            modelInfo
         );
     }
 
@@ -366,7 +378,7 @@ export abstract class LiteLLMProviderBase {
 
                 const capOverride = config.modelCapabilitiesOverrides?.[modelId];
                 const capabilities = capabilitiesToVSCode(derived, capOverride);
-                const tags = getDerivedModelTags(modelId, derived, config.modelOverrides, capOverride);
+                const tags = getDerivedModelTags(modelId, derived, undefined, capOverride);
 
                 const rawProvider = modelInfo?.litellm_provider ?? "litellm";
                 const rawModelName = entry.model_name ?? modelId;
@@ -389,7 +401,7 @@ export abstract class LiteLLMProviderBase {
                 const detailBase = entry.backendName ?? "LiteLLM";
                 const detail = `${cacheIndicator}${detailBase}`;
                 const backend = backendsByName.get(entry.backendName);
-                const supportedEfforts = getSupportedReasoningEfforts(modelInfo);
+                const supportedEfforts = getSupportedReasoningEfforts(modelInfo, modelId);
                 const reasoningSchema = this._buildReasoningSchemaWithDiagnostics(modelId, modelInfo, supportedEfforts);
                 const info: LiteLLMDiscoveredModel = {
                     id: modelId,
@@ -484,7 +496,7 @@ export abstract class LiteLLMProviderBase {
                 const maxInputTokens = derived.maxInputTokens;
                 const maxOutputTokens = derived.maxOutputTokens;
 
-                const supportedEfforts = getSupportedReasoningEfforts(modelInfo);
+                const supportedEfforts = getSupportedReasoningEfforts(modelInfo, namespacedId);
                 const reasoningSchema = this._buildReasoningSchemaWithDiagnostics(
                     namespacedId,
                     modelInfo,
@@ -781,7 +793,7 @@ export abstract class LiteLLMProviderBase {
                 Logger.trace(`[reasoning] Picker selected "none" for ${model.id}; suppressing reasoning_effort field.`);
                 return undefined;
             }
-            if (this.isReasoningEffortSupported(pickerEffort, modelInfo)) {
+            if (this.isReasoningEffortSupported(pickerEffort, modelInfo, model.id)) {
                 return pickerEffort;
             }
             Logger.warn(
@@ -797,7 +809,7 @@ export abstract class LiteLLMProviderBase {
             if (overrideEffort === "none") {
                 return undefined;
             }
-            if (this.isReasoningEffortSupported(overrideEffort, modelInfo)) {
+            if (this.isReasoningEffortSupported(overrideEffort, modelInfo, model.id)) {
                 return overrideEffort;
             }
             Logger.warn(
@@ -817,12 +829,12 @@ export abstract class LiteLLMProviderBase {
      * @param modelInfo LiteLLM model information
      * @returns true if the effort is in the model's supported efforts list
      */
-    protected isReasoningEffortSupported(effort: string, modelInfo?: LiteLLMModelInfo): boolean {
-        if (!modelInfo) {
+    protected isReasoningEffortSupported(effort: string, modelInfo?: LiteLLMModelInfo, modelId?: string): boolean {
+        if (!modelInfo && !modelId) {
             return false;
         }
 
-        const supportedEfforts = getSupportedReasoningEfforts(modelInfo);
+        const supportedEfforts = getSupportedReasoningEfforts(modelInfo, modelId);
         return supportedEfforts.includes(effort as (typeof supportedEfforts)[number]);
     }
 
@@ -1109,6 +1121,113 @@ export abstract class LiteLLMProviderBase {
         caller?: string,
         modelInfo?: LiteLLMModelInfo
     ): Promise<ReadableStream<Uint8Array>> {
+        const modelId = request.model;
+        const originalEffort = (request as { reasoning_effort?: SupportedReasoningEffort }).reasoning_effort;
+        let effectiveEffort = this._effortFallbackCache.getEffectiveEffort(modelId, originalEffort);
+        this.applyReasoningEffort(request, effectiveEffort);
+
+        const notificationKeyEffort = originalEffort ?? effectiveEffort;
+        let attempts = 0;
+        let lastError: unknown;
+
+        while (attempts < 6) {
+            try {
+                return await this.sendOnceWithOverflow(
+                    request,
+                    messages,
+                    model,
+                    options,
+                    progress,
+                    token,
+                    caller,
+                    modelInfo
+                );
+            } catch (err) {
+                if (!isReasoningError(err)) {
+                    throw err;
+                }
+
+                lastError = err;
+                const nextEffort = this._effortFallbackCache.recordFailure(modelId, effectiveEffort);
+                attempts += 1;
+
+                if (nextEffort === effectiveEffort || attempts >= 5) {
+                    throw this.toMeaningfulError(err, "Reasoning effort fallback exhausted");
+                }
+
+                const previous = effectiveEffort;
+                effectiveEffort = nextEffort;
+                this.applyReasoningEffort(request, effectiveEffort);
+
+                if (notificationKeyEffort && previous && previous !== effectiveEffort) {
+                    this.notifyReasoningFallback(modelId, notificationKeyEffort, effectiveEffort);
+                }
+
+                Logger.info(
+                    `[reasoning] ${modelId}: retrying with downgraded effort ${effectiveEffort ?? "(omitted)"} after failure`
+                );
+            }
+        }
+
+        throw this.toMeaningfulError(lastError, "Reasoning effort fallback exhausted");
+    }
+
+    private toMeaningfulError(error: unknown, fallbackMessage: string): Error {
+        if (error instanceof Error) {
+            return error;
+        }
+
+        if (typeof error === "string") {
+            return new Error(error);
+        }
+
+        if (typeof error === "object" && error !== null && "message" in error) {
+            const message = (error as { message?: unknown }).message;
+            if (typeof message === "string" && message.trim().length > 0) {
+                return new Error(message);
+            }
+        }
+
+        return new Error(fallbackMessage);
+    }
+
+    private applyReasoningEffort(
+        request: OpenAIChatCompletionRequest,
+        effort: SupportedReasoningEffort | undefined
+    ): void {
+        if (effort) {
+            request.reasoning_effort = effort;
+        } else {
+            delete (request as { reasoning_effort?: SupportedReasoningEffort }).reasoning_effort;
+        }
+    }
+
+    private notifyReasoningFallback(
+        modelId: string,
+        originalEffort: SupportedReasoningEffort,
+        fallbackEffort: SupportedReasoningEffort | undefined
+    ): void {
+        if (hasShownReasoningFallbackNotification(modelId, originalEffort)) {
+            return;
+        }
+
+        const fallbackLabel = fallbackEffort ?? "omitted";
+        void vscode.window.showInformationMessage(
+            `Effort '${originalEffort}' is not supported by ${modelId}; using '${fallbackLabel}' for this session.`
+        );
+        markReasoningFallbackNotified(modelId, originalEffort);
+    }
+
+    private async sendOnceWithOverflow(
+        request: OpenAIChatCompletionRequest,
+        messages: readonly LanguageModelChatRequestMessage[],
+        model: LanguageModelChatInformation,
+        options: ProvideLanguageModelChatResponseOptions,
+        progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+        token: vscode.CancellationToken,
+        caller?: string,
+        modelInfo?: LiteLLMModelInfo
+    ): Promise<ReadableStream<Uint8Array>> {
         try {
             return await this.sendRequestToLiteLLM(request, progress, token, caller, modelInfo);
         } catch (err) {
@@ -1118,7 +1237,6 @@ export abstract class LiteLLMProviderBase {
 
             Logger.warn("[sendRequestWithRetry] Context overflow detected, retrying with aggressive trim", err);
 
-            // Build a new request with hard budget override equal to raw limit minus tool tokens
             const toolConfig = convertTools(options);
             const hardBudget = Math.max(1, model.maxInputTokens - estimateToolTokens(toolConfig.tools));
             const trimmedMessages = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo, hardBudget);
