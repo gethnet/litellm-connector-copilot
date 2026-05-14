@@ -74,6 +74,7 @@ type LiteLLMDiscoveredModel = vscode.LanguageModelChatInformation & {
     readonly tooltip?: string;
     readonly description?: string;
     readonly tags?: string[];
+    readonly category?: { label: string; order: number };
     readonly _backendName?: string;
     readonly _backendUrl?: string;
     readonly _apiKey?: string;
