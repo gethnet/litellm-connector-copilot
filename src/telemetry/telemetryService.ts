@@ -259,6 +259,10 @@ export class TelemetryService implements vscode.Disposable {
         });
     }
 
+    captureModernConfigStatus(props: { is_on_modern_config: boolean; source: string }): void {
+        this.capture("modern_config_status", props);
+    }
+
     captureFeatureUsed(featureName: string, _caller: string): void {
         this._captureAggregatedFeatureUsage(featureName);
     }

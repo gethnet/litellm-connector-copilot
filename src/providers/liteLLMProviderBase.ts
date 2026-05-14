@@ -112,6 +112,8 @@ export abstract class LiteLLMProviderBase {
 
     protected _telemetryService?: TelemetryService;
 
+    private _onModernConfigurationDetected?: () => void;
+
     constructor(
         protected readonly secrets: vscode.SecretStorage,
         protected readonly userAgent: string,
@@ -123,6 +125,15 @@ export abstract class LiteLLMProviderBase {
 
     public setTelemetryService(service: TelemetryService): void {
         this._telemetryService = service;
+    }
+
+    /**
+     * Registers a callback fired when VS Code per-group provider configuration is
+     * present and passes syntactic validation. Extension activation uses this to
+     * persist a one-time "modern config seen" session flag and suppress legacy prompts.
+     */
+    public setModernConfigurationDetectedHandler(handler: () => void): void {
+        this._onModernConfigurationDetected = handler;
     }
 
     /** Exposes the ConfigManager for external access (e.g., commands that need configuration). */
@@ -265,6 +276,7 @@ export abstract class LiteLLMProviderBase {
                     // when VS Code omits or provides incomplete per-group configuration.
                 }
                 if (session) {
+                    this._onModernConfigurationDetected?.();
                     return this._discoverModelsFromSession(session, token);
                 }
             }
