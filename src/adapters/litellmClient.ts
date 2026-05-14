@@ -35,17 +35,33 @@ export class LiteLLMClient {
             token.onCancellationRequested(() => controller.abort());
         }
 
-        Logger.trace(`Fetching model info from ${this.config.url}/model/info`);
+        const urls = this.getModelInfoUrls();
+        Logger.trace(`Fetching model info from ${urls[0]}`);
         try {
-            const resp = await fetch(`${this.config.url}/model/info`, {
-                headers: this.getHeaders(),
-                signal: controller.signal,
-            });
-            if (!resp.ok) {
+            let lastResponse: Response | undefined;
+            for (const url of urls) {
+                const resp = await fetch(url, {
+                    headers: this.getHeaders(),
+                    signal: controller.signal,
+                });
+                if (resp.ok) {
+                    return resp.json() as Promise<LiteLLMModelInfoResponse>;
+                }
+
+                lastResponse = resp;
+                if (resp.status === 404) {
+                    Logger.warn(`Model info endpoint returned 404, trying fallback URL: ${url}`);
+                    continue;
+                }
+
                 Logger.error(`Failed to fetch model info: ${resp.status} ${resp.statusText}`);
                 throw new Error(`Failed to fetch model info: ${resp.status} ${resp.statusText}`);
             }
-            return resp.json() as Promise<LiteLLMModelInfoResponse>;
+
+            const status = lastResponse?.status ?? 404;
+            const statusText = lastResponse?.statusText ?? "Not Found";
+            Logger.error(`Failed to fetch model info after trying fallback URLs: ${status} ${statusText}`);
+            throw new Error(`Failed to fetch model info: ${status} ${statusText}`);
         } catch (err) {
             if (this._telemetryService) {
                 const errorType = err instanceof Error ? err.name : "FetchError";
@@ -53,6 +69,30 @@ export class LiteLLMClient {
             }
             throw err;
         }
+    }
+
+    private getModelInfoUrls(): string[] {
+        const trimmed = this.config.url.replace(/\/+$/, "");
+        const stripTerminalEndpoint = (url: string): string =>
+            url.replace(/\/(?:chat\/completions|completions|responses|model\/info)$/i, "");
+        const stripV1 = (url: string): string => url.replace(/\/v1$/i, "");
+
+        const baseCandidates = new Set<string>([
+            trimmed,
+            stripTerminalEndpoint(trimmed),
+            stripV1(trimmed),
+            stripV1(stripTerminalEndpoint(trimmed)),
+            stripTerminalEndpoint(stripV1(trimmed)),
+        ]);
+
+        const urls: string[] = [];
+        for (const base of baseCandidates) {
+            if (!base) {
+                continue;
+            }
+            urls.push(`${base}/model/info`);
+        }
+        return urls;
     }
 
     /**

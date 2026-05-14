@@ -17,7 +17,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "2.0.0-dev9",
+	"version": "2.0.0-dev20",
 	"preview": true,
 	"engines": {
 		"vscode": "^1.120.0"
@@ -68,28 +68,26 @@
 						"baseUrl": {
 							"type": "string",
 							"title": "Server URL",
-							"description": "Base URL for the LiteLLM proxy server.",
+							"description": "Base URL for the LiteLLM proxy server (must start with http:// or https://).",
+							"pattern": "^https?:\\/\\/.+",
 							"group": "navigation"
 						},
 						"apiKey": {
 							"type": "string",
 							"title": "API Key",
 							"description": "API key used to authenticate with the LiteLLM proxy.",
-							"secret": true
+							"secret": true,
+							"minLength": 1
 						}
 					},
 					"required": [
-						"baseUrl"
+						"baseUrl",
+						"apiKey"
 					]
-				},
-				"managementCommand": "litellm-connector.manage"
+				}
 			}
 		],
 		"commands": [
-			{
-				"command": "litellm-connector.manage",
-				"title": "Manage LiteLLM Provider"
-			},
 			{
 				"command": "litellm-connector.inlineCompletions.selectModel",
 				"title": "LiteLLM: Select Inline Completion Model"
@@ -101,6 +99,10 @@
 			{
 				"command": "litellm-connector.reloadModels",
 				"title": "LiteLLM: Reload Models"
+			},
+			{
+				"command": "litellm-connector.manage",
+				"title": "LiteLLM: Manage Configuration"
 			},
 			{
 				"command": "litellm-connector.checkConnection",

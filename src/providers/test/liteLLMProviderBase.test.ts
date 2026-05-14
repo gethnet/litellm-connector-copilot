@@ -736,7 +736,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         sandbox.stub(configManager, "convertProviderConfiguration").returns(session);
 
         const models = await provider.discoverModels(
-            { configuration: { baseUrl: "http://localhost:4000" } },
+            { configuration: { providerName: "group1", baseUrl: "http://localhost:4000", apiKey: "k" } },
             new vscode.CancellationTokenSource().token
         );
 
@@ -776,7 +776,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         sandbox.stub(configManagerForReasoning, "convertProviderConfiguration").returns(sessionForReasoning);
 
         const models = await providerForReasoning.discoverModels(
-            { configuration: { baseUrl: "http://localhost:4000" } },
+            { configuration: { providerName: "group1", baseUrl: "http://localhost:4000", apiKey: "k" } },
             new vscode.CancellationTokenSource().token
         );
 
@@ -961,7 +961,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(infos.length, 0);
     });
 
-    test("provideLanguageModelChatInformation handles missing URL", async () => {
+    test("provideLanguageModelChatInformation handles missing URL without launching config command", async () => {
         const emptySecrets = {
             get: async () => undefined,
             store: async () => {},
@@ -971,7 +971,7 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         const provider = new LiteLLMChatProvider(emptySecrets, userAgent);
 
-        // When silent=false and baseUrl is missing, the provider should trigger the classic configuration flow.
+        // Discovery should remain non-interactive even when configuration is missing.
         const execStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
 
         const infos = await provider.provideLanguageModelChatInformation(
@@ -979,7 +979,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             new vscode.CancellationTokenSource().token
         );
 
-        assert.strictEqual(execStub.calledWith("litellm-connector.manage"), true);
+        assert.strictEqual(execStub.calledWith("litellm-connector.manage"), false);
         assert.strictEqual(infos.length, 0, "Should return 0 models when URL is missing and config not completed");
     });
 
@@ -1236,10 +1236,16 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({ data: mockData });
 
-        const infos = await provider.provideLanguageModelChatInformation({ silent: true }, {
-            isCancellationRequested: false,
-            onCancellationRequested: () => ({ dispose() {} }),
-        } as vscode.CancellationToken);
+        const infos = await provider.provideLanguageModelChatInformation(
+            {
+                silent: true,
+                configuration: { providerName: "default", baseUrl: "http://localhost:4000", apiKey: "test-key" },
+            },
+            {
+                isCancellationRequested: false,
+                onCancellationRequested: () => ({ dispose() {} }),
+            } as vscode.CancellationToken
+        );
 
         assert.strictEqual(infos.length, 2);
 
@@ -1289,10 +1295,16 @@ suite("LiteLLM Provider Unit Tests", () => {
             url: "http://localhost:4000",
         });
 
-        const infos = await provider.provideLanguageModelChatInformation({ silent: true }, {
-            isCancellationRequested: false,
-            onCancellationRequested: () => ({ dispose() {} }),
-        } as vscode.CancellationToken);
+        const infos = await provider.provideLanguageModelChatInformation(
+            {
+                silent: true,
+                configuration: { providerName: "default", baseUrl: "http://localhost:4000", apiKey: "test-key" },
+            },
+            {
+                isCancellationRequested: false,
+                onCancellationRequested: () => ({ dispose() {} }),
+            } as vscode.CancellationToken
+        );
 
         assert.strictEqual(infos.length, 1);
         assert.strictEqual(infos[0].id, "default/gpt-4");
@@ -1337,10 +1349,16 @@ suite("LiteLLM Provider Unit Tests", () => {
             },
         });
 
-        const infos = await provider.provideLanguageModelChatInformation({ silent: true }, {
-            isCancellationRequested: false,
-            onCancellationRequested: () => ({ dispose() {} }),
-        } as vscode.CancellationToken);
+        const infos = await provider.provideLanguageModelChatInformation(
+            {
+                silent: true,
+                configuration: { providerName: "default", baseUrl: "http://localhost:4000", apiKey: "test-key" },
+            },
+            {
+                isCancellationRequested: false,
+                onCancellationRequested: () => ({ dispose() {} }),
+            } as vscode.CancellationToken
+        );
 
         assert.strictEqual(infos.length, 1);
         interface ModelInfoWithTags {
@@ -1359,10 +1377,16 @@ suite("LiteLLM Provider Unit Tests", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({ data: undefined } as never);
 
-        const infos = await provider.provideLanguageModelChatInformation({ silent: true }, {
-            isCancellationRequested: false,
-            onCancellationRequested: () => ({ dispose() {} }),
-        } as vscode.CancellationToken);
+        const infos = await provider.provideLanguageModelChatInformation(
+            {
+                silent: true,
+                configuration: { providerName: "default", baseUrl: "http://localhost:4000", apiKey: "test-key" },
+            },
+            {
+                isCancellationRequested: false,
+                onCancellationRequested: () => ({ dispose() {} }),
+            } as vscode.CancellationToken
+        );
 
         assert.ok(Array.isArray(infos));
         assert.strictEqual(infos.length, 0);
@@ -1372,10 +1396,16 @@ suite("LiteLLM Provider Unit Tests", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         sandbox.stub(LiteLLMClient.prototype, "getModelInfo").rejects(new Error("network"));
 
-        const infos = await provider.provideLanguageModelChatInformation({ silent: true }, {
-            isCancellationRequested: false,
-            onCancellationRequested: () => ({ dispose() {} }),
-        } as vscode.CancellationToken);
+        const infos = await provider.provideLanguageModelChatInformation(
+            {
+                silent: true,
+                configuration: { providerName: "default", baseUrl: "http://localhost:4000", apiKey: "test-key" },
+            },
+            {
+                isCancellationRequested: false,
+                onCancellationRequested: () => ({ dispose() {} }),
+            } as vscode.CancellationToken
+        );
 
         assert.ok(Array.isArray(infos));
         assert.strictEqual(infos.length, 0);
@@ -1611,14 +1641,35 @@ suite("LiteLLM Provider Unit Tests", () => {
             resolveBackends: async () => [
                 { name: "default", url: "http://localhost:4000", apiKey: "test-key", enabled: true },
             ],
+            convertProviderConfiguration: () => ({
+                backendName: "default",
+                baseUrl: "http://localhost:4000",
+                apiKey: "test-key",
+                client: {
+                    getModelInfo: async () => ({
+                        data: [
+                            {
+                                model_name: "test-model",
+                                model_info: { mode: "chat", supports_native_streaming: true },
+                            },
+                        ],
+                    }),
+                },
+            }),
         });
 
         // Initialize multiBackendClient by calling discoverModels
         sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({ data: [] });
-        await provider.provideLanguageModelChatInformation({ silent: true }, {
-            isCancellationRequested: false,
-            onCancellationRequested: () => ({ dispose() {} }),
-        } as vscode.CancellationToken);
+        await provider.provideLanguageModelChatInformation(
+            {
+                silent: true,
+                configuration: { providerName: "default", baseUrl: "http://localhost:4000", apiKey: "test-key" },
+            },
+            {
+                isCancellationRequested: false,
+                onCancellationRequested: () => ({ dispose() {} }),
+            } as vscode.CancellationToken
+        );
 
         const remoteCount = 123;
         const countTokensStub = sandbox
@@ -1784,17 +1835,72 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(doDiscoverStub.calledOnce, true);
     });
 
-    test("_doDiscoverModels triggers config flow when no backends configured and not silent", async () => {
+    test("_doDiscoverModels falls back to extension-managed backends when provider configuration is missing", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const configManager = access(provider)._configManager;
-        sandbox.stub(configManager, "resolveBackends").resolves([]);
+        sandbox
+            .stub(configManager, "resolveBackends")
+            .resolves([{ name: "cloud", url: "http://localhost:4000", apiKey: "k", enabled: true }]);
+        sandbox.stub(MultiBackendClient.prototype, "getModelInfoAll").resolves({
+            data: [
+                {
+                    backendName: "cloud",
+                    namespacedId: "cloud/gpt-4o",
+                    model_name: "gpt-4o",
+                    model_info: {
+                        litellm_provider: "openai",
+                        mode: "chat",
+                        supports_native_streaming: true,
+                        max_input_tokens: 8192,
+                        max_output_tokens: 4096,
+                    } as LiteLLMModelInfo,
+                },
+            ],
+        });
         const execStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
         const models = await access(provider)._doDiscoverModels(
             { silent: false },
             new vscode.CancellationTokenSource().token
         );
-        assert.strictEqual(execStub.calledWith("litellm-connector.manage"), true);
-        assert.strictEqual(models.length, 0);
+        assert.strictEqual(execStub.calledWith("litellm-connector.manage"), false);
+        assert.strictEqual(models.length, 1);
+        assert.strictEqual(models[0].id, "cloud/gpt-4o");
+    });
+
+    test("_doDiscoverModels falls back to extension-managed backends when provider configuration is incomplete", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const configManager = access(provider)._configManager;
+        sandbox
+            .stub(configManager, "resolveBackends")
+            .resolves([{ name: "cloud", url: "http://localhost:4000", apiKey: "k", enabled: true }]);
+        sandbox.stub(MultiBackendClient.prototype, "getModelInfoAll").resolves({
+            data: [
+                {
+                    backendName: "cloud",
+                    namespacedId: "cloud/gpt-4o-mini",
+                    model_name: "gpt-4o-mini",
+                    model_info: {
+                        litellm_provider: "openai",
+                        mode: "chat",
+                        supports_native_streaming: true,
+                    } as LiteLLMModelInfo,
+                },
+            ],
+        });
+
+        const models = await access(provider)._doDiscoverModels(
+            {
+                silent: true,
+                configuration: {
+                    baseUrl: "http://localhost:4000",
+                    // missing apiKey -> convertProviderConfiguration should fail, then legacy fallback runs
+                },
+            },
+            new vscode.CancellationTokenSource().token
+        );
+
+        assert.strictEqual(models.length, 1);
+        assert.strictEqual(models[0].id, "cloud/gpt-4o-mini");
     });
 
     test("_doDiscoverModels handles error gracefully", async () => {

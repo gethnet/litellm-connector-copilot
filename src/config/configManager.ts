@@ -317,28 +317,43 @@ export class ConfigManager {
     }
 
     /**
-     * Convert VS Code 1.119+ provider configuration (from options.configuration)
-     * into a BackendSession. Returns undefined if baseUrl is absent.
+     * Converts VS Code per-group provider configuration into a BackendSession.
+     * Required fields: baseUrl (http/https), apiKey.
      *
-     * This supports the new per-group configuration system where VS Code passes
-     * configuration directly via options.configuration in provideLanguageModelChatResponse.
+     * `providerName` is optional because VS Code group-based configuration already
+     * carries the user-entered group name separately as `groupName`.
      */
     convertProviderConfiguration(
         groupName: string,
         configuration: Record<string, unknown>
     ): BackendSession | undefined {
-        const baseUrl = configuration.baseUrl as string | undefined;
-        if (!baseUrl) {
-            Logger.debug("convertProviderConfiguration: no baseUrl in configuration");
+        const providerNameFromConfig =
+            typeof configuration.providerName === "string" ? configuration.providerName.trim() : "";
+        const providerName = providerNameFromConfig || groupName.trim();
+        const baseUrl = typeof configuration.baseUrl === "string" ? configuration.baseUrl.trim() : "";
+        const apiKey = typeof configuration.apiKey === "string" ? configuration.apiKey.trim() : "";
+
+        if (!providerName) {
+            Logger.debug("convertProviderConfiguration: missing providerName and groupName");
             return undefined;
         }
 
-        const userAgent = "litellm-vscode-chat/vscode-1.119+";
+        if (!baseUrl || !/^https?:\/\//i.test(baseUrl)) {
+            Logger.debug("convertProviderConfiguration: baseUrl must start with http:// or https://");
+            return undefined;
+        }
+
+        if (!apiKey) {
+            Logger.debug("convertProviderConfiguration: missing apiKey in configuration");
+            return undefined;
+        }
+
+        const userAgent = "litellm-vscode-chat/vscode-1.120+";
         return {
-            backendName: groupName,
+            backendName: providerName,
             baseUrl,
-            apiKey: configuration.apiKey as string | undefined,
-            client: new LiteLLMClient({ url: baseUrl, key: configuration.apiKey as string | undefined }, userAgent),
+            apiKey,
+            client: new LiteLLMClient({ url: baseUrl, key: apiKey }, userAgent),
         };
     }
 

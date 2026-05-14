@@ -51,14 +51,17 @@ If the extension fails to connect or models don't show up:
 
 1. Install **GitHub Copilot Chat**
 2. Install **LiteLLM Connector for Copilot**
-3. Open Command Palette: `Ctrl+Shift+P` / `Cmd+Shift+P`
-4. Run: **Manage LiteLLM Provider**
-5. Enter:
+3. Open Command Palette (`Cmd/Ctrl+Shift+P`)
+4. Run **LiteLLM: Manage Configuration**
+5. Add one or more backends with:
+   - **Name** (used as the provider/group label)
    - **Base URL** (example: `http://localhost:4000`)
    - **API Key** (optional)
 6. Open Copilot Chat → pick a model under **LiteLLM** → chat
 
-> **Multi-Backend**: Connect to multiple LiteLLM instances simultaneously. Use **Manage Multiple Backends** to aggregate models from several proxies. Models are automatically namespaced (e.g., `local/llama-3`).
+> **Multi-Backend**: Configure multiple LiteLLM provider groups to aggregate models from several proxies. Models are namespaced and grouped by backend so provider identity is clear.
+
+> **Backend identity remains clear**: each backend is kept as its own provider/group so model origin is obvious in the picker.
 
 ---
 
@@ -122,7 +125,7 @@ If the extension fails to connect or models don't show up:
 
 ## ⌨️ Commands
 
-- **Manage LiteLLM Provider**: Configure Base URL + API Key; refreshes models.
+- **Manage LiteLLM Provider**: Legacy migration command for older single/multi-backend setup flows.
 - **LiteLLM: Check Connection**: Verify proxy URL and API key configuration.
 - **LiteLLM: Select Inline Completion Model**: Choose a model for inline completions.
 - **LiteLLM: Select Commit Message Model**: Choose a model for git commit generation.

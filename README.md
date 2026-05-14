@@ -47,15 +47,15 @@ Your support keeps this project alive and improving! ❤️
 ### Installation & Setup (60 seconds)
 
 1. **Install** the "LiteLLM Connector for Copilot" extension from the VS Code Marketplace
-2. **Open** the Command Palette: `Ctrl+Shift+P` (Windows/Linux) or `Cmd+Shift+P` (Mac)
-3. **Run**: `Manage LiteLLM Provider`
-4. **Choose** between **Configure Single Backend (Legacy)** for a quick setup or **Manage Multiple Backends** to aggregate models from several LiteLLM proxy instances.
+2. **Open** Command Palette (`Cmd/Ctrl+Shift+P`)
+3. **Run** **LiteLLM: Manage Configuration**
+4. **Add** one or more backends (name, Base URL, and optional API key)
+5. **Open** Copilot Chat and pick a model from the **LiteLLM** category
+6. **Start chatting!** 🎉
 
-> **Multi-Backend Power**: You can now connect to multiple LiteLLM instances simultaneously (e.g., Local Llama + Cloud GPT-4 + Internal Proxy). Models are automatically namespaced (e.g., `local/llama-3`) to prevent conflicts.
+> **Multi-Backend Power**: Configure multiple LiteLLM provider groups (for example local + cloud + internal). Models are namespaced and grouped by backend so it is clear which provider each model comes from.
 
-5. **Enter** your LiteLLM proxy details (Base URL and API Key).
-6. **Open** Copilot Chat and pick a model from the **LiteLLM** section.
-7. **Start chatting!** 🎉
+> **Provider grouping remains intact**: each backend name is preserved as its provider/group label, so models stay clearly identifiable in the picker.
 
 That's it! Your models from the LiteLLM proxy will automatically appear in the model picker.
 
@@ -173,7 +173,7 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and try these:
 
 | Command | What It Does |
 |---------|--------------|
-| **Manage LiteLLM Provider** | Configure your Base URL and API key. Refreshes the model list. |
+| **Manage LiteLLM Provider** | Legacy migration command. Opens legacy single/multi-backend setup flows for users upgrading from older versions. |
 | **LiteLLM: Check Connection** | Test if your proxy is reachable and credentials are valid. |
 | **LiteLLM: Reload Models** | Manually refresh the model list from your proxy. |
 | **LiteLLM: Reset All Configuration** | ⚠️ Nuke option—clears all stored URLs and API keys. |

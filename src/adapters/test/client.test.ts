@@ -268,6 +268,30 @@ suite("LiteLLM Client Unit Tests", () => {
         assert.strictEqual(jsonStub.calledOnce, true);
     });
 
+    test("getModelInfo retries with normalized URL when first endpoint returns 404", async () => {
+        const client = new LiteLLMClient({ url: "http://localhost:4000/v1", key: "test-key" }, userAgent);
+
+        const jsonStub = sandbox.stub().resolves({ data: [] });
+        const fetchStub = sandbox.stub(global, "fetch");
+        fetchStub.onCall(0).resolves({
+            ok: false,
+            status: 404,
+            statusText: "Not Found",
+        } as unknown as Response);
+        fetchStub.onCall(1).resolves({
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: jsonStub,
+        } as unknown as Response);
+
+        const res = await client.getModelInfo();
+        assert.deepStrictEqual(res, { data: [] });
+        assert.strictEqual(fetchStub.callCount, 2);
+        assert.strictEqual(fetchStub.getCall(0).args[0], "http://localhost:4000/v1/model/info");
+        assert.strictEqual(fetchStub.getCall(1).args[0], "http://localhost:4000/model/info");
+    });
+
     test("getModelInfo throws with status details when response is not ok", async () => {
         const client = new LiteLLMClient(config, userAgent);
 

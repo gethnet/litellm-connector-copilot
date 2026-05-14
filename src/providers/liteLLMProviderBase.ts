@@ -111,15 +111,6 @@ export abstract class LiteLLMProviderBase {
 
     protected _telemetryService?: TelemetryService;
 
-    /**
-     * Tracks whether we've already logged the legacy-path deprecation warning this session.
-     * The legacy multi-backend / single-backend workspace-settings path is preserved as a
-     * compatibility shim for users upgrading from pre-1.119 VS Code, and is scheduled for
-     * removal in VS Code 1.125. We emit the warning once per process to avoid log spam while
-     * still nudging users toward the 1.120 per-group configuration system.
-     */
-    private _legacyDeprecationWarningEmitted = false;
-
     constructor(
         protected readonly secrets: vscode.SecretStorage,
         protected readonly userAgent: string,
@@ -166,32 +157,6 @@ export abstract class LiteLLMProviderBase {
      */
     public getModelInfo(modelId: string): LiteLLMModelInfo | undefined {
         return this._modelInfoCache.get(modelId);
-    }
-
-    /**
-     * Emits a one-time-per-session warning when the legacy (non-1.120) discovery path is
-     * activated. We intentionally rate-limit to one log entry per process to avoid spamming
-     * the output channel on every refresh while still surfacing the deprecation to anyone
-     * inspecting logs.
-     *
-     * @deprecated Remove together with the legacy path in VS Code 1.125.
-     */
-    private _emitLegacyDeprecationWarningOnce(): void {
-        if (this._legacyDeprecationWarningEmitted) {
-            return;
-        }
-        this._legacyDeprecationWarningEmitted = true;
-        Logger.warn(
-            "[deprecation] The legacy LiteLLM workspace-settings discovery path " +
-                "(`litellm-connector.backends` / `litellm-connector.url`) is OBSOLETE and " +
-                "will be removed in VS Code 1.125. Please configure your LiteLLM backends " +
-                "via the VS Code Language Model provider configuration UI (settings → " +
-                "Language Models → LiteLLM) so each backend becomes its own per-group " +
-                "configuration. See AGENTS.md and the VS Code 1.120 update plan for details."
-        );
-        if (this._telemetryService) {
-            this._telemetryService.captureFeatureUsed("legacy-discovery-path", "deprecation");
-        }
     }
 
     /**
@@ -289,165 +254,121 @@ export abstract class LiteLLMProviderBase {
     ): Promise<vscode.LanguageModelChatInformation[]> {
         Logger.trace("discoverModels called");
         try {
-            // VS Code 1.119+ path: configuration-based single-backend discovery
-            if (options.configuration?.baseUrl) {
+            if (options.configuration) {
                 const groupName = options.groupName ?? "default";
-                Logger.info(`Using configuration-based discovery for group: ${groupName}`);
+                Logger.info(`Using configuration-based discovery for group: `);
                 const session = this._configManager.convertProviderConfiguration(groupName, options.configuration);
                 if (!session) {
                     Logger.warn("Configuration provided but convertProviderConfiguration returned undefined");
-                    return [];
+                    // Fall back to extension-managed backends so classic management remains functional
+                    // when VS Code omits or provides incomplete per-group configuration.
                 }
-                return this._discoverModelsFromSession(session, options.silent, token);
+                if (session) {
+                    return this._discoverModelsFromSession(session, token);
+                }
             }
 
-            // ------------------------------------------------------------------------------------
-            // OBSOLETE LEGACY PATH — scheduled for removal in VS Code 1.125
-            // ------------------------------------------------------------------------------------
-            // Everything below this point exists solely to keep users upgrading from pre-1.119
-            // VS Code working without manual reconfiguration. In 1.120+, models should be
-            // discovered exclusively via the per-group `options.configuration` system handled
-            // above. The legacy multi-backend / single-backend workspace-settings path
-            // (`litellm-connector.backends`, `litellm-connector.url`, `litellm-connector.key`)
-            // is a compatibility shim only.
-            //
-            // When we drop support for VS Code <= 1.124, this entire block — along with
-            // `ConfigManager.resolveBackends`, the legacy single-backend migration in
-            // `getConfig`, and the `manageConfig` legacy single-backend prompt — must be
-            // deleted. The 1.120 group system supersedes all of it.
-            // ------------------------------------------------------------------------------------
-            this._emitLegacyDeprecationWarningOnce();
-            const config = await this._configManager.getConfig();
             const backends = await this._configManager.resolveBackends();
-
             if (backends.length === 0) {
-                // When invoked from the Language Models view with silent=false, VS Code is allowed to prompt.
-                // Use the classic configuration workflow to capture baseUrl/apiKey into canonical storage.
                 if (!options.silent) {
-                    Logger.info("No backends configured; prompting for configuration (silent=false)");
-                    await vscode.commands.executeCommand("litellm-connector.manage");
-
-                    const refreshedBackends = await this._configManager.resolveBackends();
-                    if (refreshedBackends.length === 0) {
-                        Logger.info("Configuration was not completed; returning empty model list.");
-                        return [];
-                    }
-                    Logger.debug("Configuration completed; continuing model discovery.");
-                } else {
-                    Logger.info("No backends configured, returning empty model list.");
-                    return [];
+                    Logger.info("No configured backends found for model discovery.");
                 }
+                return [];
             }
+            return this._discoverModelsFromBackends(backends, token);
+        } catch (err) {
+            Logger.error("Failed to fetch models", err);
+            return [];
+        }
+    }
 
-            // Re-read after potential prompt.
-            const effectiveBackends = await this._configManager.resolveBackends();
-            if (effectiveBackends.length === 0) {
-                Logger.info("No backends configured after prompt, returning empty model list.");
+    private async _discoverModelsFromBackends(
+        backends: { name: string; url: string; apiKey?: string; enabled: boolean }[],
+        token: vscode.CancellationToken
+    ): Promise<vscode.LanguageModelChatInformation[]> {
+        try {
+            const config = await this._configManager.getConfig();
+            const multiClient = new MultiBackendClient(backends, this.userAgent);
+            const models = await multiClient.getModelInfoAll(token);
+
+            if (!models?.data?.length) {
+                Logger.warn("No models returned from configured backends");
                 return [];
             }
 
-            // Create multi-backend client
-            this._multiBackendClient = new MultiBackendClient(effectiveBackends, this.userAgent);
-            if (this._telemetryService) {
-                this._multiBackendClient.setTelemetryService(this._telemetryService);
-            }
-            this._activeBackendNames = effectiveBackends.map((b) => b.name);
-
-            Logger.trace(`Fetching model info from ${effectiveBackends.length} backend(s)...`);
-            const aggregated = await this._multiBackendClient.getModelInfoAll(token);
-
-            Logger.info(`Found ${aggregated.data.length} models across ${effectiveBackends.length} backend(s)`);
-            if (this._telemetryService) {
-                this._telemetryService.captureModelsDiscovered(aggregated.data.length, effectiveBackends.length);
-            }
-            const backendsByName = new Map(effectiveBackends.map((backend) => [backend.name, backend]));
-            // Pre-compute a stable order map for backend categories so picker ordering is
-            // deterministic across discovery refreshes (uses the user's configured backend order).
-            const backendOrder = new Map(effectiveBackends.map((backend, idx) => [backend.name, idx]));
-            const infos: LanguageModelChatInformation[] = aggregated.data.map((entry) => {
-                const modelId = entry.namespacedId;
+            const backendByName = new Map(backends.map((backend) => [backend.name, backend]));
+            const infos = models.data.map((entry) => {
+                const backendName = entry.backendName;
+                const backend = backendByName.get(backendName);
+                const modelName = entry.model_name;
+                const namespacedId = entry.namespacedId ?? `${backendName}/${modelName ?? "unknown"}`;
                 const modelInfo = entry.model_info;
-                this._modelInfoCache.set(modelId, modelInfo);
 
-                if (this._telemetryService) {
-                    this._telemetryService.captureModelUsed(modelId, "discovery");
-                }
+                this._modelInfoCache.set(namespacedId, modelInfo);
+                const derived = deriveCapabilitiesFromModelInfo(namespacedId, modelInfo);
+                this._derivedCapabilitiesCache.set(namespacedId, derived);
 
-                const derived = deriveCapabilitiesFromModelInfo(modelId, modelInfo);
-                this._derivedCapabilitiesCache.set(modelId, derived);
-
-                const capOverride = config.modelCapabilitiesOverrides?.[modelId];
+                const capOverride = config.modelCapabilitiesOverrides?.[namespacedId];
                 const capabilities = capabilitiesToVSCode(derived, capOverride);
-                const tags = getDerivedModelTags(modelId, derived, undefined, capOverride);
-
+                const tags = getDerivedModelTags(namespacedId, derived, {}, capOverride);
                 const rawProvider = modelInfo?.litellm_provider ?? "litellm";
-                const rawModelName = entry.model_name ?? modelId;
-
-                const backendDisplay = entry.backendName ? `LiteLLM: ${entry.backendName}` : "LiteLLM";
+                const rawModelName = modelName ?? namespacedId;
+                const backendDisplay = backendName ? "LiteLLM: " + backendName : "LiteLLM";
                 const extensionName = "LiteLLM Connector for Copilot";
-                const tooltip = `Provider: ${rawProvider}, Model: ${rawModelName} contributed by ${backendDisplay} via ${extensionName}`;
-
-                // Derive family from provider to help Copilot shape requests correctly
-                const providerLower = rawProvider.toLowerCase();
-                let family = "litellm";
-                if (providerLower === "openai") {
-                    family = "gpt4";
-                } else if (providerLower === "anthropic") {
-                    family = "claude";
-                }
-
-                // Add cache indicator if model supports prompt caching
+                const tooltip =
+                    "Provider: " +
+                    rawProvider +
+                    ", Model: " +
+                    rawModelName +
+                    " contributed by " +
+                    backendDisplay +
+                    " via " +
+                    extensionName;
                 const cacheIndicator = modelInfo?.supports_prompt_caching ? "⚡ " : "";
-                const detailBase = entry.backendName ?? "LiteLLM";
-                const detail = `${cacheIndicator}${detailBase}`;
-                const backend = backendsByName.get(entry.backendName);
-                const supportedEfforts = getSupportedReasoningEfforts(modelInfo, modelId);
-                const reasoningSchema = this._buildReasoningSchemaWithDiagnostics(modelId, modelInfo, supportedEfforts);
+                const detailBase = backendName ?? "LiteLLM";
+                const detail = cacheIndicator + detailBase;
+
+                const maxInputTokens = derived.maxInputTokens;
+                const maxOutputTokens = derived.maxOutputTokens;
+                const supportedEfforts = getSupportedReasoningEfforts(modelInfo, namespacedId);
+                const reasoningSchema = this._buildReasoningSchemaWithDiagnostics(
+                    namespacedId,
+                    modelInfo,
+                    supportedEfforts
+                );
+
                 const info: LiteLLMDiscoveredModel = {
-                    id: modelId,
+                    id: namespacedId,
                     name: rawModelName,
                     vendor: rawProvider,
                     backendName: detailBase,
                     tooltip,
                     detail,
-                    family: family,
-                    version: "1.0.0",
-                    maxInputTokens: derived.maxInputTokens,
-                    maxOutputTokens: derived.maxOutputTokens,
+                    description: modelInfo?.litellm_provider ?? "",
+                    family: modelInfo?.litellm_provider ?? "litellm",
+                    version: "1.0",
+                    maxInputTokens,
+                    maxOutputTokens,
                     capabilities,
                     tags,
-                    // VS Code 1.120+ requires `isUserSelectable: true` for models to appear in the
-                    // model picker dropdown. Without this, models only show in the "Manage Language
-                    // Models" view but cannot be selected for chat.
                     isUserSelectable: true,
-                    // Group models from each backend under its own category heading in the picker.
-                    // The label uses the user's backend name; order follows the configured backend
-                    // order so categories are presented consistently across refreshes. This is
-                    // required for users running multiple LiteLLM proxies side-by-side via the
-                    // legacy multi-backend workspace settings path.
-                    category: entry.backendName
-                        ? { label: entry.backendName, order: backendOrder.get(entry.backendName) ?? 0 }
-                        : undefined,
+                    category: backendName ? { label: backendName, order: 0 } : undefined,
                     configurationSchema: reasoningSchema,
-                    _backendName: entry.backendName,
-                    _backendUrl: backend?.url,
-                    _apiKey: backend?.apiKey,
+                    _backendName: backendName,
+                    _backendUrl: backend?.url ?? "",
+                    _apiKey: backend?.apiKey ?? "",
                 };
-
                 return info;
             });
 
-            const hasChanged = JSON.stringify(this._lastModelList) !== JSON.stringify(infos);
+            this._multiBackendClient = multiClient;
+            this._activeBackendNames = backends.map((backend) => backend.name);
             this._lastModelList = infos;
             this._modelListFetchedAtMs = Date.now();
 
-            if (hasChanged) {
-                this.refreshModelInformation();
-            }
-
             return infos;
         } catch (err) {
-            Logger.error("Failed to fetch models", err);
+            Logger.error("Failed to fetch models from configured backends", err);
             return [];
         }
     }
@@ -458,12 +379,12 @@ export abstract class LiteLLMProviderBase {
      */
     private async _discoverModelsFromSession(
         session: BackendSession,
-        silent: boolean,
         token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelChatInformation[]> {
-        Logger.info(`Discovering models from session: ${session.backendName} (${session.baseUrl})`);
+        Logger.info(`Discovering models from session:  ()`);
 
         try {
+            const config = await this._configManager.getConfig();
             const client = session.client;
             const models = await client.getModelInfo(token);
 
@@ -490,8 +411,25 @@ export abstract class LiteLLMProviderBase {
                 const derived = deriveCapabilitiesFromModelInfo(namespacedId, modelInfo);
                 this._derivedCapabilitiesCache.set(namespacedId, derived);
 
-                const capabilities = capabilitiesToVSCode(derived, undefined);
-                const tags = getDerivedModelTags(namespacedId, derived, {}, undefined);
+                const capOverride = config.modelCapabilitiesOverrides?.[namespacedId];
+                const capabilities = capabilitiesToVSCode(derived, capOverride);
+                const tags = getDerivedModelTags(namespacedId, derived, {}, capOverride);
+                const rawProvider = modelInfo?.litellm_provider ?? "litellm";
+                const rawModelName = modelName ?? namespacedId;
+                const backendDisplay = session.backendName ? "LiteLLM: " + session.backendName : "LiteLLM";
+                const extensionName = "LiteLLM Connector for Copilot";
+                const tooltip =
+                    "Provider: " +
+                    rawProvider +
+                    ", Model: " +
+                    rawModelName +
+                    " contributed by " +
+                    backendDisplay +
+                    " via " +
+                    extensionName;
+                const cacheIndicator = modelInfo?.supports_prompt_caching ? "⚡ " : "";
+                const detailBase = session.backendName ?? "LiteLLM";
+                const detail = cacheIndicator + detailBase;
 
                 const maxInputTokens = derived.maxInputTokens;
                 const maxOutputTokens = derived.maxOutputTokens;
@@ -504,7 +442,11 @@ export abstract class LiteLLMProviderBase {
                 );
                 const info: LiteLLMDiscoveredModel = {
                     id: namespacedId,
-                    name: modelInfo?.id ?? namespacedId,
+                    name: rawModelName,
+                    vendor: rawProvider,
+                    backendName: detailBase,
+                    tooltip,
+                    detail,
                     description: modelInfo?.litellm_provider ?? "",
                     family: modelInfo?.litellm_provider ?? "litellm",
                     version: "1.0",
@@ -710,33 +652,38 @@ export abstract class LiteLLMProviderBase {
         return parseNamespacedModelId(modelId, this._activeBackendNames);
     }
 
+    private getDiscoveredModelBackend(
+        modelId: string
+    ): { backendName: string; url: string; apiKey: string } | undefined {
+        const entry = this._lastModelList.find((m) => m.id === modelId) as LiteLLMDiscoveredModel | undefined;
+        if (!entry?._backendName || !entry._backendUrl || !entry._apiKey) {
+            return undefined;
+        }
+        return {
+            backendName: entry._backendName,
+            url: entry._backendUrl,
+            apiKey: entry._apiKey,
+        };
+    }
+
     /**
      * Resolves a BackendSession for the given model using multi-backend routing.
      * Creates/uses a backend-specific client when the model is namespaced.
      * Falls back to the multi-client when no backend-specific client is available.
      */
     protected async resolveBackendSession(model: LanguageModelChatInformation): Promise<BackendSession | undefined> {
-        // Legacy per-backend discovery with namespaced model IDs
-        const resolvedBackend = this.resolveModelBackend(model.id);
-        if (resolvedBackend && this._multiBackendClient) {
-            const fullBackendName = resolvedBackend.backendName;
-
-            // Find the backend in multi client
-            const backends = await this._configManager.resolveBackends();
-            const targetBackend = backends.find((b) => b.name === fullBackendName);
-
-            if (targetBackend) {
-                Logger.debug(`Using namespaced backend session: ${fullBackendName}`);
-                return {
-                    backendName: fullBackendName,
-                    baseUrl: targetBackend.url,
-                    apiKey: targetBackend.apiKey,
-                    client: new LiteLLMClient({ url: targetBackend.url, key: targetBackend.apiKey }, this.userAgent),
-                };
-            }
+        const backend = this.getDiscoveredModelBackend(model.id);
+        if (!backend) {
+            return undefined;
         }
 
-        return undefined;
+        Logger.debug(`Using discovered backend session: `);
+        return {
+            backendName: backend.backendName,
+            baseUrl: backend.url,
+            apiKey: backend.apiKey,
+            client: new LiteLLMClient({ url: backend.url, key: backend.apiKey }, this.userAgent),
+        };
     }
 
     /**
@@ -1057,10 +1004,26 @@ export abstract class LiteLLMProviderBase {
     ): Promise<ReadableStream<Uint8Array>> {
         let multiClient = this.getMultiBackendClient();
         if (!multiClient) {
-            const backends = await this._configManager.resolveBackends();
-            if (backends.length === 0) {
-                throw new Error("LiteLLM configuration not found. Please configure at least one backend.");
+            const backend = this.getDiscoveredModelBackend(request.model);
+            let backends: { name: string; url: string; apiKey?: string; enabled: boolean }[];
+
+            if (backend) {
+                backends = [
+                    {
+                        name: backend.backendName,
+                        url: backend.url,
+                        apiKey: backend.apiKey,
+                        enabled: true,
+                    },
+                ];
+            } else {
+                backends = await this._configManager.resolveBackends();
             }
+
+            if (backends.length === 0) {
+                throw new Error("LiteLLM configuration not found. Please configure the model provider group.");
+            }
+
             multiClient = new MultiBackendClient(backends, this.userAgent);
             this._multiBackendClient = multiClient;
             this._activeBackendNames = backends.map((b) => b.name);
@@ -1070,9 +1033,7 @@ export abstract class LiteLLMProviderBase {
 
         if (modelInfo?.mode === "responses") {
             try {
-                // To support /responses with multiple backends, we need the specific backend's URL/Key
-                const backends = await this._configManager.resolveBackends();
-                const targetBackend = backends.find((b) => b.name === (backend?.backendName ?? "default"));
+                const targetBackend = this.getDiscoveredModelBackend(request.model);
 
                 if (targetBackend) {
                     const responsesClient = new ResponsesClient(

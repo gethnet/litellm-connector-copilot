@@ -83,7 +83,39 @@ suite("Extension Activation Unit Tests", () => {
         assert.strictEqual(registerProviderStub.calledOnce, true);
     });
 
-    test("activate prompts classic config flow when not configured", async () => {
+    test("activate refreshes model info after configuration changes", async () => {
+        const mockSecrets = createMockSecrets();
+        const context = {
+            subscriptions: [],
+            secrets: mockSecrets,
+        } as unknown as vscode.ExtensionContext;
+
+        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
+        sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
+        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
+        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
+        sandbox.stub(vscode.window, "showInformationMessage");
+        sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
+        sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
+
+        const clearModelCacheStub = sandbox.stub(providers.LiteLLMChatProvider.prototype, "clearModelCache");
+
+        let configChangeHandler: (() => void) | undefined;
+        sandbox.stub(vscode.workspace, "onDidChangeConfiguration").callsFake((listener) => {
+            configChangeHandler = listener as () => void;
+            return { dispose() {} } as vscode.Disposable;
+        });
+
+        extension.activate(context);
+        assert.ok(configChangeHandler, "expected onDidChangeConfiguration handler to be registered");
+
+        configChangeHandler?.();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+        assert.strictEqual(clearModelCacheStub.calledOnce, true);
+    });
+
+    test("activate opens LiteLLM configuration when not configured", async () => {
         const mockSecrets = createMockSecrets();
 
         const context = {
@@ -103,7 +135,7 @@ suite("Extension Activation Unit Tests", () => {
         sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
 
         const execStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
-        sandbox.stub(vscode.window, "showInformationMessage").resolves("Configure" as never);
+        sandbox.stub(vscode.window, "showInformationMessage").resolves("Open LiteLLM Configuration" as never);
 
         extension.activate(context);
 

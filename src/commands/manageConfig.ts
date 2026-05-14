@@ -6,120 +6,14 @@ import type { LiteLLMBackend } from "../types";
 import type { TelemetryService } from "../telemetry/telemetryService";
 
 function createConfigHandler(
-    configManager: ConfigManager,
-    provider?: LiteLLMChatProvider,
-    telemetryService?: TelemetryService
+    _configManager: ConfigManager,
+    _provider?: LiteLLMChatProvider,
+    _telemetryService?: TelemetryService
 ) {
     return async () => {
-        // OBSOLETE LEGACY COMMAND — scheduled for removal in VS Code 1.125.
-        // This command predates the VS Code 1.120 per-group provider configuration system.
-        // It exists to keep pre-1.119 users working while they migrate. New users should
-        // configure backends via Settings → Language Models → LiteLLM, which routes
-        // configuration through `options.configuration` in our chat provider. When the
-        // minimum supported VS Code is raised to >= 1.125, delete this command (and the
-        // single-backend prompt below) along with the rest of the legacy path.
-        const config = await configManager.getConfig();
-
-        const items: vscode.QuickPickItem[] = [
-            {
-                label: "$(settings-gear) Configure Single Backend (Legacy)",
-                description: "Basic configuration with one URL and API key — DEPRECATED, removed in 1.125",
-            },
-            {
-                label: "$(layers) Manage Multiple Backends (Legacy)",
-                description: "Configure multiple named LiteLLM proxy instances — DEPRECATED, removed in 1.125",
-            },
-        ];
-
-        const picked = await vscode.window.showQuickPick(items, {
-            title: "LiteLLM Configuration",
-            placeHolder: "Choose configuration mode",
-        });
-
-        if (!picked) {
-            return;
-        }
-
-        if (picked.label.includes("Manage Multiple Backends")) {
-            await vscode.commands.executeCommand("litellm-connector.manageBackends");
-            return;
-        }
-
-        const baseUrl = await vscode.window.showInputBox({
-            title: `LiteLLM Base URL`,
-            prompt: config.url
-                ? "Update your LiteLLM base URL"
-                : "Enter your LiteLLM base URL (e.g., http://localhost:4000 or https://api.litellm.ai)",
-            ignoreFocusOut: true,
-            value: config.url,
-            placeHolder: "http://localhost:4000",
-        });
-
-        if (baseUrl === undefined) {
-            return;
-        }
-
-        let apiKey = await vscode.window.showInputBox({
-            title: `LiteLLM API Key`,
-            prompt: config.key
-                ? "Update your LiteLLM API key"
-                : "Enter your LiteLLM API key (leave empty if not required)",
-            ignoreFocusOut: true,
-            password: true,
-            // Show empty to avoid leaking in plain text.
-            value: "",
-            placeHolder: config.key ? "••••••••••••••••" : "Enter API Key",
-        });
-
-        if (apiKey === undefined) {
-            return;
-        }
-
-        // If user enters the magic string, show the actual API key in plain text
-        if (apiKey.trim() === "thisisunsafe" && config.key) {
-            apiKey = await vscode.window.showInputBox({
-                title: `LiteLLM API Key`,
-                prompt: "Your API key (unmasked)",
-                ignoreFocusOut: true,
-                password: false,
-                value: config.key,
-                placeHolder: "Your API key",
-            });
-
-            if (apiKey === undefined) {
-                return;
-            }
-        }
-
-        // If user didn't change the value (left it blank/placeholder), keep the old key
-        const newKey = apiKey.trim();
-        const finalKey = newKey === "" ? config.key : newKey || undefined;
-
-        await configManager.setConfig({
-            url: baseUrl.trim(),
-            key: finalKey,
-        });
-        await configManager.reportFeatureToggles("config_change");
-
-        if (telemetryService) {
-            telemetryService.captureConfigChanged("baseUrl", "legacy-manage");
-            if (finalKey) {
-                telemetryService.captureConfigChanged("apiKey", "legacy-manage");
-            }
-        }
-
-        // Trigger a model discovery refresh if a provider is available
-        if (provider) {
-            try {
-                provider.clearModelCache();
-                await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
-                provider.refreshModelInformation();
-            } catch (err) {
-                console.error("Failed to refresh models after config change", err);
-            }
-        }
-
-        vscode.window.showInformationMessage(`LiteLLM configuration saved.`);
+        // Keep the public command as a stable command-palette entry point while routing
+        // users directly to multi-backend management.
+        await vscode.commands.executeCommand("litellm-connector.manageBackends");
     };
 }
 
@@ -157,6 +51,7 @@ export function registerManageBackendsCommand(
         const picked = await vscode.window.showQuickPick(items, {
             title: "LiteLLM Backend Management",
             placeHolder: "Select a backend to manage or add a new one",
+            ignoreFocusOut: true,
         });
 
         if (!picked) {
@@ -184,17 +79,21 @@ async function addNewBackend(
         prompt: "Enter a unique name for this backend (e.g., Cloud, Local)",
         placeHolder: "Cloud",
         validateInput: (value) => (value.trim().length === 0 ? "Name is required" : null),
+        ignoreFocusOut: true,
     });
 
     if (!name) {
         return;
     }
 
+    const backendName = name.trim();
+
     const url = await vscode.window.showInputBox({
-        title: `Backend URL for "${name}"`,
+        title: `Backend URL for "${backendName}"`,
         prompt: "Enter the base URL of the LiteLLM proxy",
         placeHolder: "http://localhost:4000",
         validateInput: (value) => (value.trim().length === 0 ? "URL is required" : null),
+        ignoreFocusOut: true,
     });
 
     if (!url) {
@@ -202,14 +101,18 @@ async function addNewBackend(
     }
 
     const apiKey = await vscode.window.showInputBox({
-        title: `API Key for "${name}"`,
+        title: `API Key for "${backendName}"`,
         prompt: "Enter the API key for this backend (leave empty if none)",
         password: true,
+        ignoreFocusOut: true,
     });
 
+    const backendUrl = url.trim();
+    const backendApiKey = apiKey?.trim();
+
     try {
-        await configManager.addBackend({ name: name.trim(), url: url.trim(), enabled: true }, apiKey?.trim());
-        vscode.window.showInformationMessage(`Backend "${name}" added.`);
+        await configManager.addBackend({ name: backendName, url: backendUrl, enabled: true }, backendApiKey);
+        vscode.window.showInformationMessage(`Backend "${backendName}" added.`);
 
         if (telemetryService) {
             const currentBackends = await configManager.listBackends();
@@ -243,6 +146,7 @@ async function manageExistingBackend(
 
     const picked = await vscode.window.showQuickPick(items, {
         title: `Manage Backend: ${backend.name}`,
+        ignoreFocusOut: true,
     });
 
     if (!picked) {
@@ -260,6 +164,7 @@ async function manageExistingBackend(
         const newUrl = await vscode.window.showInputBox({
             title: `Update URL for "${backend.name}"`,
             value: backend.url,
+            ignoreFocusOut: true,
         });
         if (newUrl) {
             await configManager.updateBackend(backend.name, { url: newUrl.trim() });
@@ -271,6 +176,7 @@ async function manageExistingBackend(
         const newKey = await vscode.window.showInputBox({
             title: `Update API Key for "${backend.name}"`,
             password: true,
+            ignoreFocusOut: true,
         });
         if (newKey !== undefined) {
             await configManager.updateBackend(backend.name, {}, newKey.trim());

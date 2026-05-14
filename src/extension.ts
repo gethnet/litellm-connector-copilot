@@ -179,6 +179,33 @@ export function activate(context: vscode.ExtensionContext): void {
         activeProvider.refreshModelInformation();
     });
 
+    // Re-query models after settings updates so newly completed Language Models provider
+    // configuration flows are reflected without requiring a reload.
+    let refreshModelsTimer: NodeJS.Timeout | undefined;
+    const scheduleModelRefresh = () => {
+        if (refreshModelsTimer) {
+            clearTimeout(refreshModelsTimer);
+        }
+        refreshModelsTimer = setTimeout(() => {
+            refreshModelsTimer = undefined;
+            Logger.info("Configuration changed; clearing model cache and refreshing model information...");
+            activeProvider.clearModelCache();
+        }, 250);
+    };
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration(() => {
+            scheduleModelRefresh();
+        })
+    );
+    context.subscriptions.push({
+        dispose: () => {
+            if (refreshModelsTimer) {
+                clearTimeout(refreshModelsTimer);
+                refreshModelsTimer = undefined;
+            }
+        },
+    });
+
     try {
         context.subscriptions.push(
             registerManageConfigCommand(context, configManager, activeProvider, telemetryService)
@@ -213,8 +240,8 @@ export function activate(context: vscode.ExtensionContext): void {
     inlineRegistrar.initialize();
     context.subscriptions.push(inlineRegistrar);
 
-    // Note: Configuration is now primarily handled through VS Code's Language Model provider settings UI (v1.109+).
-    // The legacy management command is retained for backward compatibility.
+    // Configuration onboarding is handled via the classic manage command,
+    // which routes users directly into multi-backend management.
     // Proactively check configuration and prompt user if missing
     configManager
         .isConfigured()
@@ -223,12 +250,11 @@ export function activate(context: vscode.ExtensionContext): void {
                 Logger.info("Extension not configured. Prompting user...");
                 vscode.window
                     .showInformationMessage(
-                        "LiteLLM Connector is not configured. Configure your Base URL and API Key to continue.",
-                        "Configure"
+                        "LiteLLM Connector is not configured. Open LiteLLM configuration to add your backends.",
+                        "Open LiteLLM Configuration"
                     )
                     .then((selection) => {
-                        if (selection === "Configure") {
-                            // Use the classic configuration flow (reliable for model discovery).
+                        if (selection === "Open LiteLLM Configuration") {
                             vscode.commands.executeCommand("litellm-connector.manage");
                         }
                     });

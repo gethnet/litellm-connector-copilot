@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import * as sinon from "sinon";
 
 import { LiteLLMChatProvider } from "../";
-import { MultiBackendClient } from "../../adapters/multiBackendClient";
+import { LiteLLMClient } from "../../adapters/litellmClient";
 
 suite("LiteLLM model display", () => {
     let sandbox: sinon.SinonSandbox;
@@ -28,11 +28,9 @@ suite("LiteLLM model display", () => {
         const token = new vscode.CancellationTokenSource().token;
 
         // Stub MultiBackendClient.prototype.getModelInfoAll to return test data
-        sandbox.stub(MultiBackendClient.prototype, "getModelInfoAll").resolves({
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({
             data: [
                 {
-                    backendName: "cloud",
-                    namespacedId: "cloud/gpt-4o",
                     model_name: "gpt-4o",
                     model_info: {
                         key: "cloud/gpt-4o",
@@ -55,11 +53,17 @@ suite("LiteLLM model display", () => {
         const models = await (
             provider as unknown as {
                 _doDiscoverModels: (
-                    options: { silent: boolean },
+                    options: { silent: boolean; configuration?: Record<string, unknown> },
                     t: vscode.CancellationToken
                 ) => Promise<vscode.LanguageModelChatInformation[]>;
             }
-        )._doDiscoverModels({ silent: true }, token);
+        )._doDiscoverModels(
+            {
+                silent: true,
+                configuration: { providerName: "cloud", baseUrl: "http://example", apiKey: "test-key" },
+            },
+            token
+        );
 
         assert.strictEqual(models.length, 1);
         assert.strictEqual(models[0].id, "cloud/gpt-4o");
@@ -88,11 +92,9 @@ suite("LiteLLM model display", () => {
         const token = new vscode.CancellationTokenSource().token;
 
         // Stub MultiBackendClient.prototype.getModelInfoAll to return test data with cache support
-        sandbox.stub(MultiBackendClient.prototype, "getModelInfoAll").resolves({
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({
             data: [
                 {
-                    backendName: "cloud",
-                    namespacedId: "cloud/gpt-4",
                     model_name: "gpt-4",
                     model_info: {
                         key: "cloud/gpt-4",
@@ -117,11 +119,17 @@ suite("LiteLLM model display", () => {
         const models = await (
             provider as unknown as {
                 _doDiscoverModels: (
-                    options: { silent: boolean },
+                    options: { silent: boolean; configuration?: Record<string, unknown> },
                     t: vscode.CancellationToken
                 ) => Promise<vscode.LanguageModelChatInformation[]>;
             }
-        )._doDiscoverModels({ silent: true }, token);
+        )._doDiscoverModels(
+            {
+                silent: true,
+                configuration: { providerName: "cloud", baseUrl: "http://example", apiKey: "test-key" },
+            },
+            token
+        );
 
         assert.strictEqual(models.length, 1);
         const model = models[0];
@@ -144,11 +152,9 @@ suite("LiteLLM model display", () => {
         const token = new vscode.CancellationTokenSource().token;
 
         // Stub MultiBackendClient.prototype.getModelInfoAll to return test data without cache support
-        sandbox.stub(MultiBackendClient.prototype, "getModelInfoAll").resolves({
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({
             data: [
                 {
-                    backendName: "local",
-                    namespacedId: "local/gpt-3.5-turbo",
                     model_name: "gpt-3.5-turbo",
                     model_info: {
                         key: "local/gpt-3.5-turbo",
@@ -173,11 +179,17 @@ suite("LiteLLM model display", () => {
         const models = await (
             provider as unknown as {
                 _doDiscoverModels: (
-                    options: { silent: boolean },
+                    options: { silent: boolean; configuration?: Record<string, unknown> },
                     t: vscode.CancellationToken
                 ) => Promise<vscode.LanguageModelChatInformation[]>;
             }
-        )._doDiscoverModels({ silent: true }, token);
+        )._doDiscoverModels(
+            {
+                silent: true,
+                configuration: { providerName: "local", baseUrl: "http://localhost:4000", apiKey: "test-key" },
+            },
+            token
+        );
 
         assert.strictEqual(models.length, 1);
         const model = models[0];

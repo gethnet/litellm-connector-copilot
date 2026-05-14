@@ -167,10 +167,6 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         };
 
         try {
-            if (!(await this._configManager.isConfigured())) {
-                throw new Error("LiteLLM configuration not found. Please configure at least one backend.");
-            }
-
             const config = await this._configManager.getConfig();
 
             // Optional model override (primarily for completions). If set, we try to use it.
