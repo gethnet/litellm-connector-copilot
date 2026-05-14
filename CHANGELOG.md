@@ -2,6 +2,49 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.0] - 2026-05-13
+
+### 💥 Breaking / Behavior Changes
+
+* **VS Code 1.120+ Baseline**: The extension now targets the VS Code 1.120 Language Model provider surface as the primary path for model discovery and response-part handling.
+* **Modern Provider Config First**: Discovery now prioritizes per-group provider configuration (`options.configuration`) and only falls back to extension-managed backends when provider configuration is missing/incomplete. This modern provider-group path is the preferred configuration path for full VS Code feature alignment.
+* **Provider Config Validation Tightened**: Provider-group conversion now requires a non-empty provider/group name, `baseUrl` starting with `http://` or `https://`, and a non-empty `apiKey`.
+* **Manage Command Behavior Changed**: `litellm-connector.manage` now routes directly to multi-backend management instead of prompting a legacy single-backend setup flow.
+
+### ✨ Features
+
+* **Unified Chat Provider Path**: Consolidated chat behavior around the VS Code 1.120 rich response-part flow (text/thinking/data/tool-call emission path hardening and shared orchestration improvements).
+* **Modern Grouped Discovery**: Added and expanded session-based discovery primitives (`BackendSession`) so model identities and picker grouping remain isolated by configured provider/group.
+* **Auto-Refresh After Config Changes**: Added a debounced `workspace.onDidChangeConfiguration` refresh hook that clears the model cache so Language Models UI updates after configuration changes.
+* **Reasoning Overrides + Fallbacks**: Added regex-based reasoning capability overrides and retry/fallback behavior for reasoning-effort handling.
+* **Model Override Registry**: Added `src/config/modelOverrides.ts` + `modelOverrides.json` with test coverage for structured override loading.
+
+### 🛠️ Fixes & Refactors
+
+* **Runtime Guard Hardening**: Tightened runtime checks across clients/providers/telemetry and removed unsafe cast-heavy paths.
+* **Discovery Flow Cleanup**: Refactored provider-base discovery into clearer modern-session and backend-fallback branches.
+* **Command/UI Reliability**: Improved backend-management UX details (focus behavior, trimmed inputs, command copy) and aligned activation prompts to configuration management flow.
+* **Type Safety Improvements**: Broader strict typing cleanup across adapters, config, providers, utility helpers, and tests.
+
+### 🧪 Tests & Validation
+
+* Expanded regression and unit coverage across:
+  * provider discovery/grouping/model-display behavior
+  * extension activation/configuration refresh behavior
+  * config conversion/validation and model override resolution
+  * responses/message conversion and token/capability handling
+
+### 📚 Documentation
+
+* Updated both README variants to align setup guidance with modern provider-group behavior, backend identity grouping, and updated command semantics.
+
+### ⚠️ Known Risks / Follow-ups
+
+* **Broad Refresh Trigger Scope**: The config-change refresh hook currently reacts to all workspace configuration changes; it may refresh more often than necessary and could be narrowed to relevant keys later.
+* **Temporary Feature Limitation (2.0.0)**: Unless manually configured, **git commit message generation** and **inline completions** may be inoperative in this release while modern-config parity work is completed.
+* **Modern-Only Parity Audit Pending**: Commit-message and inline-completion paths still have legacy/fallback touchpoints; validate strict modern-only configuration parity before declaring migration complete.
+* **No-Auth Proxy UX**: Modern provider validation now requires `apiKey`; environments that intentionally run without auth may need an explicit UX strategy if this should remain supported.
+
 ## [1.6.3] - 2026-04-30
 
 ### 🐛 Fixes

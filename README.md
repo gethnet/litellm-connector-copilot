@@ -36,11 +36,11 @@ Your support keeps this project alive and improving! ❤️
 
 ### Prerequisites
 
-- ✅ **VS Code 1.110+** (required)
+- ✅ **VS Code 1.120+** (required)
 - ✅ **GitHub Copilot Individual** subscription (Free or Paid Individual plans work).
   - ⚠️ **Important**: GitHub Copilot Business (Organization) and Enterprise plans are **not currently supported** due to VS Code API limitations. For technical details, see the [VS Code Language Model API documentation](https://code.visualstudio.com/api/extension-guides/ai/language-model-chat-provider) and the list of [supported individual plans](https://docs.github.com/en/copilot/concepts/billing/individual-plans).
 - 🌐 A **LiteLLM proxy** running somewhere (locally or in the cloud)
-- 🔑 Your **Base URL** and optionally an **API Key**
+- 🔑 Your **Base URL** and **API Key**
 
 > **New to LiteLLM?** Check out [their documentation](https://docs.litellm.ai) to learn how to set up a proxy that can route to any model provider.
 
@@ -49,13 +49,18 @@ Your support keeps this project alive and improving! ❤️
 1. **Install** the "LiteLLM Connector for Copilot" extension from the VS Code Marketplace
 2. **Open** Command Palette (`Cmd/Ctrl+Shift+P`)
 3. **Run** **LiteLLM: Manage Configuration**
-4. **Add** one or more backends (name, Base URL, and optional API key)
-5. **Open** Copilot Chat and pick a model from the **LiteLLM** category
+4. **Add** one or more backends (name, Base URL, and API key)
+5. **Open** Copilot Chat and pick a model from your configured backend/provider group label (for example, `Cloud`, `Local`, `CoolProvider`)
 6. **Start chatting!** 🎉
+
+> **Preferred configuration path**: Use the VS Code **Language Models provider-group** flow (modern config) for full VS Code 1.120+ model-picker/category behavior. Legacy settings (`litellm-connector.baseUrl` / `litellm-connector.backends`) remain compatibility fallbacks.
 
 > **Multi-Backend Power**: Configure multiple LiteLLM provider groups (for example local + cloud + internal). Models are namespaced and grouped by backend so it is clear which provider each model comes from.
 
-> **Provider grouping remains intact**: each backend name is preserved as its provider/group label, so models stay clearly identifiable in the picker.
+> **Provider grouping remains intact**: each backend name is preserved as its provider/group label, so models stay clearly identifiable in the Language Models view and picker.
+
+> **⚠️ 2.0.0 temporary limitation**: Unless manually configured, **Git Commit Message Generation** and **Inline Completions** are currently inoperative in this release. We are actively fixing modern-config parity for both paths.  
+> Manual setup: use **LiteLLM: Select Commit Message Model** and **LiteLLM: Select Inline Completion Model** (plus inline completion settings) if you need these features immediately.
 
 That's it! Your models from the LiteLLM proxy will automatically appear in the model picker.
 
@@ -94,7 +99,8 @@ The extension automatically handles provider-specific quirks:
 See real-time token usage with context window indicators (e.g., "↑128K in / ↓16K out"). Helps you stay within limits and understand costs.
 
 ### ✍️ **Git Commit Generation**
-Generate structured, conventional commit messages from your staged changes. The extension analyzes your diff and creates clear, professional commit messages.
+Generate structured, conventional commit messages from your staged changes.  
+⚠️ In `2.0.0`, this currently requires manual model configuration to operate reliably.
 
 ### 🧼 **Smart Sanitization**
 Automatically strips Markdown code blocks from generated commit messages for a clean SCM experience.
@@ -112,7 +118,8 @@ Send `no-cache` headers to bypass LiteLLM caching when you need fresh responses.
 Your API keys and URLs are stored safely in VS Code's encrypted `SecretStorage`. No plaintext secrets.
 
 ### ⌨️ **Optional Inline Completions**
-Enable LiteLLM-powered inline completions as an alternative to Copilot's default. Great for experimentation.
+Enable LiteLLM-powered inline completions as an alternative to Copilot's default.  
+⚠️ In `2.0.0`, this currently requires manual configuration to operate reliably.
 
 ---
 
@@ -133,6 +140,7 @@ Enable LiteLLM-powered inline completions as an alternative to Copilot's default
 - 🧪 **Telemetry & Observability** – PostHog-backed telemetry for feature-usage tracking, request metrics, and structured JSONL logging. All non-identifiable and opt-in.
 - 🔧 **Model Capability Overrides** – Manually override VS Code's capability detection (`toolCalling`, `imageInput`) when auto-detection is incorrect. Configure via `litellm-connector.modelCapabilitiesOverrides`.
 - 🧠 **Rich Chat Response Parts** – Unified chat provider built on the VS Code 1.120 Language Model APIs. Emits structured text, thinking, data, and tool-call parts so reasoning models render correctly in chat.
+- ⚠️ **Temporary Feature Gap (2.0.0)** – Commit-message generation and inline completions currently require manual configuration; modern-config parity fix is in progress.
 - �📊 **Advanced Token Counting** – Smarter budgeting with local estimation, background refinement, and short-lived caching for faster, more accurate context management.
 - 🏎️ **Optimized Model Discovery** – Intelligent discovery throttling with in-flight deduplication and TTL caching to prevent excessive proxy lookups.
 - 🧼 **SCM Message Sanitization** – Clean commit messages by automatically stripping triple backticks and Markdown artifacts.
@@ -148,8 +156,8 @@ Fine-tune your experience with these settings (accessible via VS Code Settings):
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `litellm-connector.baseUrl` | string | `""` | Base URL for the LiteLLM proxy server. |
-| `litellm-connector.backends` | array | `[]` | List of LiteLLM backends to connect to. Each requires a unique name and URL. |
+| `litellm-connector.baseUrl` | string | `""` | Legacy/fallback single-backend URL (kept for compatibility). |
+| `litellm-connector.backends` | array | `[]` | Legacy/fallback multi-backend list (kept for compatibility and classic management flow). |
 | `litellm-connector.apiKeySecretRef` | string | `"default"` | Reference name for the API key stored in VS Code SecretStorage. |
 | `litellm-connector.commitModelIdOverride` | string | `""` | Override the model used for git commit message generation. Leave empty to disable. |
 | `litellm-connector.inactivityTimeout` | number | `60` | Seconds of inactivity before the connection is considered idle. |
@@ -173,7 +181,7 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and try these:
 
 | Command | What It Does |
 |---------|--------------|
-| **Manage LiteLLM Provider** | Legacy migration command. Opens legacy single/multi-backend setup flows for users upgrading from older versions. |
+| **LiteLLM: Manage Configuration** | Opens LiteLLM backend management (multi-backend flow). |
 | **LiteLLM: Check Connection** | Test if your proxy is reachable and credentials are valid. |
 | **LiteLLM: Reload Models** | Manually refresh the model list from your proxy. |
 | **LiteLLM: Reset All Configuration** | ⚠️ Nuke option—clears all stored URLs and API keys. |
@@ -189,8 +197,9 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and try these:
 
 1. Run **`LiteLLM: Check Connection`** to verify your Base URL and API key
 2. Ensure your LiteLLM proxy is running and accessible
-3. Try **`LiteLLM: Reload Models`** to force a refresh
-4. If still stuck, use **`LiteLLM: Reset All Configuration`** and start fresh
+3. Wait briefly after config edits; model discovery auto-refreshes after configuration changes
+4. Try **`LiteLLM: Reload Models`** to force a refresh
+5. If still stuck, use **`LiteLLM: Reset All Configuration`** and start fresh
 
 ### "Connection fails / timeout errors"
 

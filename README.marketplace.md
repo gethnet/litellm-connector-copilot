@@ -32,7 +32,7 @@ Want to support development?
 
 If the extension fails to connect or models don't show up:
 
-1.  **Manual Setup**: Run **`Manage LiteLLM Provider`** from the Command Palette (`Ctrl+Shift+P`). This often fixes setup "hiccups".
+1.  **Manual Setup**: Run **`LiteLLM: Manage Configuration`** from the Command Palette (`Ctrl+Shift+P`). This often fixes setup "hiccups".
 2.  **Verify**: Run **`LiteLLM: Check Connection`** to test your settings.
 3.  **Reset**: If things are totally stuck, run **`LiteLLM: Reset All Configuration`**. This is the "nuke" option to clear all state.
 4.  **Note**: Reinstalling usually won't help as settings are stored securely in VS Code. Use the Reset command instead.
@@ -41,9 +41,9 @@ If the extension fails to connect or models don't show up:
 
 ## ✅ Requirements
 
-- �️ **VS Code 1.110+** (required)
+- �️ **VS Code 1.120+** (required)
 - �🔑 **GitHub Copilot** subscription (Free plan works)
-- 🌐 A **LiteLLM proxy URL** (and an API key if your proxy requires one)
+- 🌐 A **LiteLLM proxy URL** and **API key**
 
 ---
 
@@ -56,12 +56,17 @@ If the extension fails to connect or models don't show up:
 5. Add one or more backends with:
    - **Name** (used as the provider/group label)
    - **Base URL** (example: `http://localhost:4000`)
-   - **API Key** (optional)
-6. Open Copilot Chat → pick a model under **LiteLLM** → chat
+   - **API Key** (required)
+6. Open Copilot Chat → pick a model under your configured backend/provider group → chat
+
+> **Preferred configuration path**: Use the VS Code **Language Models provider-group** flow (modern config) for full VS Code 1.120+ model-picker/category behavior. Legacy settings remain compatibility fallbacks.
 
 > **Multi-Backend**: Configure multiple LiteLLM provider groups to aggregate models from several proxies. Models are namespaced and grouped by backend so provider identity is clear.
 
 > **Backend identity remains clear**: each backend is kept as its own provider/group so model origin is obvious in the picker.
+
+> **⚠️ 2.0.0 temporary limitation**: Unless manually configured, **Git commit message generation** and **inline completions** are currently inoperative in this release.  
+> Manual setup: use **LiteLLM: Select Commit Message Model** and **LiteLLM: Select Inline Completion Model** if you need these features now.
 
 ---
 
@@ -72,17 +77,17 @@ If the extension fails to connect or models don't show up:
 - 🌊 **Real-time streaming** responses
 - 🛠️ **Tool / function calling** support
 - 👁️ **Vision models** supported (where available)
-- 🧠 **V2 Chat Provider (Experimental)** — supports thinking parts for reasoning models via newer VS Code APIs
+- 🧠 **Unified Chat Provider** — supports thinking parts for reasoning models via VS Code 1.120 APIs
 - 🧠 **Smart parameter handling** for model quirks
 - 🔁 **Automatic retry** when a model rejects unsupported flags
 - 📊 **Token tracking & usage** monitoring for input/output tokens
-- ✍️ **Git commit generation** from staged changes in the SCM view (works in multi-repo workspaces)
+- ✍️ **Git commit generation** from staged changes in the SCM view (requires manual configuration in `2.0.0`)
 - 🧼 **Smart Sanitization** automatically strips Markdown code blocks from generated commit messages
 - 🔍 **Connection diagnostics** to verify proxy configuration
 - ⏱️ **Inactivity watchdog** to prevent stuck streams
 - 🚫🧠 **Cache bypass controls** (`no-cache` headers) with provider-aware behavior
 - 🔐 **Secure credential storage** using VS Code `SecretStorage`
-- ⌨️ **Optional inline completions** via VS Code's stable inline completion API
+- ⌨️ **Optional inline completions** via VS Code's stable inline completion API (requires manual configuration in `2.0.0`)
 
 ---
 
@@ -91,12 +96,12 @@ If the extension fails to connect or models don't show up:
 - 📝 **Multi-Repo Commit Generation** (correctly identifies the active repository in multi-repo workspaces)
 - 🧪 **Telemetry & Observability** (PostHog-backed feature tracking and structured JSONL logging)
 - 🔧 **Model Capability Overrides** (manually override `toolCalling` and `imageInput` detection)
-- 🧠 **V2 Chat Provider** (experimental support for thinking parts and newer VS Code chat APIs)
+- 🧠 **Unified Chat Provider** (supports thinking parts and newer VS Code 1.120 chat APIs)
 - 🧼 **SCM Message Sanitization** (automatically cleans up generated commit messages by stripping triple backticks)
 - ✍️ **Git Commit Message Generation** (generate messages from staged changes directly in the SCM view)
 - 📊 **Enhanced Token Awareness** (real-time token counting and context window display in model tooltips)
 - 🔍 **Connection Diagnostics** (new `Check Connection` command to validate proxy settings)
-- 🚀 **VS Code 1.110+ settings modernization** (aligns with the Language Model provider settings UI)
+- 🚀 **VS Code 1.120+ settings modernization** (aligns with Language Model provider-group configuration)
 - 🧱 **Tool-call compatibility hardening** (normalizes tool call IDs to OpenAI-compatible limits)
 - 🧰 **Stability Improvements** (hardened JSON parsing and stream error recovery)
 - 📦 **Smaller, faster package** (bundled/minified production builds)
@@ -107,8 +112,8 @@ If the extension fails to connect or models don't show up:
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `litellm-connector.baseUrl` | string | `""` | Base URL for the LiteLLM proxy server. |
-| `litellm-connector.backends` | array | `[]` | List of LiteLLM backends to connect to. |
+| `litellm-connector.baseUrl` | string | `""` | Legacy/fallback single-backend URL (kept for compatibility). |
+| `litellm-connector.backends` | array | `[]` | Legacy/fallback multi-backend list (kept for compatibility and classic management flow). |
 | `litellm-connector.inactivityTimeout` | number | `60` | Seconds of inactivity before the connection is considered idle. |
 | `litellm-connector.disableCaching` | boolean | `true` | Send `no-cache` headers to bypass LiteLLM caching. |
 | `litellm-connector.commitModelIdOverride` | string | `""` | Override the model used for git commit message generation. |
@@ -125,7 +130,7 @@ If the extension fails to connect or models don't show up:
 
 ## ⌨️ Commands
 
-- **Manage LiteLLM Provider**: Legacy migration command for older single/multi-backend setup flows.
+- **LiteLLM: Manage Configuration**: Opens LiteLLM backend management (multi-backend flow).
 - **LiteLLM: Check Connection**: Verify proxy URL and API key configuration.
 - **LiteLLM: Select Inline Completion Model**: Choose a model for inline completions.
 - **LiteLLM: Select Commit Message Model**: Choose a model for git commit generation.
