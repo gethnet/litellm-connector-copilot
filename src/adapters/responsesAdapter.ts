@@ -157,6 +157,10 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
         frequency_penalty: requestBody.frequency_penalty,
         presence_penalty: requestBody.presence_penalty,
         stop: requestBody.stop,
+        // LiteLLM /responses also accepts the flat `reasoning_effort` key. We pass it
+        // through unchanged so reasoning effort works identically across endpoints
+        // and the connector keeps a single canonical request shape.
+        reasoning_effort: requestBody.reasoning_effort,
     };
 
     if (requestBody.tools) {

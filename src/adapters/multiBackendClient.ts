@@ -46,14 +46,14 @@ export function createNamespacedModelId(backendName: string, originalModelId: st
  * Aggregated model info from all backends, with namespaced model IDs.
  */
 export interface AggregatedModelInfoResponse {
-    data: Array<{
+    data: {
         model_info?: LiteLLMModelInfo;
         model_name?: string;
         /** The backend this model came from. */
         backendName: string;
         /** The namespaced model ID exposed to VS Code. */
         namespacedId: string;
-    }>;
+    }[];
 }
 
 /**
@@ -140,7 +140,7 @@ export class MultiBackendClient {
      */
     async checkConnectionAll(
         token?: vscode.CancellationToken
-    ): Promise<Array<{ backendName: string; latencyMs: number; modelCount: number; error?: string }>> {
+    ): Promise<{ backendName: string; latencyMs: number; modelCount: number; error?: string }[]> {
         const entries = Array.from(this.clients.entries());
         const results = await Promise.allSettled(
             entries.map(async ([name, client]) => {

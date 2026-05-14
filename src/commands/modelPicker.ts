@@ -52,7 +52,7 @@ export async function showModelPicker(provider: LiteLLMProviderBase, options: Mo
             return;
         }
 
-        const items: Array<vscode.QuickPickItem & { id?: string }> = models.map((m) => {
+        const items: (vscode.QuickPickItem & { id?: string })[] = models.map((m) => {
             const mExtended = m as ExtendedModelInformation;
             return {
                 label: formatModelDisplayLabel(mExtended),

@@ -48,11 +48,15 @@ suite("LiteLLM Client Unit Tests", () => {
 
         await client.chat({ model: "gpt-4", messages: [] });
 
-        const args = fetchStub.getCall(0).args;
-        const body = JSON.parse(args[1]!.body as string);
+        const args0 = fetchStub.getCall(0).args;
+        const requestInit = args0[1] as RequestInit | undefined;
+        const bodyStr = requestInit?.body as string | undefined;
+        const body = bodyStr ? (JSON.parse(bodyStr) as Record<string, unknown>) : {};
         assert.strictEqual(body.no_cache, undefined);
         assert.strictEqual(body["no-cache"], undefined);
-        assert.strictEqual(body.extra_body?.cache?.["no-cache"], true);
+        const extraBody = body.extra_body as Record<string, unknown> | undefined;
+        const cache = extraBody?.cache as Record<string, unknown> | undefined;
+        assert.strictEqual(cache?.["no-cache"], true);
     });
 
     test("chat bypasses no_cache for Claude models", async () => {
@@ -64,12 +68,14 @@ suite("LiteLLM Client Unit Tests", () => {
 
         await client.chat({ model: "claude-3-opus", messages: [] });
 
-        const args = fetchStub.getCall(0).args;
-        const body = JSON.parse(args[1]!.body as string);
+        const args0 = fetchStub.getCall(0).args;
+        const requestInit = args0[1] as RequestInit | undefined;
+        const bodyStr = requestInit?.body as string | undefined;
+        const body = bodyStr ? (JSON.parse(bodyStr) as Record<string, unknown>) : {};
         assert.strictEqual(body.no_cache, undefined);
         assert.strictEqual(body["no-cache"], undefined);
         assert.strictEqual(body.extra_body, undefined);
-        const headers = args[1]!.headers as Record<string, string>;
+        const headers = (requestInit?.headers as Record<string, string>) ?? {};
         assert.strictEqual(headers["Cache-Control"], undefined);
     });
 
@@ -111,19 +117,25 @@ suite("LiteLLM Client Unit Tests", () => {
         assert.strictEqual(fetchStub.callCount, 2, "Should have retried");
 
         // First call should have no_cache
-        const firstCallBody = JSON.parse(fetchStub.getCall(0).args[1]!.body as string);
+        const firstCallInit = fetchStub.getCall(0).args[1] as RequestInit | undefined;
+        const firstCallBodyStr = firstCallInit?.body as string | undefined;
+        const firstCallBody = firstCallBodyStr ? (JSON.parse(firstCallBodyStr) as Record<string, unknown>) : {};
         assert.strictEqual(firstCallBody.no_cache, undefined);
         assert.strictEqual(firstCallBody["no-cache"], undefined);
-        assert.strictEqual(firstCallBody.extra_body?.cache?.["no-cache"], true);
-        const firstCallHeaders = fetchStub.getCall(0).args[1]!.headers as Record<string, string>;
+        const firstExtraBody = firstCallBody.extra_body as Record<string, unknown> | undefined;
+        const firstCache = firstExtraBody?.cache as Record<string, unknown> | undefined;
+        assert.strictEqual(firstCache?.["no-cache"], true);
+        const firstCallHeaders = (firstCallInit?.headers as Record<string, string>) ?? {};
         assert.strictEqual(firstCallHeaders["Cache-Control"], "no-cache");
 
         // Second call should NOT have no_cache or Cache-Control
-        const secondCallBody = JSON.parse(fetchStub.getCall(1).args[1]!.body as string);
+        const secondCallInit = fetchStub.getCall(1).args[1] as RequestInit | undefined;
+        const secondCallBodyStr = secondCallInit?.body as string | undefined;
+        const secondCallBody = secondCallBodyStr ? (JSON.parse(secondCallBodyStr) as Record<string, unknown>) : {};
         assert.strictEqual(secondCallBody.no_cache, undefined);
         assert.strictEqual(secondCallBody["no-cache"], undefined);
         assert.strictEqual(secondCallBody.extra_body, undefined);
-        const secondCallHeaders = fetchStub.getCall(1).args[1]!.headers as Record<string, string>;
+        const secondCallHeaders = (secondCallInit?.headers as Record<string, string>) ?? {};
         assert.strictEqual(secondCallHeaders["Cache-Control"], undefined);
     });
 
@@ -154,10 +166,14 @@ suite("LiteLLM Client Unit Tests", () => {
 
         assert.strictEqual(fetchStub.callCount, 2);
 
-        const secondCallBody = JSON.parse(fetchStub.getCall(0).args[1]!.body as string);
+        const secondCallInit = fetchStub.getCall(0).args[1] as RequestInit | undefined;
+        const secondCallBodyStr = secondCallInit?.body as string | undefined;
+        const secondCallBody = secondCallBodyStr ? (JSON.parse(secondCallBodyStr) as Record<string, unknown>) : {};
         assert.strictEqual(secondCallBody.temperature, 1);
 
-        const retryCallBody = JSON.parse(fetchStub.getCall(1).args[1]!.body as string);
+        const retryCallInit = fetchStub.getCall(1).args[1] as RequestInit | undefined;
+        const retryCallBodyStr = retryCallInit?.body as string | undefined;
+        const retryCallBody = retryCallBodyStr ? (JSON.parse(retryCallBodyStr) as Record<string, unknown>) : {};
         assert.strictEqual(retryCallBody.temperature, undefined, "Temperature should have been stripped");
     });
 
@@ -194,15 +210,21 @@ suite("LiteLLM Client Unit Tests", () => {
 
         assert.strictEqual(fetchStub.callCount, 2);
 
-        const firstCallBody = JSON.parse(fetchStub.getCall(0).args[1]!.body as string);
+        const firstCallInit = fetchStub.getCall(0).args[1] as RequestInit | undefined;
+        const firstCallBodyStr = firstCallInit?.body as string | undefined;
+        const firstCallBody = firstCallBodyStr ? (JSON.parse(firstCallBodyStr) as Record<string, unknown>) : {};
         // First call should still contain caching controls due to disableCaching.
-        assert.strictEqual(firstCallBody.extra_body?.cache?.["no-cache"], true);
+        const firstExtraBody = firstCallBody.extra_body as Record<string, unknown> | undefined;
+        const firstCache = firstExtraBody?.cache as Record<string, unknown> | undefined;
+        assert.strictEqual(firstCache?.["no-cache"], true);
 
-        const retryCallBody = JSON.parse(fetchStub.getCall(1).args[1]!.body as string);
+        const retryCallInit = fetchStub.getCall(1).args[1] as RequestInit | undefined;
+        const retryCallBodyStr = retryCallInit?.body as string | undefined;
+        const retryCallBody = retryCallBodyStr ? (JSON.parse(retryCallBodyStr) as Record<string, unknown>) : {};
         assert.strictEqual(retryCallBody.cache, undefined);
         assert.strictEqual(retryCallBody.extra_body, undefined);
 
-        const retryHeaders = fetchStub.getCall(1).args[1]!.headers as Record<string, string>;
+        const retryHeaders = (retryCallInit?.headers as Record<string, string>) ?? {};
         assert.strictEqual(retryHeaders["Cache-Control"], undefined);
     });
 
@@ -246,6 +268,30 @@ suite("LiteLLM Client Unit Tests", () => {
         assert.strictEqual(jsonStub.calledOnce, true);
     });
 
+    test("getModelInfo retries with normalized URL when first endpoint returns 404", async () => {
+        const client = new LiteLLMClient({ url: "http://localhost:4000/v1", key: "test-key" }, userAgent);
+
+        const jsonStub = sandbox.stub().resolves({ data: [] });
+        const fetchStub = sandbox.stub(global, "fetch");
+        fetchStub.onCall(0).resolves({
+            ok: false,
+            status: 404,
+            statusText: "Not Found",
+        } as unknown as Response);
+        fetchStub.onCall(1).resolves({
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: jsonStub,
+        } as unknown as Response);
+
+        const res = await client.getModelInfo();
+        assert.deepStrictEqual(res, { data: [] });
+        assert.strictEqual(fetchStub.callCount, 2);
+        assert.strictEqual(fetchStub.getCall(0).args[0], "http://localhost:4000/v1/model/info");
+        assert.strictEqual(fetchStub.getCall(1).args[0], "http://localhost:4000/model/info");
+    });
+
     test("getModelInfo throws with status details when response is not ok", async () => {
         const client = new LiteLLMClient(config, userAgent);
 
@@ -272,7 +318,9 @@ suite("LiteLLM Client Unit Tests", () => {
         sandbox.stub(global, "fetch").callsFake(async (_input: string | URL | Request, init?: RequestInit) => {
             abortSignal = init?.signal as AbortSignal | undefined;
             // Never resolve; we expect the abort signal to flip.
-            await new Promise(() => {});
+            await new Promise((_resolve) => {
+                // Keep promise pending
+            });
             return {} as Response;
         });
 
@@ -280,7 +328,11 @@ suite("LiteLLM Client Unit Tests", () => {
         const token = {
             onCancellationRequested: (cb: () => void) => {
                 onCancel = cb;
-                return { dispose() {} };
+                return {
+                    dispose() {
+                        // No-op for mock
+                    },
+                };
             },
         } as unknown as { onCancellationRequested: (cb: () => void) => { dispose(): void } };
 
@@ -315,24 +367,15 @@ suite("LiteLLM Client Unit Tests", () => {
                     return null;
                 },
             },
-        };
+        } as Response;
 
-        const successResponse = {
-            ok: true,
+        const successResponse = new Response(new ReadableStream(), {
             status: 200,
             statusText: "OK",
-            body: new ReadableStream(),
-            clone: function () {
-                return this;
-            },
-            headers: { get: () => null },
-        };
+        });
 
-        const firstAttempt = Promise.resolve(rateLimitResponse as unknown as Response);
-        const secondAttempt = Promise.resolve(successResponse as unknown as Response);
-
-        fetchStub.onCall(0).returns(firstAttempt);
-        fetchStub.onCall(1).returns(secondAttempt);
+        fetchStub.onCall(0).resolves(rateLimitResponse);
+        fetchStub.onCall(1).resolves(successResponse);
 
         await client.chat({ model: "m", messages: [] });
 
@@ -343,22 +386,12 @@ suite("LiteLLM Client Unit Tests", () => {
         const client = new LiteLLMClient(config, userAgent);
         const fetchStub = sandbox.stub(global, "fetch");
 
-        const serverErrorResponse = {
-            ok: false,
+        const serverErrorResponse = new Response("Service Unavailable", {
             status: 503,
-            clone: function () {
-                return this;
-            },
-            text: async () => "Service Unavailable",
-            headers: { get: () => null },
-        };
+            statusText: "Service Unavailable",
+        });
 
-        const successResponse = {
-            ok: true,
-            status: 200,
-            body: new ReadableStream(),
-            headers: { get: () => null },
-        };
+        const successResponse = new Response(new ReadableStream(), { status: 200, statusText: "OK" });
 
         fetchStub.onCall(0).resolves(serverErrorResponse as unknown as Response);
         fetchStub.onCall(1).resolves(successResponse as unknown as Response);
@@ -372,15 +405,7 @@ suite("LiteLLM Client Unit Tests", () => {
         const client = new LiteLLMClient(config, userAgent);
         const fetchStub = sandbox.stub(global, "fetch");
 
-        const badRequestResponse = {
-            ok: false,
-            status: 401,
-            clone: function () {
-                return this;
-            },
-            text: async () => "Unauthorized",
-            headers: { get: () => null },
-        };
+        const badRequestResponse = new Response("Unauthorized", { status: 401, statusText: "Unauthorized" });
 
         fetchStub.resolves(badRequestResponse as unknown as Response);
 

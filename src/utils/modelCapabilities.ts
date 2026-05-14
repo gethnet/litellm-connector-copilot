@@ -1,5 +1,6 @@
 import type * as vscode from "vscode";
-import type { LiteLLMModelInfo, ModelCapabilityOverride } from "../types";
+import type { LiteLLMModelInfo, ModelCapabilityOverride, SupportedReasoningEffort } from "../types";
+import { getDefaultEffort, getEffectiveEfforts } from "../config/modelOverrides";
 
 export interface DerivedModelCapabilities {
     supportsTools: boolean;
@@ -109,6 +110,31 @@ export function getModelTags(
 }
 
 /**
+ * Mapping of LiteLLM reasoning effort fields to standard effort values.
+ * This supports the 5 LiteLLM reasoning effort levels for model picker UI.
+ */
+const LITELLM_REASONING_EFFORT_MAPPING: Record<string, SupportedReasoningEffort> = {
+    supports_minimal_reasoning_effort: "minimal",
+    supports_low_reasoning_effort: "low",
+    supports_xlow_reasoning_effort: "low",
+    supports_high_reasoning_effort: "high",
+    supports_xhigh_reasoning_effort: "xhigh",
+} as const satisfies Record<string, SupportedReasoningEffort>;
+
+/**
+ * Default supported reasoning efforts when model explicitly supports reasoning
+ * but doesn't specify exact effort levels (supports_reasoning: true).
+ */
+const DEFAULT_REASONING_EFFORTS: readonly SupportedReasoningEffort[] = [
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+];
+
+/**
  * Type definition for extended properties on LanguageModelChatInformation.
  */
 export type ExtendedModelInformation = vscode.LanguageModelChatInformation & {
@@ -118,6 +144,170 @@ export type ExtendedModelInformation = vscode.LanguageModelChatInformation & {
     detail?: string;
     tooltip?: string;
 };
+
+/**
+ * Determine supported reasoning efforts for a model based on its LiteLLM model info.
+ *
+ * Returns an array of supported effort values (strings) that can be exposed in the
+ * VS Code model picker UI. Mappings support both standard and alias variants.
+ *
+ * Priority order for determining effort levels:
+ * 1. Explicit level fields (supports_minimal_reasoning_effort, supports_low_reasoning_effort, etc.)
+ * 2. General reasoning support (supports_reasoning: true) → ["low", "medium", "high"]
+ * 3. No reasoning support → empty array
+ *
+ * @param modelInfo LiteLLM model information with reasoning capabilities
+ * @returns Array of supported reasoning effort strings
+ */
+function hasReasoningSignal(modelInfo?: LiteLLMModelInfo): boolean {
+    if (!modelInfo) {
+        return false;
+    }
+    if (modelInfo.supports_reasoning) {
+        return true;
+    }
+    return Object.keys(LITELLM_REASONING_EFFORT_MAPPING).some(
+        (key) => modelInfo[key as keyof LiteLLMModelInfo] === true
+    );
+}
+
+export function getSupportedReasoningEfforts(
+    modelInfo?: LiteLLMModelInfo,
+    modelId?: string,
+    config?: vscode.WorkspaceConfiguration
+): readonly SupportedReasoningEffort[] {
+    if (!modelInfo && !modelId) {
+        return [];
+    }
+
+    if (modelInfo?.supports_reasoning === false) {
+        return [];
+    }
+
+    if (modelId) {
+        const overrideEfforts = getEffectiveEfforts(modelId, modelInfo, config);
+        if (overrideEfforts.length > 0) {
+            return overrideEfforts;
+        }
+    }
+
+    if (hasReasoningSignal(modelInfo)) {
+        return DEFAULT_REASONING_EFFORTS;
+    }
+
+    return [];
+}
+
+export function getDefaultReasoningEffort(
+    supportedEfforts: readonly SupportedReasoningEffort[],
+    modelId?: string,
+    modelInfo?: LiteLLMModelInfo,
+    config?: vscode.WorkspaceConfiguration
+): SupportedReasoningEffort | undefined {
+    if (supportedEfforts.length === 0) {
+        return undefined;
+    }
+
+    if (modelId) {
+        const overrideDefault = getDefaultEffort(modelId, modelInfo, config);
+        if (overrideDefault) {
+            return overrideDefault;
+        }
+    }
+
+    if (supportedEfforts.includes("medium")) {
+        return "medium";
+    }
+
+    return supportedEfforts.find((effort) => effort !== "none") ?? supportedEfforts[0];
+}
+
+/**
+ * Per-effort descriptions shown alongside each option in VS Code's model picker hover popup.
+ * VS Code renders these via `enumDescriptions` — one entry per enum value, in the same order.
+ * Without this array the picker shows only the label (e.g. "Medium") with no explanatory text,
+ * meaning users have no guidance on what each effort level actually does.
+ */
+function getEffortDescription(effort: SupportedReasoningEffort): string {
+    switch (effort) {
+        case "none":
+            return "No reasoning applied";
+        case "low":
+            return "Faster responses with less reasoning";
+        case "medium":
+            return "Balanced reasoning and speed";
+        case "high":
+            return "Greater reasoning depth but slower";
+        case "xhigh":
+            return "Maximum reasoning depth but slower";
+        default:
+            return effort;
+    }
+}
+
+export function buildReasoningEffortConfigurationSchema(
+    supportedEfforts: readonly SupportedReasoningEffort[],
+    modelId?: string,
+    modelInfo?: LiteLLMModelInfo,
+    config?: vscode.WorkspaceConfiguration
+):
+    | {
+          properties: {
+              reasoningEffort: {
+                  type: "string";
+                  // VS Code uses `title` as the section heading in the hover popup (e.g. "Thinking Effort").
+                  title: string;
+                  enum: SupportedReasoningEffort[];
+                  // Human-readable labels aligned with `enum` — shown in the picker list instead of raw values.
+                  enumItemLabels: string[];
+                  // Per-item descriptions rendered next to each option in the hover popup.
+                  // This is what causes VS Code to display the "Faster responses…" / "Balanced…" lines.
+                  enumDescriptions: string[];
+                  default?: SupportedReasoningEffort;
+                  // Must be "navigation" for VS Code 1.120 to surface this as an inline picker action
+                  // rather than hiding it in the secondary configuration UI.
+                  group: "navigation";
+              };
+          };
+      }
+    | undefined {
+    if (supportedEfforts.length === 0) {
+        return undefined;
+    }
+
+    const defaultEffort = getDefaultReasoningEffort(supportedEfforts, modelId, modelInfo, config);
+    return {
+        properties: {
+            reasoningEffort: {
+                type: "string",
+                // "Thinking Effort" matches the label VS Code's own Copilot models use, so the
+                // section heading in the hover popup is consistent with the native experience.
+                title: "Thinking Effort",
+                enum: [...supportedEfforts],
+                enumItemLabels: supportedEfforts.map((effort) => effort.charAt(0).toUpperCase() + effort.slice(1)),
+                // Per-item descriptions — renders the explanatory text beside each effort option
+                // in the VS Code model-picker hover popup (e.g. "Balanced reasoning and speed").
+                enumDescriptions: supportedEfforts.map(getEffortDescription),
+                default: defaultEffort,
+                group: "navigation",
+            },
+        },
+    };
+}
+
+/**
+ * Convert LiteLLM effort field names from arbitrary database keys to standard effort strings.
+ *
+ * Some LiteLLM models may have effort level fields named differently (e.g., camelCase, prefixed).
+ * This helper normalizes them to the standard effort strings used in the picker.
+ *
+ * @param modelInfo LiteLLM model information with reasoning capabilities
+ * @returns Standardized reasoning effort string or undefined if not supported
+ */
+export function resolveReasoningEffort(modelInfo?: LiteLLMModelInfo): SupportedReasoningEffort | undefined {
+    const supports = getSupportedReasoningEfforts(modelInfo);
+    return getDefaultReasoningEffort(supports);
+}
 
 /**
  * Centralized helper to format how a model is displayed in UI surfaces.

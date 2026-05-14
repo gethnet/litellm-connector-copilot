@@ -5,6 +5,7 @@ import * as sinon from "sinon";
 import { InlineCompletionsRegistrar } from "..//registerInlineCompletions";
 import { LiteLLMTelemetry } from "../../utils/telemetry";
 import { ConfigManager } from "../../config/configManager";
+import { EffortFallbackCache } from "../../utils/reasoningEffortFallback";
 
 suite("InlineCompletionsRegistrar Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -57,7 +58,7 @@ suite("InlineCompletionsRegistrar Unit Tests", () => {
         const registerStub = sandbox.stub(vscode.languages, "registerInlineCompletionItemProvider");
         const metricStub = sandbox.stub(LiteLLMTelemetry, "reportMetric");
 
-        const registrar = new InlineCompletionsRegistrar(mockSecrets, "ua", context);
+        const registrar = new InlineCompletionsRegistrar(mockSecrets, "ua", context, new EffortFallbackCache());
 
         registrar.initialize();
 
@@ -89,7 +90,7 @@ suite("InlineCompletionsRegistrar Unit Tests", () => {
         const registerStub = sandbox.stub(vscode.languages, "registerInlineCompletionItemProvider").returns(disposable);
         const metricStub = sandbox.stub(LiteLLMTelemetry, "reportMetric");
 
-        const registrar = new InlineCompletionsRegistrar(mockSecrets, "ua", context);
+        const registrar = new InlineCompletionsRegistrar(mockSecrets, "ua", context, new EffortFallbackCache());
 
         registrar.initialize();
 
@@ -125,13 +126,13 @@ suite("InlineCompletionsRegistrar Unit Tests", () => {
         let changeHandler: ((e: vscode.ConfigurationChangeEvent) => void) | undefined;
         sandbox.stub(vscode.workspace, "onDidChangeConfiguration").callsFake((cb) => {
             changeHandler = cb;
-            return { dispose() {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         const disposable = { dispose: sandbox.stub() } as unknown as vscode.Disposable;
         const registerStub = sandbox.stub(vscode.languages, "registerInlineCompletionItemProvider").returns(disposable);
 
-        const registrar = new InlineCompletionsRegistrar(mockSecrets, "ua", context);
+        const registrar = new InlineCompletionsRegistrar(mockSecrets, "ua", context, new EffortFallbackCache());
         registrar.initialize();
 
         // Wait for async refreshRegistration to complete

@@ -1,13 +1,24 @@
 import * as vscode from "vscode";
 import * as assert from "assert";
 import * as sinon from "sinon";
-import { LiteLLMChatProvider } from "../../providers/liteLLMChatProvider";
+import { LiteLLMChatProvider } from "../../providers";
 import { LiteLLMCompletionProvider } from "../../providers/liteLLMCompletionProvider";
-import { LiteLLMTelemetry } from "../../utils/telemetry";
+import { LiteLLMTelemetry, type IMetrics } from "../../utils/telemetry";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 import { ResponsesClient } from "../../adapters/responsesClient";
 import type { ConfigManager } from "../../config/configManager";
 import { createMockSecrets } from "../utils/testMocks";
+
+/**
+ * Test view of a captured IMetrics where the fields these tests inspect
+ * are treated as required. The production type has them optional because
+ * not every emission supplies every field, but in these regression tests
+ * the assertions only run on calls we know populated the values.
+ */
+type RecordedMetric = IMetrics & {
+    tokensIn: number;
+    tokensOut: number;
+};
 
 suite("Token Telemetry Regression Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -75,7 +86,7 @@ suite("Token Telemetry Regression Tests", () => {
         );
 
         assert.ok(reportMetricStub.calledOnce);
-        const metric = reportMetricStub.firstCall.args[0];
+        const metric = reportMetricStub.firstCall.args[0] as RecordedMetric;
 
         // "Say hello" is 3-6 tokens depending on tokenizer and overhead
         assert.ok(
@@ -130,7 +141,7 @@ suite("Token Telemetry Regression Tests", () => {
         }
 
         assert.ok(reportMetricStub.calledOnce);
-        const metric = reportMetricStub.firstCall.args[0];
+        const metric = reportMetricStub.firstCall.args[0] as RecordedMetric;
         // "Failing request" -> 3 tokens + 3 overhead + 1 prompt + 1 system?
         // It seems the test is getting 8.
         assert.ok(
@@ -180,7 +191,7 @@ suite("Token Telemetry Regression Tests", () => {
 
         assert.strictEqual(result.insertText, " completed");
         assert.ok(reportMetricStub.calledOnce);
-        const metric = reportMetricStub.firstCall.args[0];
+        const metric = reportMetricStub.firstCall.args[0] as RecordedMetric;
 
         // "Prompt" is 1-5 tokens depending on tokenizer and overhead
         assert.ok(

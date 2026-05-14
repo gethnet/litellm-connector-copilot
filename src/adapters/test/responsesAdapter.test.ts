@@ -258,4 +258,25 @@ suite("Responses Adapter Unit Tests", () => {
         // inputArray should be empty for this message
         assert.strictEqual(body.input.length, 0);
     });
+
+    test("transformToResponsesFormat propagates reasoning_effort verbatim", () => {
+        // We deliberately use a single canonical request shape across endpoints.
+        // LiteLLM accepts the flat `reasoning_effort` key on /responses just as it
+        // does on /chat/completions, so the adapter passes it through unchanged
+        // rather than translating into a nested `reasoning: { effort }` shape.
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [{ role: "user", content: "hi" }],
+            reasoning_effort: "high",
+        });
+        assert.strictEqual(body.reasoning_effort, "high");
+    });
+
+    test("transformToResponsesFormat omits reasoning_effort when source request did not set it", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [{ role: "user", content: "hi" }],
+        });
+        assert.strictEqual(body.reasoning_effort, undefined);
+    });
 });

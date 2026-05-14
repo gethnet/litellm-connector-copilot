@@ -52,8 +52,10 @@ export function registerSetLogLevelCommand(): vscode.Disposable {
             return;
         }
 
-        StructuredLogger.setLevel(picked.level);
-        vscode.window.showInformationMessage(`LiteLLM V2 log level set to: ${picked.label}`);
+        StructuredLogger.info("logger.setLevel_command_invoked", { level: picked.level });
+        vscode.window.showInformationMessage(
+            `LiteLLM V2 log level set to: ${picked.label}. Use the Output panel dropdown to filter logs.`
+        );
 
         // Show the output channel so user can see the logs
         StructuredLogger.show();

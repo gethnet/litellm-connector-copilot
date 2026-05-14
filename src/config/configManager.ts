@@ -1,6 +1,10 @@
 import * as vscode from "vscode";
-import type { LiteLLMBackend, LiteLLMConfig, ResolvedBackend } from "../types";
+import type { LiteLLMBackend, LiteLLMConfig, ModelOverride, ResolvedBackend } from "../types";
 import type { TelemetryService } from "../telemetry/telemetryService";
+import { LiteLLMClient } from "../adapters/litellmClient";
+import type { BackendSession } from "../providers/backendSession";
+import { Logger } from "../utils/logger";
+import { loadUserOverrides } from "./modelOverrides";
 
 export class ConfigManager {
     private static readonly BASE_URL_KEY = "litellm-connector.baseUrl";
@@ -12,7 +16,6 @@ export class ConfigManager {
     private static readonly DISABLE_CACHING_KEY = "litellm-connector.disableCaching";
     private static readonly EXPERIMENTAL_EMIT_USAGE_DATA_KEY = "litellm-connector.emitUsageData";
     private static readonly DISABLE_QUOTA_TOOL_REDACTION_KEY = "litellm-connector.disableQuotaToolRedaction";
-    private static readonly MODEL_OVERRIDES_KEY = "litellm-connector.modelOverrides";
     private static readonly MODEL_CAPABILITIES_OVERRIDES_KEY = "litellm-connector.modelCapabilitiesOverrides";
     private static readonly MODEL_ID_OVERRIDE_KEY = "litellm-connector.modelIdOverride";
     private static readonly INLINE_COMPLETIONS_ENABLED_KEY = "litellm-connector.inlineCompletions.enabled";
@@ -22,7 +25,52 @@ export class ConfigManager {
 
     private _telemetryService?: TelemetryService;
 
-    constructor(private readonly secrets: vscode.SecretStorage) {}
+    private readonly secrets: vscode.SecretStorage;
+
+    constructor(secrets: vscode.SecretStorage) {
+        this.secrets = ConfigManager.ensureSecretStorage(secrets);
+    }
+
+    /**
+     * Ensures a usable SecretStorage implementation even in tests that provide partial stubs.
+     */
+    private static ensureSecretStorage(secrets: vscode.SecretStorage | undefined): vscode.SecretStorage {
+        if (secrets && typeof secrets.get === "function" && typeof secrets.store === "function") {
+            return secrets;
+        }
+
+        // Provide a minimal stub for testing to avoid empty method warnings
+        const stubStorage: vscode.SecretStorage = {
+            get: async () => undefined,
+            store: async (_key: string): Promise<void> => {
+                /* no-op: stub for testing */
+            },
+            delete: async (_key: string): Promise<void> => {
+                /* no-op: stub for testing */
+            },
+            keys: async () => [],
+            onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
+        };
+        return stubStorage;
+    }
+
+    /**
+     * Store a secret in the extension's secret storage.
+     */
+    public async store(key: string, value: string): Promise<void> {
+        await this.secrets.store(key, value);
+    }
+
+    /**
+     * Delete a secret from the extension's secret storage.
+     */
+    public async delete(key: string): Promise<void> {
+        await this.secrets.delete(key);
+    }
+
+    public async getSecret(key: string): Promise<string | undefined> {
+        return this.secrets.get(key);
+    }
 
     public setTelemetryService(service: TelemetryService): void {
         this._telemetryService = service;
@@ -37,22 +85,22 @@ export class ConfigManager {
      * Retrieves the current LiteLLM configuration from secret storage.
      */
     async getConfig(): Promise<LiteLLMConfig> {
+        const workspaceConfig = vscode.workspace.getConfiguration();
+
         // Base URL is stored in plain-text settings (global user settings).
-        const url = vscode.workspace.getConfiguration().get<string>(ConfigManager.BASE_URL_KEY, "").trim();
+        const url = workspaceConfig.get<string>(ConfigManager.BASE_URL_KEY, "").trim();
 
         // API key is stored in SecretStorage. Settings only store a reference to which secret entry to use.
-        const apiKeySecretRef = vscode.workspace
-            .getConfiguration()
-            .get<string>(ConfigManager.API_KEY_SECRET_REF_KEY, ConfigManager.DEFAULT_API_KEY_SECRET_REF)
-            .trim();
-        const key = await this.secrets.get(this.getApiKeySecretStorageKey(apiKeySecretRef));
+        const apiKeySecretRef = workspaceConfig.get<string>(
+            ConfigManager.API_KEY_SECRET_REF_KEY,
+            ConfigManager.DEFAULT_API_KEY_SECRET_REF
+        );
+        const key = await this.secrets.get(this.getApiKeySecretStorageKey(apiKeySecretRef?.trim() ?? ""));
 
         // Read multi-backend array from settings
-        const backendsRaw = vscode.workspace
-            .getConfiguration()
-            .get<
-                Array<{ name: string; url: string; apiKeySecretRef?: string; enabled?: boolean }>
-            >(ConfigManager.BACKENDS_KEY, []);
+        const backendsRaw = workspaceConfig.get<
+            { name: string; url: string; apiKeySecretRef?: string; enabled?: boolean }[]
+        >(ConfigManager.BACKENDS_KEY, []);
 
         let backends: LiteLLMBackend[] | undefined;
 
@@ -65,7 +113,12 @@ export class ConfigManager {
                 enabled: b.enabled !== false,
             }));
         } else if (url) {
-            // Legacy single-backend migration: treat as backends[0]
+            // OBSOLETE LEGACY PATH — remove in VS Code 1.125.
+            // Legacy single-backend migration: pre-1.119 users stored a single backend as
+            // top-level `litellm-connector.url` + `litellm-connector.key`. We promote that
+            // shape to a single-element backends[] so the rest of the pipeline can treat
+            // it uniformly. Once the minimum supported VS Code is >= 1.125, delete this
+            // branch (and the BASE_URL_KEY / API_KEY_KEY handling it depends on).
             backends = [
                 {
                     name: "default",
@@ -76,41 +129,22 @@ export class ConfigManager {
             ];
         }
 
-        const inactivityTimeout = vscode.workspace
-            .getConfiguration()
-            .get<number>(ConfigManager.INACTIVITY_TIMEOUT_KEY, 60);
-        const disableCaching = vscode.workspace
-            .getConfiguration()
-            .get<boolean>(ConfigManager.DISABLE_CACHING_KEY, true);
-        const experimentalEmitUsageData = vscode.workspace
-            .getConfiguration()
-            .get<boolean>(ConfigManager.EXPERIMENTAL_EMIT_USAGE_DATA_KEY, false);
-        const disableQuotaToolRedaction = vscode.workspace
-            .getConfiguration()
-            .get<boolean>(ConfigManager.DISABLE_QUOTA_TOOL_REDACTION_KEY, false);
-        const modelOverridesRaw = vscode.workspace
-            .getConfiguration()
-            .get<Record<string, string | string[]>>(ConfigManager.MODEL_OVERRIDES_KEY, {});
+        const inactivityTimeout = workspaceConfig.get<number>(ConfigManager.INACTIVITY_TIMEOUT_KEY, 60);
+        const disableCaching = workspaceConfig.get<boolean>(ConfigManager.DISABLE_CACHING_KEY, true);
+        const experimentalEmitUsageData = workspaceConfig.get<boolean>(
+            ConfigManager.EXPERIMENTAL_EMIT_USAGE_DATA_KEY,
+            false
+        );
+        const disableQuotaToolRedaction = workspaceConfig.get<boolean>(
+            ConfigManager.DISABLE_QUOTA_TOOL_REDACTION_KEY,
+            false
+        );
+        const modelOverrides: ModelOverride[] = loadUserOverrides(workspaceConfig);
 
-        const modelOverrides: Record<string, string[]> = {};
-        if (modelOverridesRaw && typeof modelOverridesRaw === "object" && !Array.isArray(modelOverridesRaw)) {
-            for (const [modelId, tagsValue] of Object.entries(modelOverridesRaw)) {
-                if (Array.isArray(tagsValue)) {
-                    // Legacy format: Array of tags
-                    modelOverrides[modelId] = tagsValue.map(String);
-                } else if (typeof tagsValue === "string") {
-                    // New format: Comma-separated string (for table UI support)
-                    modelOverrides[modelId] = tagsValue
-                        .split(",")
-                        .map((tag) => tag.trim())
-                        .filter((tag) => tag.length > 0);
-                }
-            }
-        }
-
-        const modelCapabilitiesOverridesRaw = vscode.workspace
-            .getConfiguration()
-            .get<Record<string, string | string[]>>(ConfigManager.MODEL_CAPABILITIES_OVERRIDES_KEY, {});
+        const modelCapabilitiesOverridesRaw = workspaceConfig.get<Record<string, string | string[]>>(
+            ConfigManager.MODEL_CAPABILITIES_OVERRIDES_KEY,
+            {}
+        );
 
         const modelCapabilitiesOverrides: Record<string, { toolCalling?: boolean; imageInput?: boolean }> = {};
         if (
@@ -144,24 +178,18 @@ export class ConfigManager {
             }
         }
 
-        const modelIdOverride = vscode.workspace
-            .getConfiguration()
-            .get<string>(ConfigManager.MODEL_ID_OVERRIDE_KEY, "")
-            .trim();
-        const inlineCompletionsEnabled = vscode.workspace
-            .getConfiguration()
-            .get<boolean>(ConfigManager.INLINE_COMPLETIONS_ENABLED_KEY, false);
-        const inlineCompletionsModelId = vscode.workspace
-            .getConfiguration()
-            .get<string>(ConfigManager.INLINE_COMPLETIONS_MODEL_ID_KEY, "")
-            .trim();
-        const scmGitCompletionsModelId = vscode.workspace
-            .getConfiguration()
+        const modelIdOverride = workspaceConfig.get<string>(ConfigManager.MODEL_ID_OVERRIDE_KEY, "").trim();
+        const inlineCompletionsEnabled = workspaceConfig.get<boolean>(
+            ConfigManager.INLINE_COMPLETIONS_ENABLED_KEY,
+            false
+        );
+        const inlineCompletionsModelId = workspaceConfig.get<string>(ConfigManager.INLINE_COMPLETIONS_MODEL_ID_KEY, "");
+        const scmGitCompletionsModelId = workspaceConfig
             .get<string>(ConfigManager.SCM_COMMIT_MSG_MODEL_ID_KEY, "")
             .trim();
-        const v2ApiEnabled = vscode.workspace
-            .getConfiguration()
-            .get<boolean>(ConfigManager.ENABLE_RESPONSES_API, false);
+        const v2ApiEnabled = workspaceConfig.get<boolean>(ConfigManager.ENABLE_RESPONSES_API, false);
+
+        const trimmedInlineModelId = inlineCompletionsModelId?.trim() ?? "";
 
         return {
             url,
@@ -176,13 +204,14 @@ export class ConfigManager {
             modelIdOverride: modelIdOverride.length > 0 ? modelIdOverride : undefined,
             inlineCompletionsEnabled,
             inlineCompletionsModelId:
-                inlineCompletionsModelId.length > 0
-                    ? inlineCompletionsModelId
+                trimmedInlineModelId.length > 0
+                    ? trimmedInlineModelId
                     : modelIdOverride.length > 0
                       ? modelIdOverride
                       : undefined,
             commitModelIdOverride: `${scmGitCompletionsModelId}`,
             v2ApiEnabled,
+            enableResponses: v2ApiEnabled,
         };
     }
 
@@ -226,7 +255,7 @@ export class ConfigManager {
             return;
         }
         const config = await this.getConfig();
-        const toggles: Array<[string, boolean]> = [
+        const toggles: [string, boolean][] = [
             ["inline-completions", config.inlineCompletionsEnabled ?? false],
             ["responses-api", config.v2ApiEnabled ?? false],
             ["commit-message", !!(config.commitModelIdOverride && config.commitModelIdOverride.length > 0)],
@@ -242,6 +271,14 @@ export class ConfigManager {
     /**
      * Returns all enabled backends with their API keys resolved from SecretStorage.
      * Falls back to legacy single-backend config if backends array is empty.
+     *
+     * @deprecated OBSOLETE — scheduled for removal in VS Code 1.125. The legacy
+     * workspace-settings backends path (`litellm-connector.backends`,
+     * `litellm-connector.url`/`litellm-connector.key`) is preserved only for users
+     * upgrading from pre-1.119 VS Code. New code paths must use the per-group
+     * configuration delivered via `options.configuration` in the VS Code 1.120
+     * Language Model Chat Provider API. When the minimum supported VS Code is
+     * raised to >= 1.125, delete this method and all of its call sites.
      */
     async resolveBackends(): Promise<ResolvedBackend[]> {
         const config = await this.getConfig();
@@ -280,10 +317,51 @@ export class ConfigManager {
     }
 
     /**
+     * Converts VS Code per-group provider configuration into a BackendSession.
+     * Required fields: baseUrl (http/https), apiKey.
+     *
+     * `providerName` is optional because VS Code group-based configuration already
+     * carries the user-entered group name separately as `groupName`.
+     */
+    convertProviderConfiguration(
+        groupName: string,
+        configuration: Record<string, unknown>
+    ): BackendSession | undefined {
+        const providerNameFromConfig =
+            typeof configuration.providerName === "string" ? configuration.providerName.trim() : "";
+        const providerName = providerNameFromConfig || groupName.trim();
+        const baseUrl = typeof configuration.baseUrl === "string" ? configuration.baseUrl.trim() : "";
+        const apiKey = typeof configuration.apiKey === "string" ? configuration.apiKey.trim() : "";
+
+        if (!providerName) {
+            Logger.debug("convertProviderConfiguration: missing providerName and groupName");
+            return undefined;
+        }
+
+        if (!baseUrl || !/^https?:\/\//i.test(baseUrl)) {
+            Logger.debug("convertProviderConfiguration: baseUrl must start with http:// or https://");
+            return undefined;
+        }
+
+        if (!apiKey) {
+            Logger.debug("convertProviderConfiguration: missing apiKey in configuration");
+            return undefined;
+        }
+
+        const userAgent = "litellm-vscode-chat/vscode-1.120+";
+        return {
+            backendName: providerName,
+            baseUrl,
+            apiKey,
+            client: new LiteLLMClient({ url: baseUrl, key: apiKey }, userAgent),
+        };
+    }
+
+    /**
      * Adds a new backend to the configuration.
      */
     async addBackend(backend: LiteLLMBackend, apiKey?: string): Promise<void> {
-        const existing = vscode.workspace.getConfiguration().get<Array<LiteLLMBackend>>(ConfigManager.BACKENDS_KEY, []);
+        const existing = vscode.workspace.getConfiguration().get<LiteLLMBackend[]>(ConfigManager.BACKENDS_KEY, []);
         if (existing.some((b) => b.name === backend.name)) {
             throw new Error(`Backend "${backend.name}" already exists. Use updateBackend() to modify.`);
         }
@@ -302,7 +380,7 @@ export class ConfigManager {
      * Removes a backend by name.
      */
     async removeBackend(name: string): Promise<void> {
-        const existing = vscode.workspace.getConfiguration().get<Array<LiteLLMBackend>>(ConfigManager.BACKENDS_KEY, []);
+        const existing = vscode.workspace.getConfiguration().get<LiteLLMBackend[]>(ConfigManager.BACKENDS_KEY, []);
         const backend = existing.find((b) => b.name === name);
         if (!backend) {
             throw new Error(`Backend "${name}" not found.`);
@@ -320,7 +398,7 @@ export class ConfigManager {
      * Updates an existing backend.
      */
     async updateBackend(name: string, updates: Partial<LiteLLMBackend>, apiKey?: string): Promise<void> {
-        const existing = vscode.workspace.getConfiguration().get<Array<LiteLLMBackend>>(ConfigManager.BACKENDS_KEY, []);
+        const existing = vscode.workspace.getConfiguration().get<LiteLLMBackend[]>(ConfigManager.BACKENDS_KEY, []);
         const index = existing.findIndex((b) => b.name === name);
         if (index === -1) {
             throw new Error(`Backend "${name}" not found.`);
@@ -344,7 +422,7 @@ export class ConfigManager {
      * Lists all configured backends.
      */
     async listBackends(): Promise<LiteLLMBackend[]> {
-        return vscode.workspace.getConfiguration().get<Array<LiteLLMBackend>>(ConfigManager.BACKENDS_KEY, []);
+        return vscode.workspace.getConfiguration().get<LiteLLMBackend[]>(ConfigManager.BACKENDS_KEY, []);
     }
 
     /**
@@ -353,6 +431,14 @@ export class ConfigManager {
     async isConfigured(): Promise<boolean> {
         const config = await this.getConfig();
         return (config.backends && config.backends.length > 0) || !!config.url;
+    }
+
+    /**
+     * Dispose hook to align with ExtensionContext subscription lifecycle.
+     * Currently a no-op because ConfigManager does not hold disposable resources.
+     */
+    async dispose(): Promise<void> {
+        this._telemetryService = undefined;
     }
 
     /**

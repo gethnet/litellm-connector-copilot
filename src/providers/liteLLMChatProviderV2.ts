@@ -4,6 +4,7 @@ import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
 import { interpretStreamEvent, createInitialStreamingState } from "../adapters/streaming/liteLLMStreamInterpreter";
 import { emitV2PartsToVSCode } from "../adapters/streaming/vscodePartEmitter";
+import type { EffortFallbackCache } from "../utils/reasoningEffortFallback";
 
 /**
  * V2 Chat provider implementation using proposed VS Code APIs.
@@ -11,6 +12,10 @@ import { emitV2PartsToVSCode } from "../adapters/streaming/vscodePartEmitter";
  * This provider supports LanguageModelChatMessage2 and LanguageModelThinkingPart.
  */
 export class LiteLLMChatProviderV2 extends LiteLLMProviderBase implements vscode.LanguageModelChatProvider {
+    constructor(secrets: vscode.SecretStorage, userAgent: string, effortFallbackCache?: EffortFallbackCache) {
+        super(secrets, userAgent, effortFallbackCache);
+    }
+
     private emitUsageDataPart(
         progress: vscode.Progress<vscode.LanguageModelResponsePart>,
         promptTokens: number,

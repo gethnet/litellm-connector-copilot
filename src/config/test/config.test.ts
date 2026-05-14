@@ -46,7 +46,7 @@ suite("ConfigManager Unit Tests", () => {
                 case "litellm-connector.disableQuotaToolRedaction":
                     return false;
                 case "litellm-connector.modelOverrides":
-                    return {};
+                    return [];
                 case "litellm-connector.modelIdOverride":
                     return "";
                 case "litellm-connector.modelCapabilitiesOverrides":
@@ -172,6 +172,48 @@ suite("ConfigManager Unit Tests", () => {
         const cfg = await manager.getConfig();
 
         assert.deepStrictEqual(cfg.modelCapabilitiesOverrides, {});
+    });
+
+    test("getConfig reads modelOverrides array shape", async () => {
+        settingsMap.set("litellm-connector.modelOverrides", [
+            {
+                match: "gpt-5",
+                supportsReasoning: true,
+                reasoningEfforts: ["high", "xhigh"],
+                defaultEffort: "xhigh",
+            },
+            {
+                match: "",
+                supportsReasoning: true,
+            },
+            {
+                match: "claude-3",
+                supportsReasoning: null,
+                reasoningEfforts: ["minimal", "low"],
+                defaultEffort: "low",
+                notes: "keep minimal",
+            },
+        ]);
+
+        const manager = new ConfigManager(mockSecrets);
+        const cfg = await manager.getConfig();
+
+        assert.deepStrictEqual(cfg.modelOverrides, [
+            {
+                match: "gpt-5",
+                supportsReasoning: true,
+                reasoningEfforts: ["high", "xhigh"],
+                defaultEffort: "xhigh",
+                notes: undefined,
+            },
+            {
+                match: "claude-3",
+                supportsReasoning: null,
+                reasoningEfforts: ["minimal", "low"],
+                defaultEffort: "low",
+                notes: "keep minimal",
+            },
+        ]);
     });
 
     test("resolveBackends returns resolved backends with API keys", async () => {

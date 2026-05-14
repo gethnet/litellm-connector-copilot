@@ -115,20 +115,25 @@ This repository is a **VS Code extension**. Agents must follow these rules when 
 
 - **VS Code API**: Always target the `vscode` namespace.
 - **Proposed APIs**: Use `@vscode/dts` and keep `src/vscode.d.ts` current when relying on proposed types.
-- **Configuration & Secrets (v1.109+)**:
-  - Language model provider configuration (base URL, API key) is managed through `languageModelChatProviders` contribution point in `package.json`
+- **Engine target**: `package.json` `engines.vscode` is `^1.120.0`. All provider code must assume the VS Code 1.120 Language Model API surface.
+- **Configuration & Secrets (v1.120+, per-group configuration)**:
+  - Language model provider configuration (base URL, API key, and any per-backend settings) is declared via the `languageModelChatProviders` contribution point in `package.json`
+  - VS Code 1.120 supports **per-group configuration**: each configured provider group passes its own `options.configuration` into `provideLanguageModelChatInformation` and request methods. The provider must read configuration from `options.configuration` for every call rather than caching globally.
   - Configuration properties marked with `"secret": true` are encrypted by VS Code
-  - Providers receive configuration via `options.configuration` in request methods
-  - Use `ConfigManager.convertProviderConfiguration()` to convert VS Code config to internal format
-  - For other secrets: Use `vscode.SecretStorage` via `ConfigManager` for non-provider secrets. **Never** use `globalState`.
+  - Use `ConfigManager.convertProviderConfiguration()` to convert VS Code's per-group config object into the internal `LiteLLMConfig` format
+  - For non-provider secrets: use `vscode.SecretStorage` via `ConfigManager`. **Never** use `globalState`.
+- **Model picker visibility**: every `LanguageModelChatInformation` returned from `provideLanguageModelChatInformation` must set `isUserSelectable: true` so the model appears in VS Code's model picker dropdown. Models that omit this flag (or set it to `false`) are hidden from the picker even when discovery succeeds.
+- **Backend grouping**: each `LanguageModelChatInformation` must set `category: { label, order }` — `label` is the user-visible group heading in the picker (typically the backend / group name), and `order` is the deterministic display order. Without this, models from multiple backends collapse into a single ungrouped list.
+- **Reasoning effort picker (`group: "navigation"`)**: when a model supports reasoning, its `configurationSchema.properties.reasoningEffort` must include `group: "navigation"`. Only navigation-grouped properties are surfaced as inline picker actions in VS Code 1.120; without it the effort selector is hidden behind the secondary settings UI and users cannot change effort from the chat picker.
+- **Legacy compatibility path (OBSOLETE — remove in 1.125)**: the workspace-settings discovery path (`litellm-connector.backends`, `litellm-connector.url`/`litellm-connector.key`, `ConfigManager.resolveBackends`, the legacy "Single Backend" / "Manage Multiple Backends" entries in `litellm-connector.manage`, and the legacy fallback inside `_doDiscoverModels`) is preserved **only** as a compatibility shim for users upgrading from pre-1.119 VS Code. New code MUST source backend connection details from the per-group `options.configuration` payload. The shim emits a one-time deprecation warning per session when activated. **When the minimum supported VS Code is raised to >= 1.125, delete the entire legacy path** (search for `OBSOLETE` / `remove in 1.125` / `@deprecated` markers and the `_emitLegacyDeprecationWarningOnce` call site). An ESLint override in `eslint.config.mjs` silences the resulting `no-deprecated` self-references in files that own the legacy path; the override list itself is the canonical "to be deleted" file list.
 
 ### Architecture & data flow (extension)
 
 This extension integrates LiteLLM proxies into VS Code's Language Model APIs (chat and text completions).
 
-**Current Provider Architecture Pattern (Shared Base + Specialized Providers)**:
+**Current Provider Architecture Pattern (Shared Base + One Unified Chat Provider + Completions Provider)**:
 
-The extension uses a **shared orchestration + specialized protocol handlers** pattern:
+The extension uses a **shared orchestration + specialized protocol handlers** pattern, with exactly **one** chat provider and one completions provider — no version-suffixed variants.
 
 - **Base Orchestrator**: `src/providers/liteLLMProviderBase.ts`
   - Owns the shared request lifecycle used by provider implementations
@@ -137,10 +142,13 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
   - Delegates transport concerns to adapter/client layers
   - Centralizes telemetry, logging, and shared error handling
 
-- **Chat Provider**: `src/providers/liteLLMChatProvider.ts`
-  - Implements `vscode.LanguageModelChatProvider`
+- **Chat Provider** (single, unified): `src/providers/liteLLMChatProvider.ts`
+  - There is **one** chat provider class named `LiteLLMChatProvider`. Do **not** introduce or reintroduce version-suffixed siblings (`LiteLLMChatProviderV2`, `LiteLLMChatProviderV3`, etc.). The previous V1/V2/V3 split has been collapsed into this single implementation.
+  - Implements `vscode.LanguageModelChatProvider` against the VS Code 1.120 surface
   - Extends `LiteLLMProviderBase` and adds chat-protocol behavior only
-  - Handles chat-specific streaming, tool call buffering, response parts, and message parsing
+  - Handles chat-specific streaming, tool call buffering, response part emission (text / thinking / data / tool calls), and message parsing
+  - Reads per-group configuration from `options.configuration` on each call (no global config caching)
+  - Returns `LanguageModelChatInformation` entries with `isUserSelectable: true` so models appear in the picker
   - Reuses the base request pipeline for normalization, filtering, trimming, and routing
 
 - **Completions Provider**: `src/providers/liteLLMCompletionProvider.ts`
@@ -155,12 +163,12 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
   - Avoid re-implementing shared request preparation, endpoint selection, or quota/error logic in derived providers
 
 - **Entry Point**: `src/extension.ts`
-  - Activates extension and instantiates both providers
+  - Activates extension and instantiates exactly one `LiteLLMChatProvider` and one `LiteLLMCompletionProvider`
   - Registers `LiteLLMChatProvider` with `vscode.lm.registerLanguageModelChatProvider("litellm-connector", provider)`
   - Registers `LiteLLMCompletionProvider` with `vscode.lm.registerLanguageModelTextCompletionProvider("litellm-connector", provider)`
   - Both providers share same `context.secrets` for `SecretStorage` (if needed for non-provider secrets)
-  - Both receive configuration from VS Code via `options.configuration` in request methods
-  - Configuration schema defined in `package.json` `languageModelChatProviders` contribution point
+  - Both receive per-group configuration from VS Code via `options.configuration` in `provideLanguageModelChatInformation` and request methods
+  - Configuration schema defined in `package.json` `languageModelChatProviders` contribution point (VS Code 1.120 per-group format)
 
 - **Adapters**:
   - `src/adapters/litellmClient.ts` — HTTP client and endpoint routing integration
@@ -169,14 +177,14 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
   - `src/adapters/tokenUtils.ts` — token budgeting, trimming, and related helpers
 
 - **Config**: `src/config/configManager.ts`
-  - Handles provider configuration from `options.configuration` (Base URL, API Key from VS Code)
+  - Handles per-group provider configuration from `options.configuration` (Base URL, API Key, and any group-scoped settings supplied by VS Code 1.120)
   - Also manages workspace settings via `vscode.workspace.getConfiguration()` (model overrides, caching, etc.)
-  - `convertProviderConfiguration()` converts VS Code provider config to internal `LiteLLMConfig` format
+  - `convertProviderConfiguration()` converts the per-group VS Code provider config into the internal `LiteLLMConfig` format
   - Legacy migration support from `vscode.SecretStorage` for users upgrading from pre-1.109 versions
 
-**Key Design Principle**: Both chat and completions providers reuse the same message ingress pipeline. This eliminates code duplication, ensures consistent behavior, and makes the architecture extensible for future provider types.
+**Key Design Principle**: There is exactly one chat provider and one completions provider. Both reuse the same message ingress pipeline in the base orchestrator. This eliminates code duplication, ensures consistent behavior, and avoids the version-suffixed provider sprawl that previously existed.
 
-**Structural rule of thumb**: shared cross-provider behavior belongs in the base class or adapters; VS Code protocol specifics belong in the derived provider that owns that protocol.
+**Structural rule of thumb**: shared cross-provider behavior belongs in the base class or adapters; VS Code protocol specifics belong in the single derived provider that owns that protocol. Do not fork chat-protocol logic into version-suffixed siblings.
 
 When architecture changes, update this section in the same change so the document remains a reliable map of the codebase.
 
@@ -208,14 +216,16 @@ Keep this pipeline shared unless the change is intentionally protocol-specific a
 - **Stream text extraction**: parse SSE chunks and accumulate completion text
 - **Model selection**: resolve model using `modelIdOverride` config or first available model with `inline-completions` tag
 
-#### Configuration Flow (v1.109+)
-Configuration from user settings reaches providers via VS Code's language model API:
-1. User configures Base URL and API Key in language model provider settings UI
-2. VS Code encrypts secrets (fields marked `"secret": true` in package.json)
-3. VS Code passes configuration to provider via `options.configuration` in request methods
-4. `ConfigManager.convertProviderConfiguration()` converts to internal `LiteLLMConfig` format
-5. Base orchestrator uses config for model discovery, HTTP client setup, etc.
+#### Configuration Flow (v1.120+, per-group)
+Configuration from user settings reaches providers via VS Code's language model API on a per-group basis:
+1. User configures Base URL, API Key, and any other declared properties for a provider group in the language model provider settings UI
+2. VS Code encrypts secrets (fields marked `"secret": true` in `package.json`)
+3. VS Code passes the per-group configuration to the provider via `options.configuration` on every `provideLanguageModelChatInformation` and request method invocation
+4. `ConfigManager.convertProviderConfiguration()` converts the per-group object to internal `LiteLLMConfig` format
+5. Base orchestrator uses that config for model discovery, HTTP client setup, etc., scoped to the originating group
 6. Workspace-level settings (model overrides, caching preferences) retrieved via `vscode.workspace.getConfiguration()`
+
+Provider code must not assume a single global configuration — multiple groups may be active simultaneously and each call must use its own `options.configuration`.
 
 #### Endpoint Agnosticism
 The ingress pipeline is agnostic to endpoint choice:
@@ -228,9 +238,11 @@ The ingress pipeline is agnostic to endpoint choice:
 ### External dependencies
 - **LiteLLM**: expects a compatible OpenAI-like proxy with `/chat/completions`, `/completions`, and/or `/responses` endpoints
 - **GitHub Copilot Chat**: this extension is a *provider* for the official Copilot Chat extension (chat provider)
-- **VS Code 1.109+**: required for:
-  - `languageModelChatProviders` contribution point and provider configuration schema
+- **VS Code 1.120+** (declared in `package.json` `engines.vscode` as `^1.120.0`): required for:
+  - `languageModelChatProviders` contribution point with **per-group configuration** schema
+  - Stable `LanguageModelChatProvider` API used by the unified `LiteLLMChatProvider`
   - `LanguageModelTextCompletionProvider` proposed API (completions provider)
+  - `isUserSelectable` flag on `LanguageModelChatInformation` for model picker visibility
   - Proper secrets encryption for provider configuration
 
 ## 5) Change workflow (agent/CI)
@@ -285,9 +297,11 @@ Any code you edit must be brought up to these standards:
 - [ ] Shared request pipeline (message normalization, parameter filtering, token trimming) unchanged unless fixing a bug that affects all providers
 - [ ] Both chat and completions providers tested for any base class changes
 - [ ] New provider types extend base and reuse pipeline (no duplication of request processing or endpoint-specific logic)
-- [ ] Configuration handling respects VS Code v1.109+ provider config system
-  - Provider secrets handled via `languageModelChatProviders.configuration` in package.json
+- [ ] Configuration handling respects VS Code v1.120+ per-group provider config system
+  - Provider secrets handled via `languageModelChatProviders.configuration` in `package.json`
+  - Per-group `options.configuration` is read on every provider call (no global config caching)
   - Workspace settings retrieved via `vscode.workspace.getConfiguration()`
   - Use `ConfigManager.convertProviderConfiguration()` to unify config sources
+- [ ] All `LanguageModelChatInformation` entries returned from `provideLanguageModelChatInformation` set `isUserSelectable: true` so they appear in the VS Code model picker
 - [ ] Telemetry includes `caller` context to distinguish invocation source ("inline-completions", "terminal-chat", etc.)
 - [ ] Model discovery and caching tested for correctness and performance (shared across all providers)

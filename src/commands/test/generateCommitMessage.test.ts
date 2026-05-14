@@ -72,7 +72,7 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         // Mock Progress
         sandbox.stub(vscode.window, "withProgress").callsFake(async (_options, task) => {
             return await task(
-                { report: () => {} } as vscode.Progress<{ message?: string; increment?: number }>,
+                { report: sandbox.stub() } as vscode.Progress<{ message?: string; increment?: number }>,
                 new vscode.CancellationTokenSource().token
             );
         });
@@ -157,7 +157,7 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         const errorStub = sandbox.stub(vscode.window, "showErrorMessage");
         sandbox.stub(vscode.window, "withProgress").callsFake(async (_o, task) => {
             return await task(
-                { report: () => {} } as vscode.Progress<{ message?: string; increment?: number }>,
+                { report: sandbox.stub() } as vscode.Progress<{ message?: string; increment?: number }>,
                 new vscode.CancellationTokenSource().token
             );
         });
@@ -243,7 +243,7 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
 
         sandbox.stub(vscode.window, "withProgress").callsFake(async (_options, task) => {
             return await task(
-                { report: () => {} } as vscode.Progress<{ message?: string; increment?: number }>,
+                { report: sandbox.stub() } as vscode.Progress<{ message?: string; increment?: number }>,
                 new vscode.CancellationTokenSource().token
             );
         });
@@ -292,7 +292,7 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
 
         sandbox.stub(vscode.window, "withProgress").callsFake(async (_options, task) => {
             return await task(
-                { report: () => {} } as vscode.Progress<{ message?: string; increment?: number }>,
+                { report: sandbox.stub() } as vscode.Progress<{ message?: string; increment?: number }>,
                 new vscode.CancellationTokenSource().token
             );
         });

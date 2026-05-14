@@ -40,7 +40,7 @@ suite("InlineCompletions Command Unit Tests", () => {
             if (id === "litellm-connector.inlineCompletions.selectModel") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose() {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerSelectInlineCompletionModelCommand(provider);
@@ -78,7 +78,7 @@ suite("InlineCompletions Command Unit Tests", () => {
             if (id === "litellm-connector.inlineCompletions.selectModel") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose() {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerSelectInlineCompletionModelCommand(provider);
@@ -118,7 +118,7 @@ suite("InlineCompletions Command Unit Tests", () => {
             if (id === "litellm-connector.inlineCompletions.selectModel") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose() {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerSelectInlineCompletionModelCommand(provider);
@@ -159,7 +159,7 @@ suite("InlineCompletions Command Unit Tests", () => {
             if (id === "litellm-connector.inlineCompletions.selectModel") {
                 handler = cb as () => Promise<void>;
             }
-            return { dispose() {} } as vscode.Disposable;
+            return { dispose: sandbox.stub() } as vscode.Disposable;
         });
 
         registerSelectInlineCompletionModelCommand(provider);

@@ -27,12 +27,21 @@ export class TelemetryService implements vscode.Disposable {
 
     initialize(context: vscode.ExtensionContext): void {
         this.distinctId = vscode.env.machineId || vscode.env.sessionId;
-        const extensionVersion =
-            context.extension?.packageJSON?.version ??
-            vscode.extensions.getExtension("litellm-connector")?.packageJSON?.version ??
-            vscode.extensions.getExtension("GethNet.litellm-connector-copilot")?.packageJSON?.version ??
-            "unknown";
-        this.extensionVersion = extensionVersion;
+        // Safely extract version with proper type guards
+        const getVersion = (ext: vscode.Extension<unknown> | undefined): string => {
+            const pkg: unknown = ext?.packageJSON;
+            if (typeof pkg === "object" && pkg !== null && "version" in pkg) {
+                const versionValue = (pkg as Record<string, unknown>).version;
+                if (typeof versionValue === "string") {
+                    return versionValue;
+                }
+            }
+            return "unknown";
+        };
+        const v1 = getVersion(context.extension);
+        const v2 = getVersion(vscode.extensions.getExtension("litellm-connector"));
+        const v3 = getVersion(vscode.extensions.getExtension("GethNet.litellm-connector-copilot"));
+        this.extensionVersion = v1 !== "unknown" ? v1 : v2 !== "unknown" ? v2 : v3;
 
         this.adapter.initialize({
             apiKey: TelemetryService.POSTHOG_API_KEY,
@@ -167,6 +176,24 @@ export class TelemetryService implements vscode.Disposable {
         this.capture("request_completed", props);
     }
 
+    captureRequestCompletedWithCache(props: {
+        request_id: string;
+        caller: string;
+        model: string;
+        endpoint: string;
+        durationMs: number;
+        tokensIn: number;
+        tokensOut: number;
+        cacheReadRatio?: number;
+    }): void {
+        // Preserve backward compatibility by falling back to standard captureRequestCompleted
+        const { cacheReadRatio, ...baseProps } = props;
+        this.capture(
+            "request_completed",
+            cacheReadRatio !== undefined ? { ...baseProps, cache_read_ratio: cacheReadRatio } : baseProps
+        );
+    }
+
     captureRequestFailed(props: {
         request_id: string;
         caller: string;
@@ -286,7 +313,9 @@ export class TelemetryService implements vscode.Disposable {
     }
 
     dispose(): void {
-        this.disposables.forEach((d) => d.dispose());
+        this.disposables.forEach((d: vscode.Disposable) => {
+            d.dispose();
+        });
         void this.shutdown();
     }
 }

@@ -47,14 +47,19 @@ export function registerSelectInlineCompletionModelCommand(provider: LiteLLMChat
         }
 
         // Prefer models tagged for inline completions.
-        const compatible = models.filter((m) => (m as ModelWithOptionalTags).tags?.includes("inline-completions"));
+        const compatible = models.filter((m): m is ModelWithOptionalTags => {
+            const tags = (m as ModelWithOptionalTags).tags;
+            return Array.isArray(tags) ? tags.includes("inline-completions") : false;
+        });
         const list = compatible.length ? compatible : models;
 
         const picked = await vscode.window.showQuickPick(
             list
                 .slice()
-                .sort((a, b) => a.id.localeCompare(b.id))
-                .map((m) => {
+                .sort((a: vscode.LanguageModelChatInformation, b: vscode.LanguageModelChatInformation) =>
+                    a.id.localeCompare(b.id)
+                )
+                .map((m: vscode.LanguageModelChatInformation) => {
                     const mExtended = m as ExtendedModelInformation;
                     const tags = mExtended.tags ?? [];
                     return {

@@ -60,13 +60,16 @@ suite("PostHogAdapter (Node)", () => {
         });
 
         assert.strictEqual(posthogCaptureExceptionStub.calledOnce, true);
-        const [capturedError, distinctId, properties] = posthogCaptureExceptionStub.firstCall.args;
+        interface CaptureExceptionProperties {
+            feature?: string;
+            level?: string;
+        }
+        const args = posthogCaptureExceptionStub.firstCall.args as [unknown, string, CaptureExceptionProperties];
+        const [capturedError, distinctId, properties] = args;
         assert.strictEqual(capturedError, error);
         assert.strictEqual(distinctId, "user-123");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        assert.strictEqual((properties as any).feature, "test-feature");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        assert.strictEqual((properties as any).level, "error");
+        assert.strictEqual(properties.feature, "test-feature");
+        assert.strictEqual(properties.level, "error");
     });
 
     test("should identify users", () => {
@@ -80,10 +83,12 @@ suite("PostHogAdapter (Node)", () => {
         adapter.identify("user-123", { email: "test@example.com" });
 
         assert.strictEqual(posthogIdentifyStub.calledOnce, true);
-        const args = posthogIdentifyStub.firstCall.args[0];
+        const args = posthogIdentifyStub.firstCall.args[0] as {
+            distinctId: string;
+            properties: { email?: string };
+        };
         assert.strictEqual(args.distinctId, "user-123");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        assert.strictEqual((args.properties as any).email, "test@example.com");
+        assert.strictEqual(args.properties.email, "test@example.com");
     });
 
     test("should check feature flags", async () => {

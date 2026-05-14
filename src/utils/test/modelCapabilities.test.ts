@@ -3,9 +3,12 @@ import {
     capabilitiesToVSCode,
     getModelTags,
     formatModelDisplayLabel,
+    getSupportedReasoningEfforts,
+    getDefaultReasoningEffort,
+    buildReasoningEffortConfigurationSchema,
     type ExtendedModelInformation,
 } from "../modelCapabilities";
-import type { ModelCapabilityOverride } from "../../types";
+import type { LiteLLMModelInfo, ModelCapabilityOverride, SupportedReasoningEffort } from "../../types";
 
 suite("modelCapabilities", () => {
     suite("capabilitiesToVSCode", () => {
@@ -222,6 +225,159 @@ suite("modelCapabilities", () => {
 
             const mockModelNoVendor = { name: "gpt-4o" } as unknown as ExtendedModelInformation;
             assert.strictEqual(formatModelDisplayLabel(mockModelNoVendor), "gpt-4o");
+        });
+    });
+
+    suite("getSupportedReasoningEfforts", () => {
+        const canonicalGpt5Efforts: SupportedReasoningEffort[] = ["none", "minimal", "low", "medium", "high", "xhigh"];
+        const claudeEfforts: SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
+        const canonicalCatchAllEfforts: SupportedReasoningEffort[] = [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+        ];
+
+        test("returns the canonical GPT-5 effort ladder for gpt-5-mini", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                id: "gpt-5-mini",
+                name: "GPT-5 Mini",
+                supports_reasoning: true,
+            };
+
+            const result = getSupportedReasoningEfforts(modelInfo, "gpt-5-mini");
+
+            assert.deepStrictEqual(result, canonicalGpt5Efforts);
+        });
+
+        test("returns canonical GPT-5 ladder even when only xhigh is flagged", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                id: "gpt-5.4-mini",
+                name: "GPT-5.4 Mini",
+                supports_reasoning: true,
+                supports_xhigh_reasoning_effort: true,
+            };
+
+            const result = getSupportedReasoningEfforts(modelInfo, "gpt-5.4-mini");
+
+            assert.deepStrictEqual(result, canonicalGpt5Efforts);
+        });
+
+        test("returns Claude ladder for claude-haiku-4-5", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                id: "claude-haiku-4-5",
+                name: "Claude Haiku 4.5",
+                supports_reasoning: true,
+            };
+
+            const result = getSupportedReasoningEfforts(modelInfo, "claude-haiku-4-5");
+
+            assert.deepStrictEqual(result, claudeEfforts);
+        });
+
+        test("falls back to canonical efforts for other models", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                id: "local-proxy-model",
+                name: "Local Proxy Model",
+                supports_reasoning: true,
+            };
+
+            const result = getSupportedReasoningEfforts(modelInfo, "local-proxy-model");
+
+            assert.deepStrictEqual(result, canonicalCatchAllEfforts);
+        });
+
+        test("returns empty array for undefined modelInfo", () => {
+            const result = getSupportedReasoningEfforts(undefined, "unknown-model");
+            assert.deepStrictEqual(result, []);
+        });
+
+        test("returns empty array when reasoning support is disabled even for catch-all ids", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                id: "gpt-5-mini",
+                name: "GPT-5 Mini",
+                supports_reasoning: false,
+            };
+
+            const result = getSupportedReasoningEfforts(modelInfo, "gpt-5-mini");
+
+            assert.deepStrictEqual(result, []);
+        });
+    });
+
+    suite("buildReasoningEffortConfigurationSchema", () => {
+        test("returns undefined when model does not support any reasoning effort", () => {
+            const schema = buildReasoningEffortConfigurationSchema([]);
+            assert.strictEqual(schema, undefined);
+        });
+
+        test("returns schema with navigation group so picker is surfaced inline", () => {
+            const schema = buildReasoningEffortConfigurationSchema(["none", "low", "medium", "high"]);
+            assert.ok(schema, "Expected schema for non-empty efforts");
+            const prop = schema?.properties.reasoningEffort;
+            // Without `group: "navigation"` VS Code 1.120 hides the configuration property behind
+            // the secondary settings UI and the reasoning effort picker is not visible from the
+            // chat model selector. This guards against regressions where the field is dropped.
+            assert.strictEqual(prop?.group, "navigation");
+            assert.strictEqual(prop?.type, "string");
+            assert.deepStrictEqual(prop?.enum, ["none", "low", "medium", "high"]);
+        });
+
+        test("uses 'Thinking Effort' as title to match native VS Code model picker section heading", () => {
+            const schema = buildReasoningEffortConfigurationSchema(["low", "medium", "high"]);
+            // VS Code renders the `title` field as the section heading in the model picker hover popup.
+            // Matching the native "Thinking Effort" label keeps the UX consistent with Copilot's own models.
+            assert.strictEqual(schema?.properties.reasoningEffort.title, "Thinking Effort");
+        });
+
+        test("renders capitalized human-readable labels in enumItemLabels", () => {
+            const schema = buildReasoningEffortConfigurationSchema(["none", "low", "medium", "high"]);
+            // Capitalization matches OS-native quick-pick formatting; tests pin this so the
+            // user-visible labels do not silently regress to lower-case.
+            assert.deepStrictEqual(schema?.properties.reasoningEffort.enumItemLabels, [
+                "None",
+                "Low",
+                "Medium",
+                "High",
+            ]);
+        });
+
+        test("includes enumDescriptions for each effort so VS Code renders explanatory text in popup", () => {
+            // enumDescriptions is the field VS Code uses to render the per-item description text
+            // that appears alongside each option in the model picker hover popup (e.g.
+            // "Balanced reasoning and speed" for "medium"). Without this, the picker shows only
+            // labels with no guidance — exactly what Copilot's own models provide.
+            const schema = buildReasoningEffortConfigurationSchema(["none", "low", "medium", "high", "xhigh"]);
+            const descs = schema?.properties.reasoningEffort.enumDescriptions;
+            assert.ok(Array.isArray(descs), "Expected enumDescriptions to be an array");
+            assert.strictEqual(descs?.length, 5, "Expected one description per enum value");
+            assert.strictEqual(descs?.[0], "No reasoning applied");
+            assert.strictEqual(descs?.[1], "Faster responses with less reasoning");
+            assert.strictEqual(descs?.[2], "Balanced reasoning and speed");
+            assert.strictEqual(descs?.[3], "Greater reasoning depth but slower");
+            assert.strictEqual(descs?.[4], "Maximum reasoning depth but slower");
+        });
+
+        test("defaults to minimal for canonical reasoning configuration", () => {
+            const canonicalEfforts: SupportedReasoningEffort[] = ["none", "minimal", "low", "medium", "high"];
+
+            const defaultEffort = getDefaultReasoningEffort(canonicalEfforts, "any-other-model");
+            const schema = buildReasoningEffortConfigurationSchema(canonicalEfforts, "any-other-model");
+
+            assert.strictEqual(defaultEffort, "minimal");
+            assert.strictEqual(schema?.properties.reasoningEffort.default, "minimal");
+        });
+
+        test("defaults to medium for Claude reasoning configuration", () => {
+            const claudeEfforts: SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
+
+            const defaultEffort = getDefaultReasoningEffort(claudeEfforts, "claude-haiku-4-5");
+            const schema = buildReasoningEffortConfigurationSchema(claudeEfforts, "claude-haiku-4-5");
+
+            assert.strictEqual(defaultEffort, "medium");
+            assert.strictEqual(schema?.properties.reasoningEffort.default, "medium");
         });
     });
 });

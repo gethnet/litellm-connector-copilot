@@ -153,9 +153,9 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 (stream as unknown as { getReader: () => unknown }).getReader = () => {
                     const reader = (stream as unknown as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]();
                     return {
-                        read: async () => {
-                            const { done, value } = await reader.next();
-                            return { done, value };
+                        read: async (): Promise<{ done: boolean | undefined; value: Uint8Array | undefined }> => {
+                            const next = (await reader.next()) as IteratorResult<Uint8Array, undefined>;
+                            return { done: next.done, value: next.value };
                         },
                         releaseLock: () => {},
                     };

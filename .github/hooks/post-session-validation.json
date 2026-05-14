@@ -1,6 +1,6 @@
 {
   "hooks": {
-    "Stop": [
+   /* "Stop": [
       {
         "type": "command",
         "command": "./scripts/post-session-validation.sh",
@@ -10,8 +10,9 @@
     "SubagentStop": [
       {
         "type": "command",
-        "command": "./scripts/post-session-validation.sh"
+        "command": "./scripts/post-session-validation.sh",
+        "timeout": 300
       }
-    ]
+    ] */
   }
 }

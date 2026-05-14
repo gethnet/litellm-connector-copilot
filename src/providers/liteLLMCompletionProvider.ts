@@ -7,6 +7,7 @@ import { LiteLLMProviderBase } from "./liteLLMProviderBase";
 import { countTokens } from "../adapters/tokenUtils";
 import { decodeSSE } from "../adapters/sse/sseDecoder";
 import { createInitialStreamingState, interpretStreamEvent } from "../adapters/streaming/liteLLMStreamInterpreter";
+import type { EffortFallbackCache } from "../utils/reasoningEffortFallback";
 
 /**
  * Implements VS Code's LanguageModelTextCompletionProvider for inline completions.
@@ -16,6 +17,10 @@ import { createInitialStreamingState, interpretStreamEvent } from "../adapters/s
  * chat request.
  */
 export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
+    constructor(secrets: vscode.SecretStorage, userAgent: string, effortFallbackCache?: EffortFallbackCache) {
+        super(secrets, userAgent, effortFallbackCache);
+    }
+
     async provideTextCompletion(
         prompt: string,
         options: {
@@ -72,7 +77,11 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
             );
 
             // For completions we don't emit progress parts; we just need the raw stream to extract text.
-            const nullProgress: vscode.Progress<vscode.LanguageModelResponsePart> = { report: () => {} };
+            const nullProgress: vscode.Progress<vscode.LanguageModelResponsePart> = {
+                report: (_part: vscode.LanguageModelResponsePart): void => {
+                    // Intentionally empty: completions don't emit progress parts
+                },
+            };
             const stream = await this.sendRequestWithRetry(
                 requestBody,
                 messages,

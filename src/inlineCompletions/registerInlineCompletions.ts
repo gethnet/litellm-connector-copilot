@@ -6,6 +6,7 @@ import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
 import type { TelemetryService } from "../telemetry/telemetryService";
 import { LiteLLMInlineCompletionProvider } from "./liteLLMInlineCompletionProvider";
+import type { EffortFallbackCache } from "../utils/reasoningEffortFallback";
 
 const INLINE_COMPLETIONS_ENABLED_KEY = "litellm-connector.inlineCompletions.enabled";
 
@@ -18,10 +19,11 @@ export class InlineCompletionsRegistrar implements vscode.Disposable {
     constructor(
         secrets: vscode.SecretStorage,
         userAgent: string,
-        private readonly context: vscode.ExtensionContext
+        private readonly context: vscode.ExtensionContext,
+        effortFallbackCache: EffortFallbackCache
     ) {
         this.configManager = new ConfigManager(secrets);
-        this.completionProvider = new LiteLLMCompletionProvider(secrets, userAgent);
+        this.completionProvider = new LiteLLMCompletionProvider(secrets, userAgent, effortFallbackCache);
     }
 
     public initialize(): void {

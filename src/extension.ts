@@ -20,12 +20,13 @@ import { InlineCompletionsRegistrar } from "./inlineCompletions/registerInlineCo
 import { TelemetryService } from "./telemetry/telemetryService";
 import { LiteLLMTelemetry } from "./utils/telemetry";
 import { setTelemetryService as setTokenUtilsTelemetryService } from "./adapters/tokenUtils";
+import { EffortFallbackCache } from "./utils/reasoningEffortFallback";
 
 // Store the config manager for cleanup on deactivation
 let configManagerInstance: ConfigManager | undefined;
 let telemetryServiceInstance: TelemetryService | undefined;
 
-export function activate(context: vscode.ExtensionContext) {
+export function activate(context: vscode.ExtensionContext): void {
     // Initialize telemetry first so logger can use it
     telemetryServiceInstance = new TelemetryService();
     const telemetryService = telemetryServiceInstance;
@@ -87,13 +88,18 @@ export function activate(context: vscode.ExtensionContext) {
         // Build a descriptive User-Agent to help quantify API usage
         const ext = vscode.extensions.getExtension("GethNet.litellm-connector-copilot");
         Logger.debug(`Extension object found: ${!!ext}`);
-        const extVersion = ext?.packageJSON?.version ?? "unknown";
-        const vscodeVersion = vscode.version;
+        // Safely extract version with proper type guard
+        let extVersion = "unknown";
+        if (ext && typeof ext.packageJSON === "object" && ext.packageJSON !== null && "version" in ext.packageJSON) {
+            const v = (ext.packageJSON as Record<string, unknown>).version;
+            extVersion = typeof v === "string" ? v : "unknown";
+        }
         // Keep UA minimal: only extension version and VS Code version
-        ua = `litellm-vscode-chat/${extVersion} VSCode/${vscodeVersion}`;
+        const vscodeVersionStr = typeof vscode.version === "string" ? vscode.version : "unknown";
+        ua = `litellm-vscode-chat/${extVersion} VSCode/${vscodeVersionStr}`;
 
         // Capture activation
-        telemetryService.captureExtensionActivated(extVersion, vscodeVersion);
+        telemetryService.captureExtensionActivated(extVersion, vscodeVersionStr);
     } catch (uaErr) {
         Logger.error("Failed to build UA", uaErr);
     }
@@ -103,6 +109,8 @@ export function activate(context: vscode.ExtensionContext) {
     configManagerInstance = new ConfigManager(context.secrets);
     const configManager = configManagerInstance;
     configManager.setTelemetryService(telemetryService);
+
+    const effortFallbackCache = new EffortFallbackCache();
 
     // Track feature adoption
     telemetryService.captureFeatureAdoption("chat");
@@ -122,18 +130,16 @@ export function activate(context: vscode.ExtensionContext) {
         });
     });
 
-    // Legacy providers (will be removed after v2 migration)
-    // @deprecated - Will be replaced by v2 baseline providers
-    const chatProviderV1 = new LiteLLMChatProvider(context.secrets, ua);
-    // @deprecated - Will be replaced by v2 baseline providers
-    const commitProvider = new LiteLLMCommitMessageProvider(context.secrets, ua);
+    // VS Code 1.120+ uses the unified chat provider with per-group configuration support.
 
-    // Bridge to providers
-    chatProviderV1.setTelemetryService(telemetryService);
+    const activeProvider = new LiteLLMChatProvider(context.secrets, ua, effortFallbackCache);
+    activeProvider.setTelemetryService(telemetryService);
+
+    // Commit message provider (version-agnostic)
+    const commitProvider = new LiteLLMCommitMessageProvider(context.secrets, ua, effortFallbackCache);
     commitProvider.setTelemetryService(telemetryService);
 
     // Track active provider registration for hot-swap
-    const activeProvider: LiteLLMChatProvider = chatProviderV1;
     let chatProviderRegistration: vscode.Disposable | undefined;
 
     const registerProvider = () => {
@@ -160,71 +166,82 @@ export function activate(context: vscode.ExtensionContext) {
         }
     };
 
-    // Register based on initial config
-    void configManager.getConfig().then(() => {
-        // Register the LiteLLM provider under the vendor id used in package.json
-        registerProvider();
+    // Register provider and commands immediately (do not await config)
+    registerProvider();
 
-        // Management commands to configure base URL and API key
-        try {
-            context.subscriptions.push(
-                registerManageConfigCommand(
-                    context,
-                    configManager,
-                    activeProvider as unknown as LiteLLMChatProvider,
-                    telemetryService
-                )
-            );
-            context.subscriptions.push(
-                registerManageBackendsCommand(
-                    configManager,
-                    activeProvider as unknown as LiteLLMChatProvider,
-                    telemetryService
-                )
-            );
-            context.subscriptions.push(
-                registerShowModelsCommand(activeProvider as unknown as LiteLLMChatProvider, telemetryService)
-            );
-            context.subscriptions.push(
-                registerReloadModelsCommand(activeProvider as unknown as LiteLLMChatProvider, telemetryService)
-            );
-            context.subscriptions.push(registerCheckConnectionCommand(configManager, telemetryService));
-            context.subscriptions.push(
-                registerResetConfigCommand(
-                    configManager,
-                    activeProvider as unknown as LiteLLMChatProvider,
-                    telemetryService,
-                    registerProvider
-                )
-            );
-            context.subscriptions.push(
-                registerSelectInlineCompletionModelCommand(activeProvider as unknown as LiteLLMChatProvider)
-            );
-            context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider, telemetryService));
-            context.subscriptions.push(
-                vscode.commands.registerCommand("litellm-connector.generateCommitMessage.selectModel", async () => {
-                    await showModelPicker(commitProvider, {
-                        title: "Select Commit Message Model",
-                        settingKey: "commitModelIdOverride",
-                        telemetryService: telemetryService,
-                        caller: "commit-message",
-                    });
-                })
-            );
-            Logger.info("Config command registered.");
-        } catch (cmdErr) {
-            Logger.error("Failed to register commands", cmdErr);
-        }
+    // Proactively nudge VS Code to call provideLanguageModelChatInformation immediately after
+    // registration.  Without this, model discovery (and reasoning-effort schema population) is
+    // deferred until the user first opens the model picker.  Firing the change event right after
+    // registration causes VS Code to eagerly re-query the provider — this time with the correct
+    // per-group options.configuration values, so reasoning capabilities populate on first load.
+    setImmediate(() => {
+        Logger.info("Post-registration: nudging VS Code to refresh model information...");
+        activeProvider.refreshModelInformation();
     });
 
+    // Re-query models after settings updates so newly completed Language Models provider
+    // configuration flows are reflected without requiring a reload.
+    let refreshModelsTimer: NodeJS.Timeout | undefined;
+    const scheduleModelRefresh = () => {
+        if (refreshModelsTimer) {
+            clearTimeout(refreshModelsTimer);
+        }
+        refreshModelsTimer = setTimeout(() => {
+            refreshModelsTimer = undefined;
+            Logger.info("Configuration changed; clearing model cache and refreshing model information...");
+            activeProvider.clearModelCache();
+        }, 250);
+    };
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration(() => {
+            scheduleModelRefresh();
+        })
+    );
+    context.subscriptions.push({
+        dispose: () => {
+            if (refreshModelsTimer) {
+                clearTimeout(refreshModelsTimer);
+                refreshModelsTimer = undefined;
+            }
+        },
+    });
+
+    try {
+        context.subscriptions.push(
+            registerManageConfigCommand(context, configManager, activeProvider, telemetryService)
+        );
+        context.subscriptions.push(registerManageBackendsCommand(configManager, activeProvider, telemetryService));
+        context.subscriptions.push(registerShowModelsCommand(activeProvider, telemetryService));
+        context.subscriptions.push(registerReloadModelsCommand(activeProvider, telemetryService));
+        context.subscriptions.push(registerCheckConnectionCommand(configManager, telemetryService));
+        context.subscriptions.push(
+            registerResetConfigCommand(configManager, activeProvider, telemetryService, registerProvider)
+        );
+        context.subscriptions.push(registerSelectInlineCompletionModelCommand(activeProvider));
+        context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider, telemetryService));
+        context.subscriptions.push(
+            vscode.commands.registerCommand("litellm-connector.generateCommitMessage.selectModel", async () => {
+                await showModelPicker(commitProvider, {
+                    title: "Select Commit Message Model",
+                    settingKey: "commitModelIdOverride",
+                    telemetryService: telemetryService,
+                    caller: "commit-message",
+                });
+            })
+        );
+        Logger.info("Config command registered.");
+    } catch (cmdErr) {
+        Logger.error("Failed to register commands", cmdErr);
+    }
+
     // Stable inline completions (optional; disabled by default)
-    const inlineRegistrar = new InlineCompletionsRegistrar(context.secrets, ua, context);
+    const inlineRegistrar = new InlineCompletionsRegistrar(context.secrets, ua, context, effortFallbackCache);
     inlineRegistrar.setTelemetryService(telemetryService);
     inlineRegistrar.initialize();
     context.subscriptions.push(inlineRegistrar);
 
-    // Note: Configuration is now primarily handled through VS Code's Language Model provider settings UI (v1.109+).
-    // The legacy management command is retained for backward compatibility.
+    // Configuration onboarding is handled via the classic manage command,
+    // which routes users directly into multi-backend management.
     // Proactively check configuration and prompt user if missing
     configManager
         .isConfigured()
@@ -233,12 +250,11 @@ export function activate(context: vscode.ExtensionContext) {
                 Logger.info("Extension not configured. Prompting user...");
                 vscode.window
                     .showInformationMessage(
-                        "LiteLLM Connector is not configured. Configure your Base URL and API Key to continue.",
-                        "Configure"
+                        "LiteLLM Connector is not configured. Open LiteLLM configuration to add your backends.",
+                        "Open LiteLLM Configuration"
                     )
                     .then((selection) => {
-                        if (selection === "Configure") {
-                            // Use the classic configuration flow (reliable for model discovery).
+                        if (selection === "Open LiteLLM Configuration") {
                             vscode.commands.executeCommand("litellm-connector.manage");
                         }
                     });
@@ -249,7 +265,11 @@ export function activate(context: vscode.ExtensionContext) {
         });
 }
 
-export async function deactivate() {
-    // Intentionally do not clear user configuration on deactivate.
-    // Users expect provider settings and secrets to persist across reloads.
+export async function deactivate(): Promise<void> {
+    if (configManagerInstance) {
+        await configManagerInstance.dispose();
+    }
+    if (telemetryServiceInstance) {
+        await telemetryServiceInstance.dispose();
+    }
 }

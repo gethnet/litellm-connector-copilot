@@ -7,6 +7,14 @@ import { LiteLLMClient } from "../../adapters/litellmClient";
 import { normalizeMessagesForV2Pipeline, convertV2MessagesToProviderMessages } from "../../utils";
 import { Logger } from "../../utils/logger";
 import type { TelemetryService } from "../../telemetry/telemetryService";
+import type { ConfigManager } from "../../config/configManager";
+
+interface ProviderV2TestAccess {
+    _configManager: ConfigManager;
+    decodeStream: (stream: ReadableStream<Uint8Array>, token: vscode.CancellationToken) => AsyncGenerator<unknown>;
+}
+
+const accessV2 = (provider: LiteLLMChatProviderV2): ProviderV2TestAccess => provider as unknown as ProviderV2TestAccess;
 
 suite("LiteLLM Chat Provider V2 Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -31,8 +39,7 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
     test("provideLanguageModelChatResponse emits text, data, and thinking parts on the V2 pipeline", async () => {
         const provider = new LiteLLMChatProviderV2(mockSecrets, userAgent);
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (provider as any)._configManager.getConfig = async () => ({
+        sandbox.stub(accessV2(provider)._configManager, "getConfig").resolves({
             url: "http://localhost:4000",
             experimentalEmitUsageData: true,
         });
@@ -192,7 +199,7 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
                 options: vscode.ProvideLanguageModelChatResponseOptions,
                 modelInfo?: unknown,
                 caller?: string
-            ) => Promise<{ messages: Array<{ role: string; content?: unknown }> }>;
+            ) => Promise<{ messages: { role: string; content?: unknown }[] }>;
         };
 
         const model: vscode.LanguageModelChatInformation = {
@@ -285,7 +292,7 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
                 options: vscode.ProvideLanguageModelChatResponseOptions,
                 modelInfo?: unknown,
                 caller?: string
-            ) => Promise<{ messages: Array<{ role: string; content?: unknown }> }>;
+            ) => Promise<{ messages: { role: string; content?: unknown }[] }>;
         };
 
         const model: vscode.LanguageModelChatInformation = {
@@ -401,8 +408,10 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
 
     test("provideLanguageModelChatResponse handles empty usage data part gracefully", async () => {
         const provider = new LiteLLMChatProviderV2(mockSecrets, userAgent);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (provider as any)._configManager.getConfig = async () => ({ url: "u", experimentalEmitUsageData: true });
+        sandbox.stub(accessV2(provider)._configManager, "getConfig").resolves({
+            url: "u",
+            experimentalEmitUsageData: true,
+        });
 
         const encoder = new TextEncoder();
         sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
@@ -445,8 +454,7 @@ suite("LiteLLM Chat Provider V2 Unit Tests", () => {
         }) as unknown as ReadableStream<Uint8Array>;
 
         const results = [];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        for await (const chunk of (provider as any).decodeStream(stream, new vscode.CancellationTokenSource().token)) {
+        for await (const chunk of accessV2(provider).decodeStream(stream, new vscode.CancellationTokenSource().token)) {
             results.push(chunk);
         }
         assert.strictEqual(results.length, 2);

@@ -93,12 +93,12 @@ suite("Utility Unit Tests", () => {
             },
         ];
 
-        const out = convertMessages(messages) as Array<{
+        const out = convertMessages(messages) as {
             role: string;
             content: unknown;
-            tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
+            tool_calls?: { id: string; function: { name: string; arguments: string } }[];
             tool_call_id?: string;
-        }>;
+        }[];
         assert.strictEqual(out.length, 2);
         const assistant = out[0];
         assert.strictEqual(assistant.role, "assistant");
@@ -148,7 +148,7 @@ suite("Utility Unit Tests", () => {
                 name: undefined,
             },
         ];
-        const out = convertMessages(messages) as unknown as Array<{ role: string; content: unknown }>;
+        const out = convertMessages(messages) as unknown as { role: string; content: unknown }[];
         assert.strictEqual(out[0].role, "system");
         assert.strictEqual(out[0].content, "sys");
     });
@@ -163,7 +163,7 @@ suite("Utility Unit Tests", () => {
             },
         ];
 
-        const out = convertMessages(messages) as Array<{ role: string; tool_calls?: Array<{ id: string }> }>;
+        const out = convertMessages(messages) as { role: string; tool_calls?: { id: string }[] }[];
         assert.strictEqual(out.length, 1);
         assert.strictEqual(out[0].role, "assistant");
         assert.ok(Array.isArray(out[0].tool_calls));
@@ -480,7 +480,7 @@ suite("Utility Unit Tests", () => {
 
         const parsed = JSON.parse(toolContent as string) as {
             type: string;
-            content: Array<{ type: string; text?: string; value?: unknown }>;
+            content: { type: string; text?: string; value?: unknown }[];
         };
         assert.strictEqual(parsed.type, "tool_result");
         assert.deepStrictEqual(parsed.content[0], { type: "text", text: "write result" });
@@ -491,8 +491,13 @@ suite("Utility Unit Tests", () => {
     });
 
     test("V2 pipeline handles thinking parts", () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const ThinkingPart = (vscode as any).LanguageModelThinkingPart;
+        // `LanguageModelThinkingPart` is part of the proposed VS Code API and may
+        // not be present at runtime in older insiders. We probe for it via a
+        // typed view that surfaces it as an optional constructor.
+        const vscodeWithThinking = vscode as unknown as {
+            LanguageModelThinkingPart?: new (text: string, id?: string) => vscode.LanguageModelTextPart;
+        };
+        const ThinkingPart = vscodeWithThinking.LanguageModelThinkingPart;
         if (!ThinkingPart) {
             return;
         }
@@ -591,7 +596,7 @@ suite("Utility Unit Tests", () => {
                 },
             ];
 
-            const out = convertMessages(msgs) as Array<{ role: string; content: string }>;
+            const out = convertMessages(msgs) as { role: string; content: string }[];
             assert.strictEqual(out.length, 1);
             assert.strictEqual(out[0].content, "visible");
         });

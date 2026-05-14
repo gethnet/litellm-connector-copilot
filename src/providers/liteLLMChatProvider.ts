@@ -18,6 +18,7 @@ import { decodeSSE } from "../adapters/sse/sseDecoder";
 import { createInitialStreamingState, interpretStreamEvent } from "../adapters/streaming/liteLLMStreamInterpreter";
 import type { StreamingState } from "../adapters/streaming/liteLLMStreamInterpreter";
 import { emitPartsToVSCode } from "../adapters/streaming/vscodePartEmitter";
+import type { EffortFallbackCache } from "../utils/reasoningEffortFallback";
 
 /**
  * Chat provider implementation for VS Code's LanguageModelChatProvider.
@@ -30,6 +31,10 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
     private _streamingState: StreamingState = createInitialStreamingState();
     private _partialAssistantText = "";
 
+    constructor(secrets: vscode.SecretStorage, userAgent: string, effortFallbackCache?: EffortFallbackCache) {
+        super(secrets, userAgent, effortFallbackCache);
+    }
+
     private emitExperimentalUsageData(
         progress: vscode.Progress<vscode.LanguageModelResponsePart>,
         tokensIn: number,
@@ -40,18 +45,21 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         );
         const detailsString = `Context: ${tokensIn} tokens | Output: ${tokensOut} tokens`;
 
-        // 1. Try direct DTO injection (bypassing type system)
+        // 1. Try direct DTO injection (bypassing type system) when VS Code supports it.
+        // VS Code does not yet expose a typed usage part, so guard with runtime checks.
         try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (progress as any).report({
-                kind: "usage",
-                promptTokens: tokensIn,
-                completionTokens: tokensOut,
-                details: detailsString,
-                metadata: {
+            const report = (progress as unknown as { report?: (value: unknown) => void }).report;
+            if (typeof report === "function") {
+                report({
+                    kind: "usage",
+                    promptTokens: tokensIn,
+                    completionTokens: tokensOut,
                     details: detailsString,
-                },
-            });
+                    metadata: {
+                        details: detailsString,
+                    },
+                });
+            }
         } catch (e) {
             Logger.trace("Direct usage DTO injection failed", e);
         }
@@ -74,10 +82,26 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
     }
 
     async provideLanguageModelChatInformation(
-        options: { silent?: boolean },
+        options: vscode.PrepareLanguageModelChatModelOptions,
         token: CancellationToken
     ): Promise<LanguageModelChatInformation[]> {
-        return this.discoverModels({ silent: options.silent ?? false }, token);
+        // VS Code 1.120 expands the options shape to include `configuration` (per-group BYOK
+        // values configured by the user). We pass the full options through to the base discovery
+        // path so it can choose between configuration-based discovery (1.120 group system) and
+        // legacy workspace-settings discovery transparently.
+        const opts = options as vscode.PrepareLanguageModelChatModelOptions & {
+            silent?: boolean;
+            configuration?: Record<string, unknown>;
+            groupName?: string;
+        };
+        return this.discoverModels(
+            {
+                silent: opts.silent ?? false,
+                configuration: opts.configuration,
+                groupName: opts.groupName,
+            },
+            token
+        );
     }
 
     async provideTokenCount(
@@ -143,10 +167,6 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         };
 
         try {
-            if (!(await this._configManager.isConfigured())) {
-                throw new Error("LiteLLM configuration not found. Please configure at least one backend.");
-            }
-
             const config = await this._configManager.getConfig();
 
             // Optional model override (primarily for completions). If set, we try to use it.

@@ -216,7 +216,7 @@ function buildMessageContent(
     return items;
 }
 
-function serializeToolResultContent(content: ReadonlyArray<unknown>, options: V2OpenAIConversionOptions): string {
+function serializeToolResultContent(content: readonly unknown[], options: V2OpenAIConversionOptions): string {
     const serialized = content
         .map((item) => serializeToolResultItem(item, options))
         .filter((item): item is SerializedToolResultContent => !!item);

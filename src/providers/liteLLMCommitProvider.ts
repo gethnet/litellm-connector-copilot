@@ -8,12 +8,17 @@ import { decodeSSE } from "../adapters/sse/sseDecoder";
 import { createInitialStreamingState, interpretStreamEvent } from "../adapters/streaming/liteLLMStreamInterpreter";
 import { COMMIT_MESSAGE_PROMPT, COMMIT_SYSTEM_PROMPT } from "../utils/prompts";
 import { stripMarkdownCodeBlocks } from "../utils";
+import type { EffortFallbackCache } from "../utils/reasoningEffortFallback";
 
 /**
  * Provider for generating Git commit messages using LiteLLM.
  * Extends the shared orchestration from LiteLLMProviderBase.
  */
 export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
+    constructor(secrets: vscode.SecretStorage, userAgent: string, effortFallbackCache?: EffortFallbackCache) {
+        super(secrets, userAgent, effortFallbackCache);
+    }
+
     /**
      * Generates a commit message from a git diff.
      * @param diff The git diff to analyze.

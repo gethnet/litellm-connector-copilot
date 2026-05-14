@@ -35,17 +35,33 @@ export class LiteLLMClient {
             token.onCancellationRequested(() => controller.abort());
         }
 
-        Logger.trace(`Fetching model info from ${this.config.url}/model/info`);
+        const urls = this.getModelInfoUrls();
+        Logger.trace(`Fetching model info from ${urls[0]}`);
         try {
-            const resp = await fetch(`${this.config.url}/model/info`, {
-                headers: this.getHeaders(),
-                signal: controller.signal,
-            });
-            if (!resp.ok) {
+            let lastResponse: Response | undefined;
+            for (const url of urls) {
+                const resp = await fetch(url, {
+                    headers: this.getHeaders(),
+                    signal: controller.signal,
+                });
+                if (resp.ok) {
+                    return resp.json() as Promise<LiteLLMModelInfoResponse>;
+                }
+
+                lastResponse = resp;
+                if (resp.status === 404) {
+                    Logger.warn(`Model info endpoint returned 404, trying fallback URL: ${url}`);
+                    continue;
+                }
+
                 Logger.error(`Failed to fetch model info: ${resp.status} ${resp.statusText}`);
                 throw new Error(`Failed to fetch model info: ${resp.status} ${resp.statusText}`);
             }
-            return resp.json() as Promise<LiteLLMModelInfoResponse>;
+
+            const status = lastResponse?.status ?? 404;
+            const statusText = lastResponse?.statusText ?? "Not Found";
+            Logger.error(`Failed to fetch model info after trying fallback URLs: ${status} ${statusText}`);
+            throw new Error(`Failed to fetch model info: ${status} ${statusText}`);
         } catch (err) {
             if (this._telemetryService) {
                 const errorType = err instanceof Error ? err.name : "FetchError";
@@ -53,6 +69,30 @@ export class LiteLLMClient {
             }
             throw err;
         }
+    }
+
+    private getModelInfoUrls(): string[] {
+        const trimmed = this.config.url.replace(/\/+$/, "");
+        const stripTerminalEndpoint = (url: string): string =>
+            url.replace(/\/(?:chat\/completions|completions|responses|model\/info)$/i, "");
+        const stripV1 = (url: string): string => url.replace(/\/v1$/i, "");
+
+        const baseCandidates = new Set<string>([
+            trimmed,
+            stripTerminalEndpoint(trimmed),
+            stripV1(trimmed),
+            stripV1(stripTerminalEndpoint(trimmed)),
+            stripTerminalEndpoint(stripV1(trimmed)),
+        ]);
+
+        const urls: string[] = [];
+        for (const base of baseCandidates) {
+            if (!base) {
+                continue;
+            }
+            urls.push(`${base}/model/info`);
+        }
+        return urls;
     }
 
     /**
@@ -183,8 +223,13 @@ export class LiteLLMClient {
             ) {
                 Logger.warn(`Detected unsupported parameters for ${request.model}, attempting to strip and retry.`);
 
-                const strippedBody = JSON.parse(JSON.stringify(body));
+                const strippedBody: OpenAIChatCompletionRequest | LiteLLMResponsesRequest = JSON.parse(
+                    JSON.stringify(body)
+                ) as OpenAIChatCompletionRequest | LiteLLMResponsesRequest;
                 const headers = this.getHeaders(request.model, modelInfo);
+
+                // Cast to unknown first for index signature access
+                const stripedAsAny = strippedBody as unknown as Record<string, unknown>;
 
                 // 1. Handle explicit mentions of parameters in the error message
                 // Common patterns: "unsupported parameter: 'temperature'", "unexpected keyword argument 'top_p'"
@@ -192,15 +237,15 @@ export class LiteLLMClient {
                 if (paramMatch && paramMatch[1]) {
                     const paramName = paramMatch[1];
                     Logger.info(`Stripping specific parameter: ${paramName}`);
-                    delete strippedBody[paramName];
+                    delete stripedAsAny[paramName];
                 }
 
                 // Special-case: some providers reject a top-level `cache` object.
                 // LiteLLM proxy caching controls should live under extra_body.cache, but we defensively strip both.
                 if (errorLower.includes("unknown parameter") && errorLower.includes("cache")) {
-                    delete strippedBody.cache;
+                    delete stripedAsAny.cache;
                     if (strippedBody.extra_body && typeof strippedBody.extra_body === "object") {
-                        const eb = strippedBody.extra_body as Record<string, unknown>;
+                        const eb = strippedBody.extra_body as unknown as Record<string, unknown>;
                         if (eb.cache && typeof eb.cache === "object") {
                             const cache = eb.cache as Record<string, unknown>;
                             delete cache["no-cache"];
@@ -218,12 +263,14 @@ export class LiteLLMClient {
 
                 // 2. Always strip caching if mentioned or if it was a likely culprit
                 if (errorLower.includes("no-cache") || errorLower.includes("no_cache")) {
+                    // Cast to unknown first for index signature access
+                    const bodyAny = strippedBody as unknown as Record<string, unknown>;
                     // Legacy (older implementation)
-                    delete strippedBody.no_cache;
-                    delete strippedBody["no-cache"];
+                    delete bodyAny.no_cache;
+                    delete bodyAny["no-cache"];
 
                     // Some backends interpret top-level `cache` as an OpenAI param and reject it
-                    delete strippedBody.cache;
+                    delete bodyAny.cache;
 
                     // Current LiteLLM format: extra_body.cache["no-cache"]
                     if (strippedBody.extra_body && typeof strippedBody.extra_body === "object") {
@@ -343,6 +390,9 @@ export class LiteLLMClient {
 
             try {
                 const response = await fetch(url, { ...init, signal: controller.signal });
+                if (!response) {
+                    throw new Error("No response returned from fetch");
+                }
                 if (response.ok || attempt >= maxRetries || response.status < 500 || response.status >= 600) {
                     return response;
                 }
