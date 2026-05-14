@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.1] - 2026-05-14
+
+### 🧭 Improvements
+
+* **Modern Provider-Group Config**: The extension now detects VS Code per-group provider configuration during model discovery and treats it as the preferred configuration path.
+* **Legacy Prompt Suppression**: Once modern provider configuration is validated, the extension suppresses legacy configuration prompts for the rest of the session.
+* **Model Picker Grouping**: Discovered models now carry backend category metadata so multi-backend groups stay visually separated in the picker.
+
+### 📊 Telemetry & Validation
+
+* **Configuration-Flow Telemetry Refresh**: Added telemetry hooks around modern configuration detection so activation and discovery flows can be tracked more accurately.
+* **Regression Coverage**: Added and updated tests for provider discovery, telemetry behavior, and extension activation/integration paths.
+
 ## [2.0.0] - 2026-05-13
 
 ### 💥 Breaking / Behavior Changes

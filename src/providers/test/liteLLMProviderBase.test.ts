@@ -28,7 +28,7 @@ interface BaseTestAccess {
     _parameterProbeCache: Map<string, Set<string>>;
     _effortFallbackCache: EffortFallbackCache;
     _doDiscoverModels: (
-        options: { silent?: boolean; configuration?: Record<string, unknown> },
+        options: { silent?: boolean; configuration?: Record<string, unknown>; groupName?: string },
         token: vscode.CancellationToken
     ) => Promise<vscode.LanguageModelChatInformation[]>;
     buildOpenAIChatRequest: (
@@ -1901,6 +1901,53 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         assert.strictEqual(models.length, 1);
         assert.strictEqual(models[0].id, "cloud/gpt-4o-mini");
+    });
+
+    test("_doDiscoverModels marks modern configuration detection when provider configuration is valid", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const configManager = access(provider)._configManager;
+        const modernDetected = sandbox.spy();
+
+        provider.setModernConfigurationDetectedHandler(modernDetected);
+
+        const session: BackendSession = {
+            backendName: "modern-group",
+            baseUrl: "http://localhost:4000",
+            apiKey: "k",
+            client: {
+                getModelInfo: async () => ({
+                    data: [
+                        {
+                            model_name: "gpt-4o",
+                            model_info: {
+                                litellm_provider: "openai",
+                                mode: "chat",
+                                supports_native_streaming: true,
+                                max_input_tokens: 8192,
+                                max_output_tokens: 4096,
+                            } as LiteLLMModelInfo,
+                        },
+                    ],
+                }),
+            } as unknown as LiteLLMClient,
+        };
+
+        sandbox.stub(configManager, "convertProviderConfiguration").returns(session);
+
+        const models = await access(provider)._doDiscoverModels(
+            {
+                silent: true,
+                groupName: "modern-group",
+                configuration: {
+                    baseUrl: "http://localhost:4000",
+                    apiKey: "k",
+                },
+            },
+            new vscode.CancellationTokenSource().token
+        );
+
+        assert.strictEqual(models.length, 1);
+        assert.strictEqual(modernDetected.calledOnce, true);
     });
 
     test("_doDiscoverModels handles error gracefully", async () => {

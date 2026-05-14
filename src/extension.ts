@@ -26,6 +26,8 @@ import { EffortFallbackCache } from "./utils/reasoningEffortFallback";
 let configManagerInstance: ConfigManager | undefined;
 let telemetryServiceInstance: TelemetryService | undefined;
 
+const MODERN_CONFIG_SESSION_KEY = "litellm-connector.isOnModernConfig";
+
 export function activate(context: vscode.ExtensionContext): void {
     // Initialize telemetry first so logger can use it
     telemetryServiceInstance = new TelemetryService();
@@ -110,6 +112,19 @@ export function activate(context: vscode.ExtensionContext): void {
     const configManager = configManagerInstance;
     configManager.setTelemetryService(telemetryService);
 
+    const getModernConfigSessionFlag = (): boolean => {
+        return context.workspaceState?.get<boolean>(MODERN_CONFIG_SESSION_KEY, false) === true;
+    };
+
+    const persistModernConfigSessionFlag = async (): Promise<boolean> => {
+        if (!context.workspaceState) {
+            Logger.warn("workspaceState unavailable; cannot persist modern configuration session flag");
+            return false;
+        }
+        await context.workspaceState.update(MODERN_CONFIG_SESSION_KEY, true);
+        return true;
+    };
+
     const effortFallbackCache = new EffortFallbackCache();
 
     // Track feature adoption
@@ -134,6 +149,39 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const activeProvider = new LiteLLMChatProvider(context.secrets, ua, effortFallbackCache);
     activeProvider.setTelemetryService(telemetryService);
+
+    const isOnModernConfigAtStartup = getModernConfigSessionFlag();
+    telemetryService.captureModernConfigStatus({
+        is_on_modern_config: isOnModernConfigAtStartup,
+        source: "startup",
+    });
+
+    activeProvider.setModernConfigurationDetectedHandler(() => {
+        const alreadyMarked = getModernConfigSessionFlag();
+        if (alreadyMarked) {
+            telemetryService.captureModernConfigStatus({
+                is_on_modern_config: true,
+                source: "provider_configuration_detected",
+            });
+            return;
+        }
+
+        void (async () => {
+            try {
+                const persisted = await persistModernConfigSessionFlag();
+                if (!persisted) {
+                    return;
+                }
+                Logger.info("Marked session as modern-configured from provider configuration detection");
+                telemetryService.captureModernConfigStatus({
+                    is_on_modern_config: true,
+                    source: "provider_configuration_detected",
+                });
+            } catch (err: unknown) {
+                Logger.error("Failed to persist modern configuration session flag", err);
+            }
+        })();
+    });
 
     // Commit message provider (version-agnostic)
     const commitProvider = new LiteLLMCommitMessageProvider(context.secrets, ua, effortFallbackCache);
@@ -246,7 +294,8 @@ export function activate(context: vscode.ExtensionContext): void {
     configManager
         .isConfigured()
         .then((configured) => {
-            if (!configured) {
+            const isOnModernConfig = getModernConfigSessionFlag();
+            if (!configured && !isOnModernConfig) {
                 Logger.info("Extension not configured. Prompting user...");
                 vscode.window
                     .showInformationMessage(

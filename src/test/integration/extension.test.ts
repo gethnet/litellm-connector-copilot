@@ -11,6 +11,22 @@ import { createMockSecrets, createMockOutputChannel } from "../utils/testMocks";
 suite("Extension Activation Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
 
+    const createMockMemento = (seed?: Record<string, unknown>): vscode.Memento => {
+        const store = new Map<string, unknown>(Object.entries(seed ?? {}));
+        return {
+            get: <T>(key: string, defaultValue?: T): T | undefined => {
+                if (store.has(key)) {
+                    return store.get(key) as T;
+                }
+                return defaultValue;
+            },
+            update: async (key: string, value: unknown) => {
+                store.set(key, value);
+            },
+            keys: () => [...store.keys()],
+        } as vscode.Memento;
+    };
+
     setup(() => {
         sandbox = sinon.createSandbox();
     });
@@ -192,6 +208,67 @@ suite("Extension Activation Unit Tests", () => {
 
         assert.strictEqual(isConfiguredStub.called, true);
         assert.strictEqual(executeCommandStub.calledWith("litellm-connector.manage"), false);
+    });
+
+    test("activate skips classic configuration prompt when modern config session flag is set", async () => {
+        const mockSecrets = createMockSecrets();
+
+        const context = {
+            subscriptions: [],
+            secrets: mockSecrets,
+            workspaceState: createMockMemento({ "litellm-connector.isOnModernConfig": true }),
+        } as unknown as vscode.ExtensionContext;
+
+        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
+        sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
+        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
+        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(false);
+
+        const executeCommandStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
+        const infoStub = sandbox.stub(vscode.window, "showInformationMessage");
+
+        sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
+        sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
+
+        extension.activate(context);
+
+        await new Promise((r) => setTimeout(r, 0));
+
+        assert.strictEqual(infoStub.called, false);
+        assert.strictEqual(executeCommandStub.calledWith("litellm-connector.manage"), false);
+    });
+
+    test("activate persists modern config session flag when provider detects valid config", async () => {
+        const mockSecrets = createMockSecrets();
+        const workspaceState = createMockMemento();
+        const updateSpy = sandbox.spy(workspaceState, "update");
+
+        const context = {
+            subscriptions: [],
+            secrets: mockSecrets,
+            workspaceState,
+        } as unknown as vscode.ExtensionContext;
+
+        let onModernConfigDetected: (() => void) | undefined;
+        sandbox
+            .stub(providers.LiteLLMChatProvider.prototype, "setModernConfigurationDetectedHandler")
+            .callsFake((handler: () => void) => {
+                onModernConfigDetected = handler;
+            });
+
+        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
+        sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
+        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
+        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(false);
+        sandbox.stub(vscode.window, "showInformationMessage");
+        sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
+        sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
+
+        extension.activate(context);
+
+        onModernConfigDetected?.();
+
+        assert.strictEqual(updateSpy.calledWith("litellm-connector.isOnModernConfig", true), true);
     });
 
     test("deactivate tolerates repeated disposal", async () => {

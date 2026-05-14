@@ -305,6 +305,24 @@ suite("TelemetryService", () => {
         assert.strictEqual(event.properties.source, "config_change");
     });
 
+    test("captureModernConfigStatus sends correct event", () => {
+        const mockContext = {
+            extension: { packageJSON: { version: "1.0.0" } },
+        } as unknown as vscode.ExtensionContext;
+        telemetryService.initialize(mockContext);
+
+        telemetryService.captureModernConfigStatus({
+            is_on_modern_config: true,
+            source: "startup",
+        });
+
+        assert.strictEqual(adapterMock.capture.calledOnce, true);
+        const event = adapterMock.capture.firstCall.args[0];
+        assert.strictEqual(event.event, "modern_config_status");
+        assert.strictEqual(event.properties.is_on_modern_config, true);
+        assert.strictEqual(event.properties.source, "startup");
+    });
+
     test("captureFeatureUsed aggregates events", () => {
         const mockContext = {
             extension: { packageJSON: { version: "1.0.0" } },
