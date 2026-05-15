@@ -16,8 +16,8 @@
   {
     "match": ".*",
     "supportsReasoning": null,
-    "reasoningEfforts": ["none", "minimal", "low", "medium", "high", "xhigh"],
-    "defaultEffort": "minimal",
+    "reasoningEfforts": ["none","low", "medium", "high"],
+    "defaultEffort": "low",
     "notes": "Fallback catch-all; defers support flag to proxy model info."
   }
 ]

@@ -707,15 +707,22 @@ export abstract class LiteLLMProviderBase {
         justification?: string;
         modelConfiguration?: Record<string, unknown>;
     } {
+        // IMPORTANT: VS Code provides per-model configuration via `options.configuration`,
+        // NOT `options.modelConfiguration`. The latter is only available in ChatRequest (message context).
+        // This was a bug - we were reading from the wrong property!
         const opt = options as vscode.ProvideLanguageModelChatResponseOptions & {
             caller?: string;
             justification?: string;
-            modelConfiguration?: Record<string, unknown>;
+            // modelConfiguration is NOT in ProvideLanguageModelChatResponseOptions - it's in ChatRequest
+            // The correct property is `configuration`
+            configuration?: Record<string, unknown>;
         };
+        // Read from options.configuration (the correct VS Code API), not modelConfiguration
+        const modelConfig = opt.configuration ?? {};
         return {
             caller: opt.caller,
             justification: opt.justification,
-            modelConfiguration: opt.modelConfiguration,
+            modelConfiguration: modelConfig,
         };
     }
 
@@ -779,6 +786,7 @@ export abstract class LiteLLMProviderBase {
         }
 
         // No explicit user choice — let LiteLLM / the upstream model use its own default.
+        Logger.debug(`[reasoning] getReasoningEffort for ${model.id}: returning undefined (no explicit choice)`);
         return undefined;
     }
 
@@ -866,6 +874,7 @@ export abstract class LiteLLMProviderBase {
             // and let LiteLLM route to the appropriate provider-specific shape.
             ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         };
+        Logger.debug(`[buildOpenAIChatRequest] model=${model.id}, reasoning_effort in body = "${reasoningEffort}"`);
 
         const mo = (options.modelOptions as Record<string, unknown>) ?? {};
 
@@ -936,6 +945,7 @@ export abstract class LiteLLMProviderBase {
 
         const transportMessages = convertV2MessagesToProviderMessages(trimmedMessages);
         const reasoningEffort = this.getReasoningEffort(options, model, modelInfo);
+        Logger.debug(`[buildV2ChatRequest] model=${model.id}, reasoning_effort = "${reasoningEffort}"`);
 
         const requestBody: OpenAIChatCompletionRequest = {
             model: model.id,
