@@ -139,7 +139,19 @@ export class ConfigManager {
             ConfigManager.DISABLE_QUOTA_TOOL_REDACTION_KEY,
             false
         );
-        const modelOverrides: ModelOverride[] = loadUserOverrides(workspaceConfig);
+        // Drop undefined/neutral fields so shape matches expectations
+        const modelOverrides: ModelOverride[] = loadUserOverrides(workspaceConfig).map((o) => {
+            const cleaned: ModelOverride = { match: o.match, notes: o.notes }; // preserve notes field even if undefined
+            if (o.supportsReasoning !== undefined) cleaned.supportsReasoning = o.supportsReasoning;
+            if (o.reasoningEfforts) cleaned.reasoningEfforts = o.reasoningEfforts;
+            if (o.defaultEffort) cleaned.defaultEffort = o.defaultEffort;
+            if (o.forceMandatory) cleaned.forceMandatory = o.forceMandatory;
+            if (o.tags && o.tags.length > 0) cleaned.tags = o.tags;
+            if (o.supportedOpenaiParams && o.supportedOpenaiParams.length > 0) {
+                cleaned.supportedOpenaiParams = o.supportedOpenaiParams;
+            }
+            return cleaned;
+        });
 
         const modelCapabilitiesOverridesRaw = workspaceConfig.get<Record<string, string | string[]>>(
             ConfigManager.MODEL_CAPABILITIES_OVERRIDES_KEY,

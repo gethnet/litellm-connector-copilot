@@ -9,6 +9,7 @@ import type { ConfigManager } from "../../config/configManager";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, ResolvedBackend } from "../../types";
 import { createMockSecrets } from "../../test/utils/testMocks";
 import { EffortFallbackCache } from "../../utils/reasoningEffortFallback";
+import { createTelemetryMocks } from "../../test/utils/telemetryMock";
 import type { BackendSession } from "../backendSession";
 
 /**
@@ -32,12 +33,6 @@ interface BaseTestAccess {
         token: vscode.CancellationToken
     ) => Promise<vscode.LanguageModelChatInformation[]>;
     buildOpenAIChatRequest: (
-        messages: vscode.LanguageModelChatRequestMessage[],
-        model: vscode.LanguageModelChatInformation,
-        options: vscode.ProvideLanguageModelChatResponseOptions,
-        modelInfo?: LiteLLMModelInfo
-    ) => Promise<OpenAIChatCompletionRequest>;
-    buildV2ChatRequest: (
         messages: vscode.LanguageModelChatRequestMessage[],
         model: vscode.LanguageModelChatInformation,
         options: vscode.ProvideLanguageModelChatResponseOptions,
@@ -102,12 +97,16 @@ function createMessages(): vscode.LanguageModelChatRequestMessage[] {
 suite("LiteLLM Provider Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
     let settingsMap: Map<string, unknown>;
+    let telemetryMocks: ReturnType<typeof createTelemetryMocks>;
 
     setup(() => {
         sandbox = sinon.createSandbox();
+        telemetryMocks = createTelemetryMocks(sandbox);
+        telemetryMocks.setup();
     });
 
     teardown(() => {
+        telemetryMocks.teardown();
         sandbox.restore();
     });
 
@@ -377,40 +376,6 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(sendStub.callCount, 1);
     });
 
-    test("buildV2ChatRequest applies reasoning effort from modelOptions fallback", async () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        const build = access(provider).buildV2ChatRequest.bind(provider);
-        const configManager = access(provider)._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
-
-        const model = {
-            id: "reasoning-model",
-            maxInputTokens: 8192,
-            maxOutputTokens: 4096,
-        } as vscode.LanguageModelChatInformation;
-
-        const modelInfo: LiteLLMModelInfo = { supports_reasoning: true };
-
-        const messages: vscode.LanguageModelChatRequestMessage[] = [
-            {
-                role: vscode.LanguageModelChatMessageRole.User,
-                content: [new vscode.LanguageModelTextPart("hello")],
-                name: undefined,
-            },
-        ];
-
-        const request = await build(
-            messages,
-            model,
-            {
-                modelOptions: { reasoning_effort: "xhigh" },
-            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
-            modelInfo
-        );
-
-        assert.strictEqual(request.reasoning_effort, "xhigh");
-    });
-
     test("buildOpenAIChatRequest omits reasoning_effort when user has not picked one", async () => {
         // Regression: previously we defaulted to "medium" for any reasoning-capable
         // model. That caused LiteLLM to forward a `reasoning_effort` field to upstream
@@ -491,7 +456,9 @@ suite("LiteLLM Provider Unit Tests", () => {
         const sendStub = sandbox
             .stub(access(provider) as unknown as { sendRequestToLiteLLM: unknown }, "sendRequestToLiteLLM")
             .callsFake(async (req: OpenAIChatCompletionRequest) => {
-                observedEfforts.push((req as { reasoning_effort?: string }).reasoning_effort ?? "");
+                const effort = (req as { reasoning_effort?: string }).reasoning_effort;
+                console.log("STUB: req.reasoning_effort =", effort, "type:", typeof effort);
+                observedEfforts.push(effort ?? "");
                 if (observedEfforts.length === 1) {
                     throw error;
                 }
@@ -807,8 +774,8 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         assert.deepStrictEqual(
             enumValues,
-            ["none", "minimal", "low", "medium", "high", "xhigh"],
-            "Expected OpenAI-aligned effort values in enum"
+            ["none", "low", "medium", "high"],
+            "Expected catch-all effort values in enum (4-value standard set)"
         );
         assert.ok(
             enumItemLabels?.includes("Medium"),

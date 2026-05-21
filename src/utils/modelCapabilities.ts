@@ -8,6 +8,20 @@ export interface DerivedModelCapabilities {
     supportsStreaming: boolean;
     supportsReasoning: boolean;
     supportsPdf: boolean;
+    // Additional capabilities derived from supports_* fields
+    supportsAudioInput: boolean;
+    supportsAudioOutput: boolean;
+    supportsComputerUse: boolean;
+    supportsFunctionCalling: boolean;
+    supportsToolChoice: boolean;
+    supportsSystemMessages: boolean;
+    supportsResponseSchema: boolean;
+    supportsPromptCaching: boolean;
+    supportsWebSearch: boolean;
+    supportsUrlContext: boolean;
+    // Add reasoning_effort and thinking from supported_openai_params
+    supportsReasoningEffort: boolean;
+    supportsThinking: boolean;
     endpointMode: "chat" | "responses" | "completions";
     maxInputTokens: number;
     maxOutputTokens: number;
@@ -18,19 +32,43 @@ export function deriveCapabilitiesFromModelInfo(
     modelId: string,
     modelInfo?: LiteLLMModelInfo
 ): DerivedModelCapabilities {
-    const supportsTools = !!(
-        modelInfo?.supported_openai_params?.includes("tools") ||
-        modelInfo?.supported_openai_params?.includes("tool_choice")
+    // Check supported_openai_params array for capability detection
+    const supportedParams = modelInfo?.supported_openai_params ?? [];
+
+    const hasExplicitReasoningEffort = Object.keys(LITELLM_REASONING_EFFORT_MAPPING).some(
+        (key) => modelInfo?.[key as keyof LiteLLMModelInfo] === true
     );
-    const supportsVision = !!(
-        modelInfo?.supports_vision ||
-        (Array.isArray(modelInfo?.modalities) && (modelInfo.modalities as string[]).includes("vision"))
-    );
-    const supportsStreaming = !!(
-        modelInfo?.supports_native_streaming || modelInfo?.supported_openai_params?.includes("stream")
-    );
-    const supportsReasoning = !!modelInfo?.supports_reasoning;
-    const supportsPdf = !!modelInfo?.supports_pdf_input;
+
+    // Check ALL supports_* fields from model_info (treat null as undefined)
+    const supportsTools = !!(supportedParams.includes("tools") || supportedParams.includes("functions"));
+    const supportsFunctionCalling = modelInfo?.supports_function_calling === true;
+    const supportsToolChoice = modelInfo?.supports_tool_choice === true;
+    const supportsVision =
+        modelInfo?.supports_vision === true ||
+        (Array.isArray(modelInfo?.modalities) && (modelInfo.modalities as string[]).includes("vision"));
+    const supportsAudioInput = modelInfo?.supports_audio_input === true;
+    const supportsAudioOutput = modelInfo?.supports_audio_output === true;
+    const supportsComputerUse = modelInfo?.supports_computer_use === true;
+    const supportsSystemMessages = modelInfo?.supports_system_messages === true;
+    const supportsResponseSchema = modelInfo?.supports_response_schema === true;
+    const supportsPromptCaching = modelInfo?.supports_prompt_caching === true;
+    const supportsWebSearch = modelInfo?.supports_web_search === true;
+    const supportsUrlContext = modelInfo?.supports_url_context === true;
+    const supportsNativeStreaming = modelInfo?.supports_native_streaming === true;
+    const supportsPdf = modelInfo?.supports_pdf_input === true;
+
+    // Reasoning capabilities
+    const supportsReasoning =
+        modelInfo?.supports_reasoning === true ||
+        hasExplicitReasoningEffort ||
+        modelInfo?.supported_openai_params?.includes("reasoning_effort") ||
+        false;
+
+    // Check if reasoning_effort and thinking appear in supported_openai_params
+    const supportsReasoningEffort = supportedParams.includes("reasoning_effort");
+    const supportsThinking = supportedParams.includes("thinking");
+
+    const supportsStreaming = supportsNativeStreaming || supportedParams.includes("stream");
 
     const rawLimit = modelInfo?.max_input_tokens ?? modelInfo?.context_window_tokens ?? modelInfo?.max_tokens ?? 128000;
     const maxOutputTokens = modelInfo?.max_output_tokens ?? 16000;
@@ -42,6 +80,18 @@ export function deriveCapabilitiesFromModelInfo(
         supportsStreaming,
         supportsReasoning,
         supportsPdf,
+        supportsAudioInput,
+        supportsAudioOutput,
+        supportsComputerUse,
+        supportsFunctionCalling,
+        supportsToolChoice,
+        supportsSystemMessages,
+        supportsResponseSchema,
+        supportsPromptCaching,
+        supportsWebSearch,
+        supportsUrlContext,
+        supportsReasoningEffort,
+        supportsThinking,
         endpointMode: (modelInfo?.mode as "chat" | "responses" | "completions") ?? "chat",
         maxInputTokens,
         maxOutputTokens,
@@ -117,8 +167,10 @@ const LITELLM_REASONING_EFFORT_MAPPING: Record<string, SupportedReasoningEffort>
     supports_minimal_reasoning_effort: "minimal",
     supports_low_reasoning_effort: "low",
     supports_xlow_reasoning_effort: "low",
+    supports_medium_reasoning_effort: "medium",
     supports_high_reasoning_effort: "high",
     supports_xhigh_reasoning_effort: "xhigh",
+    supports_max_reasoning_effort: "max",
 } as const satisfies Record<string, SupportedReasoningEffort>;
 
 /**
@@ -163,9 +215,11 @@ function hasReasoningSignal(modelInfo?: LiteLLMModelInfo): boolean {
     if (!modelInfo) {
         return false;
     }
-    if (modelInfo.supports_reasoning) {
+    // Direct support flag
+    if (modelInfo.supports_reasoning === true) {
         return true;
     }
+    // Check for explicit reasoning effort level fields
     return Object.keys(LITELLM_REASONING_EFFORT_MAPPING).some(
         (key) => modelInfo[key as keyof LiteLLMModelInfo] === true
     );
@@ -176,26 +230,77 @@ export function getSupportedReasoningEfforts(
     modelId?: string,
     config?: vscode.WorkspaceConfiguration
 ): readonly SupportedReasoningEffort[] {
-    if (!modelInfo && !modelId) {
+    // Without model info we cannot infer efforts (even if overrides exist)
+    if (!modelInfo) {
         return [];
     }
 
+    // Explicit false means no reasoning support unless overrides force it
     if (modelInfo?.supports_reasoning === false) {
+        if (modelId) {
+            const overrideEfforts = getEffectiveEfforts(modelId, modelInfo, config);
+            if (overrideEfforts.length > 0) {
+                return overrideEfforts;
+            }
+        }
+        // Still check for explicit effort fields as some models may have them
+        const explicitEfforts = extractExplicitReasoningEfforts(modelInfo);
+        if (explicitEfforts.length > 0) {
+            return explicitEfforts;
+        }
         return [];
     }
 
+    // First priority: explicit effort level fields from LiteLLM
+    const explicitEfforts = extractExplicitReasoningEfforts(modelInfo);
+
+    // Second priority: config overrides (may broaden or narrow explicit sets)
+    let overrideEfforts: readonly SupportedReasoningEffort[] = [];
     if (modelId) {
-        const overrideEfforts = getEffectiveEfforts(modelId, modelInfo, config);
+        overrideEfforts = getEffectiveEfforts(modelId, modelInfo, config);
+    }
+
+    if (explicitEfforts.length > 0) {
+        // If overrides provide a broader or different ladder, prefer them when non-empty
         if (overrideEfforts.length > 0) {
             return overrideEfforts;
         }
+        return explicitEfforts;
     }
 
+    if (overrideEfforts.length > 0) {
+        return overrideEfforts;
+    }
+
+    // Third priority: Generic reasoning support flag
     if (hasReasoningSignal(modelInfo)) {
         return DEFAULT_REASONING_EFFORTS;
     }
 
     return [];
+}
+
+/**
+ * Extract reasoning efforts from explicit effort level fields in LiteLLM model info.
+ * Example: supports_high_reasoning_effort: true → includes "high"
+ */
+function extractExplicitReasoningEfforts(modelInfo?: LiteLLMModelInfo): SupportedReasoningEffort[] {
+    if (!modelInfo) {
+        return [];
+    }
+
+    const efforts = new Set<SupportedReasoningEffort>();
+    for (const [key, effortValue] of Object.entries(LITELLM_REASONING_EFFORT_MAPPING)) {
+        // Use safe property access - any null values treated as undefined
+        const value = modelInfo[key as keyof LiteLLMModelInfo];
+        if (value === true) {
+            efforts.add(effortValue);
+        }
+    }
+
+    // Sort efforts in standard order: none, minimal, low, medium, high, xhigh, max
+    const effortOrder: SupportedReasoningEffort[] = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+    return effortOrder.filter((e) => efforts.has(e));
 }
 
 export function getDefaultReasoningEffort(
@@ -232,6 +337,8 @@ function getEffortDescription(effort: SupportedReasoningEffort): string {
     switch (effort) {
         case "none":
             return "No reasoning applied";
+        case "minimal":
+            return "Lightweight reasoning";
         case "low":
             return "Faster responses with less reasoning";
         case "medium":
@@ -240,6 +347,8 @@ function getEffortDescription(effort: SupportedReasoningEffort): string {
             return "Greater reasoning depth but slower";
         case "xhigh":
             return "Maximum reasoning depth but slower";
+        case "max":
+            return "Highest available reasoning effort";
         default:
             return effort;
     }

@@ -52,6 +52,11 @@ import {
 import type { V2ChatMessage } from "./v2Types";
 import type { BackendSession } from "./backendSession";
 
+/**
+ * Static fallback parameter limitations for known model families.
+ * Used as fallback when model info (supported_openai_params) is unavailable.
+ * These are prefix matches - if modelId includes the key, the limitation applies.
+ */
 const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
     "claude-3-5-sonnet": new Set(["temperature"]),
     "claude-3-5-haiku": new Set(["temperature"]),
@@ -718,7 +723,8 @@ export abstract class LiteLLMProviderBase {
             configuration?: Record<string, unknown>;
         };
         // Read from options.configuration (the correct VS Code API), not modelConfiguration
-        const modelConfig = opt.configuration ?? {};
+        // Also check modelConfiguration for backward compatibility with ChatRequest context
+        const modelConfig = opt.configuration ?? opt.modelConfiguration ?? {};
         return {
             caller: opt.caller,
             justification: opt.justification,
@@ -753,20 +759,20 @@ export abstract class LiteLLMProviderBase {
         const telemetry = this.getTelemetryOptions(options);
         const modelInfo = modelInfoOverride ?? this._modelInfoCache.get(model.id);
 
+        Logger.debug(`[getReasoningEffort] modelId: ${model.id}`);
+        Logger.debug(`[getReasoningEffort] modelInfo from cache: ${JSON.stringify(modelInfo)}`);
+        Logger.debug(`[getReasoningEffort] modelInfoOverride: ${JSON.stringify(modelInfoOverride)}`);
+
         // Priority 1: Picker selection (modelConfiguration.reasoningEffort)
         const pickerEffort = telemetry.modelConfiguration?.reasoningEffort;
+        Logger.debug(`[getReasoningEffort] pickerEffort (from modelConfiguration): ${pickerEffort}`);
         if (typeof pickerEffort === "string") {
             if (pickerEffort === "none") {
                 Logger.trace(`[reasoning] Picker selected "none" for ${model.id}; suppressing reasoning_effort field.`);
                 return undefined;
             }
-            if (this.isReasoningEffortSupported(pickerEffort, modelInfo, model.id)) {
-                return pickerEffort;
-            }
-            Logger.warn(
-                `[reasoning] Picker selected unsupported effort "${pickerEffort}" for ${model.id}; suppressing field.`
-            );
-            return undefined;
+            Logger.debug(`[getReasoningEffort] Returning pickerEffort without validation: ${pickerEffort}`);
+            return pickerEffort;
         }
 
         // Priority 2: API override (prefer OpenAI snake_case, keep camelCase for compatibility)
@@ -798,12 +804,19 @@ export abstract class LiteLLMProviderBase {
      * @returns true if the effort is in the model's supported efforts list
      */
     protected isReasoningEffortSupported(effort: string, modelInfo?: LiteLLMModelInfo, modelId?: string): boolean {
+        Logger.debug(
+            `[isReasoningEffortSupported] effort: ${effort}, modelInfo: ${JSON.stringify(modelInfo)}, modelId: ${modelId}`
+        );
         if (!modelInfo && !modelId) {
+            Logger.debug("[isReasoningEffortSupported] No modelInfo and no modelId -> returning false");
             return false;
         }
 
         const supportedEfforts = getSupportedReasoningEfforts(modelInfo, modelId);
-        return supportedEfforts.includes(effort as (typeof supportedEfforts)[number]);
+        Logger.debug(`[isReasoningEffortSupported] supportedEfforts: ${supportedEfforts}`);
+        const result = supportedEfforts.includes(effort as (typeof supportedEfforts)[number]);
+        Logger.debug(`[isReasoningEffortSupported] result: ${result}`);
+        return result;
     }
 
     /**
@@ -858,6 +871,7 @@ export abstract class LiteLLMProviderBase {
         }
 
         const reasoningEffort = this.getReasoningEffort(options, model, modelInfo);
+        Logger.debug(`[buildOpenAIChatRequest] reasoningEffort from getReasoningEffort: "${reasoningEffort}"`);
 
         const requestBody: OpenAIChatCompletionRequest = {
             model: model.id,
@@ -875,6 +889,9 @@ export abstract class LiteLLMProviderBase {
             ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         };
         Logger.debug(`[buildOpenAIChatRequest] model=${model.id}, reasoning_effort in body = "${reasoningEffort}"`);
+        Logger.debug(
+            `[buildOpenAIChatRequest] requestBody.reasoning_effort = ${(requestBody as { reasoning_effort?: string }).reasoning_effort}`
+        );
 
         const mo = (options.modelOptions as Record<string, unknown>) ?? {};
 
@@ -1106,8 +1123,10 @@ export abstract class LiteLLMProviderBase {
         modelInfo?: LiteLLMModelInfo
     ): Promise<ReadableStream<Uint8Array>> {
         const modelId = request.model;
+        Logger.debug(`[sendRequestWithRetry] modelId: ${modelId}, reasoning_effort: ${request.reasoning_effort}`);
         const originalEffort = (request as { reasoning_effort?: SupportedReasoningEffort }).reasoning_effort;
         let effectiveEffort = this._effortFallbackCache.getEffectiveEffort(modelId, originalEffort);
+        Logger.debug(`[sendRequestWithRetry] originalEffort: ${originalEffort}, effectiveEffort: ${effectiveEffort}`);
         this.applyReasoningEffort(request, effectiveEffort);
 
         const notificationKeyEffort = originalEffort ?? effectiveEffort;
@@ -1127,15 +1146,26 @@ export abstract class LiteLLMProviderBase {
                     modelInfo
                 );
             } catch (err) {
-                if (!isReasoningError(err)) {
+                Logger.debug(`[sendRequestWithRetry] Caught error, checking isReasoningError...`);
+                const isReasoning = isReasoningError(err);
+                Logger.debug(`[sendRequestWithRetry] isReasoningError result: ${isReasoning}`);
+                if (!isReasoning) {
+                    Logger.debug("[sendRequestWithRetry] Not a reasoning error, throwing immediately");
                     throw err;
                 }
 
                 lastError = err;
                 const nextEffort = this._effortFallbackCache.recordFailure(modelId, effectiveEffort);
                 attempts += 1;
+                Logger.debug(
+                    `[sendRequestWithRetry] After recordFailure: nextEffort: ${nextEffort}, attempts: ${attempts}`
+                );
 
                 if (nextEffort === effectiveEffort || attempts >= 5) {
+                    Logger.debug("[sendRequestWithRetry] Condition met - throwing toMeaningfulError");
+                    Logger.debug(`[sendRequestWithRetry]   nextEffort: ${nextEffort}`);
+                    Logger.debug(`[sendRequestWithRetry]   effectiveEffort: ${effectiveEffort}`);
+                    Logger.debug(`[sendRequestWithRetry]   attempts: ${attempts}`);
                     throw this.toMeaningfulError(err, "Reasoning effort fallback exhausted");
                 }
 
@@ -1248,6 +1278,7 @@ export abstract class LiteLLMProviderBase {
     }
 
     protected isParameterSupported(param: string, modelInfo: LiteLLMModelInfo | undefined, modelId?: string): boolean {
+        // Priority 1: Static known limitations
         if (modelId) {
             if (KNOWN_PARAMETER_LIMITATIONS[modelId]?.has(param)) {
                 return false;
@@ -1259,21 +1290,42 @@ export abstract class LiteLLMProviderBase {
             }
         }
 
-        if (!modelInfo) {
-            return true;
-        }
-
+        // Priority 2: Cached probe results
         if (modelId && this._parameterProbeCache.has(modelId)) {
             if (this._parameterProbeCache.get(modelId)?.has(param)) {
                 return false;
             }
         }
 
-        if (modelInfo.supported_openai_params) {
-            return modelInfo.supported_openai_params.includes(param);
+        // Priority 3: Dynamic detection from model info
+        // Any null values in supported_openai_params array should be treated as undefined
+        if (modelInfo?.supported_openai_params) {
+            const supportedParams = modelInfo.supported_openai_params;
+            const normalizedParam = param.toLowerCase();
+            const isSupported = supportedParams.some((p) => p.toLowerCase() === normalizedParam);
+
+            if (supportedParams.length === 0) {
+                return false;
+            }
+
+            if (!isSupported) {
+                // Param not in supported list - return false for restrictable params
+                return !this.isRestrictableParam(param);
+            }
+            return true;
         }
 
+        // Priority 4: Default to true if no model info available
         return true;
+    }
+
+    /**
+     * Check if a parameter is typically restrictable (should be filtered for certain models).
+     * These are parameters that cause errors on models like o1/o3 or have known restrictions.
+     */
+    private isRestrictableParam(param: string): boolean {
+        const restrictableParams = new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty", "stop"]);
+        return restrictableParams.has(param.toLowerCase());
     }
 
     protected stripUnsupportedParametersFromRequest(

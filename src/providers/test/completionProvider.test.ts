@@ -5,15 +5,20 @@ import * as sinon from "sinon";
 import { LiteLLMCompletionProvider } from "../";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 import { LiteLLMTelemetry } from "../../utils/telemetry";
+import { createTelemetryMocks } from "../../test/utils/telemetryMock";
 
 suite("LiteLLMCompletionProvider Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
+    let telemetryMocks: ReturnType<typeof createTelemetryMocks>;
 
     setup(() => {
         sandbox = sinon.createSandbox();
+        telemetryMocks = createTelemetryMocks(sandbox);
+        telemetryMocks.setup();
     });
 
     teardown(() => {
+        telemetryMocks.teardown();
         sandbox.restore();
     });
 

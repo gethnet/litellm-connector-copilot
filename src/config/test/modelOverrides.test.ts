@@ -12,7 +12,7 @@ import {
 import type { LiteLLMModelInfo } from "../../types";
 import { Logger } from "../../utils/logger";
 
-const CANONICAL_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
+const CANONICAL_REASONING_EFFORTS = ["none", "low", "medium", "high"] as const;
 
 suite("modelOverrides", () => {
     let getConfigurationStub: sinon.SinonStub;
@@ -53,7 +53,7 @@ suite("modelOverrides", () => {
 
         assert.ok(gptOverride, "gpt-5 override should be present");
         assert.deepStrictEqual(gptOverride?.reasoningEfforts, ["none", "minimal", "low", "medium", "high", "xhigh"]);
-        assert.strictEqual(gptOverride?.defaultEffort, "minimal");
+        assert.strictEqual(gptOverride?.defaultEffort, "medium");
 
         assert.ok(claudeOverride, "claude override should be present");
         assert.deepStrictEqual(claudeOverride?.reasoningEfforts, ["none", "low", "medium", "high"]);
@@ -62,7 +62,7 @@ suite("modelOverrides", () => {
         assert.ok(catchAll, "catch-all override should be present");
         assert.strictEqual(catchAllIndex, overrides.length - 1, "catch-all should be last");
         assert.deepStrictEqual(catchAll.reasoningEfforts, CANONICAL_REASONING_EFFORTS);
-        assert.strictEqual(catchAll.defaultEffort, "minimal");
+        assert.strictEqual(catchAll.defaultEffort, "medium");
         assert.strictEqual(catchAll.supportsReasoning, null);
     });
 
@@ -132,8 +132,43 @@ suite("modelOverrides", () => {
         const fallbackDefault = await getDefaultEffort("unknown-model", { supports_reasoning: true });
         const unsupportedDefault = await getDefaultEffort("unknown-model", { supports_reasoning: false });
 
-        assert.strictEqual(gptDefault, "minimal");
-        assert.strictEqual(fallbackDefault, "minimal");
+        assert.strictEqual(gptDefault, "medium");
+        assert.strictEqual(fallbackDefault, "medium");
         assert.strictEqual(unsupportedDefault, undefined);
+    });
+
+    test("forceMandatory override returns values even when LiteLLM has data", async () => {
+        const override: ModelOverride = {
+            match: "^test-.*",
+            reasoningEfforts: ["high", "xhigh"],
+            forceMandatory: true,
+        };
+        getConfigurationStub.returns(buildWorkspaceConfiguration([override]));
+
+        const modelInfo: LiteLLMModelInfo = {
+            supports_reasoning: false,
+        };
+
+        const result = await getEffectiveEfforts("test-model", modelInfo, undefined, true);
+        assert.ok(result.includes("high"));
+        assert.ok(result.includes("xhigh"));
+    });
+
+    test("non-mandatory override is ignored when LiteLLM has valid data", async () => {
+        const override: ModelOverride = {
+            match: "^test-.*",
+            reasoningEfforts: ["high", "xhigh"],
+            forceMandatory: false,
+        };
+        getConfigurationStub.returns(buildWorkspaceConfiguration([override]));
+
+        const modelInfo: LiteLLMModelInfo = {
+            supports_reasoning: true,
+        };
+
+        const result = await getEffectiveEfforts("test-model", modelInfo);
+        // Should return default set, not override values
+        assert.ok(result.includes("medium"));
+        assert.ok(!result.includes("xhigh"));
     });
 });

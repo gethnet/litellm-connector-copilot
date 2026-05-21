@@ -5,12 +5,23 @@ import * as sinon from "sinon";
 import { registerSelectInlineCompletionModelCommand } from "../../commands/inlineCompletions";
 import type { LiteLLMChatProvider } from "../../providers";
 import { LiteLLMTelemetry } from "../../utils/telemetry";
+import type { TelemetryService } from "../../telemetry/telemetryService";
 
 suite("InlineCompletions Command Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
+    let telemetryServiceStub: TelemetryService;
 
     setup(() => {
         sandbox = sinon.createSandbox();
+        // Create a minimal telemetry service mock to prevent "not a function" errors
+        telemetryServiceStub = {
+            capture: sandbox.stub(),
+            captureRequestCompletedWithCache: sandbox.stub(),
+            captureRequestFailed: sandbox.stub(),
+            captureFeatureUsed: sandbox.stub(),
+            captureInlineCompletionRequest: sandbox.stub(),
+        } as unknown as TelemetryService;
+        LiteLLMTelemetry.setTelemetryService(telemetryServiceStub);
     });
 
     teardown(() => {

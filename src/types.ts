@@ -52,13 +52,24 @@ export interface ModelCapabilityOverride {
     pdfInput?: boolean;
 }
 
-export type SupportedReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type SupportedReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface ModelOverride {
+    /** Regex pattern to match model IDs */
     match: string;
-    supportsReasoning: boolean | null;
+    /** Override for supports_reasoning */
+    supportsReasoning?: boolean | null;
+    /** Override for supported reasoning efforts */
     reasoningEfforts?: SupportedReasoningEffort[];
+    /** Default reasoning effort when reasoning is supported */
     defaultEffort?: SupportedReasoningEffort;
+    /** Force this override to be mandatory (ignore remote LiteLLM values) */
+    forceMandatory?: boolean;
+    /** Custom tags to add to model */
+    tags?: string[];
+    /** Override for supported_openai_params */
+    supportedOpenaiParams?: string[];
+    /** Additional notes about this override */
     notes?: string;
 }
 
@@ -261,9 +272,20 @@ export interface LiteLLMModelInfo {
     supports_native_streaming?: boolean | null;
     supports_web_search?: boolean | null;
     supports_url_context?: boolean | null;
-    supports_reasoning?: boolean;
+    supports_reasoning?: boolean | null;
     supports_computer_use?: boolean | null;
-    supported_openai_params?: string[];
+    // Extended reasoning effort support fields from LiteLLM
+    // (for future use when LiteLLM provides explicit effort level fields)
+    supports_minimal_reasoning_effort?: boolean | null;
+    supports_low_reasoning_effort?: boolean | null;
+    supports_medium_reasoning_effort?: boolean | null;
+    supports_high_reasoning_effort?: boolean | null;
+    supports_xhigh_reasoning_effort?: boolean | null;
+    supports_max_reasoning_effort?: boolean | null;
+    // Supported parameters array - must be validated before API calls
+    supported_openai_params?: string[] | null;
+    // Modalities for advanced capability detection
+    modalities?: string[];
     tags?: string[];
     [key: string]: unknown; // Allow additional fields for extensibility
 }

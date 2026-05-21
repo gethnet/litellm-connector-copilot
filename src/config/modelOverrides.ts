@@ -79,6 +79,13 @@ function validateOverride(entry: unknown, source: string): ModelOverride | undef
         supportsReasoning,
         reasoningEfforts,
         defaultEffort,
+        forceMandatory: candidate.forceMandatory === true,
+        tags: Array.isArray(candidate.tags)
+            ? candidate.tags.filter((t): t is string => typeof t === "string")
+            : undefined,
+        supportedOpenaiParams: Array.isArray(candidate.supportedOpenaiParams)
+            ? candidate.supportedOpenaiParams.filter((p): p is string => typeof p === "string")
+            : undefined,
         notes: candidate.notes,
     };
 }
@@ -125,7 +132,7 @@ export function findOverride(modelId: string, config?: vscode.WorkspaceConfigura
 
     for (const override of overrides) {
         try {
-            const regex = new RegExp(override.match);
+            const regex = new RegExp(override.match, "i");
             if (regex.test(modelId)) {
                 return override;
             }
@@ -140,10 +147,19 @@ export function findOverride(modelId: string, config?: vscode.WorkspaceConfigura
 export function getEffectiveEfforts(
     modelId: string,
     modelInfo?: LiteLLMModelInfo,
-    config?: vscode.WorkspaceConfiguration
-): SupportedReasoningEffort[] {
+    config?: vscode.WorkspaceConfiguration,
+    forceMandatory?: boolean
+): readonly SupportedReasoningEffort[] {
     const override = findOverride(modelId, config);
     const overrideEfforts = override?.reasoningEfforts;
+
+    // Force-mandatory request parameter should win regardless of LiteLLM data
+    if (forceMandatory && override) {
+        if (override.supportsReasoning === false) {
+            return [];
+        }
+        return overrideEfforts ?? [...CANONICAL_REASONING_EFFORTS];
+    }
 
     if (modelInfo?.supports_reasoning === false) {
         return [];
@@ -154,13 +170,22 @@ export function getEffectiveEfforts(
             return [];
         }
 
-        if (override.supportsReasoning === true) {
+        if (override.forceMandatory) {
             return overrideEfforts ?? [...CANONICAL_REASONING_EFFORTS];
         }
 
-        // supportsReasoning === null → inherit proxy
-        if (modelInfo?.supports_reasoning) {
-            return overrideEfforts ?? [...CANONICAL_REASONING_EFFORTS];
+        // If the proxy already reports reasoning capability, prefer proxy data and ignore non-mandatory override efforts.
+        if (modelInfo?.supports_reasoning === true) {
+            return ["none", "low", "medium", "high"];
+        }
+
+        // If proxy lacks reasoning data, use override efforts if provided
+        const hasLiteLLMReasoningData =
+            modelInfo?.supports_reasoning !== undefined ||
+            Object.keys(modelInfo ?? {}).some((k) => k.includes("reasoning_effort"));
+
+        if (!hasLiteLLMReasoningData) {
+            return overrideEfforts ?? [];
         }
 
         return [];

@@ -99,7 +99,7 @@ suite("Extension Activation Unit Tests", () => {
         assert.strictEqual(registerProviderStub.calledOnce, true);
     });
 
-    test("activate refreshes model info after configuration changes", async () => {
+    test("activate does not refresh model info after configuration changes", async () => {
         const mockSecrets = createMockSecrets();
         const context = {
             subscriptions: [],
@@ -128,7 +128,7 @@ suite("Extension Activation Unit Tests", () => {
         configChangeHandler?.();
         await new Promise((resolve) => setTimeout(resolve, 300));
 
-        assert.strictEqual(clearModelCacheStub.calledOnce, true);
+        assert.strictEqual(clearModelCacheStub.calledOnce, false);
     });
 
     test("activate opens LiteLLM configuration when not configured", async () => {

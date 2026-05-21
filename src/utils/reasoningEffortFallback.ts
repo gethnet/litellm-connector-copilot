@@ -1,4 +1,5 @@
 import type { SupportedReasoningEffort } from "../types";
+import { Logger } from "./logger";
 
 // Reasoning effort ladder from most to least capable. `undefined` means omit the parameter entirely.
 const EFFORT_LADDER: readonly SupportedReasoningEffort[] = ["xhigh", "high", "medium", "low", "minimal", "none"];
@@ -69,17 +70,23 @@ export class EffortFallbackCache {
         modelId: string,
         requestedEffort: SupportedReasoningEffort | undefined
     ): SupportedReasoningEffort | undefined {
+        Logger.debug(`[getEffectiveEffort] requestedEffort: ${requestedEffort}, modelId: ${modelId}`);
         if (!requestedEffort) {
+            Logger.debug(`[getEffectiveEffort] requestedEffort is falsy, returning undefined`);
             return undefined;
         }
 
         const failedEfforts = this.failures.get(modelId);
+        Logger.debug(
+            `[getEffectiveEffort] failedEfforts: ${JSON.stringify(Array.from(failedEfforts?.values() ?? []))}`
+        );
         let effort: SupportedReasoningEffort | undefined = requestedEffort;
 
         while (effort && failedEfforts?.has(effort)) {
             effort = nextLowerEffort(effort);
         }
 
+        Logger.debug(`[getEffectiveEffort] returning: ${effort}`);
         return effort;
     }
 
@@ -120,6 +127,7 @@ export function isReasoningError(error: unknown): boolean {
         return false;
     }
 
+    Logger.debug(`[isReasoningError] status: ${status}, text: ${text}`);
     return text.includes("reasoning") && (text.includes("effort") || text.includes("parameter"));
 }
 

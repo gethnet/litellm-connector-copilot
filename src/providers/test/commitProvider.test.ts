@@ -4,6 +4,7 @@ import * as sinon from "sinon";
 import { LiteLLMCommitMessageProvider } from "../liteLLMCommitProvider";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 import type { ConfigManager } from "../../config/configManager";
+import { createTelemetryMocks } from "../../test/utils/telemetryMock";
 
 /**
  * Typed view of the commit-message provider's private surface so tests
@@ -29,12 +30,16 @@ function commitInternals(p: LiteLLMCommitMessageProvider): CommitProviderInterna
 
 suite("LiteLLMCommitMessageProvider Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
+    let telemetryMocks: ReturnType<typeof createTelemetryMocks>;
 
     setup(() => {
         sandbox = sinon.createSandbox();
+        telemetryMocks = createTelemetryMocks(sandbox);
+        telemetryMocks.setup();
     });
 
     teardown(() => {
+        telemetryMocks.teardown();
         sandbox.restore();
     });
 

@@ -1,9 +1,9 @@
 [
   {
-    "match": "^gpt[-]?5(\\.[0-9]+)?(-codex)?(-mini|-nano)?$",
+    "match": "^gpt-5(\\.[0-9]+)?(-codex)?(-mini|-nano)?$",
     "supportsReasoning": true,
     "reasoningEfforts": ["none", "minimal", "low", "medium", "high", "xhigh"],
-    "defaultEffort": "minimal",
+    "defaultEffort": "medium",
     "notes": "GPT-5* family supports the full canonical set plus xhigh."
   },
   {
@@ -14,10 +14,22 @@
     "notes": "Anthropic models support a reduced set; no minimal/xhigh."
   },
   {
+    "match": "^(o1|o3|o4)-.*",
+    "forceMandatory": true,
+    "supportedOpenaiParams": [
+      "model",
+      "messages",
+      "max_completion_tokens",
+      "stream",
+      "reasoning_effort"
+    ],
+    "notes": "OpenAI o1/o3/o4 models have strict parameter restrictions. Force mandatory override to ensure correct parameter filtering."
+  },
+  {
     "match": ".*",
     "supportsReasoning": null,
-    "reasoningEfforts": ["none","low", "medium", "high"],
-    "defaultEffort": "low",
+    "reasoningEfforts": ["none", "low", "medium", "high"],
+    "defaultEffort": "medium",
     "notes": "Fallback catch-all; defers support flag to proxy model info."
   }
 ]
