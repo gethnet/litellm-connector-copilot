@@ -2043,4 +2043,217 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(parse(500, "Raw error message"), "Raw error message");
         assert.strictEqual(parse(500, ""), "API request failed with status 500");
     });
+
+    test("sendRequestToLiteLLM routes to /responses when forceResponsesEndpoint is true and requests succeed", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        sandbox
+            .stub(access(provider) as unknown as { getMultiBackendClient: unknown }, "getMultiBackendClient")
+            .returns({
+                chat: () =>
+                    Promise.resolve(
+                        new ReadableStream<Uint8Array>({
+                            start(controller) {
+                                controller.close();
+                            },
+                        })
+                    ),
+            });
+        access(provider)._lastModelList = [
+            {
+                id: "test-model",
+                name: "test-model",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1000,
+                maxOutputTokens: 256,
+                capabilities: { toolCalling: false, imageInput: false },
+                _backendName: "default",
+                _backendUrl: "http://localhost:4000",
+                _apiKey: "k",
+            } as unknown as vscode.LanguageModelChatInformation,
+        ];
+
+        const responsesStub = sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves(undefined);
+        const chatStub = sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.close();
+                },
+            })
+        );
+
+        await access(provider).sendRequestToLiteLLM(
+            { model: "test-model", messages: [] },
+            { report: () => {} } as unknown as vscode.Progress<vscode.LanguageModelResponsePart>,
+            new vscode.CancellationTokenSource().token,
+            undefined,
+            { mode: "responses" as const }
+        );
+
+        assert.ok(responsesStub.called, "Should use /responses endpoint");
+        assert.strictEqual(
+            chatStub.called,
+            false,
+            "Should not fall back to /chat/completions when /responses succeeds"
+        );
+    });
+
+    test("sendRequestToLiteLLM falls back to /chat/completions when forceResponsesEndpoint is true and fallback enabled", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        sandbox.stub(access(provider)._configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            forceResponsesEndpoint: true,
+            allowChatCompletionsFallback: true,
+        });
+        const multiChatStub = sandbox.stub().resolves(
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.close();
+                },
+            })
+        );
+        sandbox
+            .stub(access(provider) as unknown as { getMultiBackendClient: unknown }, "getMultiBackendClient")
+            .returns({
+                chat: multiChatStub,
+            });
+        access(provider)._lastModelList = [
+            {
+                id: "test-model",
+                name: "test-model",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1000,
+                maxOutputTokens: 256,
+                capabilities: { toolCalling: false, imageInput: false },
+                _backendName: "default",
+                _backendUrl: "http://localhost:4000",
+                _apiKey: "k",
+            } as unknown as vscode.LanguageModelChatInformation,
+        ];
+
+        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").rejects(new Error("/responses request failed"));
+
+        await access(provider).sendRequestToLiteLLM(
+            { model: "test-model", messages: [] },
+            { report: () => {} } as unknown as vscode.Progress<vscode.LanguageModelResponsePart>,
+            new vscode.CancellationTokenSource().token,
+            undefined,
+            { mode: "responses" as const }
+        );
+
+        assert.ok(
+            multiChatStub.called,
+            "Should fallback to /chat/completions via multiClient when fallback is enabled"
+        );
+    });
+
+    test("sendRequestToLiteLLM does not fall back to /chat/completions when allowChatCompletionsFallback is false", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        sandbox.stub(access(provider)._configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            forceResponsesEndpoint: true,
+            allowChatCompletionsFallback: false,
+        });
+        const multiChatStub = sandbox.stub().resolves(
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.close();
+                },
+            })
+        );
+        sandbox
+            .stub(access(provider) as unknown as { getMultiBackendClient: unknown }, "getMultiBackendClient")
+            .returns({
+                chat: multiChatStub,
+            });
+        access(provider)._lastModelList = [
+            {
+                id: "test-model",
+                name: "test-model",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1000,
+                maxOutputTokens: 256,
+                capabilities: { toolCalling: false, imageInput: false },
+                _backendName: "default",
+                _backendUrl: "http://localhost:4000",
+                _apiKey: "k",
+            } as unknown as vscode.LanguageModelChatInformation,
+        ];
+
+        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").rejects(new Error("/responses request failed"));
+
+        await assert.rejects(
+            access(provider).sendRequestToLiteLLM(
+                { model: "test-model", messages: [] },
+                { report: () => {} } as unknown as vscode.Progress<vscode.LanguageModelResponsePart>,
+                new vscode.CancellationTokenSource().token,
+                undefined,
+                { mode: "responses" as const }
+            ),
+            /\/responses request failed/
+        );
+
+        assert.strictEqual(
+            multiChatStub.called,
+            false,
+            "Should not fallback to /chat/completions when fallback is disabled"
+        );
+    });
+
+    test("sendRequestToLiteLLM does not fall back when forceResponsesEndpoint is true and /responses succeeds", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        sandbox.stub(access(provider)._configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            forceResponsesEndpoint: true,
+            allowChatCompletionsFallback: true,
+        });
+        const multiChatStub = sandbox.stub().resolves(
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.close();
+                },
+            })
+        );
+        sandbox
+            .stub(access(provider) as unknown as { getMultiBackendClient: unknown }, "getMultiBackendClient")
+            .returns({
+                chat: multiChatStub,
+            });
+        access(provider)._lastModelList = [
+            {
+                id: "test-model",
+                name: "test-model",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1000,
+                maxOutputTokens: 256,
+                capabilities: { toolCalling: false, imageInput: false },
+                _backendName: "default",
+                _backendUrl: "http://localhost:4000",
+                _apiKey: "k",
+            } as unknown as vscode.LanguageModelChatInformation,
+        ];
+
+        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves(undefined);
+
+        await access(provider).sendRequestToLiteLLM(
+            { model: "test-model", messages: [] },
+            { report: () => {} } as unknown as vscode.Progress<vscode.LanguageModelResponsePart>,
+            new vscode.CancellationTokenSource().token,
+            undefined,
+            { mode: "responses" as const }
+        );
+
+        assert.strictEqual(multiChatStub.called, false, "Should not fallback when /responses succeeds");
+    });
 });

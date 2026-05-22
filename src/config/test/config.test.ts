@@ -7,6 +7,7 @@ import type { TelemetryService } from "../../telemetry/telemetryService";
 suite("ConfigManager Unit Tests", () => {
     let mockSecrets: vscode.SecretStorage;
     let secretsMap: Map<string, string>;
+    let configManager: ConfigManager;
     let getConfigurationStub: sinon.SinonStub;
     let configGetStub: sinon.SinonStub;
     let settingsMap: Map<string, unknown>;
@@ -67,6 +68,7 @@ suite("ConfigManager Unit Tests", () => {
             },
             has: () => false,
         } as unknown as vscode.WorkspaceConfiguration);
+        configManager = new ConfigManager(mockSecrets);
     });
 
     teardown(() => {
@@ -289,6 +291,9 @@ suite("ConfigManager Unit Tests", () => {
         settingsMap.set("litellm-connector.disableCaching", false);
         settingsMap.set("litellm-connector.disableQuotaToolRedaction", false);
 
+        settingsMap.set("litellm-connector.forceResponsesEndpoint", true);
+        settingsMap.set("litellm-connector.allowChatCompletionsFallback", true);
+
         await manager.reportFeatureToggles("test_source");
 
         assert.strictEqual(captureStub.callCount, 6);
@@ -410,5 +415,29 @@ suite("ConfigManager Unit Tests", () => {
         const manager = new ConfigManager(mockSecrets);
         // This should not throw
         await manager.reportFeatureToggles("test");
+    });
+
+    test("should read forceResponsesEndpoint from workspace settings", async () => {
+        settingsMap.set("litellm-connector.forceResponsesEndpoint", false);
+        const config = await configManager.getConfig();
+        assert.strictEqual(config.forceResponsesEndpoint, false);
+    });
+
+    test("should default forceResponsesEndpoint to true when not set", async () => {
+        settingsMap.delete("litellm-connector.forceResponsesEndpoint");
+        const config = await configManager.getConfig();
+        assert.strictEqual(config.forceResponsesEndpoint, true);
+    });
+
+    test("should read allowChatCompletionsFallback from workspace settings", async () => {
+        settingsMap.set("litellm-connector.allowChatCompletionsFallback", true);
+        const config = await configManager.getConfig();
+        assert.strictEqual(config.allowChatCompletionsFallback, true);
+    });
+
+    test("should default allowChatCompletionsFallback to false when not set", async () => {
+        settingsMap.delete("litellm-connector.allowChatCompletionsFallback");
+        const config = await configManager.getConfig();
+        assert.strictEqual(config.allowChatCompletionsFallback, false);
     });
 });

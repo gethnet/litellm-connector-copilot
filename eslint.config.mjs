@@ -58,7 +58,7 @@ export default defineConfig(
 			'@typescript-eslint/no-unsafe-member-access': 'error',
 			'@typescript-eslint/no-unsafe-return': 'error',
 			'@typescript-eslint/no-explicit-any': 'error',
-			'@typescript-eslint/no-empty-function': 'warn'
+			'@typescript-eslint/no-empty-function': 'off'
 		}
 	},
 	js.configs.recommended,

@@ -271,6 +271,20 @@ export interface LiteLLMConfig {
     enableResponses?: boolean;
 
     /**
+     * When true, forces all models to use the `/responses` endpoint instead of per-model mode selection.
+     * This ensures consistent behavior across models, especially for those that require reasoning support.
+     * Default: true (JSON-only, not in Settings UI).
+     */
+    forceResponsesEndpoint?: boolean;
+
+    /**
+     * When true and forceResponsesEndpoint is true, falls back to `/chat/completions` if `/responses` fails.
+     * This is an escape hatch for models that cannot use /responses.
+     * Default: false (JSON-only, not in Settings UI).
+     */
+    allowChatCompletionsFallback?: boolean;
+
+    /**
      * Per-language-model group backend assignments (VS Code 1.119+ groups API).
      * Allows different groups to use different backends (e.g., dev vs production).
      */

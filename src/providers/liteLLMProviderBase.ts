@@ -112,7 +112,7 @@ export abstract class LiteLLMProviderBase {
     protected _modelListFetchedAtMs = 0;
     private _inFlightDiscovery: Promise<vscode.LanguageModelChatInformation[]> | undefined;
 
-    private _usageOptOutModels: Set<string> = new Set();
+    private _usageOptOutModels = new Set<string>();
 
     protected _multiBackendClient: MultiBackendClient | undefined;
     protected _activeBackendNames: string[] = [];
@@ -323,15 +323,19 @@ export abstract class LiteLLMProviderBase {
                 const modelName = entry.model_name;
                 const namespacedId = entry.namespacedId ?? `${backendName}/${modelName ?? "unknown"}`;
                 const modelInfo = entry.model_info;
-
-                this._modelInfoCache.set(namespacedId, modelInfo);
-                const derived = deriveCapabilitiesFromModelInfo(namespacedId, modelInfo);
+                // Override mode to 'responses' when forceResponsesEndpoint is enabled
+                let finalModelInfo = modelInfo;
+                if (config.forceResponsesEndpoint && modelInfo?.mode === "chat") {
+                    finalModelInfo = { ...modelInfo, mode: "responses" as const };
+                }
+                this._modelInfoCache.set(namespacedId, finalModelInfo);
+                const derived = deriveCapabilitiesFromModelInfo(namespacedId, finalModelInfo);
                 this._derivedCapabilitiesCache.set(namespacedId, derived);
 
                 const capOverride = config.modelCapabilitiesOverrides?.[namespacedId];
                 const capabilities = capabilitiesToVSCode(derived, capOverride);
                 const tags = getDerivedModelTags(namespacedId, derived, {}, capOverride);
-                const rawProvider = modelInfo?.litellm_provider ?? "litellm";
+                const rawProvider = finalModelInfo?.litellm_provider ?? "litellm";
                 const rawModelName = modelName ?? namespacedId;
                 const backendDisplay = backendName ? "LiteLLM: " + backendName : "LiteLLM";
                 const extensionName = "LiteLLM Connector for Copilot";
@@ -423,18 +427,22 @@ export abstract class LiteLLMProviderBase {
                     ? `${session.backendName}/${modelName}`
                     : (modelName ?? "unknown");
                 const modelInfo = entry.model_info;
+                // Override mode to 'responses' when forceResponsesEndpoint is enabled
+                let finalModelInfo = modelInfo;
+                if (config.forceResponsesEndpoint && modelInfo?.mode === "chat") {
+                    finalModelInfo = { ...modelInfo, mode: "responses" as const };
+                }
 
                 // Cache the model info
-                this._modelInfoCache.set(namespacedId, modelInfo);
+                this._modelInfoCache.set(namespacedId, finalModelInfo);
 
-                // Use the same derivation logic as the legacy path
-                const derived = deriveCapabilitiesFromModelInfo(namespacedId, modelInfo);
+                const derived = deriveCapabilitiesFromModelInfo(namespacedId, finalModelInfo);
                 this._derivedCapabilitiesCache.set(namespacedId, derived);
 
                 const capOverride = config.modelCapabilitiesOverrides?.[namespacedId];
                 const capabilities = capabilitiesToVSCode(derived, capOverride);
                 const tags = getDerivedModelTags(namespacedId, derived, {}, capOverride);
-                const rawProvider = modelInfo?.litellm_provider ?? "litellm";
+                const rawProvider = finalModelInfo?.litellm_provider ?? "litellm";
                 const rawModelName = modelName ?? namespacedId;
                 const backendDisplay = session.backendName ? "LiteLLM: " + session.backendName : "LiteLLM";
                 const extensionName = "LiteLLM Connector for Copilot";
@@ -1103,7 +1111,16 @@ export abstract class LiteLLMProviderBase {
                     });
                 }
             } catch (err) {
-                Logger.warn(`/responses failed, falling back to /chat/completions: ${err}`);
+                // Only fall back to /chat/completions if forceResponsesEndpoint allows it
+                const config = await this._configManager.getConfig();
+                if (config.forceResponsesEndpoint && config.allowChatCompletionsFallback) {
+                    Logger.warn(`/responses failed, falling back to /chat/completions: ${err}`);
+                } else if (config.forceResponsesEndpoint) {
+                    Logger.error(`/responses failed and fallback is disabled: ${err}`);
+                    throw err;
+                } else {
+                    Logger.warn(`/responses failed, falling back to /chat/completions: ${err}`);
+                }
             }
         }
 

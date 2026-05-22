@@ -22,6 +22,8 @@ export class ConfigManager {
     private static readonly INLINE_COMPLETIONS_MODEL_ID_KEY = "litellm-connector.inlineCompletions.modelId";
     private static readonly SCM_COMMIT_MSG_MODEL_ID_KEY = "litellm-connector.commitModelIdOverride";
     private static readonly ENABLE_RESPONSES_API = "litellm-connector.enableResponsesApi";
+    private static readonly FORCE_RESPONSES_ENDPOINT_KEY = "litellm-connector.forceResponsesEndpoint";
+    private static readonly ALLOW_CHAT_COMPLETIONS_FALLBACK_KEY = "litellm-connector.allowChatCompletionsFallback";
 
     private _telemetryService?: TelemetryService;
 
@@ -215,6 +217,11 @@ export class ConfigManager {
             .get<string>(ConfigManager.SCM_COMMIT_MSG_MODEL_ID_KEY, "")
             .trim();
         const v2ApiEnabled = workspaceConfig.get<boolean>(ConfigManager.ENABLE_RESPONSES_API, false);
+        const forceResponsesEndpoint = workspaceConfig.get<boolean>(ConfigManager.FORCE_RESPONSES_ENDPOINT_KEY, true);
+        const allowChatCompletionsFallback = workspaceConfig.get<boolean>(
+            ConfigManager.ALLOW_CHAT_COMPLETIONS_FALLBACK_KEY,
+            false
+        );
 
         const trimmedInlineModelId = inlineCompletionsModelId?.trim() ?? "";
 
@@ -239,6 +246,8 @@ export class ConfigManager {
             commitModelIdOverride: `${scmGitCompletionsModelId}`,
             v2ApiEnabled,
             enableResponses: v2ApiEnabled,
+            forceResponsesEndpoint,
+            allowChatCompletionsFallback,
         };
     }
 
