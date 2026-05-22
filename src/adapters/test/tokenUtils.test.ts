@@ -7,6 +7,7 @@ import {
     estimateToolTokens,
     trimMessagesToFitBudget,
     countTokens,
+    countOpenAIChatMessagesTokens,
     calculateAvailableContext,
     getStaticPromptTokenCount,
     countTokensForV2Messages,
@@ -297,6 +298,35 @@ suite("TokenUtils Unit Tests", () => {
         assert.ok(count > 0);
 
         assert.strictEqual(countTokensForV2Messages("string"), 2);
+    });
+
+    test("countOpenAIChatMessagesTokens counts transport tool calls and tool results", () => {
+        const count = countOpenAIChatMessagesTokens(
+            [
+                {
+                    role: "assistant",
+                    content: "",
+                    tool_calls: [
+                        {
+                            id: "call_1",
+                            type: "function",
+                            function: {
+                                name: "read_file",
+                                arguments: '{"path":"a.txt"}',
+                            },
+                        },
+                    ],
+                },
+                {
+                    role: "tool",
+                    tool_call_id: "call_1",
+                    content: "file contents",
+                },
+            ],
+            "m"
+        );
+
+        assert.ok(count > 0);
     });
 
     test("trimV2MessagesForBudget protects assistant message on 'continue'", () => {

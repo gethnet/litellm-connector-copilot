@@ -2,7 +2,6 @@ import * as assert from "assert";
 import {
     deriveCapabilitiesFromModelInfo,
     getSupportedReasoningEfforts,
-    getDefaultReasoningEffort,
     buildReasoningEffortConfigurationSchema,
 } from "../modelCapabilities";
 import type { LiteLLMModelInfo } from "../../types";

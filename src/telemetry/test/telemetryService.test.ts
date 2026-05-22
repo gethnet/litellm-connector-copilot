@@ -71,6 +71,9 @@ suite("TelemetryService", () => {
         assert.strictEqual(event.properties.request_id, "test-request-id");
         assert.strictEqual(event.properties.caller, "test-caller");
         assert.strictEqual(event.properties.model, "test-model");
+        assert.strictEqual(event.properties.duration_ms, 100);
+        assert.strictEqual(event.properties.tokens_in, 10);
+        assert.strictEqual(event.properties.tokens_out, 20);
         assert.strictEqual(event.properties.distinctId, "test-machine-id");
         assert.strictEqual(event.properties.extension_version, "1.0.0");
     });
@@ -153,7 +156,63 @@ suite("TelemetryService", () => {
         const event = adapterMock.capture.firstCall.args[0];
         assert.strictEqual(event.event, "request_failed");
         assert.strictEqual(event.properties.request_id, "req-fail-123");
-        assert.strictEqual(event.properties.errorType, "boom");
+        assert.strictEqual(event.properties.error_type, "boom");
+        assert.strictEqual(event.properties.duration_ms, 12);
+    });
+
+    test("captureRequestCompleted normalizes request telemetry property keys", () => {
+        const mockContext = {
+            extension: {
+                packageJSON: {
+                    version: "1.0.0",
+                },
+            },
+        } as unknown as vscode.ExtensionContext;
+
+        telemetryService.initialize(mockContext);
+        telemetryService.captureRequestCompleted({
+            request_id: "req-snake-123",
+            caller: "chat",
+            model: "test-model",
+            endpoint: "/chat/completions",
+            durationMs: 77,
+            tokensIn: 12,
+            tokensOut: 34,
+        });
+
+        assert.strictEqual(adapterMock.capture.calledOnce, true);
+        const event = adapterMock.capture.firstCall.args[0];
+        assert.strictEqual(event.event, "request_completed");
+        assert.strictEqual(event.properties.request_id, "req-snake-123");
+        assert.strictEqual(event.properties.duration_ms, 77);
+        assert.strictEqual(event.properties.tokens_in, 12);
+        assert.strictEqual(event.properties.tokens_out, 34);
+    });
+
+    test("captureRequestCachingBypassed emits dedicated event with snake_case properties", () => {
+        const mockContext = {
+            extension: {
+                packageJSON: {
+                    version: "1.0.0",
+                },
+            },
+        } as unknown as vscode.ExtensionContext;
+
+        telemetryService.initialize(mockContext);
+        telemetryService.captureRequestCachingBypassed({
+            request_id: "req-bypass-123",
+            caller: "chat",
+            model: "anthropic/claude-3",
+            endpoint: "/chat/completions",
+            reason: "provider_caching_not_supported",
+        });
+
+        assert.strictEqual(adapterMock.capture.calledOnce, true);
+        const event = adapterMock.capture.firstCall.args[0];
+        assert.strictEqual(event.event, "request_caching_bypassed");
+        assert.strictEqual(event.properties.request_id, "req-bypass-123");
+        assert.strictEqual(event.properties.reason, "provider_caching_not_supported");
+        assert.strictEqual(event.properties.duration_ms, 0);
     });
 
     test("request telemetry preserves request_id as a flat searchable property", () => {

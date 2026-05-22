@@ -2,16 +2,16 @@
   {
     "match": "^gpt-5(\\.[0-9]+)?(-codex)?(-mini|-nano)?$",
     "supportsReasoning": true,
-    "reasoningEfforts": ["none", "minimal", "low", "medium", "high", "xhigh"],
+    "reasoningEfforts": ["none", "low", "medium", "high"],
     "defaultEffort": "medium",
-    "notes": "GPT-5* family supports the full canonical set plus xhigh."
+    "notes": "GPT-5* family supports the canonical reasoning ladder (none, low, medium, high)."
   },
   {
     "match": "^claude[-_].*",
     "supportsReasoning": true,
     "reasoningEfforts": ["none", "low", "medium", "high"],
     "defaultEffort": "medium",
-    "notes": "Anthropic models support a reduced set; no minimal/xhigh."
+    "notes": "Anthropic models support the canonical reasoning ladder (none, low, medium, high)."
   },
   {
     "match": "^(o1|o3|o4)-.*",

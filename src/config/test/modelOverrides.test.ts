@@ -52,7 +52,7 @@ suite("modelOverrides", () => {
         const catchAll = overrides[catchAllIndex];
 
         assert.ok(gptOverride, "gpt-5 override should be present");
-        assert.deepStrictEqual(gptOverride?.reasoningEfforts, ["none", "minimal", "low", "medium", "high", "xhigh"]);
+        assert.deepStrictEqual(gptOverride?.reasoningEfforts, ["none", "low", "medium", "high"]);
         assert.strictEqual(gptOverride?.defaultEffort, "medium");
 
         assert.ok(claudeOverride, "claude override should be present");
@@ -71,7 +71,7 @@ suite("modelOverrides", () => {
             {
                 match: "^[Gg][Pp][Tt].*",
                 supportsReasoning: true,
-                reasoningEfforts: ["none", "minimal"],
+                reasoningEfforts: ["none", "low"],
                 defaultEffort: "none",
             },
         ];
@@ -82,7 +82,7 @@ suite("modelOverrides", () => {
 
         assert.ok(override, "user override should be matched first");
         assert.strictEqual(override?.defaultEffort, "none");
-        assert.deepStrictEqual(override?.reasoningEfforts, ["none", "minimal"]);
+        assert.deepStrictEqual(override?.reasoningEfforts, ["none", "low"]);
     });
 
     test("invalid user override is skipped with a warning and does not crash", async () => {
@@ -105,12 +105,20 @@ suite("modelOverrides", () => {
         assert.strictEqual(overrides[0].defaultEffort, "low");
     });
 
-    test("getEffectiveEfforts prefers override match even without model info", async () => {
+    test("empty config returns default behavior (gpt-5 specific)", async () => {
         getConfigurationStub.returns(buildWorkspaceConfiguration([]));
 
-        const efforts = await getEffectiveEfforts("gpt-5-mini");
+        // With empty config and no model info for a generic model, returns empty
+        // because there's no reason to assume reasoning capability
+        const efforts = await getEffectiveEfforts("generic-model");
 
-        assert.deepStrictEqual(efforts, ["none", "minimal", "low", "medium", "high", "xhigh"]);
+        assert.deepStrictEqual(efforts, []);
+
+        // For canonical GPT-5 models, when no model info is provided but the model
+        // is in the bundled/default list, returns canonical efforts
+        const gpt5Efforts = await getEffectiveEfforts("gpt-5-mini");
+
+        assert.deepStrictEqual(gpt5Efforts, ["none", "low", "medium", "high"]);
     });
 
     test("getEffectiveEfforts inherits proxy support when override is neutral", async () => {
@@ -140,7 +148,7 @@ suite("modelOverrides", () => {
     test("forceMandatory override returns values even when LiteLLM has data", async () => {
         const override: ModelOverride = {
             match: "^test-.*",
-            reasoningEfforts: ["high", "xhigh"],
+            reasoningEfforts: ["high"],
             forceMandatory: true,
         };
         getConfigurationStub.returns(buildWorkspaceConfiguration([override]));
@@ -151,13 +159,13 @@ suite("modelOverrides", () => {
 
         const result = await getEffectiveEfforts("test-model", modelInfo, undefined, true);
         assert.ok(result.includes("high"));
-        assert.ok(result.includes("xhigh"));
+        assert.strictEqual(result.length, 1);
     });
 
     test("non-mandatory override is ignored when LiteLLM has valid data", async () => {
         const override: ModelOverride = {
             match: "^test-.*",
-            reasoningEfforts: ["high", "xhigh"],
+            reasoningEfforts: ["high"],
             forceMandatory: false,
         };
         getConfigurationStub.returns(buildWorkspaceConfiguration([override]));
@@ -167,8 +175,8 @@ suite("modelOverrides", () => {
         };
 
         const result = await getEffectiveEfforts("test-model", modelInfo);
-        // Should return default set, not override values
-        assert.ok(result.includes("medium"));
-        assert.ok(!result.includes("xhigh"));
+        // If LiteLLM has valid data, returns enumeration. When supports_reasoning is true
+        // but no effort flags are set, falls back to DEFAULT_REASONING_EFFORTS.
+        assert.deepStrictEqual(result, ["none", "low", "medium", "high"]);
     });
 });

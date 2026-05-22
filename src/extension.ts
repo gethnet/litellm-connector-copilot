@@ -230,19 +230,26 @@ export function activate(context: vscode.ExtensionContext): void {
     // Re-query models after settings updates so newly completed Language Models provider
     // configuration flows are reflected without requiring a reload.
     let refreshModelsTimer: NodeJS.Timeout | undefined;
-    const scheduleModelRefresh = () => {
+    const refreshModelInformation = () => {
         if (refreshModelsTimer) {
             clearTimeout(refreshModelsTimer);
         }
         refreshModelsTimer = setTimeout(() => {
             refreshModelsTimer = undefined;
-            Logger.info("Configuration changed; clearing model cache and refreshing model information...");
-            activeProvider.clearModelCache();
+            Logger.info("Configuration changed; refreshing model information...");
+            activeProvider.refreshModelInformation();
         }, 250);
     };
     context.subscriptions.push(
-        vscode.workspace.onDidChangeConfiguration(() => {
-            scheduleModelRefresh();
+        vscode.workspace.onDidChangeConfiguration((e) => {
+            // Only refresh when LiteLM-specific settings change, not generic provider config
+            // (e.affectsConfiguration) returns true for the top-level "litellm-connector.*" path
+            if (
+                e.affectsConfiguration("litellm-connector.modelOverrides") ||
+                e.affectsConfiguration("litellm-connector.backendGroups")
+            ) {
+                refreshModelInformation();
+            }
         })
     );
     context.subscriptions.push({

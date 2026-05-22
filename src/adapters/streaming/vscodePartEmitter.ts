@@ -22,8 +22,18 @@ export function emitV2PartsToVSCode(
                     Logger.trace(`[vscodePartEmitter] Dropping cache_control data part (mimeType: ${part.mimeType})`);
                     break;
                 }
-                // Guard: if mimeType starts with "text/" or includes "json", treat value as string|object; otherwise unknown
                 const mimeType = part.mimeType;
+
+                // The `usage` mimetype must stay raw. `LanguageModelDataPart.json()` would
+                // wrap it as JSON content and lose the special MIME type VS Code expects.
+                if (mimeType === "usage") {
+                    const payloadJson = typeof part.value === "string" ? part.value : JSON.stringify(part.value);
+                    const payloadBytes = new TextEncoder().encode(payloadJson);
+                    progress.report(new vscode.LanguageModelDataPart(payloadBytes, "usage"));
+                    break;
+                }
+
+                // Guard: if mimeType starts with "text/" or includes "json", treat value as string|object; otherwise unknown
                 const isTextLike = mimeType.startsWith("text/") || mimeType.includes("json");
                 if (isTextLike) {
                     const safeValue: string | object =

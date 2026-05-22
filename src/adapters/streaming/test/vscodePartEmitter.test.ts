@@ -67,4 +67,48 @@ suite("vscodePartEmitter", () => {
             "cache_control is legitimate text here"
         );
     });
+
+    test("emits usage data parts with the raw usage mimetype", () => {
+        const reported: unknown[] = [];
+        const progress = {
+            report: (p: unknown) => reported.push(p),
+        } as vscode.Progress<vscode.LanguageModelResponsePart>;
+
+        emitV2PartsToVSCode(
+            [
+                {
+                    type: "data",
+                    mimeType: "usage",
+                    value: {
+                        prompt_tokens: 11,
+                        completion_tokens: 7,
+                        total_tokens: 18,
+                        prompt_tokens_details: {
+                            cached_tokens: 3,
+                        },
+                        completion_tokens_details: {
+                            reasoning_tokens: 4,
+                        },
+                    },
+                },
+            ],
+            progress
+        );
+
+        assert.strictEqual(reported.length, 1);
+        assert.ok(reported[0] instanceof vscode.LanguageModelDataPart);
+        const part = reported[0] as vscode.LanguageModelDataPart;
+        assert.strictEqual(part.mimeType, "usage");
+        assert.deepStrictEqual(JSON.parse(Buffer.from(part.data).toString("utf-8")), {
+            prompt_tokens: 11,
+            completion_tokens: 7,
+            total_tokens: 18,
+            prompt_tokens_details: {
+                cached_tokens: 3,
+            },
+            completion_tokens_details: {
+                reasoning_tokens: 4,
+            },
+        });
+    });
 });

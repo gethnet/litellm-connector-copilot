@@ -360,7 +360,7 @@ suite("modelCapabilities", () => {
     });
 
     suite("getSupportedReasoningEfforts", () => {
-        const canonicalGpt5Efforts: SupportedReasoningEffort[] = ["none", "minimal", "low", "medium", "high", "xhigh"];
+        const canonicalGpt5Efforts: SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
         const claudeEfforts: SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
         const canonicalCatchAllEfforts: SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
 
@@ -376,7 +376,7 @@ suite("modelCapabilities", () => {
             assert.deepStrictEqual(result, canonicalGpt5Efforts);
         });
 
-        test("returns canonical GPT-5 ladder even when only xhigh is flagged", () => {
+        test("returns only efforts that are explicitly supported", () => {
             const modelInfo: LiteLLMModelInfo = {
                 id: "gpt-5.4-mini",
                 name: "GPT-5.4 Mini",
@@ -386,7 +386,8 @@ suite("modelCapabilities", () => {
 
             const result = getSupportedReasoningEfforts(modelInfo, "gpt-5.4-mini");
 
-            assert.deepStrictEqual(result, canonicalGpt5Efforts);
+            // Canonical ladder is now limited to none/low/medium/high.
+            assert.deepStrictEqual(result, ["none", "low", "medium", "high"]);
         });
 
         test("returns Claude ladder for claude-haiku-4-5", () => {
@@ -473,15 +474,14 @@ suite("modelCapabilities", () => {
             // that appears alongside each option in the model picker hover popup (e.g.
             // "Balanced reasoning and speed" for "medium"). Without this, the picker shows only
             // labels with no guidance — exactly what Copilot's own models provide.
-            const schema = buildReasoningEffortConfigurationSchema(["none", "low", "medium", "high", "xhigh"]);
+            const schema = buildReasoningEffortConfigurationSchema(["none", "low", "medium", "high"]);
             const descs = schema?.properties.reasoningEffort.enumDescriptions;
             assert.ok(Array.isArray(descs), "Expected enumDescriptions to be an array");
-            assert.strictEqual(descs?.length, 5, "Expected one description per enum value");
+            assert.strictEqual(descs?.length, 4, "Expected one description per enum value");
             assert.strictEqual(descs?.[0], "No reasoning applied");
             assert.strictEqual(descs?.[1], "Faster responses with less reasoning");
             assert.strictEqual(descs?.[2], "Balanced reasoning and speed");
             assert.strictEqual(descs?.[3], "Greater reasoning depth but slower");
-            assert.strictEqual(descs?.[4], "Maximum reasoning depth but slower");
         });
 
         test("defaults to medium for canonical reasoning configuration", () => {

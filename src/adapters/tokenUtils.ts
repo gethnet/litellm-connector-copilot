@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { LiteLLMModelInfo } from "../types";
+import type { LiteLLMModelInfo, OpenAIChatMessage } from "../types";
 import { isAnthropicModel } from "../utils/modelUtils";
 import { selectTokenizer } from "./tokenizers/selectTokenizer";
 import type { V2ChatMessage } from "../providers/v2Types";
@@ -74,6 +74,72 @@ export function countTokens(
         return total;
     }
     return tokenizer.countMessageTokens(input as vscode.LanguageModelChatRequestMessage).tokens;
+}
+
+/**
+ * Counts tokens for the OpenAI-style transport messages that are actually sent
+ * to LiteLLM after trimming and tool conversion.
+ */
+export function countOpenAIChatMessagesTokens(
+    messages: readonly OpenAIChatMessage[],
+    modelId?: string,
+    modelInfo?: LiteLLMModelInfo
+): number {
+    const tokenizer = selectTokenizer(modelId || "default", modelInfo);
+    let total = 0;
+
+    for (const message of messages) {
+        if (typeof message.content === "string") {
+            total += tokenizer.countTokens(message.content).tokens;
+        } else if (Array.isArray(message.content)) {
+            for (const part of message.content) {
+                if (part.type === "text" && typeof part.text === "string") {
+                    total += tokenizer.countTokens(part.text).tokens;
+                }
+            }
+        }
+
+        if (typeof message.name === "string" && message.name.length > 0) {
+            total += tokenizer.countTokens(message.name).tokens;
+        }
+
+        if (typeof message.tool_call_id === "string" && message.tool_call_id.length > 0) {
+            total += tokenizer.countTokens(message.tool_call_id).tokens;
+        }
+
+        if (Array.isArray(message.tool_calls)) {
+            for (const toolCall of message.tool_calls) {
+                total += tokenizer.countTokens(toolCall.function.name).tokens;
+                total += tokenizer.countTokens(toolCall.function.arguments).tokens;
+            }
+        }
+    }
+
+    return total;
+}
+
+/**
+ * Resolves the number of tokens reserved for model output in a request.
+ */
+export function getReservedOutputTokens(
+    model: vscode.LanguageModelChatInformation,
+    requestedMaxTokens?: number
+): number {
+    if (typeof requestedMaxTokens === "number") {
+        return Math.max(1, Math.min(requestedMaxTokens, model.maxOutputTokens));
+    }
+    return Math.max(1, model.maxOutputTokens);
+}
+
+/**
+ * Resolves the total token window for the model.
+ */
+export function getTotalTokenLimit(model: vscode.LanguageModelChatInformation, modelInfo?: LiteLLMModelInfo): number {
+    const rawLimit = modelInfo?.max_input_tokens ?? modelInfo?.context_window_tokens ?? modelInfo?.max_tokens;
+    if (typeof rawLimit === "number" && rawLimit > 0) {
+        return rawLimit;
+    }
+    return Math.max(1, model.maxInputTokens + model.maxOutputTokens);
 }
 
 export function countTokensForV2Messages(

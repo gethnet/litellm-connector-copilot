@@ -38,6 +38,41 @@ export interface OpenAIChatMessage {
 }
 
 /**
+ * OpenAI-compatible breakdown of prompt token usage.
+ */
+export interface OpenAIUsagePromptTokenDetails {
+    cached_tokens?: number;
+    cache_creation_input_tokens?: number;
+}
+
+/**
+ * OpenAI-compatible breakdown of completion token usage.
+ * Extra fields like `tool_tokens` are preserved when upstream providers expose them.
+ */
+export interface OpenAIUsageCompletionTokenDetails {
+    reasoning_tokens?: number;
+    accepted_prediction_tokens?: number;
+    rejected_prediction_tokens?: number;
+    tool_tokens?: number;
+}
+
+/**
+ * Usage payload emitted back to VS Code through a `LanguageModelDataPart`.
+ * Required fields match the OpenAI usage object so VS Code's BYOK plumbing can parse it,
+ * while optional fields carry richer budgeting diagnostics.
+ */
+export interface OpenAIUsagePayload {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    prompt_tokens_details?: OpenAIUsagePromptTokenDetails;
+    completion_tokens_details?: OpenAIUsageCompletionTokenDetails;
+    system_prompt_tokens?: number;
+    reserved_output_tokens?: number;
+    total_token_max?: number;
+}
+
+/**
  * Capability overrides for a single model.
  * Undefined fields are left at their auto-derived values.
  */
@@ -341,6 +376,7 @@ export interface OpenAIChatCompletionRequest {
     stop?: string | string[];
     tools?: OpenAIFunctionToolDef[];
     tool_choice?: string | object;
+    stream_options?: { include_usage?: boolean };
     /**
      * OpenAI-compatible reasoning effort hint accepted by LiteLLM in flat top-level
      * snake_case form on both `/chat/completions` and `/responses`. LiteLLM translates
@@ -392,6 +428,7 @@ export interface LiteLLMResponsesRequest {
      * the canonical chat-shaped request body during transformation.
      */
     reasoning_effort?: string;
+    stream_options?: { include_usage?: boolean };
     /**
      * LiteLLM passthrough body.
      * Used for features like caching controls.

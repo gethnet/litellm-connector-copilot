@@ -116,16 +116,22 @@ suite("Extension Activation Unit Tests", () => {
 
         const clearModelCacheStub = sandbox.stub(providers.LiteLLMChatProvider.prototype, "clearModelCache");
 
-        let configChangeHandler: (() => void) | undefined;
+        let configChangeHandler: ((e: vscode.ConfigurationChangeEvent) => void) | undefined;
         sandbox.stub(vscode.workspace, "onDidChangeConfiguration").callsFake((listener) => {
-            configChangeHandler = listener as () => void;
+            configChangeHandler = listener as (e: vscode.ConfigurationChangeEvent) => void;
             return { dispose() {} } as vscode.Disposable;
         });
 
         extension.activate(context);
         assert.ok(configChangeHandler, "expected onDidChangeConfiguration handler to be registered");
 
-        configChangeHandler?.();
+        // Trigger config change WITHOUT affecting litellm-connector config - should not refresh
+        const mockEvent = {
+            affectsConfiguration: (section: string): boolean => {
+                return section === "litellm-connector.someOtherSetting";
+            },
+        };
+        configChangeHandler(mockEvent);
         await new Promise((resolve) => setTimeout(resolve, 300));
 
         assert.strictEqual(clearModelCacheStub.calledOnce, false);

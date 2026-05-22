@@ -112,6 +112,8 @@ export abstract class LiteLLMProviderBase {
     protected _modelListFetchedAtMs = 0;
     private _inFlightDiscovery: Promise<vscode.LanguageModelChatInformation[]> | undefined;
 
+    private _usageOptOutModels: Set<string> = new Set();
+
     protected _multiBackendClient: MultiBackendClient | undefined;
     protected _activeBackendNames: string[] = [];
 
@@ -893,6 +895,10 @@ export abstract class LiteLLMProviderBase {
             `[buildOpenAIChatRequest] requestBody.reasoning_effort = ${(requestBody as { reasoning_effort?: string }).reasoning_effort}`
         );
 
+        if (!this._usageOptOutModels.has(model.id)) {
+            requestBody.stream_options = { include_usage: true } as { include_usage?: boolean };
+        }
+
         const mo = (options.modelOptions as Record<string, unknown>) ?? {};
 
         if (this.isParameterSupported("temperature", modelInfo, model.id)) {
@@ -1005,6 +1011,10 @@ export abstract class LiteLLMProviderBase {
             requestBody.tool_choice = toolConfig.tool_choice;
         }
 
+        if (!this._usageOptOutModels.has(model.id)) {
+            requestBody.stream_options = { include_usage: true } as { include_usage?: boolean };
+        }
+
         this.stripUnsupportedParametersFromRequest(
             requestBody as unknown as Record<string, unknown>,
             modelInfo,
@@ -1086,12 +1096,6 @@ export abstract class LiteLLMProviderBase {
                         responsesRequest.model = backend.originalModelId;
                     }
                     await responsesClient.sendResponsesRequest(responsesRequest, progress, token, modelInfo);
-                    LiteLLMTelemetry.reportMetric({
-                        requestId: `resp-${Math.random().toString(36).slice(2, 10)}`,
-                        model: request.model,
-                        status: "success",
-                        ...(caller && { caller }),
-                    });
                     return new ReadableStream<Uint8Array>({
                         start(controller) {
                             controller.close();
@@ -1133,6 +1137,10 @@ export abstract class LiteLLMProviderBase {
         let attempts = 0;
         let lastError: unknown;
 
+        const clearUsageFlag = () => {
+            delete (request as { stream_options?: { include_usage?: boolean } }).stream_options;
+        };
+
         while (attempts < 6) {
             try {
                 return await this.sendOnceWithOverflow(
@@ -1146,6 +1154,16 @@ export abstract class LiteLLMProviderBase {
                     modelInfo
                 );
             } catch (err) {
+                const errorMessage = err instanceof Error ? err.message : String(err);
+                if (
+                    typeof errorMessage === "string" &&
+                    (errorMessage.toLowerCase().includes("stream_options") ||
+                        errorMessage.toLowerCase().includes("include_usage"))
+                ) {
+                    this._usageOptOutModels.add(model.id);
+                    clearUsageFlag();
+                }
+
                 Logger.debug(`[sendRequestWithRetry] Caught error, checking isReasoningError...`);
                 const isReasoning = isReasoningError(err);
                 Logger.debug(`[sendRequestWithRetry] isReasoningError result: ${isReasoning}`);

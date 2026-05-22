@@ -1,5 +1,6 @@
 export type { V2EmittedPart as EmittedPart } from "../../providers/v2Types";
 import type { V2EmittedPart as EmittedPart } from "../../providers/v2Types";
+import type { OpenAIUsageCompletionTokenDetails, OpenAIUsagePayload, OpenAIUsagePromptTokenDetails } from "../../types";
 import { isCacheControlMimeType, normalizeToolCallId } from "../../utils";
 import { StructuredLogger } from "../../observability/structuredLogger";
 
@@ -21,6 +22,86 @@ export function createInitialStreamingState(): StreamingState {
         responseToolCallBuffers: new Map(),
         responseToolCallOrder: [],
     };
+}
+
+interface RawUsagePayload {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    system_tokens?: number;
+    prompt_tokens_details?: { cached_tokens?: number; cache_creation_input_tokens?: number };
+    completion_tokens_details?: {
+        reasoning_tokens?: number;
+        tool_tokens?: number;
+        accepted_prediction_tokens?: number;
+        rejected_prediction_tokens?: number;
+    };
+    input_token_details?: { cached_tokens?: number; cache_creation_input_tokens?: number };
+    output_token_details?: {
+        reasoning_tokens?: number;
+        tool_tokens?: number;
+        accepted_prediction_tokens?: number;
+        rejected_prediction_tokens?: number;
+    };
+}
+
+function normalizeUsagePayload(usage: RawUsagePayload): OpenAIUsagePayload {
+    const promptTokenDetails: OpenAIUsagePromptTokenDetails = {};
+    const cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? usage.input_token_details?.cached_tokens;
+    if (typeof cachedTokens === "number") {
+        promptTokenDetails.cached_tokens = cachedTokens;
+    } else if (usage.input_token_details !== undefined || usage.prompt_tokens_details !== undefined) {
+        promptTokenDetails.cached_tokens = 0;
+    }
+
+    const cacheCreationInputTokens =
+        usage.prompt_tokens_details?.cache_creation_input_tokens ??
+        usage.input_token_details?.cache_creation_input_tokens;
+    if (typeof cacheCreationInputTokens === "number") {
+        promptTokenDetails.cache_creation_input_tokens = cacheCreationInputTokens;
+    }
+
+    const completionTokenDetails: OpenAIUsageCompletionTokenDetails = {};
+    const reasoningTokens =
+        usage.completion_tokens_details?.reasoning_tokens ?? usage.output_token_details?.reasoning_tokens;
+    if (typeof reasoningTokens === "number") {
+        completionTokenDetails.reasoning_tokens = reasoningTokens;
+    } else if (usage.output_token_details !== undefined || usage.completion_tokens_details !== undefined) {
+        completionTokenDetails.reasoning_tokens = 0;
+    }
+    const toolTokens = usage.completion_tokens_details?.tool_tokens ?? usage.output_token_details?.tool_tokens;
+    if (typeof toolTokens === "number") {
+        completionTokenDetails.tool_tokens = toolTokens;
+    }
+    const acceptedPredictionTokens =
+        usage.completion_tokens_details?.accepted_prediction_tokens ??
+        usage.output_token_details?.accepted_prediction_tokens;
+    if (typeof acceptedPredictionTokens === "number") {
+        completionTokenDetails.accepted_prediction_tokens = acceptedPredictionTokens;
+    }
+    const rejectedPredictionTokens =
+        usage.completion_tokens_details?.rejected_prediction_tokens ??
+        usage.output_token_details?.rejected_prediction_tokens;
+    if (typeof rejectedPredictionTokens === "number") {
+        completionTokenDetails.rejected_prediction_tokens = rejectedPredictionTokens;
+    }
+
+    const normalized: OpenAIUsagePayload = {
+        prompt_tokens: usage.prompt_tokens ?? 0,
+        completion_tokens: usage.completion_tokens ?? 0,
+        total_tokens: (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0),
+    };
+
+    if (Object.keys(promptTokenDetails).length > 0) {
+        normalized.prompt_tokens_details = promptTokenDetails;
+    }
+    if (Object.keys(completionTokenDetails).length > 0) {
+        normalized.completion_tokens_details = completionTokenDetails;
+    }
+    if (typeof usage.system_tokens === "number") {
+        normalized.system_prompt_tokens = usage.system_tokens;
+    }
+
+    return normalized;
 }
 
 /**
@@ -46,10 +127,16 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
             StructuredLogger.trace("stream.cache_control_carrier_dropped", { mimeType: data.mimeType });
             return [];
         }
+
+        // Preserve the original payload value when present; fallback to the carrier itself.
+        const carrierValue = Object.prototype.hasOwnProperty.call(data, "data")
+            ? (data as { data: unknown }).data
+            : data;
+
         dataParts.push({
             type: "data",
             mimeType: data.mimeType,
-            value: data,
+            value: carrierValue,
         });
         return dataParts;
     }
@@ -161,6 +248,23 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
 
             finishParts.push({ type: "finish", reason: choice.finish_reason });
         }
+
+        if (data.usage && typeof data.usage === "object") {
+            dataParts.push({
+                type: "data",
+                mimeType: "usage",
+                value: normalizeUsagePayload(data.usage as RawUsagePayload),
+            });
+        }
+    }
+
+    // Handle usage-only frames (OpenAI /responses sometimes emit standalone usage objects)
+    if (!dataParts.length && data.usage && typeof data.usage === "object") {
+        dataParts.push({
+            type: "data",
+            mimeType: "usage",
+            value: normalizeUsagePayload(data.usage as RawUsagePayload),
+        });
     }
 
     // 2. Handle LiteLLM /responses format
@@ -188,7 +292,22 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
         }
     }
     if (data.type === "response.completed") {
-        const response = data.response as { usage?: { input_tokens?: number; output_tokens?: number } } | undefined;
+        const response = data.response as
+            | {
+                  usage?: {
+                      input_tokens?: number;
+                      output_tokens?: number;
+                      system_tokens?: number;
+                      input_token_details?: { cached_tokens?: number; cache_creation_input_tokens?: number };
+                      output_token_details?: {
+                          reasoning_tokens?: number;
+                          tool_tokens?: number;
+                          accepted_prediction_tokens?: number;
+                          rejected_prediction_tokens?: number;
+                      };
+                  };
+              }
+            | undefined;
         responseParts.push({
             type: "response",
             usage: {
@@ -220,14 +339,25 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
         state.responseToolCallBuffers.clear();
         state.responseToolCallOrder = [];
         if (typeof response?.usage?.input_tokens === "number" || typeof response?.usage?.output_tokens === "number") {
+            const usageValue = normalizeUsagePayload({
+                prompt_tokens: response?.usage?.input_tokens,
+                completion_tokens: response?.usage?.output_tokens,
+                system_tokens: response?.usage?.system_tokens,
+                input_token_details: response?.usage?.input_token_details,
+                output_token_details: response?.usage?.output_token_details,
+            });
+
+            if (!usageValue.prompt_tokens_details) {
+                usageValue.prompt_tokens_details = { cached_tokens: 0 };
+            }
+            if (!usageValue.completion_tokens_details) {
+                usageValue.completion_tokens_details = { reasoning_tokens: 0 };
+            }
+
             dataParts.push({
                 type: "data",
-                mimeType: "application/vnd.litellm.usage+json",
-                value: {
-                    kind: "usage",
-                    promptTokens: response?.usage?.input_tokens,
-                    completionTokens: response?.usage?.output_tokens,
-                },
+                mimeType: "usage",
+                value: usageValue,
             });
         }
     }

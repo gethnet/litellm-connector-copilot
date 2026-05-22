@@ -1,4 +1,4 @@
-import type { LanguageModelChatRequestMessage, LanguageModelTextPart } from "vscode";
+import type { LanguageModelChatRequestMessage } from "vscode";
 import type { Tokenizer, TokenizationResult } from "./types";
 
 export class HeuristicTokenizer implements Tokenizer {
@@ -25,18 +25,54 @@ export class HeuristicTokenizer implements Tokenizer {
             total += this.countTokens(message.content).tokens;
         } else {
             for (const part of message.content) {
-                if (
-                    typeof part === "object" &&
-                    part !== null &&
-                    "value" in part &&
-                    typeof (part as unknown as LanguageModelTextPart).value === "string"
-                ) {
-                    total += this.countTokens((part as unknown as LanguageModelTextPart).value).tokens;
-                }
+                total += this.countPartTokens(part);
                 // Images are typically handled with a fixed cost or safety margin in the caller
             }
         }
         // Add overhead for roles/formatting (OpenAI-ish)
         return { tokens: total };
+    }
+
+    private countPartTokens(part: unknown): number {
+        if (typeof part !== "object" || part === null) {
+            return 0;
+        }
+
+        if ("value" in part) {
+            const value = (part as { value?: string | string[] }).value;
+            if (typeof value === "string") {
+                return this.countTokens(value).tokens;
+            }
+            if (Array.isArray(value)) {
+                return this.countTokens(value.join("")).tokens;
+            }
+        }
+
+        if ("name" in part && "input" in part) {
+            const toolCall = part as { name?: string; input?: unknown };
+            return this.countTokens(`${toolCall.name ?? ""}${JSON.stringify(toolCall.input ?? {})}`).tokens;
+        }
+
+        if ("mimeType" in part && "data" in part) {
+            const dataPart = part as { mimeType?: string; data?: Uint8Array };
+            if (
+                typeof dataPart.mimeType === "string" &&
+                dataPart.data instanceof Uint8Array &&
+                (dataPart.mimeType.startsWith("text/") ||
+                    dataPart.mimeType.includes("json") ||
+                    dataPart.mimeType === "usage")
+            ) {
+                return this.countTokens(Buffer.from(dataPart.data).toString("utf-8")).tokens;
+            }
+        }
+
+        if ("content" in part && Array.isArray((part as { content?: unknown[] }).content)) {
+            return (part as { content: unknown[] }).content.reduce<number>(
+                (sum, item) => sum + this.countPartTokens(item),
+                0
+            );
+        }
+
+        return 0;
     }
 }

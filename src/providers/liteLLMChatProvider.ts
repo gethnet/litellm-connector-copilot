@@ -13,12 +13,19 @@ import { tryParseJSONObject } from "../utils";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
 import { LiteLLMProviderBase } from "./liteLLMProviderBase";
-import { countTokens } from "../adapters/tokenUtils";
+import {
+    countOpenAIChatMessagesTokens,
+    countTokens,
+    estimateToolTokens,
+    getReservedOutputTokens,
+    getTotalTokenLimit,
+} from "../adapters/tokenUtils";
 import { decodeSSE } from "../adapters/sse/sseDecoder";
 import { createInitialStreamingState, interpretStreamEvent } from "../adapters/streaming/liteLLMStreamInterpreter";
 import type { StreamingState } from "../adapters/streaming/liteLLMStreamInterpreter";
 import { emitPartsToVSCode } from "../adapters/streaming/vscodePartEmitter";
 import type { EffortFallbackCache } from "../utils/reasoningEffortFallback";
+import type { OpenAIUsageCompletionTokenDetails, OpenAIUsagePayload, OpenAIUsagePromptTokenDetails } from "../types";
 
 /**
  * Chat provider implementation for VS Code's LanguageModelChatProvider.
@@ -30,6 +37,19 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
     // Streaming state
     private _streamingState: StreamingState = createInitialStreamingState();
     private _partialAssistantText = "";
+    private _lastStreamUsage?: {
+        promptTokens?: number;
+        completionTokens?: number;
+        systemTokens?: number;
+        cachedTokens?: number;
+        cacheCreationInputTokens?: number;
+        reasoningTokens?: number;
+        toolTokens?: number;
+        acceptedPredictionTokens?: number;
+        rejectedPredictionTokens?: number;
+    };
+    private _sawUsageDataPart = false;
+    private _estimatedToolCallTokens = 0;
 
     constructor(secrets: vscode.SecretStorage, userAgent: string, effortFallbackCache?: EffortFallbackCache) {
         super(secrets, userAgent, effortFallbackCache);
@@ -38,47 +58,71 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
     private emitExperimentalUsageData(
         progress: vscode.Progress<vscode.LanguageModelResponsePart>,
         tokensIn: number,
-        tokensOut: number
+        tokensOut: number,
+        reasoningTokens?: number,
+        cachedTokens?: number,
+        extra?: {
+            systemPromptTokens?: number;
+            toolTokens?: number;
+            acceptedPredictionTokens?: number;
+            rejectedPredictionTokens?: number;
+            cacheCreationInputTokens?: number;
+            reservedOutputTokens?: number;
+            totalTokenMax?: number;
+        }
     ): void {
         Logger.debug(
-            `Emitting experimental usage data part | promptTokens: ${tokensIn} | completionTokens: ${tokensOut}`
+            `Emitting experimental usage data part | prompt_tokens: ${tokensIn} | completion_tokens: ${tokensOut} | reasoning_tokens: ${reasoningTokens ?? "undefined"} | cached_tokens: ${cachedTokens ?? "undefined"} | system_prompt_tokens: ${extra?.systemPromptTokens ?? "undefined"}`
         );
-        const detailsString = `Context: ${tokensIn} tokens | Output: ${tokensOut} tokens`;
 
-        // 1. Try direct DTO injection (bypassing type system) when VS Code supports it.
-        // VS Code does not yet expose a typed usage part, so guard with runtime checks.
-        try {
-            const report = (progress as unknown as { report?: (value: unknown) => void }).report;
-            if (typeof report === "function") {
-                report({
-                    kind: "usage",
-                    promptTokens: tokensIn,
-                    completionTokens: tokensOut,
-                    details: detailsString,
-                    metadata: {
-                        details: detailsString,
-                    },
-                });
-            }
-        } catch (e) {
-            Logger.trace("Direct usage DTO injection failed", e);
+        const usagePayload: OpenAIUsagePayload = {
+            prompt_tokens: tokensIn,
+            completion_tokens: tokensOut,
+            total_tokens: tokensIn + tokensOut,
+        };
+
+        const promptTokenDetails: OpenAIUsagePromptTokenDetails = {};
+        if (typeof cachedTokens === "number") {
+            promptTokenDetails.cached_tokens = cachedTokens;
+        }
+        if (typeof extra?.cacheCreationInputTokens === "number") {
+            promptTokenDetails.cache_creation_input_tokens = extra.cacheCreationInputTokens;
+        }
+        if (Object.keys(promptTokenDetails).length > 0) {
+            usagePayload.prompt_tokens_details = promptTokenDetails;
         }
 
-        // 2. Keep the DataPart probe as fallback
-        progress.report(
-            vscode.LanguageModelDataPart.json(
-                {
-                    kind: "usage",
-                    promptTokens: tokensIn,
-                    completionTokens: tokensOut,
-                    details: detailsString,
-                    metadata: {
-                        details: detailsString,
-                    },
-                },
-                "application/vnd.litellm.usage+json"
-            )
-        );
+        const completionTokenDetails: OpenAIUsageCompletionTokenDetails = {};
+        if (typeof reasoningTokens === "number") {
+            completionTokenDetails.reasoning_tokens = reasoningTokens;
+        }
+        if (typeof extra?.toolTokens === "number") {
+            completionTokenDetails.tool_tokens = extra.toolTokens;
+        }
+        if (typeof extra?.acceptedPredictionTokens === "number") {
+            completionTokenDetails.accepted_prediction_tokens = extra.acceptedPredictionTokens;
+        }
+        if (typeof extra?.rejectedPredictionTokens === "number") {
+            completionTokenDetails.rejected_prediction_tokens = extra.rejectedPredictionTokens;
+        }
+        if (Object.keys(completionTokenDetails).length > 0) {
+            usagePayload.completion_tokens_details = completionTokenDetails;
+        }
+
+        if (typeof extra?.systemPromptTokens === "number") {
+            usagePayload.system_prompt_tokens = extra.systemPromptTokens;
+        }
+        if (typeof extra?.reservedOutputTokens === "number") {
+            usagePayload.reserved_output_tokens = extra.reservedOutputTokens;
+        }
+        if (typeof extra?.totalTokenMax === "number") {
+            usagePayload.total_token_max = extra.totalTokenMax;
+        }
+
+        const payloadJson = JSON.stringify(usagePayload);
+        const payloadBytes = new TextEncoder().encode(payloadJson);
+
+        progress.report(new vscode.LanguageModelDataPart(payloadBytes, "usage"));
     }
 
     async provideLanguageModelChatInformation(
@@ -153,6 +197,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             }`
         );
 
+        let reservedOutputTokensForRequest: number | undefined;
+        let totalTokenMaxForRequest: number | undefined;
+
         const trackingProgress: Progress<LanguageModelResponsePart> = {
             report: (part) => {
                 if (part instanceof vscode.LanguageModelTextPart) {
@@ -161,6 +208,47 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                     // Accumulate thinking tokens as well to count total output tokens accurately
                     const tp = part as unknown as { value: string | string[] };
                     this._partialAssistantText += Array.isArray(tp.value) ? tp.value.join("") : tp.value;
+                } else if (part instanceof vscode.LanguageModelToolCallPart) {
+                    this._estimatedToolCallTokens += countTokens(`${part.name}${JSON.stringify(part.input ?? {})}`);
+                } else if (part instanceof vscode.LanguageModelDataPart && part.mimeType === "usage") {
+                    try {
+                        this._sawUsageDataPart = true;
+                        const parsed = JSON.parse(Buffer.from(part.data).toString("utf-8")) as OpenAIUsagePayload;
+                        const completionTokenDetails: OpenAIUsageCompletionTokenDetails = {
+                            ...(parsed.completion_tokens_details ?? {}),
+                        };
+                        if (completionTokenDetails.tool_tokens === undefined && this._estimatedToolCallTokens > 0) {
+                            completionTokenDetails.tool_tokens = this._estimatedToolCallTokens;
+                        }
+
+                        const enrichedUsage: OpenAIUsagePayload = {
+                            ...parsed,
+                            completion_tokens_details:
+                                Object.keys(completionTokenDetails).length > 0 ? completionTokenDetails : undefined,
+                            reserved_output_tokens: parsed.reserved_output_tokens ?? reservedOutputTokensForRequest,
+                            total_token_max: parsed.total_token_max ?? totalTokenMaxForRequest,
+                        };
+
+                        this._lastStreamUsage = {
+                            promptTokens: enrichedUsage.prompt_tokens,
+                            completionTokens: enrichedUsage.completion_tokens,
+                            systemTokens: enrichedUsage.system_prompt_tokens,
+                            cachedTokens: enrichedUsage.prompt_tokens_details?.cached_tokens,
+                            cacheCreationInputTokens: enrichedUsage.prompt_tokens_details?.cache_creation_input_tokens,
+                            reasoningTokens: enrichedUsage.completion_tokens_details?.reasoning_tokens,
+                            toolTokens: enrichedUsage.completion_tokens_details?.tool_tokens,
+                            acceptedPredictionTokens:
+                                enrichedUsage.completion_tokens_details?.accepted_prediction_tokens,
+                            rejectedPredictionTokens:
+                                enrichedUsage.completion_tokens_details?.rejected_prediction_tokens,
+                        };
+
+                        const enrichedBytes = new TextEncoder().encode(JSON.stringify(enrichedUsage));
+                        progress.report(new vscode.LanguageModelDataPart(enrichedBytes, "usage"));
+                        return;
+                    } catch {
+                        // ignore malformed usage payload
+                    }
                 }
                 progress.report(part);
             },
@@ -197,9 +285,15 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
 
             const modelInfo = this._modelInfoCache.get(modelToUse.id);
             const requestBody = await this.buildOpenAIChatRequest(messages, modelToUse, options, modelInfo, caller);
+            const reservedOutputTokens = getReservedOutputTokens(modelToUse, requestBody.max_tokens);
+            const totalTokenMax = getTotalTokenLimit(modelToUse, modelInfo);
+            reservedOutputTokensForRequest = reservedOutputTokens;
+            totalTokenMaxForRequest = totalTokenMax;
 
-            // Calculate tokensIn for telemetry
-            tokensIn = countTokens(messages, modelToUse.id, modelInfo);
+            // Count the actual transport request after trimming/conversion.
+            tokensIn =
+                countOpenAIChatMessagesTokens(requestBody.messages, modelToUse.id, modelInfo) +
+                estimateToolTokens(requestBody.tools);
 
             let stream: ReadableStream<Uint8Array>;
             try {
@@ -233,6 +327,14 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                         delete requestBody.frequency_penalty;
                         delete requestBody.presence_penalty;
                         delete requestBody.stop;
+
+                        if (
+                            parsedMessage.toLowerCase().includes("stream_options") ||
+                            parsedMessage.toLowerCase().includes("include_usage")
+                        ) {
+                            (this as unknown as { _usageOptOutModels: Set<string> })._usageOptOutModels.add(model.id);
+                            delete (requestBody as { stream_options?: { include_usage?: boolean } }).stream_options;
+                        }
 
                         if (token.isCancellationRequested) {
                             throw new Error("Operation cancelled by user", { cause: err });
@@ -301,17 +403,40 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
 
             await this.processStreamingResponse(stream, trackingProgress, token);
 
-            // Estimate tokensOut from the accumulated assistant text
-            const tokensOut = countTokens(this._partialAssistantText, modelToUse.id, modelInfo);
+            const usage = this._lastStreamUsage;
+            const tokensOut =
+                usage?.completionTokens ??
+                countTokens(this._partialAssistantText, modelToUse.id, modelInfo) + this._estimatedToolCallTokens;
+            const tokensInForTelemetry = usage?.promptTokens ?? tokensIn;
+            const reasoningTokens = usage?.reasoningTokens;
+            const cachedTokens = usage?.cachedTokens;
+            const systemPromptTokens = usage?.systemTokens;
+            const toolTokens =
+                usage?.toolTokens ?? (this._estimatedToolCallTokens > 0 ? this._estimatedToolCallTokens : undefined);
+            const acceptedPredictionTokens = usage?.acceptedPredictionTokens;
+            const rejectedPredictionTokens = usage?.rejectedPredictionTokens;
+            const cacheCreationInputTokens = usage?.cacheCreationInputTokens;
 
             const metric = {
                 requestId,
                 model: modelToUse.id,
                 durationMs: LiteLLMTelemetry.endTimer(startTime),
-                tokensIn,
+                tokensIn: tokensInForTelemetry,
                 tokensOut,
+                promptCacheTokens: cachedTokens,
+                cacheCreationInputTokens,
+                reasoningTokens,
+                toolTokens,
+                acceptedPredictionTokens,
+                rejectedPredictionTokens,
+                reservedOutputTokens,
+                totalTokenMax,
                 status: "success" as const,
                 caller,
+                cacheReadRatio:
+                    cachedTokens !== undefined && tokensInForTelemetry
+                        ? cachedTokens / tokensInForTelemetry
+                        : undefined,
             };
             LiteLLMTelemetry.reportMetric(metric);
 
@@ -332,8 +457,27 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             }
             */
 
-            if (config.experimentalEmitUsageData && typeof tokensIn === "number") {
-                this.emitExperimentalUsageData(trackingProgress, tokensIn, tokensOut);
+            if (
+                config.experimentalEmitUsageData &&
+                typeof tokensInForTelemetry === "number" &&
+                !this._sawUsageDataPart
+            ) {
+                this.emitExperimentalUsageData(
+                    trackingProgress,
+                    tokensInForTelemetry,
+                    tokensOut,
+                    reasoningTokens,
+                    cachedTokens,
+                    {
+                        systemPromptTokens,
+                        toolTokens,
+                        acceptedPredictionTokens,
+                        rejectedPredictionTokens,
+                        cacheCreationInputTokens,
+                        reservedOutputTokens,
+                        totalTokenMax,
+                    }
+                );
             }
         } catch (err: unknown) {
             let errorMessage = err instanceof Error ? err.message : String(err);
@@ -386,6 +530,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
     protected resetStreamingState(): void {
         this._streamingState = createInitialStreamingState();
         this._partialAssistantText = "";
+        this._lastStreamUsage = undefined;
+        this._sawUsageDataPart = false;
+        this._estimatedToolCallTokens = 0;
     }
 
     /**

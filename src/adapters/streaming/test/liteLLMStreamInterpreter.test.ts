@@ -127,6 +127,22 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
 
         const usage = parts.find((p) => p.type === "data");
         assert.ok(usage, "expected usage data part to be emitted");
+        assert.strictEqual(usage.type, "data");
+        if (usage.type === "data") {
+            assert.strictEqual(usage.mimeType, "usage");
+            // OpenAI API spec: nested completion_tokens_details.reasoning_tokens and prompt_tokens_details.cached_tokens
+            assert.deepStrictEqual(usage.value, {
+                prompt_tokens: 1,
+                completion_tokens: 2,
+                total_tokens: 3,
+                prompt_tokens_details: {
+                    cached_tokens: 0,
+                },
+                completion_tokens_details: {
+                    reasoning_tokens: 0,
+                },
+            });
+        }
     });
 
     test("should flush /responses tool calls on output_item.done when no completed frame", () => {
@@ -205,8 +221,8 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
         const parts = interpretStreamEvent(
             {
                 $mid: 2,
-                mimeType: "application/vnd.litellm.usage+json",
-                data: { promptTokens: 1, completionTokens: 2 },
+                mimeType: "usage",
+                data: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
             },
             state
         );
@@ -215,7 +231,12 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
         const [part] = parts;
         assert.strictEqual(part.type, "data");
         if (part.type === "data") {
-            assert.strictEqual(part.mimeType, "application/vnd.litellm.usage+json");
+            assert.strictEqual(part.mimeType, "usage");
+            assert.deepStrictEqual(part.value, {
+                prompt_tokens: 1,
+                completion_tokens: 2,
+                total_tokens: 3,
+            });
         }
     });
 

@@ -1,6 +1,5 @@
 import { Logger } from "./logger";
 import type { TelemetryService } from "../telemetry/telemetryService";
-import type { TelemetryEvent } from "../telemetry/types";
 
 export interface IMetrics {
     requestId: string;
@@ -9,6 +8,14 @@ export interface IMetrics {
     tokensIn?: number;
     tokensOut?: number;
     cacheReadRatio?: number;
+    promptCacheTokens?: number;
+    cacheCreationInputTokens?: number;
+    reasoningTokens?: number;
+    toolTokens?: number;
+    acceptedPredictionTokens?: number;
+    rejectedPredictionTokens?: number;
+    reservedOutputTokens?: number;
+    totalTokenMax?: number;
     status: "success" | "failure" | "caching_bypassed";
     error?: string;
     caller?: string;
@@ -22,41 +29,61 @@ export class LiteLLMTelemetry {
     }
 
     public static reportMetric(metric: IMetrics): void {
-        // Initially log to debug level.
-        // This is architected for future external telemetry integration.
+        // Keep structured debug logs for local diagnostics.
         Logger.debug(`[Telemetry] ${JSON.stringify(metric)}`);
 
+        // Mirror token usage into the regular output stream to make token accounting
+        // visible without requiring debug log level.
+        Logger.info(
+            `[TokenUsage] request_id=${metric.requestId} caller=${metric.caller ?? "unknown"} model=${
+                metric.model
+            } status=${metric.status} duration_ms=${metric.durationMs ?? 0} tokens_in=${metric.tokensIn ?? 0} tokens_out=${
+                metric.tokensOut ?? 0
+            } cache_read_ratio=${metric.cacheReadRatio ?? "n/a"} prompt_cache_tokens=${
+                metric.promptCacheTokens ?? "n/a"
+            } cache_creation_input_tokens=${metric.cacheCreationInputTokens ?? "n/a"} reasoning_tokens=${
+                metric.reasoningTokens ?? "n/a"
+            } tool_tokens=${metric.toolTokens ?? "n/a"} accepted_prediction_tokens=${
+                metric.acceptedPredictionTokens ?? "n/a"
+            } rejected_prediction_tokens=${metric.rejectedPredictionTokens ?? "n/a"} token_count_max=${
+                metric.reservedOutputTokens ?? "n/a"
+            } total_token_max=${metric.totalTokenMax ?? "n/a"}`
+        );
+
         if (this._telemetryService) {
-            const properties: TelemetryEvent["properties"] = {
-                request_id: metric.requestId,
-                caller: metric.caller ?? "unknown",
-                model: metric.model,
-                endpoint: "unknown",
-                durationMs: metric.durationMs ?? 0,
-                tokensIn: metric.tokensIn ?? 0,
-                tokensOut: metric.tokensOut ?? 0,
-                status: metric.status,
-                error: metric.error,
+            const caller = metric.caller ?? "unknown";
+            const telemetryService = this._telemetryService as unknown as {
+                captureRequestCompletedWithCache?: (props: {
+                    request_id: string;
+                    caller: string;
+                    model: string;
+                    endpoint: string;
+                    durationMs: number;
+                    tokensIn: number;
+                    tokensOut: number;
+                    cacheReadRatio?: number;
+                }) => void;
+                captureRequestFailed?: (props: {
+                    request_id: string;
+                    caller: string;
+                    model: string;
+                    endpoint: string;
+                    durationMs: number;
+                    errorType: string;
+                }) => void;
+                captureRequestCachingBypassed?: (props: {
+                    request_id: string;
+                    caller: string;
+                    model: string;
+                    endpoint: string;
+                    reason?: string;
+                }) => void;
             };
-            if (metric.cacheReadRatio !== undefined) {
-                properties.cache_read_ratio = metric.cacheReadRatio;
-            }
-
-            const event: TelemetryEvent = {
-                event: "request_completed",
-                properties,
-                timestamp: new Date(),
-            };
-
-            // Emit the generic capture event for compatibility with existing listeners.
-            (this._telemetryService as unknown as { capture?: (telemetryEvent: TelemetryEvent) => void }).capture?.(
-                event
-            );
 
             if (metric.status === "success") {
-                this._telemetryService.captureRequestCompletedWithCache({
+                telemetryService.captureRequestCompletedWithCache?.({
                     request_id: metric.requestId,
-                    caller: metric.caller ?? "unknown",
+                    caller,
                     model: metric.model,
                     endpoint: "unknown", // endpoint not available in IMetrics
                     durationMs: metric.durationMs ?? 0,
@@ -65,13 +92,21 @@ export class LiteLLMTelemetry {
                     cacheReadRatio: metric.cacheReadRatio,
                 });
             } else if (metric.status === "failure") {
-                this._telemetryService.captureRequestFailed({
+                telemetryService.captureRequestFailed?.({
                     request_id: metric.requestId,
-                    caller: metric.caller ?? "unknown",
+                    caller,
                     model: metric.model,
                     endpoint: "unknown",
                     durationMs: metric.durationMs ?? 0,
                     errorType: metric.error ?? "unknown",
+                });
+            } else if (metric.status === "caching_bypassed") {
+                telemetryService.captureRequestCachingBypassed?.({
+                    request_id: metric.requestId,
+                    caller,
+                    model: metric.model,
+                    endpoint: "unknown",
+                    reason: metric.error ?? "provider_caching_not_supported",
                 });
             }
         }

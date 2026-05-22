@@ -6,6 +6,7 @@ import { LiteLLMChatProvider } from "../";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 import { ResponsesClient } from "../../adapters/responsesClient";
 import { Logger } from "../../utils/logger";
+import { LiteLLMTelemetry } from "../../utils/telemetry";
 import { createMockSecrets } from "../../test/utils/testMocks";
 import { createTelemetryMocks } from "../../test/utils/telemetryMock";
 
@@ -621,16 +622,268 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         assert.ok(usagePart, "Expected a usage LanguageModelDataPart to be emitted");
 
         const dataPart = usagePart as vscode.LanguageModelDataPart;
-        assert.strictEqual(dataPart.mimeType, "application/vnd.litellm.usage+json");
+        assert.strictEqual(dataPart.mimeType, "usage");
         const payload = JSON.parse(Buffer.from(dataPart.data).toString("utf-8")) as {
-            kind: string;
-            promptTokens: number;
-            completionTokens: number;
+            prompt_tokens: number;
+            completion_tokens: number;
+            total_tokens: number;
+            prompt_tokens_details?: {
+                cached_tokens?: number;
+            };
+            completion_tokens_details?: {
+                reasoning_tokens?: number;
+                accepted_prediction_tokens?: number;
+                rejected_prediction_tokens?: number;
+                tool_tokens?: number;
+            };
+            reserved_output_tokens?: number;
+            total_token_max?: number;
+            kind?: string;
+            promptTokens?: number;
+            completionTokens?: number;
         };
-        assert.strictEqual(payload.kind, "usage");
-        assert.ok(payload.promptTokens > 0);
-        assert.ok(payload.completionTokens > 0);
+        assert.ok(payload.prompt_tokens > 0);
+        assert.ok(payload.completion_tokens > 0);
+        assert.strictEqual(payload.total_tokens, payload.prompt_tokens + payload.completion_tokens);
+        // OpenAI API spec: reasoning tokens are nested under completion_tokens_details.reasoning_tokens
+        if (payload.completion_tokens_details) {
+            assert.strictEqual(typeof payload.completion_tokens_details.reasoning_tokens, "number");
+        }
+        // OpenAI API spec: cached tokens are nested under prompt_tokens_details.cached_tokens
+        if (payload.prompt_tokens_details) {
+            assert.strictEqual(typeof payload.prompt_tokens_details.cached_tokens, "number");
+        }
+        assert.strictEqual(payload.reserved_output_tokens, 1000);
+        assert.strictEqual(payload.total_token_max, 2000);
+        assert.strictEqual(payload.kind, undefined);
+        assert.strictEqual(payload.promptTokens, undefined);
+        assert.strictEqual(payload.completionTokens, undefined);
         assert.ok(debugStub.calledWithMatch(sinon.match(/experimental usage data part/i)));
+    });
+
+    test("requests usage by default and suppresses include_usage after upstream rejects stream_options", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const providerAny = provider as unknown as {
+            _usageOptOutModels: Set<string>;
+            buildOpenAIChatRequest: (typeof LiteLLMChatProvider.prototype)["buildOpenAIChatRequest"];
+            sendRequestWithRetry: (typeof LiteLLMChatProvider.prototype)["sendRequestWithRetry"];
+            _configManager: { getConfig: () => Promise<{ url: string; experimentalEmitUsageData: boolean }> };
+        };
+
+        sandbox
+            .stub(providerAny._configManager, "getConfig")
+            .resolves({ url: "http://localhost:4000", experimentalEmitUsageData: true });
+
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                name: undefined,
+                content: [new vscode.LanguageModelTextPart("hi")],
+            },
+        ];
+        const model = {
+            id: "model-usage",
+            name: "model-usage",
+            tooltip: "",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 1000,
+            maxOutputTokens: 1000,
+            capabilities: { toolCalling: true, imageInput: false },
+        };
+
+        const requestBody = await providerAny.buildOpenAIChatRequest(
+            messages,
+            model,
+            { modelOptions: {}, tools: [], toolMode: vscode.LanguageModelChatToolMode.Auto, requestInitiator: "test" },
+            undefined,
+            "chat"
+        );
+        assert.deepStrictEqual(requestBody.stream_options, { include_usage: true });
+
+        const encoder = new TextEncoder();
+        const successStream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"ok"}}]}' + "\n\n"));
+                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                controller.close();
+            },
+        });
+
+        const sendStub = sandbox
+            .stub(providerAny, "sendRequestWithRetry")
+            .onFirstCall()
+            .rejects(new Error("LiteLLM API error: 400\nUnsupported parameter: stream_options"))
+            .onSecondCall()
+            .resolves(successStream);
+
+        const reported: vscode.LanguageModelResponsePart[] = [];
+        await provider.provideLanguageModelChatResponse(
+            model,
+            messages,
+            { modelOptions: {}, tools: [], toolMode: vscode.LanguageModelChatToolMode.Auto, requestInitiator: "test" },
+            { report: (part) => reported.push(part) },
+            new vscode.CancellationTokenSource().token
+        );
+
+        assert.ok(
+            providerAny._usageOptOutModels.has("model-usage"),
+            "Model should be marked as usage opt-out after rejection"
+        );
+        assert.strictEqual(sendStub.callCount, 2);
+    });
+
+    test("prefers streamed usage metrics over estimated counts", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        sandbox
+            .stub(
+                (
+                    provider as unknown as {
+                        _configManager: {
+                            getConfig: () => Promise<{ url: string; experimentalEmitUsageData: boolean }>;
+                        };
+                    }
+                )._configManager,
+                "getConfig"
+            )
+            .resolves({ url: "http://localhost:4000", experimentalEmitUsageData: true });
+
+        const encoder = new TextEncoder();
+        sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Hello"}}]}' + "\n\n"));
+                    controller.enqueue(
+                        encoder.encode(
+                            'data: {"usage":{"prompt_tokens":12,"completion_tokens":7,"input_token_details":{"cached_tokens":3},"output_token_details":{"reasoning_tokens":2},"system_tokens":5}}' +
+                                "\n\n"
+                        )
+                    );
+                    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                    controller.close();
+                },
+            })
+        );
+        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
+
+        const telemetrySpy = sandbox.spy(LiteLLMTelemetry, "reportMetric");
+        const parts: vscode.LanguageModelResponsePart[] = [];
+        await provider.provideLanguageModelChatResponse(
+            {
+                id: "model-usage",
+                name: "model-usage",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1000,
+                maxOutputTokens: 1000,
+                capabilities: { toolCalling: true, imageInput: false },
+            },
+            [
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [new vscode.LanguageModelTextPart("hi")],
+                },
+            ],
+            { modelOptions: {}, tools: [], toolMode: vscode.LanguageModelChatToolMode.Auto, requestInitiator: "test" },
+            { report: (part) => parts.push(part) },
+            new vscode.CancellationTokenSource().token
+        );
+
+        const usagePart = parts.find((p) => p instanceof vscode.LanguageModelDataPart) as vscode.LanguageModelDataPart;
+        const payload = JSON.parse(Buffer.from(usagePart.data).toString("utf-8")) as Record<string, unknown>;
+        assert.strictEqual(payload.prompt_tokens, 12);
+        assert.strictEqual(payload.completion_tokens, 7);
+        assert.strictEqual((payload.prompt_tokens_details as { cached_tokens: number }).cached_tokens, 3);
+        assert.strictEqual(
+            (payload.completion_tokens_details as { reasoning_tokens: number; tool_tokens: number }).reasoning_tokens,
+            2
+        );
+        assert.strictEqual(
+            (payload.completion_tokens_details as { reasoning_tokens: number; tool_tokens?: number }).tool_tokens,
+            undefined
+        );
+        assert.strictEqual(payload.system_prompt_tokens, 5);
+
+        sinon.assert.calledWithMatch(telemetrySpy, sinon.match({ tokensIn: 12, tokensOut: 7 }));
+    });
+
+    test("counts tool-call only responses in fallback token reporting", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        sandbox
+            .stub(
+                (
+                    provider as unknown as {
+                        _configManager: {
+                            getConfig: () => Promise<{ url: string; experimentalEmitUsageData: boolean }>;
+                        };
+                    }
+                )._configManager,
+                "getConfig"
+            )
+            .resolves({ url: "http://localhost:4000", experimentalEmitUsageData: true });
+
+        const encoder = new TextEncoder();
+        sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(
+                        encoder.encode(
+                            'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{\\"path\\":\\"a.txt\\"}"}}]}}]}' +
+                                "\n\n"
+                        )
+                    );
+                    controller.enqueue(encoder.encode('data: {"choices":[{"finish_reason":"tool_calls"}]}' + "\n\n"));
+                    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                    controller.close();
+                },
+            })
+        );
+        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
+
+        const telemetrySpy = sandbox.spy(LiteLLMTelemetry, "reportMetric");
+        const parts: vscode.LanguageModelResponsePart[] = [];
+        await provider.provideLanguageModelChatResponse(
+            {
+                id: "model-tool-only",
+                name: "model-tool-only",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1000,
+                maxOutputTokens: 1000,
+                capabilities: { toolCalling: true, imageInput: false },
+            },
+            [
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [new vscode.LanguageModelTextPart("hi")],
+                },
+            ],
+            { modelOptions: {}, tools: [], toolMode: vscode.LanguageModelChatToolMode.Auto, requestInitiator: "test" },
+            { report: (part) => parts.push(part) },
+            new vscode.CancellationTokenSource().token
+        );
+
+        const usagePart = parts.find(
+            (part) => part instanceof vscode.LanguageModelDataPart
+        ) as vscode.LanguageModelDataPart;
+        const payload = JSON.parse(Buffer.from(usagePart.data).toString("utf-8")) as {
+            completion_tokens: number;
+            completion_tokens_details?: { tool_tokens?: number };
+        };
+
+        assert.ok(payload.completion_tokens > 0);
+        assert.ok((payload.completion_tokens_details?.tool_tokens ?? 0) > 0);
+        sinon.assert.calledWithMatch(
+            telemetrySpy,
+            sinon.match((metric: unknown) => {
+                const typedMetric = metric as { tokensOut?: number; toolTokens?: number };
+                return (typedMetric.tokensOut ?? 0) > 0 && (typedMetric.toolTokens ?? 0) > 0;
+            })
+        );
     });
 
     test("provideLanguageModelChatResponse handles empty stream without emitting parts", async () => {

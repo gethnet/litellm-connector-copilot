@@ -181,7 +181,7 @@ suite("ResponsesClient sendResponsesRequest", () => {
         );
         const sse = [
             'data: {"type":"response.output_text.delta","delta":"Hello"}\n\n',
-            'data: {"type":"response.completed","response":{"usage":{"input_tokens":12,"output_tokens":4}}}\n\n',
+            'data: {"type":"response.completed","response":{"usage":{"input_tokens":12,"output_tokens":4,"input_token_details":{"cached_tokens":5},"output_token_details":{"reasoning_tokens":2}}}}\n\n',
             "data: [DONE]\n\n",
         ];
         fetchStub.resolves(new Response(readableFromStrings(sse), { status: 200 }));
@@ -196,16 +196,80 @@ suite("ResponsesClient sendResponsesRequest", () => {
         const usagePart = reported.find((part) => part instanceof vscode.LanguageModelDataPart);
         assert.ok(usagePart, "Expected a usage LanguageModelDataPart to be emitted");
         const dataPart = usagePart as vscode.LanguageModelDataPart;
-        assert.strictEqual(dataPart.mimeType, "application/vnd.litellm.usage+json");
+        assert.strictEqual(dataPart.mimeType, "usage");
         const payload = JSON.parse(Buffer.from(dataPart.data).toString("utf-8")) as {
-            kind: string;
-            promptTokens: number;
-            completionTokens: number;
+            prompt_tokens: number;
+            completion_tokens: number;
+            total_tokens: number;
+            prompt_tokens_details?: {
+                cached_tokens?: number;
+            };
+            completion_tokens_details?: {
+                reasoning_tokens?: number;
+                tool_tokens?: number;
+                accepted_prediction_tokens?: number;
+                rejected_prediction_tokens?: number;
+            };
+            kind?: string;
+            promptTokens?: number;
+            completionTokens?: number;
         };
-        assert.strictEqual(payload.kind, "usage");
-        assert.strictEqual(payload.promptTokens, 12);
-        assert.strictEqual(payload.completionTokens, 4);
+        assert.strictEqual(payload.prompt_tokens, 12);
+        assert.strictEqual(payload.completion_tokens, 4);
+        assert.strictEqual(payload.total_tokens, 16);
+        // OpenAI API spec: reasoning tokens are nested under completion_tokens_details.reasoning_tokens
+        assert.strictEqual(payload.completion_tokens_details?.reasoning_tokens, 2);
+        // OpenAI API spec: cached tokens are nested under prompt_tokens_details.cached_tokens
+        assert.strictEqual(payload.prompt_tokens_details?.cached_tokens, 5);
+        assert.strictEqual(payload.kind, undefined);
+        assert.strictEqual(payload.promptTokens, undefined);
+        assert.strictEqual(payload.completionTokens, undefined);
         assert.ok(debugStub.calledWithMatch(sinon.match(/experimental usage data part/i)));
+    });
+
+    test("emits usage data with cache, reasoning, tool, and system tokens from /responses", async () => {
+        const client = new ResponsesClient({ ...config, experimentalEmitUsageData: true } as LiteLLMConfig, userAgent);
+        const encoder = new TextEncoder();
+
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":"hi"}\n\n'));
+                controller.enqueue(
+                    encoder.encode(
+                        'data: {"type":"response.completed","response":{"usage":{"input_tokens":10,"output_tokens":6,"input_token_details":{"cached_tokens":2},"output_token_details":{"reasoning_tokens":1,"tool_tokens":3},"system_tokens":4}}}' +
+                            "\n\n"
+                    )
+                );
+                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                controller.close();
+            },
+        });
+
+        const reported: vscode.LanguageModelResponsePart[] = [];
+        await (
+            client as unknown as { parseSSEStream: (typeof ResponsesClient.prototype)["parseSSEStream"] }
+        ).parseSSEStream(
+            stream,
+            { report: (p: vscode.LanguageModelResponsePart) => reported.push(p) },
+            new vscode.CancellationTokenSource().token
+        );
+
+        const usagePart = reported.find(
+            (p) => p instanceof vscode.LanguageModelDataPart
+        ) as vscode.LanguageModelDataPart;
+        const payload = JSON.parse(Buffer.from(usagePart.data).toString("utf-8")) as Record<string, unknown>;
+        assert.strictEqual(payload.prompt_tokens, 10);
+        assert.strictEqual(payload.completion_tokens, 6);
+        assert.strictEqual((payload.prompt_tokens_details as { cached_tokens: number }).cached_tokens, 2);
+        assert.strictEqual(
+            (payload.completion_tokens_details as { reasoning_tokens: number; tool_tokens: number }).reasoning_tokens,
+            1
+        );
+        assert.strictEqual(
+            (payload.completion_tokens_details as { reasoning_tokens: number; tool_tokens: number }).tool_tokens,
+            3
+        );
+        assert.strictEqual(payload.system_prompt_tokens, 4);
     });
 
     test("handles partial lines across chunks", async () => {
@@ -337,6 +401,6 @@ suite("ResponsesClient sendResponsesRequest", () => {
 
         // This should not throw
         clientInternal.emitExperimentalUsageData(progress, 10, 20);
-        assert.ok(progress.report.calledTwice);
+        assert.ok(progress.report.calledOnce);
     });
 });

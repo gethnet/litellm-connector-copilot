@@ -179,8 +179,8 @@ suite("ConfigManager Unit Tests", () => {
             {
                 match: "gpt-5",
                 supportsReasoning: true,
-                reasoningEfforts: ["high", "xhigh"],
-                defaultEffort: "xhigh",
+                reasoningEfforts: ["none", "low", "medium", "high"],
+                defaultEffort: "medium",
             },
             {
                 match: "",
@@ -189,8 +189,8 @@ suite("ConfigManager Unit Tests", () => {
             {
                 match: "claude-3",
                 supportsReasoning: null,
-                reasoningEfforts: ["minimal", "low"],
-                defaultEffort: "low",
+                reasoningEfforts: ["none", "low", "medium", "high"],
+                defaultEffort: "medium",
                 notes: "keep minimal",
             },
         ]);
@@ -202,15 +202,15 @@ suite("ConfigManager Unit Tests", () => {
             {
                 match: "gpt-5",
                 supportsReasoning: true,
-                reasoningEfforts: ["high", "xhigh"],
-                defaultEffort: "xhigh",
+                reasoningEfforts: ["none", "low", "medium", "high"],
+                defaultEffort: "medium",
                 notes: undefined,
             },
             {
                 match: "claude-3",
                 supportsReasoning: null,
-                reasoningEfforts: ["minimal", "low"],
-                defaultEffort: "low",
+                reasoningEfforts: ["none", "low", "medium", "high"],
+                defaultEffort: "medium",
                 notes: "keep minimal",
             },
         ]);

@@ -4,7 +4,7 @@ import type { TelemetryService } from "../telemetry/telemetryService";
 import { LiteLLMClient } from "../adapters/litellmClient";
 import type { BackendSession } from "../providers/backendSession";
 import { Logger } from "../utils/logger";
-import { loadUserOverrides } from "./modelOverrides";
+import { loadUserOverrides, toStringArray } from "./modelOverrides";
 
 export class ConfigManager {
     private static readonly BASE_URL_KEY = "litellm-connector.baseUrl";
@@ -142,13 +142,28 @@ export class ConfigManager {
         // Drop undefined/neutral fields so shape matches expectations
         const modelOverrides: ModelOverride[] = loadUserOverrides(workspaceConfig).map((o) => {
             const cleaned: ModelOverride = { match: o.match, notes: o.notes }; // preserve notes field even if undefined
-            if (o.supportsReasoning !== undefined) cleaned.supportsReasoning = o.supportsReasoning;
-            if (o.reasoningEfforts) cleaned.reasoningEfforts = o.reasoningEfforts;
-            if (o.defaultEffort) cleaned.defaultEffort = o.defaultEffort;
-            if (o.forceMandatory) cleaned.forceMandatory = o.forceMandatory;
-            if (o.tags && o.tags.length > 0) cleaned.tags = o.tags;
-            if (o.supportedOpenaiParams && o.supportedOpenaiParams.length > 0) {
-                cleaned.supportedOpenaiParams = o.supportedOpenaiParams;
+            if (o.supportsReasoning !== undefined) {
+                cleaned.supportsReasoning = o.supportsReasoning;
+            }
+            if (o.reasoningEfforts) {
+                cleaned.reasoningEfforts = o.reasoningEfforts;
+            }
+            if (o.defaultEffort) {
+                cleaned.defaultEffort = o.defaultEffort;
+            }
+            // Only include forceMandatory when explicitly set to true
+            if (o.forceMandatory === true) {
+                cleaned.forceMandatory = true;
+            }
+            // Coerce array-of-string fields via the shared helper so we never
+            // hand back the raw unknown shape from VS Code settings.
+            const tags = toStringArray(o.tags);
+            if (tags) {
+                cleaned.tags = tags;
+            }
+            const supportedOpenaiParams = toStringArray(o.supportedOpenaiParams);
+            if (supportedOpenaiParams) {
+                cleaned.supportedOpenaiParams = supportedOpenaiParams;
             }
             return cleaned;
         });

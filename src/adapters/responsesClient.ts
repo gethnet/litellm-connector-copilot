@@ -1,5 +1,12 @@
 import * as vscode from "vscode";
-import type { LiteLLMConfig, LiteLLMResponsesRequest, LiteLLMModelInfo } from "../types";
+import type {
+    LiteLLMConfig,
+    LiteLLMResponsesRequest,
+    LiteLLMModelInfo,
+    OpenAIUsageCompletionTokenDetails,
+    OpenAIUsagePayload,
+    OpenAIUsagePromptTokenDetails,
+} from "../types";
 import { tryParseJSONObject } from "../utils";
 import { Logger } from "../utils/logger";
 import { isAnthropicModel } from "../utils/modelUtils";
@@ -17,6 +24,14 @@ export interface ResponsesEvent {
         usage?: {
             input_tokens?: number;
             output_tokens?: number;
+            system_tokens?: number;
+            input_token_details?: { cached_tokens?: number; cache_creation_input_tokens?: number };
+            output_token_details?: {
+                reasoning_tokens?: number;
+                tool_tokens?: number;
+                accepted_prediction_tokens?: number;
+                rejected_prediction_tokens?: number;
+            };
         };
     };
 }
@@ -42,50 +57,66 @@ export class ResponsesClient {
     private emitExperimentalUsageData(
         progress: vscode.Progress<vscode.LanguageModelResponsePart>,
         promptTokens: number,
-        completionTokens: number
+        completionTokens: number,
+        reasoningTokens?: number,
+        cachedTokens?: number,
+        extra?: {
+            systemPromptTokens?: number;
+            toolTokens?: number;
+            acceptedPredictionTokens?: number;
+            rejectedPredictionTokens?: number;
+            cacheCreationInputTokens?: number;
+        }
     ): void {
         Logger.debug(
-            `Emitting experimental usage data part | promptTokens: ${promptTokens} | completionTokens: ${completionTokens}`
+            `Emitting experimental usage data part | prompt_tokens: ${promptTokens} | completion_tokens: ${completionTokens} | reasoning_tokens: ${reasoningTokens ?? "undefined"} | cached_tokens: ${cachedTokens ?? "undefined"} | system_prompt_tokens: ${extra?.systemPromptTokens ?? "undefined"}`
         );
-        const detailsString = `Context: ${promptTokens} tokens | Output: ${completionTokens} tokens`;
 
-        // 1. Try direct DTO injection (bypassing type system) when VS Code supports it.
-        // VS Code does not yet expose a typed usage part, so guard with runtime checks.
-        try {
-            const report = (progress as unknown as { report?: (value: unknown) => void }).report;
-            if (typeof report === "function") {
-                report({
-                    kind: "usage",
-                    promptTokens: promptTokens,
-                    completionTokens: completionTokens,
-                    details: detailsString,
-                    metadata: {
-                        details: detailsString,
-                    },
-                });
-            }
-        } catch (e) {
-            Logger.trace("Direct usage DTO injection failed", e);
+        const usagePayload: OpenAIUsagePayload = {
+            prompt_tokens: promptTokens,
+            completion_tokens: completionTokens,
+            total_tokens: promptTokens + completionTokens,
+        };
+
+        const promptTokenDetails: OpenAIUsagePromptTokenDetails = {};
+        if (typeof cachedTokens === "number") {
+            promptTokenDetails.cached_tokens = cachedTokens;
+        }
+        if (typeof extra?.cacheCreationInputTokens === "number") {
+            promptTokenDetails.cache_creation_input_tokens = extra.cacheCreationInputTokens;
+        }
+        if (Object.keys(promptTokenDetails).length > 0) {
+            usagePayload.prompt_tokens_details = promptTokenDetails;
         }
 
-        // 2. Keep the DataPart probe as fallback
+        const completionTokenDetails: OpenAIUsageCompletionTokenDetails = {};
+        if (typeof reasoningTokens === "number") {
+            completionTokenDetails.reasoning_tokens = reasoningTokens;
+        }
+        if (typeof extra?.toolTokens === "number") {
+            completionTokenDetails.tool_tokens = extra.toolTokens;
+        }
+        if (typeof extra?.acceptedPredictionTokens === "number") {
+            completionTokenDetails.accepted_prediction_tokens = extra.acceptedPredictionTokens;
+        }
+        if (typeof extra?.rejectedPredictionTokens === "number") {
+            completionTokenDetails.rejected_prediction_tokens = extra.rejectedPredictionTokens;
+        }
+        if (Object.keys(completionTokenDetails).length > 0) {
+            usagePayload.completion_tokens_details = completionTokenDetails;
+        }
+
+        if (typeof extra?.systemPromptTokens === "number") {
+            usagePayload.system_prompt_tokens = extra.systemPromptTokens;
+        }
+
+        const payloadJson = JSON.stringify(usagePayload);
+        const payloadBytes = new TextEncoder().encode(payloadJson);
+
         try {
-            progress.report(
-                vscode.LanguageModelDataPart.json(
-                    {
-                        kind: "usage",
-                        promptTokens,
-                        completionTokens,
-                        details: detailsString,
-                        metadata: {
-                            details: detailsString,
-                        },
-                    },
-                    "application/vnd.litellm.usage+json"
-                )
-            );
+            progress.report(new vscode.LanguageModelDataPart(payloadBytes, "usage"));
         } catch (e) {
-            Logger.trace("DataPart usage report failed", e);
+            Logger.trace("Usage data report failed", e);
         }
     }
 
@@ -246,12 +277,32 @@ export class ResponsesClient {
         } else if (type === "response.completed") {
             const promptTokens = event.response?.usage?.input_tokens;
             const completionTokens = event.response?.usage?.output_tokens;
+            const reasoningTokens = event.response?.usage?.output_token_details?.reasoning_tokens;
+            const cachedTokens = event.response?.usage?.input_token_details?.cached_tokens;
+            const systemTokens = event.response?.usage?.system_tokens;
+            const toolTokens = event.response?.usage?.output_token_details?.tool_tokens;
+            const acceptedPredictionTokens = event.response?.usage?.output_token_details?.accepted_prediction_tokens;
+            const rejectedPredictionTokens = event.response?.usage?.output_token_details?.rejected_prediction_tokens;
+            const cacheCreationInputTokens = event.response?.usage?.input_token_details?.cache_creation_input_tokens;
             if (
                 this.config.experimentalEmitUsageData &&
                 typeof promptTokens === "number" &&
                 typeof completionTokens === "number"
             ) {
-                this.emitExperimentalUsageData(progress, promptTokens, completionTokens);
+                this.emitExperimentalUsageData(
+                    progress,
+                    promptTokens,
+                    completionTokens,
+                    reasoningTokens,
+                    cachedTokens,
+                    {
+                        systemPromptTokens: systemTokens,
+                        toolTokens,
+                        acceptedPredictionTokens,
+                        rejectedPredictionTokens,
+                        cacheCreationInputTokens,
+                    }
+                );
             }
         }
     }

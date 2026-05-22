@@ -66,6 +66,13 @@ interface BaseTestAccess {
         caller?: string,
         modelInfo?: LiteLLMModelInfo
     ) => Promise<ReadableStream<Uint8Array>>;
+    sendRequestToLiteLLM: (
+        request: OpenAIChatCompletionRequest,
+        progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+        token: vscode.CancellationToken,
+        caller?: string,
+        modelInfo?: LiteLLMModelInfo
+    ) => Promise<ReadableStream<Uint8Array>>;
 }
 
 /**
@@ -948,6 +955,60 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         assert.strictEqual(execStub.calledWith("litellm-connector.manage"), false);
         assert.strictEqual(infos.length, 0, "Should return 0 models when URL is missing and config not completed");
+    });
+
+    test("sendRequestToLiteLLM does not emit duplicate zero-token metric for /responses", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const telemetryModule = await import("../../utils/telemetry.js");
+        const reportMetricStub = sandbox.stub(telemetryModule.LiteLLMTelemetry, "reportMetric");
+        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
+        const configManager = access(provider)._configManager;
+        sandbox.stub(configManager, "resolveBackends").resolves([
+            {
+                name: "default",
+                url: "http://localhost:4000",
+                apiKey: "k",
+                enabled: true,
+            },
+        ]);
+        access(provider)._lastModelList = [
+            {
+                id: "default/test-responses",
+                name: "default/test-responses",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1000,
+                maxOutputTokens: 256,
+                capabilities: { toolCalling: true, imageInput: false },
+                _backendName: "default",
+                _backendUrl: "http://localhost:4000",
+                _apiKey: "k",
+            } as unknown as vscode.LanguageModelChatInformation,
+        ];
+
+        const stream = await access(provider).sendRequestToLiteLLM(
+            {
+                model: "default/test-responses",
+                messages: [
+                    {
+                        role: "user",
+                        content: "hello",
+                    },
+                ],
+                stream: true,
+                max_tokens: 256,
+            },
+            { report: () => {} },
+            new vscode.CancellationTokenSource().token,
+            "tools",
+            { mode: "responses" }
+        );
+
+        const reader = stream.getReader();
+        const result = await reader.read();
+        assert.strictEqual(result.done, true);
+        assert.strictEqual(reportMetricStub.called, false);
     });
 
     test("buildCapabilities maps model_info flags correctly", () => {

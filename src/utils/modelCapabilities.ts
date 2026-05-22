@@ -176,15 +176,9 @@ const LITELLM_REASONING_EFFORT_MAPPING: Record<string, SupportedReasoningEffort>
 /**
  * Default supported reasoning efforts when model explicitly supports reasoning
  * but doesn't specify exact effort levels (supports_reasoning: true).
+ * Uses a conservative set to avoid unsupported effort flags being exposed in the UI.
  */
-const DEFAULT_REASONING_EFFORTS: readonly SupportedReasoningEffort[] = [
-    "none",
-    "minimal",
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-];
+const DEFAULT_REASONING_EFFORTS: readonly SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
 
 /**
  * Type definition for extended properties on LanguageModelChatInformation.
