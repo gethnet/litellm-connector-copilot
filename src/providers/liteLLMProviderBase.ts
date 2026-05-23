@@ -13,7 +13,7 @@ import type {
     OpenAIFunctionToolDef,
     LiteLLMTokenCounterRequest,
 } from "../types";
-import { convertMessages, convertTools, validateRequest } from "../utils";
+import { convertMessages, convertTools, deriveGroupNameFromUrl, validateRequest } from "../utils";
 import {
     convertV2MessagesToOpenAI,
     convertV2MessagesToProviderMessages,
@@ -274,8 +274,17 @@ export abstract class LiteLLMProviderBase {
         Logger.trace("discoverModels called");
         try {
             if (options.configuration) {
-                const groupName = options.groupName ?? "default";
-                Logger.info(`Using configuration-based discovery for group: `);
+                const groupNameFromOptions = typeof options.groupName === "string" ? options.groupName.trim() : "";
+                const groupNameFromConfiguration =
+                    typeof options.configuration.providerName === "string"
+                        ? options.configuration.providerName.trim()
+                        : "";
+                const groupNameFromBaseUrl = deriveGroupNameFromUrl(
+                    typeof options.configuration.baseUrl === "string" ? options.configuration.baseUrl : ""
+                );
+                const groupName =
+                    groupNameFromOptions || groupNameFromConfiguration || groupNameFromBaseUrl || "default";
+                Logger.info(`Using configuration-based discovery for group: ${groupName}`);
                 const session = this._configManager.convertProviderConfiguration(groupName, options.configuration);
                 if (!session) {
                     Logger.warn("Configuration provided but convertProviderConfiguration returned undefined");
@@ -405,7 +414,7 @@ export abstract class LiteLLMProviderBase {
         session: BackendSession,
         token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelChatInformation[]> {
-        Logger.info(`Discovering models from session:  ()`);
+        Logger.info(`Discovering models from session: ${session.backendName} (${session.baseUrl})`);
 
         try {
             const config = await this._configManager.getConfig();
@@ -692,6 +701,34 @@ export abstract class LiteLLMProviderBase {
             url: entry._backendUrl,
             apiKey: entry._apiKey,
         };
+    }
+
+    /**
+     * Resolves the transport model ID to send upstream to LiteLLM.
+     *
+     * VS Code-facing model IDs are backend-namespaced (`backend/model`) so we can
+     * route requests across multiple backends. LiteLLM expects the original model
+     * ID (`model`) at transport time.
+     *
+     * In some mixed discovery flows, backend prefix metadata can be temporarily
+     * stale (for example, model list cache from one config path while the active
+     * backend client is initialized from another). When that happens,
+     * `parseNamespacedModelId` may not match even though `_lastModelList` contains
+     * the discovered model entry. To avoid intermittent "Invalid model name"
+     * failures, we fall back to the discovered entry's `name` (raw model id).
+     */
+    private getTransportModelId(modelId: string): string {
+        const parsed = this.resolveModelBackend(modelId);
+        if (parsed) {
+            return parsed.originalModelId;
+        }
+
+        const discovered = this._lastModelList.find((m) => m.id === modelId) as LiteLLMDiscoveredModel | undefined;
+        if (discovered?.name) {
+            return discovered.name;
+        }
+
+        return modelId;
     }
 
     /**
@@ -1088,6 +1125,7 @@ export abstract class LiteLLMProviderBase {
         }
 
         const backend = this.resolveModelBackend(request.model);
+        const transportModelId = this.getTransportModelId(request.model);
 
         if (modelInfo?.mode === "responses") {
             try {
@@ -1099,10 +1137,8 @@ export abstract class LiteLLMProviderBase {
                         this.userAgent
                     );
                     const responsesRequest = transformToResponsesFormat(request);
-                    // Strip prefix for /responses request if needed
-                    if (backend) {
-                        responsesRequest.model = backend.originalModelId;
-                    }
+                    // Always send upstream/original model ID for /responses.
+                    responsesRequest.model = transportModelId;
                     await responsesClient.sendResponsesRequest(responsesRequest, progress, token, modelInfo);
                     return new ReadableStream<Uint8Array>({
                         start(controller) {
@@ -1124,7 +1160,8 @@ export abstract class LiteLLMProviderBase {
             }
         }
 
-        return multiClient.chat(request.model, request, modelInfo?.mode, token, modelInfo);
+        const modelIdForRouting = backend ? request.model : transportModelId;
+        return multiClient.chat(modelIdForRouting, request, modelInfo?.mode, token, modelInfo);
     }
 
     /**

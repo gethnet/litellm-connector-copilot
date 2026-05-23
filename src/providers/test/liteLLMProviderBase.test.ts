@@ -25,6 +25,8 @@ interface BaseTestAccess {
     _configManager: ConfigManager;
     _lastModelList: vscode.LanguageModelChatInformation[];
     _modelListFetchedAtMs: number;
+    _multiBackendClient?: MultiBackendClient;
+    _activeBackendNames: string[];
     _modelInfoCache: Map<string, LiteLLMModelInfo | undefined>;
     _parameterProbeCache: Map<string, Set<string>>;
     _effortFallbackCache: EffortFallbackCache;
@@ -1978,6 +1980,96 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(modernDetected.calledOnce, true);
     });
 
+    test("_doDiscoverModels uses providerName from configuration when groupName is missing", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const configManager = access(provider)._configManager;
+
+        const session: BackendSession = {
+            backendName: "Gethnet",
+            baseUrl: "http://localhost:4000",
+            apiKey: "k",
+            client: {
+                getModelInfo: async () => ({
+                    data: [
+                        {
+                            model_name: "gpt-4o",
+                            model_info: {
+                                litellm_provider: "openai",
+                                mode: "chat",
+                                supports_native_streaming: true,
+                            } as LiteLLMModelInfo,
+                        },
+                    ],
+                }),
+            } as unknown as LiteLLMClient,
+        };
+
+        const convertStub = sandbox.stub(configManager, "convertProviderConfiguration").returns(session);
+
+        const models = await access(provider)._doDiscoverModels(
+            {
+                silent: true,
+                configuration: {
+                    providerName: "Gethnet",
+                    baseUrl: "http://localhost:4000",
+                    apiKey: "k",
+                },
+            },
+            new vscode.CancellationTokenSource().token
+        );
+
+        assert.strictEqual(models.length, 1);
+        assert.strictEqual(convertStub.calledOnce, true);
+        assert.strictEqual(convertStub.firstCall.args[0], "Gethnet");
+        assert.strictEqual(models[0].id, "Gethnet/gpt-4o");
+    });
+
+    test(
+        "_doDiscoverModels derives group name from baseUrl hostname when providerName and groupName are omitted",
+        async () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const configManager = access(provider)._configManager;
+
+            const session: BackendSession = {
+                backendName: "llm-kit.geth.cc",
+                baseUrl: "https://llm-kit.geth.cc",
+                apiKey: "k",
+                client: {
+                    getModelInfo: async () => ({
+                        data: [
+                            {
+                                model_name: "gpt-5.3-codex",
+                                model_info: {
+                                    litellm_provider: "azure_ai",
+                                    mode: "chat",
+                                    supports_native_streaming: true,
+                                } as LiteLLMModelInfo,
+                            },
+                        ],
+                    }),
+                } as unknown as LiteLLMClient,
+            };
+
+            const convertStub = sandbox.stub(configManager, "convertProviderConfiguration").returns(session);
+
+            const models = await access(provider)._doDiscoverModels(
+                {
+                    silent: true,
+                    configuration: {
+                        baseUrl: "https://llm-kit.geth.cc",
+                        apiKey: "k",
+                    },
+                },
+                new vscode.CancellationTokenSource().token
+            );
+
+            assert.strictEqual(models.length, 1);
+            assert.strictEqual(convertStub.calledOnce, true);
+            assert.strictEqual(convertStub.firstCall.args[0], "llm-kit.geth.cc");
+            assert.strictEqual(models[0].id, "llm-kit.geth.cc/gpt-5.3-codex");
+        }
+    );
+
     test("_doDiscoverModels handles error gracefully", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const configManager = access(provider)._configManager;
@@ -2255,5 +2347,54 @@ suite("LiteLLM Provider Unit Tests", () => {
         );
 
         assert.strictEqual(multiChatStub.called, false, "Should not fallback when /responses succeeds");
+    });
+
+    test("sendRequestToLiteLLM uses discovered raw model id when backend prefix resolution is stale", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        const chatStub = sandbox.stub().resolves(
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.close();
+                },
+            })
+        );
+
+        access(provider)._multiBackendClient = {
+            chat: chatStub,
+        } as unknown as MultiBackendClient;
+
+        // Simulate stale backend names from a previous discovery path so
+        // parseNamespacedModelId("default/...") cannot resolve.
+        access(provider)._activeBackendNames = ["Gethnet"];
+        access(provider)._lastModelList = [
+            {
+                id: "default/azure_ai/gpt-5.3-codex",
+                name: "azure_ai/gpt-5.3-codex",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 128000,
+                maxOutputTokens: 64000,
+                capabilities: { toolCalling: false, imageInput: false },
+                _backendName: "default",
+                _backendUrl: "http://localhost:4000",
+                _apiKey: "k",
+            } as unknown as vscode.LanguageModelChatInformation,
+        ];
+
+        await access(provider).sendRequestToLiteLLM(
+            {
+                model: "default/azure_ai/gpt-5.3-codex",
+                messages: [],
+            },
+            { report: () => {} } as unknown as vscode.Progress<vscode.LanguageModelResponsePart>,
+            new vscode.CancellationTokenSource().token,
+            undefined,
+            { mode: "chat" as const }
+        );
+
+        assert.strictEqual(chatStub.calledOnce, true);
+        assert.strictEqual(chatStub.firstCall.args[0], "azure_ai/gpt-5.3-codex");
     });
 });
