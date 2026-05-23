@@ -809,6 +809,92 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         sinon.assert.calledWithMatch(telemetrySpy, sinon.match({ tokensIn: 12, tokensOut: 7 }));
     });
 
+    test("merges partial usage frames to avoid dropping previously reported token details", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        sandbox
+            .stub(
+                (
+                    provider as unknown as {
+                        _configManager: {
+                            getConfig: () => Promise<{ url: string; experimentalEmitUsageData: boolean }>;
+                        };
+                    }
+                )._configManager,
+                "getConfig"
+            )
+            .resolves({ url: "http://localhost:4000", experimentalEmitUsageData: true });
+
+        const encoder = new TextEncoder();
+        sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Hello"}}]}' + "\n\n"));
+                    controller.enqueue(
+                        encoder.encode(
+                            'data: {"usage":{"prompt_tokens":12,"completion_tokens":5,"input_token_details":{"cached_tokens":3},"output_token_details":{"reasoning_tokens":2,"tool_tokens":1},"system_tokens":5}}' +
+                                "\n\n"
+                        )
+                    );
+                    // Simulate a later sparse usage frame from upstream that omits details or sends lower values.
+                    controller.enqueue(
+                        encoder.encode('data: {"usage":{"prompt_tokens":12,"completion_tokens":7}}' + "\n\n")
+                    );
+                    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                    controller.close();
+                },
+            })
+        );
+        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
+
+        const usageParts: vscode.LanguageModelDataPart[] = [];
+        await provider.provideLanguageModelChatResponse(
+            {
+                id: "model-partial-usage",
+                name: "model-partial-usage",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1000,
+                maxOutputTokens: 1000,
+                capabilities: { toolCalling: true, imageInput: false },
+            },
+            [
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [new vscode.LanguageModelTextPart("hi")],
+                },
+            ],
+            { modelOptions: {}, tools: [], toolMode: vscode.LanguageModelChatToolMode.Auto, requestInitiator: "test" },
+            {
+                report: (part) => {
+                    if (part instanceof vscode.LanguageModelDataPart && part.mimeType === "usage") {
+                        usageParts.push(part);
+                    }
+                },
+            },
+            new vscode.CancellationTokenSource().token
+        );
+
+        assert.ok(usageParts.length >= 2, "Expected at least two usage data frames");
+        const finalPayload = JSON.parse(Buffer.from(usageParts[usageParts.length - 1].data).toString("utf-8")) as {
+            prompt_tokens: number;
+            completion_tokens: number;
+            total_tokens: number;
+            system_prompt_tokens?: number;
+            prompt_tokens_details?: { cached_tokens?: number };
+            completion_tokens_details?: { reasoning_tokens?: number; tool_tokens?: number };
+        };
+
+        assert.strictEqual(finalPayload.prompt_tokens, 12);
+        assert.strictEqual(finalPayload.completion_tokens, 7);
+        assert.strictEqual(finalPayload.total_tokens, 19);
+        assert.strictEqual(finalPayload.prompt_tokens_details?.cached_tokens, 3);
+        assert.strictEqual(finalPayload.completion_tokens_details?.reasoning_tokens, 2);
+        assert.strictEqual(finalPayload.completion_tokens_details?.tool_tokens, 1);
+        assert.strictEqual(finalPayload.system_prompt_tokens, 5);
+    });
+
     test("counts tool-call only responses in fallback token reporting", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         sandbox

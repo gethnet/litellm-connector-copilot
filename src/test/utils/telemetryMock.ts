@@ -1,4 +1,4 @@
-import * as sinon from "sinon";
+import type * as sinon from "sinon";
 import type { TelemetryService } from "../../telemetry/telemetryService";
 import { LiteLLMTelemetry } from "../../utils/telemetry";
 

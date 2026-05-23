@@ -9,6 +9,7 @@ import type { ConfigManager } from "../../config/configManager";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, ResolvedBackend } from "../../types";
 import { createMockSecrets } from "../../test/utils/testMocks";
 import { EffortFallbackCache } from "../../utils/reasoningEffortFallback";
+import { Logger } from "../../utils/logger";
 import { createTelemetryMocks } from "../../test/utils/telemetryMock";
 import type { BackendSession } from "../backendSession";
 
@@ -691,6 +692,158 @@ suite("LiteLLM Provider Unit Tests", () => {
         );
 
         assert.strictEqual(sendStub.callCount, 5);
+    });
+
+    test("sendRequestWithRetry retries once without stream_options include_usage on unknown parameter rejection", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent, new EffortFallbackCache());
+        const configManager = access(provider)._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+
+        const model = {
+            id: "azure_ai/gpt-5.3-codex",
+            name: "azure_ai/gpt-5.3-codex",
+            tooltip: "",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 8192,
+            maxOutputTokens: 4096,
+            capabilities: { toolCalling: false, imageInput: false },
+        } as vscode.LanguageModelChatInformation;
+
+        const request = await access(provider).buildOpenAIChatRequest(
+            createMessages(),
+            model,
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+            },
+            undefined
+        );
+
+        const observedStreamOptions: Array<{ include_usage?: boolean } | undefined> = [];
+        const sendStub = sandbox
+            .stub(access(provider) as unknown as { sendRequestToLiteLLM: unknown }, "sendRequestToLiteLLM")
+            .callsFake(async (req: OpenAIChatCompletionRequest) => {
+                observedStreamOptions.push(req.stream_options ? { ...req.stream_options } : undefined);
+                if (observedStreamOptions.length === 1) {
+                    throw new Error(
+                        'LiteLLM Responses API error: 400 Bad Request {"error":{"message":"Unknown parameter: \'stream_options.include_usage\'."}}'
+                    );
+                }
+
+                return new ReadableStream<Uint8Array>({
+                    start(controller) {
+                        controller.close();
+                    },
+                });
+            });
+
+        await access(provider).sendRequestWithRetry(
+            request,
+            createMessages(),
+            model,
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+            },
+            { report: () => {} },
+            new vscode.CancellationTokenSource().token,
+            "chat"
+        );
+
+        const usageOptOutModels = (
+            provider as unknown as {
+                _usageOptOutModels: Set<string>;
+            }
+        )._usageOptOutModels;
+
+        assert.strictEqual(sendStub.callCount, 2);
+        assert.deepStrictEqual(observedStreamOptions[0], { include_usage: true });
+        assert.strictEqual(observedStreamOptions[1], undefined);
+        assert.ok(usageOptOutModels.has(model.id));
+    });
+
+    test("sendRequestWithRetry logs trace payload summary on failures", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent, new EffortFallbackCache());
+        const configManager = access(provider)._configManager;
+        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+
+        const traceStub = sandbox.stub(Logger, "trace");
+
+        const model = {
+            id: "failure-log-model",
+            name: "failure-log-model",
+            tooltip: "",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 8192,
+            maxOutputTokens: 4096,
+            capabilities: { toolCalling: false, imageInput: false },
+        } as vscode.LanguageModelChatInformation;
+
+        const request = await access(provider).buildOpenAIChatRequest(
+            createMessages(),
+            model,
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+            },
+            undefined
+        );
+
+        sandbox
+            .stub(access(provider) as unknown as { sendRequestToLiteLLM: unknown }, "sendRequestToLiteLLM")
+            .rejects(new Error("LiteLLM API error: 400\nUnsupported parameter: stream_options"));
+
+        await assert.rejects(
+            access(provider).sendRequestWithRetry(
+                request,
+                createMessages(),
+                model,
+                {
+                    modelOptions: {},
+                    tools: [],
+                    toolMode: vscode.LanguageModelChatToolMode.Auto,
+                    requestInitiator: "test",
+                },
+                { report: () => {} },
+                new vscode.CancellationTokenSource().token,
+                "chat"
+            )
+        );
+
+        assert.ok(
+            traceStub.calledWithMatch(
+                sinon.match(
+                    (msg: unknown) =>
+                        typeof msg === "string" && msg.includes("[request-failure] stage=sendRequestWithRetry")
+                ),
+                sinon.match((payload: unknown) => {
+                    if (!payload || typeof payload !== "object") {
+                        return false;
+                    }
+
+                    const candidate = payload as {
+                        model?: string;
+                        messageCount?: number;
+                        stream_options?: { include_usage?: boolean };
+                    };
+
+                    return (
+                        candidate.model === "failure-log-model" &&
+                        typeof candidate.messageCount === "number" &&
+                        candidate.stream_options?.include_usage === true
+                    );
+                })
+            ),
+            "Expected trace request-failure payload summary to be logged"
+        );
     });
 
     test("discoverModels attaches backend metadata and reasoning configuration schema when supported", async () => {
@@ -2024,51 +2177,48 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(models[0].id, "Gethnet/gpt-4o");
     });
 
-    test(
-        "_doDiscoverModels derives group name from baseUrl hostname when providerName and groupName are omitted",
-        async () => {
-            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-            const configManager = access(provider)._configManager;
+    test("_doDiscoverModels derives group name from baseUrl hostname when providerName and groupName are omitted", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const configManager = access(provider)._configManager;
 
-            const session: BackendSession = {
-                backendName: "llm-kit.geth.cc",
-                baseUrl: "https://llm-kit.geth.cc",
-                apiKey: "k",
-                client: {
-                    getModelInfo: async () => ({
-                        data: [
-                            {
-                                model_name: "gpt-5.3-codex",
-                                model_info: {
-                                    litellm_provider: "azure_ai",
-                                    mode: "chat",
-                                    supports_native_streaming: true,
-                                } as LiteLLMModelInfo,
-                            },
-                        ],
-                    }),
-                } as unknown as LiteLLMClient,
-            };
+        const session: BackendSession = {
+            backendName: "llm-kit.geth.cc",
+            baseUrl: "https://llm-kit.geth.cc",
+            apiKey: "k",
+            client: {
+                getModelInfo: async () => ({
+                    data: [
+                        {
+                            model_name: "gpt-5.3-codex",
+                            model_info: {
+                                litellm_provider: "azure_ai",
+                                mode: "chat",
+                                supports_native_streaming: true,
+                            } as LiteLLMModelInfo,
+                        },
+                    ],
+                }),
+            } as unknown as LiteLLMClient,
+        };
 
-            const convertStub = sandbox.stub(configManager, "convertProviderConfiguration").returns(session);
+        const convertStub = sandbox.stub(configManager, "convertProviderConfiguration").returns(session);
 
-            const models = await access(provider)._doDiscoverModels(
-                {
-                    silent: true,
-                    configuration: {
-                        baseUrl: "https://llm-kit.geth.cc",
-                        apiKey: "k",
-                    },
+        const models = await access(provider)._doDiscoverModels(
+            {
+                silent: true,
+                configuration: {
+                    baseUrl: "https://llm-kit.geth.cc",
+                    apiKey: "k",
                 },
-                new vscode.CancellationTokenSource().token
-            );
+            },
+            new vscode.CancellationTokenSource().token
+        );
 
-            assert.strictEqual(models.length, 1);
-            assert.strictEqual(convertStub.calledOnce, true);
-            assert.strictEqual(convertStub.firstCall.args[0], "llm-kit.geth.cc");
-            assert.strictEqual(models[0].id, "llm-kit.geth.cc/gpt-5.3-codex");
-        }
-    );
+        assert.strictEqual(models.length, 1);
+        assert.strictEqual(convertStub.calledOnce, true);
+        assert.strictEqual(convertStub.firstCall.args[0], "llm-kit.geth.cc");
+        assert.strictEqual(models[0].id, "llm-kit.geth.cc/gpt-5.3-codex");
+    });
 
     test("_doDiscoverModels handles error gracefully", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);

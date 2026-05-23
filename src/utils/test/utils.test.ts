@@ -578,33 +578,32 @@ suite("Utility Unit Tests", () => {
             assert.ok(!serialized.includes("cache_control"), "cache_control marker must not leak");
         });
 
+        suite("deriveGroupNameFromUrl", () => {
+            test("returns hostname from https URL", () => {
+                const result = deriveGroupNameFromUrl("https://llm-kit.geth.cc");
+                assert.strictEqual(result, "llm-kit.geth.cc");
+            });
 
-    suite("deriveGroupNameFromUrl", () => {
-        test("returns hostname from https URL", () => {
-            const result = deriveGroupNameFromUrl("https://llm-kit.geth.cc");
-            assert.strictEqual(result, "llm-kit.geth.cc");
-        });
+            test("returns hostname from http URL with port", () => {
+                const result = deriveGroupNameFromUrl("http://localhost:4000");
+                assert.strictEqual(result, "localhost:4000");
+            });
 
-        test("returns hostname from http URL with port", () => {
-            const result = deriveGroupNameFromUrl("http://localhost:4000");
-            assert.strictEqual(result, "localhost:4000");
-        });
+            test("returns empty string for empty input", () => {
+                const result = deriveGroupNameFromUrl("");
+                assert.strictEqual(result, "");
+            });
 
-        test("returns empty string for empty input", () => {
-            const result = deriveGroupNameFromUrl("");
-            assert.strictEqual(result, "");
-        });
+            test("returns empty string for non-URL string", () => {
+                const result = deriveGroupNameFromUrl("not-a-url");
+                assert.strictEqual(result, "");
+            });
 
-        test("returns empty string for non-URL string", () => {
-            const result = deriveGroupNameFromUrl("not-a-url");
-            assert.strictEqual(result, "");
+            test("strips path and query from URL", () => {
+                const result = deriveGroupNameFromUrl("https://proxy.example.com/v1?key=abc");
+                assert.strictEqual(result, "proxy.example.com");
+            });
         });
-
-        test("strips path and query from URL", () => {
-            const result = deriveGroupNameFromUrl("https://proxy.example.com/v1?key=abc");
-            assert.strictEqual(result, "proxy.example.com");
-        });
-    });
         test("V1 convertMessages drops cache_control parts (bare + +json variants)", () => {
             // V1 path: Copilot Chat can deliver the same poisoned data parts to
             // providers using the legacy convertMessages path, so it must be

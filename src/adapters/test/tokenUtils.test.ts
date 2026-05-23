@@ -10,6 +10,7 @@ import {
     countOpenAIChatMessagesTokens,
     calculateAvailableContext,
     getStaticPromptTokenCount,
+    getReservedOutputTokens,
     countTokensForV2Messages,
     trimV2MessagesForBudget,
     isContextOverflowError,
@@ -75,6 +76,37 @@ suite("TokenUtils Unit Tests", () => {
         (cyclic as unknown[]).push(cyclic);
 
         assert.strictEqual(estimateToolTokens(cyclic as never), 0);
+    });
+
+    test("getReservedOutputTokens uses smart defaults between 16k and 64k when max_tokens is omitted", () => {
+        const model = {
+            id: "test-model",
+            maxInputTokens: 200000,
+            maxOutputTokens: 128000,
+        } as vscode.LanguageModelChatInformation;
+
+        const lowInputReservation = getReservedOutputTokens(model, undefined, { estimatedInputTokens: 2000 });
+        const highInputReservation = getReservedOutputTokens(model, undefined, { estimatedInputTokens: 60000 });
+
+        assert.ok(lowInputReservation >= 16000);
+        assert.ok(highInputReservation <= 64000);
+        assert.ok(highInputReservation > lowInputReservation);
+    });
+
+    test("getReservedOutputTokens never exceeds remaining context window", () => {
+        const model = {
+            id: "small-model",
+            maxInputTokens: 0,
+            maxOutputTokens: 64000,
+        } as vscode.LanguageModelChatInformation;
+
+        const reserved = getReservedOutputTokens(model, undefined, {
+            estimatedInputTokens: 31900,
+            modelInfo: { max_input_tokens: 32000 } as LiteLLMModelInfo,
+        });
+
+        // total 32000 - input 31900 - structural headroom 256 => clamped to minimum 1
+        assert.strictEqual(reserved, 1);
     });
 
     test("isAnthropicModel identifies models correctly", () => {

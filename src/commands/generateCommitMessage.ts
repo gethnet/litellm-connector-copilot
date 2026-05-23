@@ -9,6 +9,50 @@ import { COMMIT_MESSAGE_PROMPT, COMMIT_SYSTEM_PROMPT } from "../utils/prompts";
 import { stripMarkdownCodeBlocks } from "../utils";
 import type { TelemetryService } from "../telemetry/telemetryService";
 
+async function tryGenerateViaVSCodeModelRequest(
+    modelId: string,
+    diff: string,
+    token: vscode.CancellationToken,
+    onProgress: (chunk: string) => void
+): Promise<string | undefined> {
+    // Route commit generation through VS Code's model request API first.
+    // This forces VS Code to call our registered chat provider with the
+    // provider-group configuration payload (`options.configuration`) attached.
+    const models = await vscode.lm.selectChatModels({ id: modelId });
+    const selectedModel = models[0];
+    if (!selectedModel) {
+        return undefined;
+    }
+
+    const messages: vscode.LanguageModelChatMessage[] = [
+        vscode.LanguageModelChatMessage.User(COMMIT_SYSTEM_PROMPT),
+        vscode.LanguageModelChatMessage.User(`${COMMIT_MESSAGE_PROMPT}\n\nHere is the diff:\n\n${diff}`),
+    ];
+
+    const response = await selectedModel.sendRequest(
+        messages,
+        {
+            justification: "Generate a concise git commit message from staged changes.",
+            modelOptions: {},
+        },
+        token
+    );
+
+    let accumulated = "";
+    for await (const chunk of response.stream) {
+        if (token.isCancellationRequested) {
+            break;
+        }
+
+        if (chunk instanceof vscode.LanguageModelTextPart) {
+            accumulated += chunk.value;
+            onProgress(chunk.value);
+        }
+    }
+
+    return stripMarkdownCodeBlocks(accumulated);
+}
+
 /**
  * Registers the command to generate a git commit message.
  */
@@ -127,25 +171,48 @@ export function registerGenerateCommitMessageCommand(
                 async (progress, token) => {
                     try {
                         let accumulatedText = "";
-                        await provider.provideCommitMessage(
-                            processedDiff,
-                            {
-                                modelOptions: {},
-                            } as vscode.LanguageModelChatRequestOptions,
-                            token,
-                            (chunk) => {
-                                accumulatedText += chunk;
-                                // Update input box incrementally (streaming effect)
-                                // We apply a light filter here to hide backticks/markdown tags
-                                // as they arrive, providing a cleaner UI experience.
-                                const filtered = accumulatedText
-                                    .replace(/^```(?:\w+)?\s*/, "") // Strip starting block
-                                    .replace(/```$/, ""); // Strip ending block if it just arrived
-                                inputBox.value = filtered;
-                            }
-                        );
-                        // Ensure final value is fully sanitized
-                        inputBox.value = stripMarkdownCodeBlocks(accumulatedText);
+                        let generatedMessage: string | undefined;
+
+                        try {
+                            generatedMessage = await tryGenerateViaVSCodeModelRequest(
+                                modelId,
+                                processedDiff,
+                                token,
+                                (chunk) => {
+                                    accumulatedText += chunk;
+                                    const filtered = accumulatedText.replace(/^```(?:\w+)?\s*/, "").replace(/```$/, "");
+                                    inputBox.value = filtered;
+                                }
+                            );
+                        } catch (vscodeRouteErr) {
+                            Logger.warn(
+                                "VS Code model request route failed; falling back to direct provider request",
+                                vscodeRouteErr
+                            );
+                        }
+
+                        if (generatedMessage === undefined) {
+                            await provider.provideCommitMessage(
+                                processedDiff,
+                                {
+                                    modelOptions: {},
+                                } as vscode.LanguageModelChatRequestOptions,
+                                token,
+                                (chunk) => {
+                                    accumulatedText += chunk;
+                                    // Update input box incrementally (streaming effect)
+                                    // We apply a light filter here to hide backticks/markdown tags
+                                    // as they arrive, providing a cleaner UI experience.
+                                    const filtered = accumulatedText
+                                        .replace(/^```(?:\w+)?\s*/, "") // Strip starting block
+                                        .replace(/```$/, ""); // Strip ending block if it just arrived
+                                    inputBox.value = filtered;
+                                }
+                            );
+                            generatedMessage = stripMarkdownCodeBlocks(accumulatedText);
+                        }
+
+                        inputBox.value = generatedMessage;
 
                         /* if (telemetryService) {
                             telemetryService.captureCommitMessageGenerated({

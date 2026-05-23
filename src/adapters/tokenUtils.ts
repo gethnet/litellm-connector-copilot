@@ -8,6 +8,13 @@ import { isCacheControlMimeType } from "../utils";
 
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16000;
 export const DEFAULT_CONTEXT_LENGTH = 128000;
+const SMART_OUTPUT_RESERVATION_MIN = 16000;
+const SMART_OUTPUT_RESERVATION_MAX = 64000;
+
+interface OutputReservationOptions {
+    estimatedInputTokens?: number;
+    modelInfo?: LiteLLMModelInfo;
+}
 
 let telemetryServiceInstance: TelemetryService | undefined;
 
@@ -123,12 +130,32 @@ export function countOpenAIChatMessagesTokens(
  */
 export function getReservedOutputTokens(
     model: vscode.LanguageModelChatInformation,
-    requestedMaxTokens?: number
+    requestedMaxTokens?: number,
+    options?: OutputReservationOptions
 ): number {
     if (typeof requestedMaxTokens === "number") {
         return Math.max(1, Math.min(requestedMaxTokens, model.maxOutputTokens));
     }
-    return Math.max(1, model.maxOutputTokens);
+
+    const estimatedInputTokens =
+        typeof options?.estimatedInputTokens === "number" && options.estimatedInputTokens > 0
+            ? options.estimatedInputTokens
+            : 0;
+    const totalTokenLimit = getTotalTokenLimit(model, options?.modelInfo);
+
+    // A "smart reservation" target in the requested 16k..64k range.
+    // Larger requests reserve a larger output window, but we always clamp to model limits.
+    const ratio = Math.min(1, estimatedInputTokens / 48000);
+    const smartTarget = Math.round(
+        SMART_OUTPUT_RESERVATION_MIN + (SMART_OUTPUT_RESERVATION_MAX - SMART_OUTPUT_RESERVATION_MIN) * ratio
+    );
+
+    // Keep a small structural headroom so output reservation does not completely consume the
+    // context window when input is already large.
+    const structuralHeadroom = 256;
+    const remainingContextWindow = Math.max(1, totalTokenLimit - estimatedInputTokens - structuralHeadroom);
+
+    return Math.max(1, Math.min(model.maxOutputTokens, smartTarget, remainingContextWindow));
 }
 
 /**

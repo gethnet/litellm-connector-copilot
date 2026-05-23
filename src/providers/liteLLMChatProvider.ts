@@ -55,6 +55,115 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         super(secrets, userAgent, effortFallbackCache);
     }
 
+    private mergeUsagePayloadWithLastKnown(current: OpenAIUsagePayload): OpenAIUsagePayload {
+        const previous = this._lastStreamUsage;
+        if (!previous) {
+            return current;
+        }
+
+        const pickMonotonicTokenCount = (currentValue?: number, previousValue?: number): number | undefined => {
+            if (typeof currentValue === "number" && typeof previousValue === "number") {
+                return Math.max(currentValue, previousValue);
+            }
+            if (typeof currentValue === "number") {
+                return currentValue;
+            }
+            return previousValue;
+        };
+
+        const normalizedCurrentPromptDetails: OpenAIUsagePromptTokenDetails = {
+            ...(current.prompt_tokens_details ?? {}),
+        };
+        const normalizedCurrentCompletionDetails: OpenAIUsageCompletionTokenDetails = {
+            ...(current.completion_tokens_details ?? {}),
+        };
+
+        const mergedPromptTokens = Math.max(current.prompt_tokens, previous.promptTokens ?? 0);
+        const mergedCompletionTokens = Math.max(current.completion_tokens, previous.completionTokens ?? 0);
+
+        const mergedPromptDetails: OpenAIUsagePromptTokenDetails = {
+            cached_tokens: pickMonotonicTokenCount(
+                normalizedCurrentPromptDetails.cached_tokens ?? (current.prompt_tokens_details ? 0 : undefined),
+                previous.cachedTokens
+            ),
+            cache_creation_input_tokens: pickMonotonicTokenCount(
+                normalizedCurrentPromptDetails.cache_creation_input_tokens,
+                previous.cacheCreationInputTokens
+            ),
+        };
+
+        const mergedCompletionDetails: OpenAIUsageCompletionTokenDetails = {
+            reasoning_tokens: pickMonotonicTokenCount(
+                normalizedCurrentCompletionDetails.reasoning_tokens ??
+                    (current.completion_tokens_details ? 0 : undefined),
+                previous.reasoningTokens
+            ),
+            tool_tokens: pickMonotonicTokenCount(normalizedCurrentCompletionDetails.tool_tokens, previous.toolTokens),
+            accepted_prediction_tokens: pickMonotonicTokenCount(
+                normalizedCurrentCompletionDetails.accepted_prediction_tokens,
+                previous.acceptedPredictionTokens
+            ),
+            rejected_prediction_tokens: pickMonotonicTokenCount(
+                normalizedCurrentCompletionDetails.rejected_prediction_tokens,
+                previous.rejectedPredictionTokens
+            ),
+        };
+
+        const merged: OpenAIUsagePayload = {
+            ...current,
+            prompt_tokens: mergedPromptTokens,
+            completion_tokens: mergedCompletionTokens,
+            total_tokens: mergedPromptTokens + mergedCompletionTokens,
+            system_prompt_tokens: pickMonotonicTokenCount(current.system_prompt_tokens, previous.systemTokens),
+            prompt_tokens_details: Object.values(mergedPromptDetails).some((value) => typeof value === "number")
+                ? mergedPromptDetails
+                : undefined,
+            completion_tokens_details: Object.values(mergedCompletionDetails).some((value) => typeof value === "number")
+                ? mergedCompletionDetails
+                : undefined,
+            reserved_output_tokens: current.reserved_output_tokens,
+            total_token_max: current.total_token_max,
+        };
+
+        return merged;
+    }
+
+    private logFinalUsageEnvelope(
+        requestId: string,
+        modelId: string,
+        caller: string,
+        usage: {
+            tokensIn?: number;
+            tokensOut?: number;
+            cachedTokens?: number;
+            cacheCreationInputTokens?: number;
+            reasoningTokens?: number;
+            toolTokens?: number;
+            acceptedPredictionTokens?: number;
+            rejectedPredictionTokens?: number;
+            systemPromptTokens?: number;
+            reservedOutputTokens?: number;
+            totalTokenMax?: number;
+            sawUsageDataPart: boolean;
+        }
+    ): void {
+        Logger.debug(
+            `[TokenUsage][Final] request_id=${requestId} model=${modelId} caller=${caller} ` +
+                `tokens_in=${usage.tokensIn ?? "n/a"} tokens_out=${usage.tokensOut ?? "n/a"} ` +
+                `cached_tokens=${usage.cachedTokens ?? "n/a"} cache_creation_input_tokens=${
+                    usage.cacheCreationInputTokens ?? "n/a"
+                } ` +
+                `reasoning_tokens=${usage.reasoningTokens ?? "n/a"} tool_tokens=${usage.toolTokens ?? "n/a"} ` +
+                `accepted_prediction_tokens=${usage.acceptedPredictionTokens ?? "n/a"} rejected_prediction_tokens=${
+                    usage.rejectedPredictionTokens ?? "n/a"
+                } ` +
+                `system_prompt_tokens=${usage.systemPromptTokens ?? "n/a"} reserved_output_tokens=${
+                    usage.reservedOutputTokens ?? "n/a"
+                } ` +
+                `total_token_max=${usage.totalTokenMax ?? "n/a"} streamed_usage=${usage.sawUsageDataPart}`
+        );
+    }
+
     private emitExperimentalUsageData(
         progress: vscode.Progress<vscode.LanguageModelResponsePart>,
         tokensIn: number,
@@ -229,21 +338,21 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                             total_token_max: parsed.total_token_max ?? totalTokenMaxForRequest,
                         };
 
+                        const mergedUsage = this.mergeUsagePayloadWithLastKnown(enrichedUsage);
+
                         this._lastStreamUsage = {
-                            promptTokens: enrichedUsage.prompt_tokens,
-                            completionTokens: enrichedUsage.completion_tokens,
-                            systemTokens: enrichedUsage.system_prompt_tokens,
-                            cachedTokens: enrichedUsage.prompt_tokens_details?.cached_tokens,
-                            cacheCreationInputTokens: enrichedUsage.prompt_tokens_details?.cache_creation_input_tokens,
-                            reasoningTokens: enrichedUsage.completion_tokens_details?.reasoning_tokens,
-                            toolTokens: enrichedUsage.completion_tokens_details?.tool_tokens,
-                            acceptedPredictionTokens:
-                                enrichedUsage.completion_tokens_details?.accepted_prediction_tokens,
-                            rejectedPredictionTokens:
-                                enrichedUsage.completion_tokens_details?.rejected_prediction_tokens,
+                            promptTokens: mergedUsage.prompt_tokens,
+                            completionTokens: mergedUsage.completion_tokens,
+                            systemTokens: mergedUsage.system_prompt_tokens,
+                            cachedTokens: mergedUsage.prompt_tokens_details?.cached_tokens,
+                            cacheCreationInputTokens: mergedUsage.prompt_tokens_details?.cache_creation_input_tokens,
+                            reasoningTokens: mergedUsage.completion_tokens_details?.reasoning_tokens,
+                            toolTokens: mergedUsage.completion_tokens_details?.tool_tokens,
+                            acceptedPredictionTokens: mergedUsage.completion_tokens_details?.accepted_prediction_tokens,
+                            rejectedPredictionTokens: mergedUsage.completion_tokens_details?.rejected_prediction_tokens,
                         };
 
-                        const enrichedBytes = new TextEncoder().encode(JSON.stringify(enrichedUsage));
+                        const enrichedBytes = new TextEncoder().encode(JSON.stringify(mergedUsage));
                         progress.report(new vscode.LanguageModelDataPart(enrichedBytes, "usage"));
                         return;
                     } catch {
@@ -285,15 +394,19 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
 
             const modelInfo = this._modelInfoCache.get(modelToUse.id);
             const requestBody = await this.buildOpenAIChatRequest(messages, modelToUse, options, modelInfo, caller);
-            const reservedOutputTokens = getReservedOutputTokens(modelToUse, requestBody.max_tokens);
+            const estimatedTransportInputTokens =
+                countOpenAIChatMessagesTokens(requestBody.messages, modelToUse.id, modelInfo) +
+                estimateToolTokens(requestBody.tools);
+            const reservedOutputTokens = getReservedOutputTokens(modelToUse, requestBody.max_tokens, {
+                estimatedInputTokens: estimatedTransportInputTokens,
+                modelInfo,
+            });
             const totalTokenMax = getTotalTokenLimit(modelToUse, modelInfo);
             reservedOutputTokensForRequest = reservedOutputTokens;
             totalTokenMaxForRequest = totalTokenMax;
 
             // Count the actual transport request after trimming/conversion.
-            tokensIn =
-                countOpenAIChatMessagesTokens(requestBody.messages, modelToUse.id, modelInfo) +
-                estimateToolTokens(requestBody.tools);
+            tokensIn = estimatedTransportInputTokens;
 
             let stream: ReadableStream<Uint8Array>;
             try {
@@ -310,6 +423,13 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                     modelInfo
                 );
             } catch (err: unknown) {
+                this.logRequestPayloadOnFailure(requestBody, err, {
+                    stage: "provideLanguageModelChatResponse",
+                    modelId: modelToUse.id,
+                    caller,
+                    modelInfoMode: modelInfo?.mode,
+                });
+
                 if (token.isCancellationRequested) {
                     throw new Error("Operation cancelled by user", { cause: err });
                 }
@@ -365,6 +485,11 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                                 caller,
                             };
                             LiteLLMTelemetry.reportMetric(metric);
+                            this.logFinalUsageEnvelope(requestId, modelToUse.id, caller, {
+                                tokensIn,
+                                tokensOut,
+                                sawUsageDataPart: this._sawUsageDataPart,
+                            });
 
                             // Disabling this to reduce noise / unecessary logging
                             // TODO: look into potentially removing this in the future if don't need it.
@@ -439,6 +564,20 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                         : undefined,
             };
             LiteLLMTelemetry.reportMetric(metric);
+            this.logFinalUsageEnvelope(requestId, modelToUse.id, caller, {
+                tokensIn: tokensInForTelemetry,
+                tokensOut,
+                cachedTokens,
+                cacheCreationInputTokens,
+                reasoningTokens,
+                toolTokens,
+                acceptedPredictionTokens,
+                rejectedPredictionTokens,
+                systemPromptTokens,
+                reservedOutputTokens,
+                totalTokenMax,
+                sawUsageDataPart: this._sawUsageDataPart,
+            });
 
             // Disabling this to reduce noise / unecessary logging
             // TODO: look into potentially removing this in the future if don't need it.

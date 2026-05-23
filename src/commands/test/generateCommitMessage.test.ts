@@ -14,6 +14,7 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
     setup(() => {
         sandbox = sinon.createSandbox();
         mockProvider = sandbox.createStubInstance(LiteLLMCommitMessageProvider);
+        sandbox.stub(vscode.lm, "selectChatModels").resolves([]);
     });
 
     teardown(() => {
@@ -81,6 +82,46 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
 
         assert.strictEqual(mockInputBox.value, "feat: test");
         assert.strictEqual(mockInputBox.enabled, true);
+    });
+
+    test("handler prefers VS Code model request route when model is available", async () => {
+        const registerStub = sandbox.stub(vscode.commands, "registerCommand");
+        registerGenerateCommitMessageCommand(mockProvider as unknown as LiteLLMCommitMessageProvider);
+        const handler = registerStub.firstCall.args[1] as () => Promise<void>;
+
+        mockProvider.getConfigManager.returns({
+            getConfig: async () => ({ commitModelIdOverride: "test-model" }),
+        } as unknown as ConfigManager);
+
+        sandbox.stub(GitUtils, "getStagedDiff").resolves("test-diff");
+        const mockInputBox = { value: "", placeholder: "", enabled: true };
+        const mockRepo = { inputBox: mockInputBox };
+        sandbox.stub(GitUtils, "getGitAPI").resolves({ repositories: [mockRepo] } as unknown as never);
+        mockProvider.getModelInfo.returns({ max_input_tokens: 1000 } as unknown as LiteLLMModelInfo);
+
+        const model = {
+            sendRequest: sandbox.stub().resolves({
+                stream: (async function* () {
+                    yield new vscode.LanguageModelTextPart("feat: ");
+                    yield new vscode.LanguageModelTextPart("from vscode route");
+                })(),
+            }),
+        };
+        const selectModelsStub = vscode.lm.selectChatModels as unknown as sinon.SinonStub;
+        selectModelsStub.resolves([model as unknown as vscode.LanguageModelChat]);
+
+        sandbox.stub(vscode.window, "withProgress").callsFake(async (_options, task) => {
+            return await task(
+                { report: sandbox.stub() } as vscode.Progress<{ message?: string; increment?: number }>,
+                new vscode.CancellationTokenSource().token
+            );
+        });
+
+        await handler();
+
+        assert.strictEqual(mockInputBox.value, "feat: from vscode route");
+        assert.strictEqual(mockProvider.provideCommitMessage.called, false);
+        assert.strictEqual((model.sendRequest as sinon.SinonStub).calledOnce, true);
     });
 
     test("handler reports error if diff retrieval fails", async () => {

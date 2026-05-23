@@ -1190,6 +1190,7 @@ export abstract class LiteLLMProviderBase {
         const notificationKeyEffort = originalEffort ?? effectiveEffort;
         let attempts = 0;
         let lastError: unknown;
+        let usageRetryAttempted = false;
 
         const clearUsageFlag = () => {
             delete (request as { stream_options?: { include_usage?: boolean } }).stream_options;
@@ -1208,14 +1209,25 @@ export abstract class LiteLLMProviderBase {
                     modelInfo
                 );
             } catch (err) {
+                this.logRequestPayloadOnFailure(request, err, {
+                    stage: "sendRequestWithRetry",
+                    modelId: model.id,
+                    caller,
+                    modelInfoMode: modelInfo?.mode,
+                });
+
                 const errorMessage = err instanceof Error ? err.message : String(err);
-                if (
-                    typeof errorMessage === "string" &&
-                    (errorMessage.toLowerCase().includes("stream_options") ||
-                        errorMessage.toLowerCase().includes("include_usage"))
-                ) {
+                if (this.isUsageIncludeUsageParameterError(errorMessage)) {
                     this._usageOptOutModels.add(model.id);
                     clearUsageFlag();
+
+                    if (!usageRetryAttempted) {
+                        usageRetryAttempted = true;
+                        Logger.warn(
+                            `[sendRequestWithRetry] Retrying once without stream_options.include_usage after upstream rejection for model ${model.id}`
+                        );
+                        continue;
+                    }
                 }
 
                 Logger.debug(`[sendRequestWithRetry] Caught error, checking isReasoningError...`);
@@ -1256,6 +1268,17 @@ export abstract class LiteLLMProviderBase {
         }
 
         throw this.toMeaningfulError(lastError, "Reasoning effort fallback exhausted");
+    }
+
+    private isUsageIncludeUsageParameterError(errorMessage: string): boolean {
+        const lower = errorMessage.toLowerCase();
+        return (
+            (lower.includes("stream_options") || lower.includes("include_usage")) &&
+            (lower.includes("unsupported parameter") ||
+                lower.includes("not supported") ||
+                lower.includes("unknown parameter") ||
+                lower.includes("unexpected keyword argument"))
+        );
     }
 
     private toMeaningfulError(error: unknown, fallbackMessage: string): Error {
@@ -1537,6 +1560,72 @@ export abstract class LiteLLMProviderBase {
 
         // Cap size.
         return withoutCopilotContext.length > 500 ? `${withoutCopilotContext.slice(0, 500)}…` : withoutCopilotContext;
+    }
+
+    protected logRequestPayloadOnFailure(
+        request: OpenAIChatCompletionRequest,
+        error: unknown,
+        context: {
+            stage: "sendRequestWithRetry" | "provideLanguageModelChatResponse";
+            modelId: string;
+            caller?: string;
+            modelInfoMode?: string;
+        }
+    ): void {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const sanitizedError = this.sanitizeErrorTextForLogs(errorMessage);
+        const payloadSummary = this.summarizeRequestPayloadForLogs(request);
+
+        Logger.trace(
+            `[request-failure] stage=${context.stage} model=${context.modelId} caller=${context.caller ?? "unknown"} mode=${context.modelInfoMode ?? "unknown"} error=${sanitizedError}`,
+            payloadSummary
+        );
+    }
+
+    private summarizeRequestPayloadForLogs(request: OpenAIChatCompletionRequest): Record<string, unknown> {
+        const summarizeMessages = (request.messages ?? []).map(
+            (message: { role?: string; content?: unknown; tool_calls?: unknown[]; tool_call_id?: string }) => {
+                const content = message.content;
+                const contentSummary =
+                    typeof content === "string"
+                        ? `text(${content.length})`
+                        : Array.isArray(content)
+                          ? `parts(${content.length})`
+                          : typeof content;
+
+                return {
+                    role: message.role,
+                    content: contentSummary,
+                    hasToolCalls: Array.isArray(message.tool_calls) && message.tool_calls.length > 0,
+                    toolCallId: message.tool_call_id,
+                };
+            }
+        );
+
+        const summarizeTools = (request.tools ?? []).map((tool) => ({
+            type: tool.type,
+            name: tool.function?.name,
+            hasDescription: typeof tool.function?.description === "string" && tool.function.description.length > 0,
+        }));
+
+        return {
+            model: request.model,
+            stream: request.stream,
+            max_tokens: request.max_tokens,
+            temperature: request.temperature,
+            top_p: request.top_p,
+            frequency_penalty: request.frequency_penalty,
+            presence_penalty: request.presence_penalty,
+            stop: request.stop,
+            reasoning_effort: request.reasoning_effort,
+            stream_options: request.stream_options,
+            tool_choice: request.tool_choice,
+            messageCount: request.messages?.length ?? 0,
+            messages: summarizeMessages,
+            toolCount: request.tools?.length ?? 0,
+            tools: summarizeTools,
+            hasExtraBody: typeof request.extra_body === "object" && request.extra_body !== null,
+        };
     }
 
     private collectMessageText(message: LanguageModelChatRequestMessage): string {
