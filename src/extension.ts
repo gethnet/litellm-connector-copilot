@@ -139,7 +139,6 @@ export function activate(context: vscode.ExtensionContext): void {
             "inline-completions": config.inlineCompletionsEnabled ?? false,
             "responses-api": config.v2ApiEnabled ?? false,
             "commit-message": !!(config.commitModelIdOverride && config.commitModelIdOverride.length > 0),
-            "usage-data": config.experimentalEmitUsageData ?? false,
             caching: !config.disableCaching,
             "quota-tool-redaction": !config.disableQuotaToolRedaction,
         });

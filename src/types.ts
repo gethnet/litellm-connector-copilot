@@ -226,10 +226,6 @@ export interface LiteLLMConfig {
 
     inactivityTimeout?: number;
     disableCaching?: boolean;
-    /**
-     * Experimental: emit token usage metadata as a response data part for manual UI probing.
-     */
-    experimentalEmitUsageData?: boolean;
     disableQuotaToolRedaction?: boolean;
     /**
      * Reasoning capability overrides supplied by the user. Mirrors the

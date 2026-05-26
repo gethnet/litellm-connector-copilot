@@ -59,7 +59,7 @@ Your support keeps this project alive and improving! ❤️
 
 > **Provider grouping remains intact**: each backend name is preserved as its provider/group label, so models stay clearly identifiable in the Language Models view and picker.
 
-> **⚠️ 2.0.0 temporary limitation**: Unless manually configured, **Git Commit Message Generation** and **Inline Completions** are currently inoperative in this release. We are actively fixing modern-config parity for both paths.  
+> **⚠️ 2.0.0 temporary limitation**: Unless manually configured, **Git Commit Message Generation** and **Inline Completions** are currently inoperative in this release. We are actively fixing modern-config parity for both paths.
 > Manual setup: use **LiteLLM: Select Commit Message Model** and **LiteLLM: Select Inline Completion Model** (plus inline completion settings) if you need these features immediately.
 
 That's it! Your models from the LiteLLM proxy will automatically appear in the model picker.
@@ -99,7 +99,7 @@ The extension automatically handles provider-specific quirks:
 See real-time token usage with context window indicators (e.g., "↑128K in / ↓16K out"). Helps you stay within limits and understand costs.
 
 ### ✍️ **Git Commit Generation**
-Generate structured, conventional commit messages from your staged changes.  
+Generate structured, conventional commit messages from your staged changes.
 ⚠️ In `2.0.0`, this currently requires manual model configuration to operate reliably.
 
 ### 🧼 **Smart Sanitization**
@@ -118,7 +118,7 @@ Send `no-cache` headers to bypass LiteLLM caching when you need fresh responses.
 Your API keys and URLs are stored safely in VS Code's encrypted `SecretStorage`. No plaintext secrets.
 
 ### ⌨️ **Optional Inline Completions**
-Enable LiteLLM-powered inline completions as an alternative to Copilot's default.  
+Enable LiteLLM-powered inline completions as an alternative to Copilot's default.
 ⚠️ In `2.0.0`, this currently requires manual configuration to operate reliably.
 
 ---
@@ -168,7 +168,6 @@ Fine-tune your experience with these settings (accessible via VS Code Settings):
 | `litellm-connector.modelCapabilitiesOverrides` | object | `{}` | Override model capabilities (`toolCalling`, `imageInput`) reported to VS Code (e.g., `toolCalling,imageInput`). |
 | `litellm-connector.inlineCompletions.enabled` | boolean | `false` | Enable LiteLLM inline completions via VS Code's stable inline completion provider API. **(Deprecated: will be removed)** |
 | `litellm-connector.inlineCompletions.modelId` | string | `""` | **(Deprecated)** Use VS Code's [`inlineChat.defaultModel`](vscode://settings/inlineChat.defaultModel) setting instead. |
-| `litellm-connector.emitUsageData` | boolean | `false` | **(Experimental)** Emit token usage metadata as a response data part. |
 | `litellm-connector.sendDefaultParameters` | boolean | `false` | **(Temporary, will be removed)** Send default temperature, frequency_penalty, and presence_penalty if not provided. Recommended: false. |
 
 > **Tip**: Most users won't need to touch these—the defaults work great out of the box!

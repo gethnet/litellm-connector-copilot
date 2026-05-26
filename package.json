@@ -17,7 +17,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "2.1.0-dev12",
+	"version": "2.1.0-dev17",
 	"preview": true,
 	"engines": {
 		"vscode": "^1.120.0"
@@ -198,14 +198,6 @@
 					"default": "",
 					"description": "Override the model ID for git commit message generation. If empty, the feature is disabled.",
 					"markdownDescription": "Override the model ID for git commit message generation. [Select Model](command:litellm-connector.generateCommitMessage.selectModel) to choose from discovered models. If empty, the feature is disabled."
-				},
-				"litellm-connector.emitUsageData": {
-					"type": "boolean",
-					"default": false,
-					"description": "Emit token usage metadata as a response data part to probe whether Copilot or VS Code surfaces context usage in chat UI.",
-					"tags": [
-						"experimental"
-					]
 				},
 				"litellm-connector.enableResponsesApi": {
 					"type": "boolean",

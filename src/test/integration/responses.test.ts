@@ -33,8 +33,24 @@ suite("Responses Client Unit Tests", () => {
         await client.handleEvent({ type: "response.output_reasoning.delta", delta: "Thinking..." }, progress);
 
         assert.strictEqual(reportedParts.length, 1);
-        assert.ok(reportedParts[0] instanceof vscode.LanguageModelTextPart);
-        assert.strictEqual((reportedParts[0] as vscode.LanguageModelTextPart).value, "*Thinking...*");
+        const ThinkingCtor = (vscode as unknown as Record<string, unknown>).LanguageModelThinkingPart as
+            | (new (
+                  value: string | string[],
+                  id?: string,
+                  metadata?: Record<string, unknown>
+              ) => vscode.LanguageModelResponsePart)
+            | undefined;
+        if (ThinkingCtor) {
+            assert.ok(
+                reportedParts[0] instanceof ThinkingCtor || reportedParts[0] instanceof vscode.LanguageModelTextPart
+            );
+            if (reportedParts[0] instanceof vscode.LanguageModelTextPart) {
+                assert.strictEqual((reportedParts[0] as vscode.LanguageModelTextPart).value, "*Thinking...*");
+            }
+        } else {
+            assert.ok(reportedParts[0] instanceof vscode.LanguageModelTextPart);
+            assert.strictEqual((reportedParts[0] as vscode.LanguageModelTextPart).value, "*Thinking...*");
+        }
     });
 
     test("handleEvent buffers and emits tool calls", async () => {

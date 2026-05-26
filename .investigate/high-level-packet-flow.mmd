@@ -1,0 +1,28 @@
+flowchart TD
+    %% Out
+    A([Request Start])
+    B{Process}
+    D(Send Request via LiteLLM)
+    C.0[Chat Completion Endpoint]
+    C.1[Responses Endpoint]
+    E([Error])
+    E.Pass([Success])
+
+    A --> B
+
+    B --> D
+
+    D --> C.1
+
+    C.1 -- Failed --> C.0
+    C.1 -- Success --> E.Pass
+    C.0 -- Success --> E.Pass
+    C.0 -- Failed --> E
+
+    %% In
+    Resp.Start
+    Resp.Process
+    Resp.EmitData
+    Resp.SendToVSCode
+
+    Resp.Start --> Resp.Process --> Resp.EmitData --> Resp.SendToVSCode

@@ -4,6 +4,7 @@ import { LiteLLMProviderBase } from "./liteLLMProviderBase";
 import { LiteLLMTelemetry } from "../utils/telemetry";
 import { Logger } from "../utils/logger";
 import { countTokens } from "../adapters/tokenUtils";
+import { StreamTokenCapture } from "../adapters/streaming/streamTokenCapture";
 import { decodeSSE } from "../adapters/sse/sseDecoder";
 import { createInitialStreamingState, interpretStreamEvent } from "../adapters/streaming/liteLLMStreamInterpreter";
 import { COMMIT_MESSAGE_PROMPT, COMMIT_SYSTEM_PROMPT } from "../utils/prompts";
@@ -94,13 +95,19 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
             );
 
             // Send the request
-            const nullProgress: vscode.Progress<vscode.LanguageModelResponsePart> = {
-                report: (part) => {
-                    if (part instanceof vscode.LanguageModelTextPart && onProgress) {
-                        onProgress(part.value);
-                    }
+            const tokenCapture = new StreamTokenCapture(
+                model.id,
+                {
+                    report: (part) => {
+                        if (part instanceof vscode.LanguageModelTextPart && onProgress) {
+                            onProgress(part.value);
+                        }
+                    },
                 },
-            };
+                modelInfo
+            );
+            tokenCapture.setEstimatedPromptTokens(tokensIn ?? 0);
+            const trackingProgress = tokenCapture.progress;
 
             const stream = await this.sendRequestWithRetry(
                 requestBody,
@@ -112,7 +119,7 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
                     toolMode: vscode.LanguageModelChatToolMode.Auto,
                     requestInitiator: "commit-message",
                 } as vscode.ProvideLanguageModelChatResponseOptions,
-                nullProgress,
+                trackingProgress,
                 token,
                 "scm-generator",
                 modelInfo
@@ -124,8 +131,10 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
             // Sanitize the message by stripping markdown code blocks
             const sanitizedMessage = stripMarkdownCodeBlocks(commitMessage);
 
-            // Estimate tokensOut from the generated text
-            const tokensOut = countTokens(sanitizedMessage, model.id, modelInfo);
+            const snapshot = tokenCapture.getSnapshot();
+            const tokensOut = snapshot.sawUpstreamUsage
+                ? snapshot.completionTokens
+                : countTokens(sanitizedMessage, model.id, modelInfo);
 
             LiteLLMTelemetry.reportMetric({
                 requestId,

@@ -65,7 +65,7 @@ If the extension fails to connect or models don't show up:
 
 > **Backend identity remains clear**: each backend is kept as its own provider/group so model origin is obvious in the picker.
 
-> **⚠️ 2.0.0 temporary limitation**: Unless manually configured, **Git commit message generation** and **inline completions** are currently inoperative in this release.  
+> **⚠️ 2.0.0 temporary limitation**: Unless manually configured, **Git commit message generation** and **inline completions** are currently inoperative in this release.
 > Manual setup: use **LiteLLM: Select Commit Message Model** and **LiteLLM: Select Inline Completion Model** if you need these features now.
 
 ---
@@ -123,7 +123,6 @@ If the extension fails to connect or models don't show up:
 | `litellm-connector.modelCapabilitiesOverrides` | object | `{}` | Override model capabilities (`toolCalling`, `imageInput`) reported to VS Code (e.g., `toolCalling,imageInput`). |
 | `litellm-connector.inlineCompletions.enabled` | boolean | `false` | Enable LiteLLM inline completions. **(Deprecated: will be removed)** |
 | `litellm-connector.inlineCompletions.modelId` | string | `""` | **(Deprecated)** Use VS Code's [`inlineChat.defaultModel`](vscode://settings/inlineChat.defaultModel) setting instead. |
-| `litellm-connector.emitUsageData` | boolean | `false` | **(Experimental)** Emit token usage metadata. |
 | `litellm-connector.sendDefaultParameters` | boolean | `false` | **(Temporary, will be removed)** Send default parameters if not provided. Recommended: false. |
 
 ---

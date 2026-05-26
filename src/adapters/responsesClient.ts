@@ -3,9 +3,9 @@ import type {
     LiteLLMConfig,
     LiteLLMResponsesRequest,
     LiteLLMModelInfo,
-    OpenAIUsageCompletionTokenDetails,
-    OpenAIUsagePayload,
-    OpenAIUsagePromptTokenDetails,
+    // OpenAIUsageCompletionTokenDetails, // TODO: Remove by v2.3 if still commented
+    // OpenAIUsagePayload, // TODO: Remove by v2.3 if still commented
+    // OpenAIUsagePromptTokenDetails, // TODO: Remove by v2.3 if still commented
 } from "../types";
 import { tryParseJSONObject } from "../utils";
 import { Logger } from "../utils/logger";
@@ -53,72 +53,6 @@ export class ResponsesClient {
      */
     private anonymousToolArgsBuffer = "";
     private anonymousToolName: string | undefined;
-
-    private emitExperimentalUsageData(
-        progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-        promptTokens: number,
-        completionTokens: number,
-        reasoningTokens?: number,
-        cachedTokens?: number,
-        extra?: {
-            systemPromptTokens?: number;
-            toolTokens?: number;
-            acceptedPredictionTokens?: number;
-            rejectedPredictionTokens?: number;
-            cacheCreationInputTokens?: number;
-        }
-    ): void {
-        Logger.debug(
-            `Emitting experimental usage data part | prompt_tokens: ${promptTokens} | completion_tokens: ${completionTokens} | reasoning_tokens: ${reasoningTokens ?? "undefined"} | cached_tokens: ${cachedTokens ?? "undefined"} | system_prompt_tokens: ${extra?.systemPromptTokens ?? "undefined"}`
-        );
-
-        const usagePayload: OpenAIUsagePayload = {
-            prompt_tokens: promptTokens,
-            completion_tokens: completionTokens,
-            total_tokens: promptTokens + completionTokens,
-        };
-
-        const promptTokenDetails: OpenAIUsagePromptTokenDetails = {};
-        if (typeof cachedTokens === "number") {
-            promptTokenDetails.cached_tokens = cachedTokens;
-        }
-        if (typeof extra?.cacheCreationInputTokens === "number") {
-            promptTokenDetails.cache_creation_input_tokens = extra.cacheCreationInputTokens;
-        }
-        if (Object.keys(promptTokenDetails).length > 0) {
-            usagePayload.prompt_tokens_details = promptTokenDetails;
-        }
-
-        const completionTokenDetails: OpenAIUsageCompletionTokenDetails = {};
-        if (typeof reasoningTokens === "number") {
-            completionTokenDetails.reasoning_tokens = reasoningTokens;
-        }
-        if (typeof extra?.toolTokens === "number") {
-            completionTokenDetails.tool_tokens = extra.toolTokens;
-        }
-        if (typeof extra?.acceptedPredictionTokens === "number") {
-            completionTokenDetails.accepted_prediction_tokens = extra.acceptedPredictionTokens;
-        }
-        if (typeof extra?.rejectedPredictionTokens === "number") {
-            completionTokenDetails.rejected_prediction_tokens = extra.rejectedPredictionTokens;
-        }
-        if (Object.keys(completionTokenDetails).length > 0) {
-            usagePayload.completion_tokens_details = completionTokenDetails;
-        }
-
-        if (typeof extra?.systemPromptTokens === "number") {
-            usagePayload.system_prompt_tokens = extra.systemPromptTokens;
-        }
-
-        const payloadJson = JSON.stringify(usagePayload);
-        const payloadBytes = new TextEncoder().encode(payloadJson);
-
-        try {
-            progress.report(new vscode.LanguageModelDataPart(payloadBytes, "usage"));
-        } catch (e) {
-            Logger.trace("Usage data report failed", e);
-        }
-    }
 
     constructor(
         private readonly config: LiteLLMConfig,
@@ -204,8 +138,19 @@ export class ResponsesClient {
         else if (type === "response.output_reasoning.delta") {
             const reasoning = event.delta || event.text || event.chunk;
             if (reasoning) {
-                // Format reasoning as italicized text to distinguish it
-                progress.report(new vscode.LanguageModelTextPart(`*${reasoning}*`));
+                const ThinkingPart = (vscode as unknown as Record<string, unknown>).LanguageModelThinkingPart as
+                    | (new (
+                          value: string | string[],
+                          id?: string,
+                          metadata?: Record<string, unknown>
+                      ) => vscode.LanguageModelResponsePart)
+                    | undefined;
+                if (ThinkingPart) {
+                    progress.report(new ThinkingPart(reasoning));
+                } else {
+                    // Fallback: encode as italicized text for older VS Code hosts
+                    progress.report(new vscode.LanguageModelTextPart(`*${reasoning}*`));
+                }
             }
         }
         // Handle tool call parts (buffering arguments)
@@ -275,35 +220,9 @@ export class ResponsesClient {
                 this.anonymousToolName = undefined;
             }
         } else if (type === "response.completed") {
-            const promptTokens = event.response?.usage?.input_tokens;
-            const completionTokens = event.response?.usage?.output_tokens;
-            const reasoningTokens = event.response?.usage?.output_token_details?.reasoning_tokens;
-            const cachedTokens = event.response?.usage?.input_token_details?.cached_tokens;
-            const systemTokens = event.response?.usage?.system_tokens;
-            const toolTokens = event.response?.usage?.output_token_details?.tool_tokens;
-            const acceptedPredictionTokens = event.response?.usage?.output_token_details?.accepted_prediction_tokens;
-            const rejectedPredictionTokens = event.response?.usage?.output_token_details?.rejected_prediction_tokens;
-            const cacheCreationInputTokens = event.response?.usage?.input_token_details?.cache_creation_input_tokens;
-            if (
-                this.config.experimentalEmitUsageData &&
-                typeof promptTokens === "number" &&
-                typeof completionTokens === "number"
-            ) {
-                this.emitExperimentalUsageData(
-                    progress,
-                    promptTokens,
-                    completionTokens,
-                    reasoningTokens,
-                    cachedTokens,
-                    {
-                        systemPromptTokens: systemTokens,
-                        toolTokens,
-                        acceptedPredictionTokens,
-                        rejectedPredictionTokens,
-                        cacheCreationInputTokens,
-                    }
-                );
-            }
+            // Usage data is now handled by StreamTokenCapture in the chat provider
+            // which intercepts usage DataParts during streaming
+            // No need to emit usage here - it flows through the wrapped progress
         }
     }
 }

@@ -296,11 +296,10 @@ suite("ConfigManager Unit Tests", () => {
 
         await manager.reportFeatureToggles("test_source");
 
-        assert.strictEqual(captureStub.callCount, 6);
+        assert.strictEqual(captureStub.callCount, 5);
         assert.ok(captureStub.calledWith("inline-completions", true, "test_source"));
         assert.ok(captureStub.calledWith("responses-api", true, "test_source"));
         assert.ok(captureStub.calledWith("commit-message", true, "test_source"));
-        assert.ok(captureStub.calledWith("usage-data", true, "test_source"));
         assert.ok(captureStub.calledWith("caching", true, "test_source"));
         assert.ok(captureStub.calledWith("quota-tool-redaction", true, "test_source"));
     });
@@ -366,14 +365,7 @@ suite("ConfigManager Unit Tests", () => {
         assert.strictEqual(cfg.modelIdOverride, undefined);
     });
 
-    test("getConfig reads experimental usage emission flag", async () => {
-        settingsMap.set("litellm-connector.emitUsageData", true);
-
-        const manager = new ConfigManager(mockSecrets);
-        const cfg = await manager.getConfig();
-
-        assert.strictEqual(cfg.experimentalEmitUsageData, true);
-    });
+    // experimental emitUsageData setting removed
 
     test("cleanupAllConfiguration removes all stored configuration", async () => {
         const manager = new ConfigManager(mockSecrets);

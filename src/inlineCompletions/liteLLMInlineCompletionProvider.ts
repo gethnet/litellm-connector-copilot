@@ -4,7 +4,7 @@ import { calculateAvailableContext, countTokens } from "../adapters/tokenUtils";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
 import type { TelemetryService } from "../telemetry/telemetryService";
-import type { LiteLLMConfig } from "../types";
+import type { LiteLLMConfig, LiteLLMModelInfo } from "../types";
 
 const INLINE_SYSTEM_PROMPT =
     "You are an inline code completion engine.\nContinue the code at the cursor. Output only the text to insert.";
@@ -210,7 +210,7 @@ export class LiteLLMInlineCompletionProvider implements vscode.InlineCompletionI
                 durationMs,
                 status: "success",
                 tokensIn: prefixTokens + suffixTokens,
-                tokensOut: Math.ceil(insertText.length / 4),
+                tokensOut: countTokens(insertText, modelId),
                 caller: "inline-completions.request.result",
             });
 
@@ -265,6 +265,8 @@ export interface PromptWindowOptions {
     availableTokens: number;
     /** Model ID for tokenizer selection. */
     modelId: string;
+    /** Optional model info for tokenizer selection. */
+    modelInfo?: LiteLLMModelInfo;
 }
 
 export function buildInlineCompletionPrompt(
@@ -283,11 +285,11 @@ export function buildInlineCompletionPrompt(
     const suffixBudget = Math.floor(budget * 0.25);
     const prefixBudget = budget - suffixBudget;
 
-    const prefix = trimTextToTokenBudget(prefixFull, prefixBudget, options.modelId);
-    const suffix = trimTextToTokenBudget(suffixFull, suffixBudget, options.modelId);
+    const prefix = trimTextToTokenBudget(prefixFull, prefixBudget, options.modelId, options.modelInfo);
+    const suffix = trimTextToTokenBudget(suffixFull, suffixBudget, options.modelId, options.modelInfo);
 
-    const prefixTokens = countTokens(prefix, options.modelId);
-    const suffixTokens = countTokens(suffix, options.modelId);
+    const prefixTokens = countTokens(prefix, options.modelId, options.modelInfo);
+    const suffixTokens = countTokens(suffix, options.modelId, options.modelInfo);
 
     // Prompt format: provide cursor marker and suffix so the model can continue.
     const prompt = [
@@ -305,13 +307,18 @@ export function buildInlineCompletionPrompt(
     return { prompt, prefixTokens, suffixTokens };
 }
 
-function trimTextToTokenBudget(text: string, tokenBudget: number, modelId: string): string {
+function trimTextToTokenBudget(
+    text: string,
+    tokenBudget: number,
+    modelId: string,
+    modelInfo?: LiteLLMModelInfo
+): string {
     if (tokenBudget <= 0) {
         return "";
     }
 
     // Use actual tokenizer for measurement during trimming
-    const tokens = countTokens(text, modelId);
+    const tokens = countTokens(text, modelId, modelInfo);
     if (tokens <= tokenBudget) {
         return text;
     }
@@ -322,7 +329,7 @@ function trimTextToTokenBudget(text: string, tokenBudget: number, modelId: strin
     let trimmed = text.length > charLimit ? text.slice(-charLimit) : text; // For prefix, we keep the end
 
     // Fine-grained trim if still over
-    while (countTokens(trimmed, modelId) > tokenBudget && trimmed.length > 0) {
+    while (countTokens(trimmed, modelId, modelInfo) > tokenBudget && trimmed.length > 0) {
         trimmed = trimmed.slice(Math.floor(trimmed.length * 0.1)); // Remove 10% at a time
     }
 

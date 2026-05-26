@@ -5,6 +5,7 @@ import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
 import { LiteLLMProviderBase } from "./liteLLMProviderBase";
 import { countTokens } from "../adapters/tokenUtils";
+import { StreamTokenCapture } from "../adapters/streaming/streamTokenCapture";
 import { decodeSSE } from "../adapters/sse/sseDecoder";
 import { createInitialStreamingState, interpretStreamEvent } from "../adapters/streaming/liteLLMStreamInterpreter";
 import type { EffortFallbackCache } from "../utils/reasoningEffortFallback";
@@ -76,12 +77,17 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
                 "inline-completions"
             );
 
-            // For completions we don't emit progress parts; we just need the raw stream to extract text.
-            const nullProgress: vscode.Progress<vscode.LanguageModelResponsePart> = {
-                report: (_part: vscode.LanguageModelResponsePart): void => {
-                    // Intentionally empty: completions don't emit progress parts
+            const tokenCapture = new StreamTokenCapture(
+                model.id,
+                {
+                    report: (_part: vscode.LanguageModelResponsePart): void => {
+                        // Completions do not forward parts to VS Code UI
+                    },
                 },
-            };
+                modelInfo
+            );
+            tokenCapture.setEstimatedPromptTokens(tokensIn ?? 0);
+            const trackingProgress = tokenCapture.progress;
             const stream = await this.sendRequestWithRetry(
                 requestBody,
                 messages,
@@ -90,16 +96,17 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
                     modelOptions: options.modelOptions,
                     tools: [],
                 } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
-                nullProgress,
+                trackingProgress,
                 token,
                 "inline-completions",
                 modelInfo
             );
 
             const completionText = await this.extractCompletionTextFromStream(stream, token);
-
-            // Estimate tokensOut from the completion text
-            const tokensOut = countTokens(completionText, model.id, modelInfo);
+            const snapshot = tokenCapture.getSnapshot();
+            const tokensOut = snapshot.sawUpstreamUsage
+                ? snapshot.completionTokens
+                : countTokens(completionText, model.id, modelInfo);
 
             const durationMs = LiteLLMTelemetry.endTimer(startTime);
             LiteLLMTelemetry.reportMetric({

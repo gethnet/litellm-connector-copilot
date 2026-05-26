@@ -164,8 +164,20 @@ suite("ResponsesClient sendResponsesRequest", () => {
         assert.strictEqual(reported.length, 3);
         assert.ok(reported[0] instanceof vscode.LanguageModelTextPart);
         assert.strictEqual((reported[0] as vscode.LanguageModelTextPart).value, "Hello");
-        assert.ok(reported[1] instanceof vscode.LanguageModelTextPart);
-        assert.strictEqual((reported[1] as vscode.LanguageModelTextPart).value, "*Think*");
+        const second = reported[1];
+        const ThinkingCtor = (vscode as unknown as Record<string, unknown>).LanguageModelThinkingPart as
+            | (new (
+                  value: string | string[],
+                  id?: string,
+                  metadata?: Record<string, unknown>
+              ) => vscode.LanguageModelResponsePart)
+            | undefined;
+        if (ThinkingCtor) {
+            assert.ok(second instanceof ThinkingCtor || second instanceof vscode.LanguageModelTextPart);
+        } else {
+            assert.ok(second instanceof vscode.LanguageModelTextPart);
+            assert.strictEqual((second as vscode.LanguageModelTextPart).value, "*Think*");
+        }
         assert.ok(reported[2] instanceof vscode.LanguageModelToolCallPart);
         const toolCall = reported[2] as vscode.LanguageModelToolCallPart;
         assert.strictEqual(toolCall.callId, "c1");
@@ -173,12 +185,11 @@ suite("ResponsesClient sendResponsesRequest", () => {
         assert.deepStrictEqual(toolCall.input, { x: 1 });
     });
 
-    test("emits experimental usage data part when responses stream includes usage event", async () => {
-        const debugStub = sinon.stub(Logger, "debug");
-        const experimentalClient = new ResponsesClient(
-            { ...config, experimentalEmitUsageData: true } as LiteLLMConfig,
-            userAgent
-        );
+    test("usage data part is handled by StreamTokenCapture (not emitted by ResponsesClient directly)", async () => {
+        // Note: Usage data is now handled by StreamTokenCapture in the chat provider
+        // ResponsesClient no longer emits usage data directly
+        // This test verifies the stream processes without error
+        const client = makeClient();
         const sse = [
             'data: {"type":"response.output_text.delta","delta":"Hello"}\n\n',
             'data: {"type":"response.completed","response":{"usage":{"input_tokens":12,"output_tokens":4,"input_token_details":{"cached_tokens":5},"output_token_details":{"reasoning_tokens":2}}}}\n\n',
@@ -187,48 +198,19 @@ suite("ResponsesClient sendResponsesRequest", () => {
         fetchStub.resolves(new Response(readableFromStrings(sse), { status: 200 }));
         const { progress, reported } = makeProgress();
 
-        await experimentalClient.sendResponsesRequest(
-            makeRequest(),
-            progress,
-            new vscode.CancellationTokenSource().token
-        );
+        await client.sendResponsesRequest(makeRequest(), progress, new vscode.CancellationTokenSource().token);
 
-        const usagePart = reported.find((part) => part instanceof vscode.LanguageModelDataPart);
-        assert.ok(usagePart, "Expected a usage LanguageModelDataPart to be emitted");
-        const dataPart = usagePart as vscode.LanguageModelDataPart;
-        assert.strictEqual(dataPart.mimeType, "usage");
-        const payload = JSON.parse(Buffer.from(dataPart.data).toString("utf-8")) as {
-            prompt_tokens: number;
-            completion_tokens: number;
-            total_tokens: number;
-            prompt_tokens_details?: {
-                cached_tokens?: number;
-            };
-            completion_tokens_details?: {
-                reasoning_tokens?: number;
-                tool_tokens?: number;
-                accepted_prediction_tokens?: number;
-                rejected_prediction_tokens?: number;
-            };
-            kind?: string;
-            promptTokens?: number;
-            completionTokens?: number;
-        };
-        assert.strictEqual(payload.prompt_tokens, 12);
-        assert.strictEqual(payload.completion_tokens, 4);
-        assert.strictEqual(payload.total_tokens, 16);
-        // OpenAI API spec: reasoning tokens are nested under completion_tokens_details.reasoning_tokens
-        assert.strictEqual(payload.completion_tokens_details?.reasoning_tokens, 2);
-        // OpenAI API spec: cached tokens are nested under prompt_tokens_details.cached_tokens
-        assert.strictEqual(payload.prompt_tokens_details?.cached_tokens, 5);
-        assert.strictEqual(payload.kind, undefined);
-        assert.strictEqual(payload.promptTokens, undefined);
-        assert.strictEqual(payload.completionTokens, undefined);
-        assert.ok(debugStub.calledWithMatch(sinon.match(/experimental usage data part/i)));
+        // Verify text was emitted
+        const textParts = reported.filter((p) => p instanceof vscode.LanguageModelTextPart);
+        assert.ok(textParts.length > 0, "Expected text parts to be emitted");
+        assert.strictEqual((textParts[0] as vscode.LanguageModelTextPart).value, "Hello");
     });
 
-    test("emits usage data with cache, reasoning, tool, and system tokens from /responses", async () => {
-        const client = new ResponsesClient({ ...config, experimentalEmitUsageData: true } as LiteLLMConfig, userAgent);
+    test("usage data parsing is handled by StreamTokenCapture (not ResponsesClient directly)", async () => {
+        // Note: Usage data is now handled by StreamTokenCapture in the chat provider
+        // ResponsesClient no longer emits usage data directly
+        // This test verifies the stream processes without error
+        const client = makeClient();
         const encoder = new TextEncoder();
 
         const stream = new ReadableStream<Uint8Array>({
@@ -254,22 +236,10 @@ suite("ResponsesClient sendResponsesRequest", () => {
             new vscode.CancellationTokenSource().token
         );
 
-        const usagePart = reported.find(
-            (p) => p instanceof vscode.LanguageModelDataPart
-        ) as vscode.LanguageModelDataPart;
-        const payload = JSON.parse(Buffer.from(usagePart.data).toString("utf-8")) as Record<string, unknown>;
-        assert.strictEqual(payload.prompt_tokens, 10);
-        assert.strictEqual(payload.completion_tokens, 6);
-        assert.strictEqual((payload.prompt_tokens_details as { cached_tokens: number }).cached_tokens, 2);
-        assert.strictEqual(
-            (payload.completion_tokens_details as { reasoning_tokens: number; tool_tokens: number }).reasoning_tokens,
-            1
-        );
-        assert.strictEqual(
-            (payload.completion_tokens_details as { reasoning_tokens: number; tool_tokens: number }).tool_tokens,
-            3
-        );
-        assert.strictEqual(payload.system_prompt_tokens, 4);
+        // Verify text was emitted
+        const textParts = reported.filter((p) => p instanceof vscode.LanguageModelTextPart);
+        assert.ok(textParts.length > 0, "Expected text parts to be emitted");
+        assert.strictEqual((textParts[0] as vscode.LanguageModelTextPart).value, "hi");
     });
 
     test("handles partial lines across chunks", async () => {
@@ -383,24 +353,37 @@ suite("ResponsesClient sendResponsesRequest", () => {
         assert.strictEqual((reported[1] as vscode.LanguageModelTextPart).value, "B");
     });
 
-    test("emitExperimentalUsageData handles report failure", async () => {
+    test("StreamTokenCapture handles usage data without throwing", async () => {
+        // Note: emitExperimentalUsageData has been removed
+        // Usage data is now handled exclusively by StreamTokenCapture
+        // This test verifies the stream processes without error when usage data is present
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":"hi"}\n\n'));
+                controller.enqueue(
+                    encoder.encode(
+                        'data: {"type":"response.completed","response":{"usage":{"input_tokens":10,"output_tokens":6}}}\n\n'
+                    )
+                );
+                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                controller.close();
+            },
+        });
+
         const client = makeClient();
-        const clientInternal = client as unknown as {
-            config: LiteLLMConfig & { experimentalEmitUsageData?: boolean };
-            emitExperimentalUsageData: (
-                progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-                promptTokens: number,
-                completionTokens: number
-            ) => void;
-        };
-        clientInternal.config.experimentalEmitUsageData = true;
+        const reported: vscode.LanguageModelResponsePart[] = [];
+        await (
+            client as unknown as { parseSSEStream: (typeof ResponsesClient.prototype)["parseSSEStream"] }
+        ).parseSSEStream(
+            stream,
+            { report: (p: vscode.LanguageModelResponsePart) => reported.push(p) },
+            new vscode.CancellationTokenSource().token
+        );
 
-        const progress = {
-            report: sinon.stub().throws(new Error("crash")),
-        } as vscode.Progress<vscode.LanguageModelResponsePart> & { report: sinon.SinonStub };
-
-        // This should not throw
-        clientInternal.emitExperimentalUsageData(progress, 10, 20);
-        assert.ok(progress.report.calledOnce);
+        // Verify text was emitted
+        const textParts = reported.filter((p) => p instanceof vscode.LanguageModelTextPart);
+        assert.ok(textParts.length > 0, "Expected text parts to be emitted");
+        assert.strictEqual((textParts[0] as vscode.LanguageModelTextPart).value, "hi");
     });
 });

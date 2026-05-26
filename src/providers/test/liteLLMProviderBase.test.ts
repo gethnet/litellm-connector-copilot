@@ -722,7 +722,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             undefined
         );
 
-        const observedStreamOptions: Array<{ include_usage?: boolean } | undefined> = [];
+        const observedStreamOptions: ({ include_usage?: boolean } | undefined)[] = [];
         const sendStub = sandbox
             .stub(access(provider) as unknown as { sendRequestToLiteLLM: unknown }, "sendRequestToLiteLLM")
             .callsFake(async (req: OpenAIChatCompletionRequest) => {

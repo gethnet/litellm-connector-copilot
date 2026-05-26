@@ -1,4 +1,4 @@
-import * as vscode from "vscode";
+import type * as vscode from "vscode";
 import type {
     CancellationToken,
     LanguageModelChatInformation,
@@ -25,7 +25,7 @@ import { createInitialStreamingState, interpretStreamEvent } from "../adapters/s
 import type { StreamingState } from "../adapters/streaming/liteLLMStreamInterpreter";
 import { emitPartsToVSCode } from "../adapters/streaming/vscodePartEmitter";
 import type { EffortFallbackCache } from "../utils/reasoningEffortFallback";
-import type { OpenAIUsageCompletionTokenDetails, OpenAIUsagePayload, OpenAIUsagePromptTokenDetails } from "../types";
+import { StreamTokenCapture } from "../adapters/streaming/streamTokenCapture";
 
 /**
  * Chat provider implementation for VS Code's LanguageModelChatProvider.
@@ -36,27 +36,22 @@ import type { OpenAIUsageCompletionTokenDetails, OpenAIUsagePayload, OpenAIUsage
 export class LiteLLMChatProvider extends LiteLLMProviderBase implements LanguageModelChatProvider {
     // Streaming state
     private _streamingState: StreamingState = createInitialStreamingState();
-    private _partialAssistantText = "";
-    private _lastStreamUsage?: {
-        promptTokens?: number;
-        completionTokens?: number;
-        systemTokens?: number;
-        cachedTokens?: number;
-        cacheCreationInputTokens?: number;
-        reasoningTokens?: number;
-        toolTokens?: number;
-        acceptedPredictionTokens?: number;
-        rejectedPredictionTokens?: number;
-    };
-    private _sawUsageDataPart = false;
-    private _estimatedToolCallTokens = 0;
+    private _tokenCapture?: StreamTokenCapture;
 
     constructor(secrets: vscode.SecretStorage, userAgent: string, effortFallbackCache?: EffortFallbackCache) {
         super(secrets, userAgent, effortFallbackCache);
     }
 
+    /************************************************
+     * TODO: REMOVE IF UNUSED IN VERSION 2.3
+     * REASON: Saving in the event this code is
+     *       actually necessary.
+     *  REMOVE BY: V2.3
+     *  CONDITION: IF UNUSED/COMMENTED
+     */
+    /*
     private mergeUsagePayloadWithLastKnown(current: OpenAIUsagePayload): OpenAIUsagePayload {
-        const previous = this._lastStreamUsage;
+        const previous = this._tokenCapture?.getSnapshot();
         if (!previous) {
             return current;
         }
@@ -114,7 +109,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             prompt_tokens: mergedPromptTokens,
             completion_tokens: mergedCompletionTokens,
             total_tokens: mergedPromptTokens + mergedCompletionTokens,
-            system_prompt_tokens: pickMonotonicTokenCount(current.system_prompt_tokens, previous.systemTokens),
+            system_prompt_tokens: pickMonotonicTokenCount(current.system_prompt_tokens, previous.systemPromptTokens),
             prompt_tokens_details: Object.values(mergedPromptDetails).some((value) => typeof value === "number")
                 ? mergedPromptDetails
                 : undefined,
@@ -127,6 +122,10 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
 
         return merged;
     }
+*/
+    /************************************************
+     * End of code block
+     ***********************************************/
 
     private logFinalUsageEnvelope(
         requestId: string,
@@ -162,76 +161,6 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 } ` +
                 `total_token_max=${usage.totalTokenMax ?? "n/a"} streamed_usage=${usage.sawUsageDataPart}`
         );
-    }
-
-    private emitExperimentalUsageData(
-        progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-        tokensIn: number,
-        tokensOut: number,
-        reasoningTokens?: number,
-        cachedTokens?: number,
-        extra?: {
-            systemPromptTokens?: number;
-            toolTokens?: number;
-            acceptedPredictionTokens?: number;
-            rejectedPredictionTokens?: number;
-            cacheCreationInputTokens?: number;
-            reservedOutputTokens?: number;
-            totalTokenMax?: number;
-        }
-    ): void {
-        Logger.debug(
-            `Emitting experimental usage data part | prompt_tokens: ${tokensIn} | completion_tokens: ${tokensOut} | reasoning_tokens: ${reasoningTokens ?? "undefined"} | cached_tokens: ${cachedTokens ?? "undefined"} | system_prompt_tokens: ${extra?.systemPromptTokens ?? "undefined"}`
-        );
-
-        const usagePayload: OpenAIUsagePayload = {
-            prompt_tokens: tokensIn,
-            completion_tokens: tokensOut,
-            total_tokens: tokensIn + tokensOut,
-        };
-
-        const promptTokenDetails: OpenAIUsagePromptTokenDetails = {};
-        if (typeof cachedTokens === "number") {
-            promptTokenDetails.cached_tokens = cachedTokens;
-        }
-        if (typeof extra?.cacheCreationInputTokens === "number") {
-            promptTokenDetails.cache_creation_input_tokens = extra.cacheCreationInputTokens;
-        }
-        if (Object.keys(promptTokenDetails).length > 0) {
-            usagePayload.prompt_tokens_details = promptTokenDetails;
-        }
-
-        const completionTokenDetails: OpenAIUsageCompletionTokenDetails = {};
-        if (typeof reasoningTokens === "number") {
-            completionTokenDetails.reasoning_tokens = reasoningTokens;
-        }
-        if (typeof extra?.toolTokens === "number") {
-            completionTokenDetails.tool_tokens = extra.toolTokens;
-        }
-        if (typeof extra?.acceptedPredictionTokens === "number") {
-            completionTokenDetails.accepted_prediction_tokens = extra.acceptedPredictionTokens;
-        }
-        if (typeof extra?.rejectedPredictionTokens === "number") {
-            completionTokenDetails.rejected_prediction_tokens = extra.rejectedPredictionTokens;
-        }
-        if (Object.keys(completionTokenDetails).length > 0) {
-            usagePayload.completion_tokens_details = completionTokenDetails;
-        }
-
-        if (typeof extra?.systemPromptTokens === "number") {
-            usagePayload.system_prompt_tokens = extra.systemPromptTokens;
-        }
-        if (typeof extra?.reservedOutputTokens === "number") {
-            usagePayload.reserved_output_tokens = extra.reservedOutputTokens;
-        }
-        if (typeof extra?.totalTokenMax === "number") {
-            usagePayload.total_token_max = extra.totalTokenMax;
-        }
-
-        const payloadJson = JSON.stringify(usagePayload);
-        const payloadBytes = new TextEncoder().encode(payloadJson);
-
-        progress.report(new vscode.LanguageModelDataPart(payloadBytes, "usage"));
     }
 
     async provideLanguageModelChatInformation(
@@ -278,6 +207,14 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
 
         // Check if vscode has thinking part API available.
         // Even if we are not the V2 provider, we can safely report thinking parts if the type exists.
+        /************************************************
+         * TODO: REMOVE IF UNUSED IN VERSION 2.3
+         * REASON: Saving in the event this code is
+         *       actually necessary.
+         *  REMOVE BY: V2.3
+         *  CONDITION: IF UNUSED/COMMENTED
+         */
+        /*
         const ThinkingPart = (vscode as unknown as Record<string, unknown>).LanguageModelThinkingPart as
             | (new (
                   value: string | string[],
@@ -285,7 +222,10 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                   metadata?: Record<string, unknown>
               ) => vscode.LanguageModelResponsePart)
             | undefined;
-
+*/
+        /************************************************
+         * End of code block
+         ***********************************************/
         // Extract caller/justification from options or model tags
         const telemetry = this.getTelemetryOptions(options);
         const modelWithTags = model as vscode.LanguageModelChatInformation & { tags?: string[] };
@@ -306,62 +246,14 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             }`
         );
 
-        let reservedOutputTokensForRequest: number | undefined;
-        let totalTokenMaxForRequest: number | undefined;
+        // <Line of Code>; // TODO: Remove by v2.3 if still commented
+        // let reservedOutputTokensForRequest: number | undefined;
+        // let totalTokenMaxForRequest: number | undefined;
 
-        const trackingProgress: Progress<LanguageModelResponsePart> = {
-            report: (part) => {
-                if (part instanceof vscode.LanguageModelTextPart) {
-                    this._partialAssistantText += part.value;
-                } else if (ThinkingPart && part instanceof ThinkingPart) {
-                    // Accumulate thinking tokens as well to count total output tokens accurately
-                    const tp = part as unknown as { value: string | string[] };
-                    this._partialAssistantText += Array.isArray(tp.value) ? tp.value.join("") : tp.value;
-                } else if (part instanceof vscode.LanguageModelToolCallPart) {
-                    this._estimatedToolCallTokens += countTokens(`${part.name}${JSON.stringify(part.input ?? {})}`);
-                } else if (part instanceof vscode.LanguageModelDataPart && part.mimeType === "usage") {
-                    try {
-                        this._sawUsageDataPart = true;
-                        const parsed = JSON.parse(Buffer.from(part.data).toString("utf-8")) as OpenAIUsagePayload;
-                        const completionTokenDetails: OpenAIUsageCompletionTokenDetails = {
-                            ...(parsed.completion_tokens_details ?? {}),
-                        };
-                        if (completionTokenDetails.tool_tokens === undefined && this._estimatedToolCallTokens > 0) {
-                            completionTokenDetails.tool_tokens = this._estimatedToolCallTokens;
-                        }
-
-                        const enrichedUsage: OpenAIUsagePayload = {
-                            ...parsed,
-                            completion_tokens_details:
-                                Object.keys(completionTokenDetails).length > 0 ? completionTokenDetails : undefined,
-                            reserved_output_tokens: parsed.reserved_output_tokens ?? reservedOutputTokensForRequest,
-                            total_token_max: parsed.total_token_max ?? totalTokenMaxForRequest,
-                        };
-
-                        const mergedUsage = this.mergeUsagePayloadWithLastKnown(enrichedUsage);
-
-                        this._lastStreamUsage = {
-                            promptTokens: mergedUsage.prompt_tokens,
-                            completionTokens: mergedUsage.completion_tokens,
-                            systemTokens: mergedUsage.system_prompt_tokens,
-                            cachedTokens: mergedUsage.prompt_tokens_details?.cached_tokens,
-                            cacheCreationInputTokens: mergedUsage.prompt_tokens_details?.cache_creation_input_tokens,
-                            reasoningTokens: mergedUsage.completion_tokens_details?.reasoning_tokens,
-                            toolTokens: mergedUsage.completion_tokens_details?.tool_tokens,
-                            acceptedPredictionTokens: mergedUsage.completion_tokens_details?.accepted_prediction_tokens,
-                            rejectedPredictionTokens: mergedUsage.completion_tokens_details?.rejected_prediction_tokens,
-                        };
-
-                        const enrichedBytes = new TextEncoder().encode(JSON.stringify(mergedUsage));
-                        progress.report(new vscode.LanguageModelDataPart(enrichedBytes, "usage"));
-                        return;
-                    } catch {
-                        // ignore malformed usage payload
-                    }
-                }
-                progress.report(part);
-            },
-        };
+        const modelInfo = this._modelInfoCache.get(model.id);
+        this._tokenCapture = new StreamTokenCapture(model.id, progress, modelInfo);
+        const tokenCapture = this._tokenCapture;
+        const trackingProgress = tokenCapture.progress;
 
         try {
             const config = await this._configManager.getConfig();
@@ -402,8 +294,16 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 modelInfo,
             });
             const totalTokenMax = getTotalTokenLimit(modelToUse, modelInfo);
-            reservedOutputTokensForRequest = reservedOutputTokens;
-            totalTokenMaxForRequest = totalTokenMax;
+            // <Line of Code>; // TODO: Remove by v2.3 if still commented
+            // reservedOutputTokensForRequest = reservedOutputTokens;
+            // totalTokenMaxForRequest = totalTokenMax;
+            tokenCapture.setEstimatedPromptTokens(estimatedTransportInputTokens);
+            const systemPromptContent = requestBody.messages.find((m) => m.role === "system")?.content;
+            if (typeof systemPromptContent === "string") {
+                tokenCapture.setEstimatedSystemPromptTokens(countTokens(systemPromptContent, modelToUse.id, modelInfo));
+            }
+            tokenCapture.setReservedOutputTokens(reservedOutputTokens);
+            tokenCapture.setTotalTokenMax(totalTokenMax);
 
             // Count the actual transport request after trimming/conversion.
             tokensIn = estimatedTransportInputTokens;
@@ -472,8 +372,12 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                             );
                             await this.processStreamingResponse(stream, trackingProgress, token);
 
-                            // Estimate tokensOut from the accumulated assistant text
-                            const tokensOut = countTokens(this._partialAssistantText, modelToUse.id, modelInfo);
+                            // Flush usage after processing the retried stream
+                             
+                            tokenCapture.flushUsage();
+
+                            const snapshot = tokenCapture.getSnapshot();
+                            const tokensOut = snapshot.completionTokens;
 
                             const metric = {
                                 requestId,
@@ -488,8 +392,12 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                             this.logFinalUsageEnvelope(requestId, modelToUse.id, caller, {
                                 tokensIn,
                                 tokensOut,
-                                sawUsageDataPart: this._sawUsageDataPart,
+                                sawUsageDataPart: snapshot.sawUpstreamUsage,
                             });
+
+                            // Return early - all processing complete, prevent fall-through
+                            // to avoid double-processing the already-consumed stream
+                            return;
 
                             // Disabling this to reduce noise / unecessary logging
                             // TODO: look into potentially removing this in the future if don't need it.
@@ -528,19 +436,35 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
 
             await this.processStreamingResponse(stream, trackingProgress, token);
 
-            const usage = this._lastStreamUsage;
-            const tokensOut =
-                usage?.completionTokens ??
-                countTokens(this._partialAssistantText, modelToUse.id, modelInfo) + this._estimatedToolCallTokens;
-            const tokensInForTelemetry = usage?.promptTokens ?? tokensIn;
-            const reasoningTokens = usage?.reasoningTokens;
-            const cachedTokens = usage?.cachedTokens;
-            const systemPromptTokens = usage?.systemTokens;
-            const toolTokens =
-                usage?.toolTokens ?? (this._estimatedToolCallTokens > 0 ? this._estimatedToolCallTokens : undefined);
-            const acceptedPredictionTokens = usage?.acceptedPredictionTokens;
-            const rejectedPredictionTokens = usage?.rejectedPredictionTokens;
-            const cacheCreationInputTokens = usage?.cacheCreationInputTokens;
+            // Flush usage data if no upstream usage was seen during streaming
+            // This ensures usage is always reported to VS Code
+            const capture = this._tokenCapture;
+            if (capture) {
+                 
+                capture.flushUsage();
+            }
+
+            const snapshot = capture?.getSnapshot() ?? {
+                promptTokens: tokensIn ?? 0,
+                cachedTokens: 0,
+                cacheCreationInputTokens: 0,
+                systemPromptTokens: 0,
+                completionTokens: 0,
+                reasoningTokens: 0,
+                toolTokens: 0,
+                acceptedPredictionTokens: 0,
+                rejectedPredictionTokens: 0,
+                sawUpstreamUsage: false,
+            };
+            const tokensOut = Math.max(snapshot.completionTokens, snapshot.toolTokens);
+            const tokensInForTelemetry = snapshot.promptTokens ?? tokensIn;
+            const reasoningTokens = snapshot.reasoningTokens || undefined;
+            const cachedTokens = snapshot.cachedTokens || undefined;
+            const systemPromptTokens = snapshot.systemPromptTokens || undefined;
+            const toolTokens = snapshot.toolTokens || undefined;
+            const acceptedPredictionTokens = snapshot.acceptedPredictionTokens || undefined;
+            const rejectedPredictionTokens = snapshot.rejectedPredictionTokens || undefined;
+            const cacheCreationInputTokens = snapshot.cacheCreationInputTokens || undefined;
 
             const metric = {
                 requestId,
@@ -576,8 +500,12 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 systemPromptTokens,
                 reservedOutputTokens,
                 totalTokenMax,
-                sawUsageDataPart: this._sawUsageDataPart,
+                sawUsageDataPart: snapshot.sawUpstreamUsage,
             });
+
+            // Usage data is now handled exclusively by StreamTokenCapture
+            // which intercepts usage DataParts during streaming and enriches them
+            // No need for separate emitExperimentalUsageData call
 
             // Disabling this to reduce noise / unecessary logging
             // TODO: look into potentially removing this in the future if don't need it.
@@ -595,29 +523,6 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 });
             }
             */
-
-            if (
-                config.experimentalEmitUsageData &&
-                typeof tokensInForTelemetry === "number" &&
-                !this._sawUsageDataPart
-            ) {
-                this.emitExperimentalUsageData(
-                    trackingProgress,
-                    tokensInForTelemetry,
-                    tokensOut,
-                    reasoningTokens,
-                    cachedTokens,
-                    {
-                        systemPromptTokens,
-                        toolTokens,
-                        acceptedPredictionTokens,
-                        rejectedPredictionTokens,
-                        cacheCreationInputTokens,
-                        reservedOutputTokens,
-                        totalTokenMax,
-                    }
-                );
-            }
         } catch (err: unknown) {
             let errorMessage = err instanceof Error ? err.message : String(err);
             if (errorMessage.includes("LiteLLM API error")) {
@@ -668,10 +573,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
 
     protected resetStreamingState(): void {
         this._streamingState = createInitialStreamingState();
-        this._partialAssistantText = "";
-        this._lastStreamUsage = undefined;
-        this._sawUsageDataPart = false;
-        this._estimatedToolCallTokens = 0;
+        this._tokenCapture = undefined;
     }
 
     /**
