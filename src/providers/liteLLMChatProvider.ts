@@ -373,7 +373,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                             await this.processStreamingResponse(stream, trackingProgress, token);
 
                             // Flush usage after processing the retried stream
-                             
+
                             tokenCapture.flushUsage();
 
                             const snapshot = tokenCapture.getSnapshot();
@@ -440,7 +440,6 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             // This ensures usage is always reported to VS Code
             const capture = this._tokenCapture;
             if (capture) {
-                 
                 capture.flushUsage();
             }
 
@@ -591,14 +590,16 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         const timeoutMs = (config.inactivityTimeout ?? 60) * 1000;
         let watchdog: NodeJS.Timeout | undefined;
 
+        // Create an AbortController to actually cancel the stream on timeout
+        const controller = new AbortController();
+
         const resetWatchdog = () => {
             if (watchdog) {
                 clearTimeout(watchdog);
             }
             watchdog = setTimeout(() => {
                 Logger.warn(`Inactivity timeout after ${timeoutMs}ms`);
-                // Note: We can't easily cancel the reader from here without a reference,
-                // but decodeSSE handles cancellation via the token.
+                controller.abort();
             }, timeoutMs);
         };
 
@@ -606,17 +607,13 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             if (watchdog) {
                 clearTimeout(watchdog);
             }
+            controller.abort();
         });
 
         try {
             resetWatchdog();
-            for await (const payload of decodeSSE(responseBody, token)) {
-                console.log("DEBUG: LiteLLMChatProvider payload:", payload);
+            for await (const payload of decodeSSE(responseBody, token, controller.signal)) {
                 resetWatchdog();
-                if (token.isCancellationRequested) {
-                    console.log("DEBUG: LiteLLMChatProvider cancellation requested");
-                    break;
-                }
 
                 const jsonResult = tryParseJSONObject(payload);
                 if (!jsonResult.ok) {
@@ -630,7 +627,6 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 }
 
                 const parts = interpretStreamEvent(json, this._streamingState);
-                console.log("DEBUG: LiteLLMChatProvider interpreted parts:", JSON.stringify(parts));
                 emitPartsToVSCode(parts, progress);
             }
         } finally {

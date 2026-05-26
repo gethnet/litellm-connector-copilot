@@ -68,12 +68,121 @@ suite("ResponsesClient sendResponsesRequest", () => {
         });
     }
 
+    function createAbortController(): { controller: AbortController; token: vscode.CancellationToken } {
+        const controller = new AbortController();
+        const token = {
+            isCancellationRequested: false,
+            onCancellationRequested: (cb: () => void) => {
+                const listener = () => {
+                    (token as { isCancellationRequested: boolean }).isCancellationRequested = true;
+                    cb();
+                };
+                controller.signal.addEventListener("abort", listener);
+                return { dispose: () => controller.signal.removeEventListener("abort", listener) };
+            },
+        } as vscode.CancellationToken;
+        return { controller, token };
+    }
+
     setup(() => {
         fetchStub = sinon.stub(global, "fetch");
     });
 
     teardown(() => {
         sinon.restore();
+    });
+
+    test("includes AbortSignal in fetch when token is provided", async () => {
+        const client = makeClient();
+        const body: LiteLLMResponsesRequest = makeRequest();
+        const { token } = createAbortController();
+
+        let capturedSignal: AbortSignal | undefined;
+        fetchStub.callsFake((_url, init) => {
+            capturedSignal = init?.signal;
+            return Promise.resolve(new Response(readableFromStrings([""]), { status: 200 }));
+        });
+
+        await client.sendResponsesRequest(body, makeProgress().progress, token);
+
+        assert.ok(capturedSignal instanceof AbortSignal, "fetch should receive an AbortSignal");
+    });
+
+    test("aborts fetch when cancellation token is triggered", async () => {
+        const client = makeClient();
+        const body: LiteLLMResponsesRequest = makeRequest();
+        const { controller, token } = createAbortController();
+
+        let capturedSignal: AbortSignal | undefined;
+        fetchStub.callsFake((_url, init) => {
+            capturedSignal = init?.signal;
+            // If signal is already aborted, reject immediately
+            if (capturedSignal?.aborted) {
+                return Promise.reject(new DOMException("The operation was aborted", "AbortError"));
+            }
+            // Otherwise return a promise that rejects when signal is aborted
+            return new Promise<Response>((_resolve, reject) => {
+                if (capturedSignal) {
+                    const onAbort = () => {
+                        reject(new DOMException("The operation was aborted", "AbortError"));
+                    };
+                    capturedSignal.addEventListener("abort", onAbort);
+                }
+                // Never resolve - will be aborted
+            });
+        });
+
+        const promise = client.sendResponsesRequest(body, makeProgress().progress, token);
+
+        // Trigger cancellation
+        controller.abort();
+
+        // The fetch should have been called with a signal that gets aborted
+        assert.ok(capturedSignal, "fetch should have been called with a signal");
+        assert.ok(capturedSignal?.aborted, "signal should be aborted after cancellation");
+
+        // Wait for the promise to reject
+        await assert.rejects(promise, (err: Error) => {
+            return err.name === "AbortError" || err.message.includes("aborted");
+        });
+    });
+
+    test("aborts fetch after inactivity timeout", async () => {
+        const timeoutConfig: LiteLLMConfig = { ...config, inactivityTimeout: 0.1 }; // 100ms timeout
+        const client = new ResponsesClient(timeoutConfig, userAgent);
+        const body: LiteLLMResponsesRequest = makeRequest();
+
+        let capturedSignal: AbortSignal | undefined;
+        fetchStub.callsFake((_url, init) => {
+            capturedSignal = init?.signal;
+            // Return a promise that never resolves - will be aborted by timeout
+            return new Promise<Response>((_resolve, reject) => {
+                if (capturedSignal) {
+                    const onAbort = () => {
+                        reject(new DOMException("The operation was aborted", "AbortError"));
+                    };
+                    capturedSignal.addEventListener("abort", onAbort);
+                }
+                // Never resolve - will be aborted
+            });
+        });
+
+        const promise = client.sendResponsesRequest(
+            body,
+            makeProgress().progress,
+            new vscode.CancellationTokenSource().token
+        );
+
+        // Wait for timeout to fire (100ms + some buffer)
+        await new Promise((resolve) => setTimeout(resolve, 250));
+
+        assert.ok(capturedSignal, "fetch should have been called with a signal");
+        assert.ok(capturedSignal?.aborted, "signal should be aborted after timeout");
+
+        // The promise should reject due to abort
+        await assert.rejects(promise, (err: Error) => {
+            return err.name === "AbortError" || err.message.includes("timed out") || err.message.includes("aborted");
+        });
     });
 
     test("sets headers with api key", async () => {

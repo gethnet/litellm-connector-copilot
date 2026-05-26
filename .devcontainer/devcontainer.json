@@ -4,7 +4,7 @@
 	"features": {
 		"ghcr.io/devcontainers/features/desktop-lite:1": {},
 		"ghcr.io/devcontainers/features/github-cli:1": {},
-		"ghcr.io/devcontainers/features/common-utils:2.5.6": {
+		"ghcr.io/devcontainers/features/common-utils:2.5.9": {
 			"installZsh": true,
 			"configureZshAsDefaultShell": true,
 			"upgradePackages": true
@@ -20,7 +20,12 @@
 		"GH_TOKEN": "${localEnv:GITHUB_TOKEN}"
 	},
 	"mounts": [
-		"source=${localEnv:HOME}/.ssh,target=/home/node/.ssh,type=bind,consistency=cached"
+		"source=${localEnv:HOME}/.ssh,target=/home/node/.ssh,type=bind,consistency=cached",
+		"source=litellm-connector-copilot-node_modules,target=/workspaces/litellm-connector-copilot/node_modules,type=volume",
+		"source=litellm-connector-copilot-dist,target=/workspaces/litellm-connector-copilot/dist,type=volume",
+		"source=litellm-connector-copilot-coverage,target=/workspaces/litellm-connector-copilot/coverage,type=volume",
+		"source=litellm-connector-copilot-test-results,target=/workspaces/litellm-connector-copilot/test-results,type=volume",
+		"source=litellm-connector-copilot-vscode-test,target=/workspaces/litellm-connector-copilot/.vscode-test,type=volume"
 	],
 	"customizations": {
 		"vscode": {
@@ -36,7 +41,16 @@
 				"ms-vscode.test-adapter-converter",
 				"ryanluker.vscode-coverage-gutters",
 				"GitHub.vscode-pull-request-github",
-				"dennisvhest.npm-browser"
+				"dennisvhest.npm-browser",
+				"coderline.mocha-vscode",
+				"corschenzi.mermaid-graphical-editor",
+				"hbenl.vscode-mocha-test-adapter",
+				"illyriat.github-template-preview",
+				"mermaidchart.vscode-mermaid-chart",
+				"ms-azuretools.vscode-containers",
+				"ms-vscode.vscode-chat-customizations-evaluations",
+				"reespozzi.github-issue-template-preview",
+				"vstirbu.vscode-mermaid-preview"
 			],
 			"settings": {
 				"editor.formatOnSave": true,

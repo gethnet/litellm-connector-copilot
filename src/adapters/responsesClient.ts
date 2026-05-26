@@ -68,22 +68,59 @@ export class ResponsesClient {
         token: vscode.CancellationToken,
         modelInfo?: LiteLLMModelInfo
     ): Promise<void> {
-        const response = await fetch(`${this.config.url}/responses`, {
-            method: "POST",
-            headers: this.getHeaders(request.model, modelInfo),
-            body: JSON.stringify(request),
-        });
+        // Create an AbortController to support cancellation and timeout
+        const controller = new AbortController();
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`LiteLLM Responses API error: ${response.status} ${response.statusText}\n${errorText}`);
+        // Wire up VS Code's cancellation token to abort the fetch
+        let tokenDisposable: vscode.Disposable | undefined;
+        if (token) {
+            if (token.isCancellationRequested) {
+                throw new Error("Request cancelled before starting");
+            }
+            tokenDisposable = token.onCancellationRequested(() => {
+                controller.abort();
+            });
         }
 
-        if (!response.body) {
-            throw new Error("No response body from LiteLLM Responses API");
+        // Set up inactivity timeout if configured
+        let timeoutId: NodeJS.Timeout | undefined;
+        const timeoutSeconds = this.config.inactivityTimeout ?? 60;
+        if (timeoutSeconds > 0) {
+            const timeoutMs = timeoutSeconds * 1000;
+            timeoutId = setTimeout(() => {
+                const timeoutMsg = `Request timed out after ${timeoutSeconds}s of inactivity. This may indicate the /responses endpoint is not responding. Consider setting 'forceResponsesEndpoint' to false or 'allowChatCompletionsFallback' to true in configuration.`;
+                Logger.warn(timeoutMsg);
+                controller.abort(timeoutMsg);
+            }, timeoutMs);
         }
 
-        await this.parseSSEStream(response.body, progress, token);
+        try {
+            const response = await fetch(`${this.config.url}/responses`, {
+                method: "POST",
+                headers: this.getHeaders(request.model, modelInfo),
+                body: JSON.stringify(request),
+                signal: controller.signal,
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`LiteLLM Responses API error: ${response.status} ${response.statusText}\n${errorText}`);
+            }
+
+            if (!response.body) {
+                throw new Error("No response body from LiteLLM Responses API");
+            }
+
+            await this.parseSSEStream(response.body, progress, token);
+        } finally {
+            // Clean up resources
+            if (tokenDisposable) {
+                tokenDisposable.dispose();
+            }
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+        }
     }
 
     private getHeaders(modelId?: string, modelInfo?: LiteLLMModelInfo): Record<string, string> {

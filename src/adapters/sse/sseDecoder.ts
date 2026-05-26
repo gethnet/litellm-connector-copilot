@@ -6,11 +6,26 @@ import type { CancellationToken } from "vscode";
  */
 export async function* decodeSSE(
     stream: ReadableStream<Uint8Array>,
-    token?: CancellationToken
+    token?: CancellationToken,
+    signal?: AbortSignal
 ): AsyncGenerator<string> {
     const reader = stream.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+
+    // If an AbortSignal is provided, abort the reader when signal fires
+    let aborted = false;
+    const onAbort = () => {
+        aborted = true;
+        reader.cancel().catch(() => {});
+    };
+    if (signal) {
+        if (signal.aborted) {
+            onAbort();
+        } else {
+            signal.addEventListener("abort", onAbort);
+        }
+    }
 
     const extractEvent = (rawEvent: string): { payload?: string; sawDone: boolean } => {
         if (!rawEvent.trim()) {
@@ -45,7 +60,7 @@ export async function* decodeSSE(
 
     try {
         while (true) {
-            if (token?.isCancellationRequested) {
+            if (aborted || token?.isCancellationRequested) {
                 break;
             }
 
@@ -83,6 +98,9 @@ export async function* decodeSSE(
             }
         }
     } finally {
+        if (signal) {
+            signal.removeEventListener("abort", onAbort);
+        }
         reader.releaseLock();
     }
 }
