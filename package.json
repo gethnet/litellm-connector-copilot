@@ -17,7 +17,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "2.1.0-dev21",
+	"version": "2.1.0-dev22",
 	"preview": true,
 	"engines": {
 		"vscode": "^1.120.0"
@@ -298,9 +298,9 @@
 	"main": "./dist/extension.js",
 	"browser": "./dist/web/extension.js",
 	"scripts": {
-		"clean": "rm -rf ./dist ./out ./coverage ./test-results",
-		"clean:build": "rm -rf ./dist ./out",
-		"clean:tests": "rm -rf ./coverage ./test-results",
+		"clean": "rm -rf ./dist/* ./out/* ./coverage/* ./test-results/*",
+		"clean:build": "rm -rf ./dist/* ./out/*",
+		"clean:tests": "rm -rf ./coverage/* ./test-results/*",
 		"precompile": "npm run clean",
 		"compile": "tsc -p ./",
 		"vscode:pack:dev": "npm run clean:build && tsc --noEmit && node esbuild.js && npx vsce package",
@@ -317,7 +317,7 @@
 		"test": "xvfb-run vscode-test --args=\"--no-sandbox\"",
 		"test:report": "npm run pretest && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && npm run test",
 		"pretest:coverage": "npm run compile",
-		"test:coverage": "node -e \"const fs = require('fs'); const path = require('path'); const { spawnSync } = require('child_process'); const coveragePath = path.join(process.cwd(), 'coverage'); if (fs.existsSync(coveragePath)) fs.rmSync(coveragePath, { recursive: true, force: true }); process.env.VSCODE_TEST_RESULTS_DIR = path.join(process.cwd(), 'test-results'); fs.mkdirSync(process.env.VSCODE_TEST_RESULTS_DIR, { recursive: true }); const testArgs = ['vscode-test', '--args=--no-sandbox', '--coverage', '--coverage-output', 'coverage', '--coverage-reporter', 'lcovonly', '--coverage-reporter', 'html', '--coverage-reporter', 'text-summary']; const hasXvfb = process.platform === 'linux' && spawnSync('sh', ['-lc', 'command -v xvfb-run >/dev/null 2>&1']).status === 0; const cmd = hasXvfb ? 'xvfb-run' : testArgs[0]; const args = hasXvfb ? testArgs : testArgs.slice(1); const result = spawnSync(cmd, args, { stdio: 'inherit', env: process.env }); if (typeof result.status === 'number') process.exit(result.status); process.exit(1);\"",
+		"test:coverage": "node scripts/test-coverage.mjs",
 		"bump-version": "node scripts/bump-version.js"
 	},
 	"devDependencies": {

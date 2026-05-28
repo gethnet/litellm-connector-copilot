@@ -112,7 +112,87 @@ export abstract class LiteLLMProviderBase {
     protected _modelListFetchedAtMs = 0;
     private _inFlightDiscovery: Promise<vscode.LanguageModelChatInformation[]> | undefined;
 
+    // Per-configuration cache: maps a configuration key to { models, timestamp }
+    // This allows caching per VS Code 1.120+ provider group to avoid recreating
+    // model objects (which resets the picker state for model/reasoning effort).
+    private _perConfigCache = new Map<string, { models: vscode.LanguageModelChatInformation[]; fetchedAtMs: number }>();
+
     private _usageOptOutModels = new Set<string>();
+
+    /**
+     * Generates a cache key for per-configuration caching.
+     * Uses providerName + baseUrl to uniquely identify a configuration group.
+     */
+    private _getConfigCacheKey(configuration: Record<string, unknown>): string {
+        const providerName = typeof configuration.providerName === "string" ? configuration.providerName : "";
+        const baseUrl = typeof configuration.baseUrl === "string" ? configuration.baseUrl : "";
+        return `${providerName}::${baseUrl}`;
+    }
+
+    /**
+     * Compares two model lists to detect meaningful drift.
+     * Returns true if the lists differ in ways that affect VS Code's picker state.
+     */
+    private _hasModelListDrift(
+        cached: vscode.LanguageModelChatInformation[],
+        fresh: vscode.LanguageModelChatInformation[]
+    ): boolean {
+        if (cached.length !== fresh.length) {
+            return true;
+        }
+
+        for (let i = 0; i < cached.length; i++) {
+            const cachedModel = cached[i] as vscode.LanguageModelChatInformation & { _backendName?: string };
+            const freshModel = fresh[i] as vscode.LanguageModelChatInformation & { _backendName?: string };
+
+            if (cachedModel.id !== freshModel.id) {
+                return true;
+            }
+            if (cachedModel.name !== freshModel.name) {
+                return true;
+            }
+            const cachedVendor = (cachedModel as { vendor?: unknown }).vendor;
+            const freshVendor = (freshModel as { vendor?: unknown }).vendor;
+            if (cachedVendor !== freshVendor) {
+                return true;
+            }
+            if (cachedModel.isUserSelectable !== freshModel.isUserSelectable) {
+                return true;
+            }
+
+            const cachedSchema = cachedModel.configurationSchema;
+            const freshSchema = freshModel.configurationSchema;
+            if (cachedSchema === undefined && freshSchema !== undefined) {
+                return true;
+            }
+            if (cachedSchema !== undefined && freshSchema === undefined) {
+                return true;
+            }
+            if (cachedSchema && freshSchema) {
+                const cachedEffort = (cachedSchema.properties as Record<string, unknown>)?.reasoningEffort;
+                const freshEffort = (freshSchema.properties as Record<string, unknown>)?.reasoningEffort;
+                if (JSON.stringify(cachedEffort) !== JSON.stringify(freshEffort)) {
+                    return true;
+                }
+            }
+
+            const cachedCategory = (cachedModel as { category?: unknown }).category;
+            const freshCategory = (freshModel as { category?: unknown }).category;
+            if (cachedCategory === undefined && freshCategory !== undefined) {
+                return true;
+            }
+            if (cachedCategory !== undefined && freshCategory === undefined) {
+                return true;
+            }
+            if (cachedCategory !== undefined && freshCategory !== undefined) {
+                if (JSON.stringify(cachedCategory) !== JSON.stringify(freshCategory)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 
     protected _multiBackendClient: MultiBackendClient | undefined;
     protected _activeBackendNames: string[] = [];
@@ -162,6 +242,7 @@ export abstract class LiteLLMProviderBase {
         this._parameterProbeCache.clear();
         this._lastModelList = [];
         this._modelListFetchedAtMs = 0;
+        this._perConfigCache.clear();
         this.refreshModelInformation();
         Logger.info("Cleared cache");
     }
@@ -243,7 +324,19 @@ export abstract class LiteLLMProviderBase {
 
         const TTL_MS = 30000; // 30 seconds
         const now = Date.now();
-        // Only use cache for legacy path (no configuration provided)
+
+        if (options.configuration) {
+            const configKey = this._getConfigCacheKey(options.configuration);
+            const cached = this._perConfigCache.get(configKey);
+            if (cached && silent && now - cached.fetchedAtMs < TTL_MS) {
+                Logger.trace(`Returning cached models for config key: ${configKey} (within TTL)`);
+                if (this._telemetryService) {
+                    this._telemetryService.captureModelsCacheHit(cached.models.length);
+                }
+                return cached.models;
+            }
+        }
+
         const useCache = silent && this._lastModelList.length > 0 && now - this._modelListFetchedAtMs < TTL_MS;
         if (useCache && !options.configuration) {
             Logger.trace("Returning cached models (within TTL)");
@@ -271,7 +364,7 @@ export abstract class LiteLLMProviderBase {
         options: { silent: boolean; configuration?: Record<string, unknown>; groupName?: string },
         token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelChatInformation[]> {
-        Logger.trace("discoverModels called");
+        Logger.trace("_doDiscoverModels called");
         try {
             if (options.configuration) {
                 const groupNameFromOptions = typeof options.groupName === "string" ? options.groupName.trim() : "";
@@ -293,7 +386,18 @@ export abstract class LiteLLMProviderBase {
                 }
                 if (session) {
                     this._onModernConfigurationDetected?.();
-                    return this._discoverModelsFromSession(session, token);
+                    const models = await this._discoverModelsFromSession(session, token);
+
+                    const configKey = this._getConfigCacheKey(options.configuration);
+                    const cached = this._perConfigCache.get(configKey);
+                    if (cached && !this._hasModelListDrift(cached.models, models)) {
+                        Logger.trace(`No drift detected for config key: ${configKey}, keeping cached models`);
+                        return cached.models;
+                    }
+
+                    this._perConfigCache.set(configKey, { models, fetchedAtMs: Date.now() });
+                    Logger.info(`Cached ${models.length} models for config key: ${configKey}`);
+                    return models;
                 }
             }
 
