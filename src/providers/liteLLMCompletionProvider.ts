@@ -181,11 +181,13 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
         }
 
         if (config.modelIdOverride) {
-            return this._lastModelList.find((m) => m.id === config.modelIdOverride);
+            return this._lastModelList.find(
+                (m: vscode.LanguageModelChatInformation) => m.id === config.modelIdOverride
+            );
         }
 
         // Prefer models explicitly tagged for inline completions.
-        return this._lastModelList.find((m) => {
+        return this._lastModelList.find((m: vscode.LanguageModelChatInformation) => {
             const tags = (m as unknown as { tags?: string[] }).tags;
             return tags?.includes("inline-completions") === true;
         });

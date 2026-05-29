@@ -191,11 +191,13 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
         // Use the override if provided in settings
         if (config.commitModelIdOverride) {
             Logger.trace(`Returning model data ${config.commitModelIdOverride}`);
-            return this._lastModelList.find((m) => m.id === config.commitModelIdOverride);
+            return this._lastModelList.find(
+                (m: vscode.LanguageModelChatInformation) => m.id === config.commitModelIdOverride
+            );
         }
 
         // Prefer models explicitly tagged for SCM generation
-        return this._lastModelList.find((m) => {
+        return this._lastModelList.find((m: vscode.LanguageModelChatInformation) => {
             const tags = (m as unknown as { tags?: string[] }).tags;
             return tags?.includes("scm-generator") === true;
         });

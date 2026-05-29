@@ -263,14 +263,18 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             let modelToUse = model;
             if (config.modelIdOverride) {
                 const overrideId = config.modelIdOverride;
-                const cachedOverride = this._lastModelList.find((m) => m.id === overrideId);
+                const cachedOverride = this._lastModelList.find(
+                    (m: vscode.LanguageModelChatInformation) => m.id === overrideId
+                );
                 if (cachedOverride) {
                     modelToUse = cachedOverride;
                 } else {
                     try {
                         Logger.info(`modelIdOverride set to '${overrideId}' but not in cache; refreshing model list`);
                         await this.discoverModels({ silent: true }, token);
-                        const refreshed = this._lastModelList.find((m) => m.id === overrideId);
+                        const refreshed = this._lastModelList.find(
+                            (m: vscode.LanguageModelChatInformation) => m.id === overrideId
+                        );
                         if (refreshed) {
                             modelToUse = refreshed;
                         } else {
