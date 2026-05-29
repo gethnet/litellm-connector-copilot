@@ -262,7 +262,8 @@ export class ModelDiscovery {
         const derived = deriveCapabilitiesFromModelInfo(namespacedId, modelInfo);
         this.derivedCapabilitiesCache.set(namespacedId, derived);
 
-        const capabilityOverrides = modelCapabilitiesOverrides?.[namespacedId] ?? modelCapabilitiesOverrides?.[modelName];
+        const capabilityOverrides =
+            modelCapabilitiesOverrides?.[namespacedId] ?? modelCapabilitiesOverrides?.[modelName];
         const capabilities = capabilitiesToVSCode(derived, capabilityOverrides);
         const tags = getDerivedModelTags(namespacedId, derived, {}, capabilityOverrides);
         const supportedEfforts = getSupportedReasoningEfforts(modelInfo, namespacedId);

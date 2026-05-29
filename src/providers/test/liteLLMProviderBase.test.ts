@@ -1158,15 +1158,13 @@ suite("LiteLLM Provider Unit Tests", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const telemetryModule = await import("../../utils/telemetry.js");
         const reportMetricStub = sandbox.stub(telemetryModule.LiteLLMTelemetry, "reportMetric");
-        sandbox
-            .stub(access(provider)._transport, "sendRequestToLiteLLM")
-            .resolves(
-                new ReadableStream<Uint8Array>({
-                    start(controller) {
-                        controller.close();
-                    },
-                })
-            );
+        sandbox.stub(access(provider)._transport, "sendRequestToLiteLLM").resolves(
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.close();
+                },
+            })
+        );
         const configManager = access(provider)._configManager;
         sandbox.stub(configManager, "resolveBackends").resolves([
             {
@@ -1997,12 +1995,10 @@ suite("LiteLLM Provider Unit Tests", () => {
 
     test("discoverModels deduplicates in-flight requests", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        const discoverStub = sandbox
-            .stub(access(provider)._modelDiscovery, "discover")
-            .callsFake(async () => {
-                await new Promise((resolve) => setTimeout(resolve, 50));
-                return [];
-            });
+        const discoverStub = sandbox.stub(access(provider)._modelDiscovery, "discover").callsFake(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            return [];
+        });
 
         const p1 = provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
         const p2 = provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
@@ -2055,10 +2051,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             ],
         });
         const execStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
-        const models = await provider.discoverModels(
-            { silent: false },
-            new vscode.CancellationTokenSource().token
-        );
+        const models = await provider.discoverModels({ silent: false }, new vscode.CancellationTokenSource().token);
         assert.strictEqual(execStub.calledWith("litellm-connector.manage"), false);
         assert.strictEqual(models.length, 1);
         assert.strictEqual(models[0].id, "cloud/gpt-4o");
@@ -2238,10 +2231,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const configManager = access(provider)._configManager;
         sandbox.stub(configManager, "getConfig").rejects(new Error("boom"));
-        const models = await provider.discoverModels(
-            { silent: true },
-            new vscode.CancellationTokenSource().token
-        );
+        const models = await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
         assert.strictEqual(models.length, 0);
     });
 
@@ -2331,15 +2321,13 @@ suite("LiteLLM Provider Unit Tests", () => {
         access(provider)._lastModelList = discoveredModels;
         sandbox.stub(access(provider)._modelDiscovery, "getLastModels").returns(discoveredModels);
 
-        const responsesStub = sandbox
-            .stub(access(provider)._transport, "sendRequestToLiteLLM")
-            .resolves(
-                new ReadableStream<Uint8Array>({
-                    start(controller) {
-                        controller.close();
-                    },
-                })
-            );
+        const responsesStub = sandbox.stub(access(provider)._transport, "sendRequestToLiteLLM").resolves(
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.close();
+                },
+            })
+        );
         const chatStub = sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
             new ReadableStream<Uint8Array>({
                 start(controller) {
@@ -2402,7 +2390,9 @@ suite("LiteLLM Provider Unit Tests", () => {
         access(provider)._lastModelList = discoveredModels;
         sandbox.stub(access(provider)._modelDiscovery, "getLastModels").returns(discoveredModels);
 
-        sandbox.stub(access(provider)._transport, "sendRequestToLiteLLM").rejects(new Error("/responses request failed"));
+        sandbox
+            .stub(access(provider)._transport, "sendRequestToLiteLLM")
+            .rejects(new Error("/responses request failed"));
 
         await access(provider).sendRequestToLiteLLM(
             { model: "test-model", messages: [] },
@@ -2456,7 +2446,9 @@ suite("LiteLLM Provider Unit Tests", () => {
         access(provider)._lastModelList = discoveredModels;
         sandbox.stub(access(provider)._modelDiscovery, "getLastModels").returns(discoveredModels);
 
-        sandbox.stub(access(provider)._transport, "sendRequestToLiteLLM").rejects(new Error("/responses request failed"));
+        sandbox
+            .stub(access(provider)._transport, "sendRequestToLiteLLM")
+            .rejects(new Error("/responses request failed"));
 
         await assert.rejects(
             access(provider).sendRequestToLiteLLM(
@@ -2514,15 +2506,13 @@ suite("LiteLLM Provider Unit Tests", () => {
         access(provider)._lastModelList = discoveredModels;
         sandbox.stub(access(provider)._modelDiscovery, "getLastModels").returns(discoveredModels);
 
-        sandbox
-            .stub(access(provider)._transport, "sendRequestToLiteLLM")
-            .resolves(
-                new ReadableStream<Uint8Array>({
-                    start(controller) {
-                        controller.close();
-                    },
-                })
-            );
+        sandbox.stub(access(provider)._transport, "sendRequestToLiteLLM").resolves(
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.close();
+                },
+            })
+        );
 
         await access(provider).sendRequestToLiteLLM(
             { model: "test-model", messages: [] },
