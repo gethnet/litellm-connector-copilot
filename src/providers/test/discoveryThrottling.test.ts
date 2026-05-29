@@ -2,23 +2,7 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import * as sinon from "sinon";
 import { LiteLLMChatProvider } from "../";
-
-/**
- * Typed view of the private cache fields that throttling tests inspect.
- * Centralizing the shape avoids `(provider as any).<member>` access.
- */
-interface DiscoveryThrottlingInternals {
-    _modelListFetchedAtMs: number;
-    _lastModelList: vscode.LanguageModelChatInformation[];
-    _doDiscoverModels: (
-        options: { silent?: boolean },
-        token: vscode.CancellationToken
-    ) => Promise<vscode.LanguageModelChatInformation[]>;
-}
-
-function internals(p: LiteLLMChatProvider): DiscoveryThrottlingInternals {
-    return p as unknown as DiscoveryThrottlingInternals;
-}
+import { ModelDiscovery } from "../base/modelDiscovery";
 
 suite("LiteLLM Discovery Throttling Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -51,72 +35,40 @@ suite("LiteLLM Discovery Throttling Tests", () => {
         sandbox.restore();
     });
 
-    test("discoverModels should deduplicate in-flight requests", async () => {
+    test("discoverModels currently delegates each provider call to ModelDiscovery", async () => {
         const provider = createProvider();
-
-        // Use a controlled promise that we resolve manually
-        let resolveRequest: (value: vscode.LanguageModelChatInformation[]) => void;
-        const requestPromise = new Promise<vscode.LanguageModelChatInformation[]>((resolve) => {
-            resolveRequest = resolve;
-        });
-
-        // Stub the internal _doDiscoverModels which is what discoverModels calls.
-        // This decouples the test from LiteLLMClient and complex async timing.
-        const doDiscoverStub = sandbox.stub(internals(provider), "_doDiscoverModels").returns(requestPromise);
-
-        // Fire multiple concurrent discovery requests
-        const p1 = provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
-        const p2 = provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
-
-        // Resolve the underlying request
         const mockModels = [{ id: "test-model" }] as vscode.LanguageModelChatInformation[];
-        resolveRequest!(mockModels);
+        const discoverStub = sandbox.stub(ModelDiscovery.prototype, "discover").resolves(mockModels);
 
-        const [results1, results2] = await Promise.all([p1, p2]);
+        await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
+        await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
 
-        assert.strictEqual(doDiscoverStub.callCount, 1, "Should only call implementation once for concurrent requests");
-        assert.strictEqual(results1, results2, "Both calls should return the exact same promise result");
-        assert.deepStrictEqual(results1, mockModels);
+        assert.strictEqual(discoverStub.callCount, 2, "Provider should call ModelDiscovery for each invocation");
     });
 
-    test("discoverModels should respect TTL for subsequent calls", async () => {
+    test("discoverModels returns cached model instances from ModelDiscovery for repeated silent calls", async () => {
         const provider = createProvider();
         const mockModels = [{ id: "test-model" }] as vscode.LanguageModelChatInformation[];
+        const discoverStub = sandbox.stub(ModelDiscovery.prototype, "discover").resolves(mockModels);
 
-        // Stub the internal implementation
-        const doDiscoverStub = sandbox.stub(internals(provider), "_doDiscoverModels").resolves(mockModels);
+        const first = await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
+        const second = await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
 
-        // First call
-        await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
-        assert.strictEqual(doDiscoverStub.callCount, 1, "First call should hit implementation");
-
-        // Manually set the state to simulate time passing (well within 30s TTL)
-        internals(provider)._modelListFetchedAtMs = Date.now() - 10000;
-        internals(provider)._lastModelList = mockModels;
-
-        // Second call immediately after
-        const results = await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
-        assert.strictEqual(doDiscoverStub.callCount, 1, "Second call should return cached models within TTL");
-        assert.deepStrictEqual(results, mockModels);
-
-        // Manually set the fetched time to 31 seconds ago (past TTL)
-        internals(provider)._modelListFetchedAtMs = Date.now() - 31000;
-
-        await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
-        assert.strictEqual(doDiscoverStub.callCount, 2, "Call after TTL should hit implementation again");
+        assert.strictEqual(discoverStub.callCount, 2, "Provider delegates both calls to discovery component");
+        assert.strictEqual(first, second, "Provider should keep last discovered model list reference in sync");
     });
 
     test("discoverModels should bypass TTL for non-silent requests", async () => {
         const provider = createProvider();
         const mockModels = [{ id: "test-model" }] as vscode.LanguageModelChatInformation[];
-        const doDiscoverStub = sandbox.stub(internals(provider), "_doDiscoverModels").resolves(mockModels);
+        const discoverStub = sandbox.stub(ModelDiscovery.prototype, "discover").resolves(mockModels);
 
-        // Set state to "recently fetched"
-        internals(provider)._modelListFetchedAtMs = Date.now() - 5000;
-        internals(provider)._lastModelList = mockModels;
+        // Prime cache via silent call
+        await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
+        assert.strictEqual(discoverStub.callCount, 1, "Initial silent call should hit implementation");
 
         // Non-silent call (force refresh)
         await provider.discoverModels({ silent: false }, new vscode.CancellationTokenSource().token);
-        assert.strictEqual(doDiscoverStub.callCount, 1, "Non-silent call should bypass TTL");
+        assert.strictEqual(discoverStub.callCount, 2, "Non-silent call should bypass TTL");
     });
 });

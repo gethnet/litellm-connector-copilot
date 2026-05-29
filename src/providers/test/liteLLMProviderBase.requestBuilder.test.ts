@@ -64,13 +64,16 @@ suite("RequestBuilder", () => {
             model,
             {
                 modelOptions: {},
-                tool_choice: "required" as never,
-                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Required,
+                tools: [{ name: "test_tool", description: "desc", inputSchema: {} }],
             } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
             modelInfo,
             "caller"
         );
 
-        sinon.assert.match(req.tool_choice, "required");
+        sinon.assert.match(req.tool_choice, {
+            type: "function",
+            function: { name: "test_tool" },
+        });
     });
 });

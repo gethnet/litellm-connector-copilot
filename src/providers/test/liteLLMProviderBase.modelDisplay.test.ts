@@ -43,21 +43,7 @@ suite("LiteLLM model display", () => {
             ],
         });
 
-        // Stub config manager to return a backend
-        const configManager = (provider as unknown as { _configManager: { resolveBackends: () => Promise<unknown> } })
-            ._configManager;
-        sandbox
-            .stub(configManager, "resolveBackends")
-            .resolves([{ name: "cloud", url: "http://example", enabled: true }]);
-
-        const models = await (
-            provider as unknown as {
-                _doDiscoverModels: (
-                    options: { silent: boolean; configuration?: Record<string, unknown> },
-                    t: vscode.CancellationToken
-                ) => Promise<vscode.LanguageModelChatInformation[]>;
-            }
-        )._doDiscoverModels(
+        const models = await provider.discoverModels(
             {
                 silent: true,
                 configuration: { providerName: "cloud", baseUrl: "http://example", apiKey: "test-key" },
@@ -109,21 +95,7 @@ suite("LiteLLM model display", () => {
             ],
         });
 
-        // Stub config manager to return a backend
-        const configManager = (provider as unknown as { _configManager: { resolveBackends: () => Promise<unknown> } })
-            ._configManager;
-        sandbox
-            .stub(configManager, "resolveBackends")
-            .resolves([{ name: "cloud", url: "http://example", enabled: true }]);
-
-        const models = await (
-            provider as unknown as {
-                _doDiscoverModels: (
-                    options: { silent: boolean; configuration?: Record<string, unknown> },
-                    t: vscode.CancellationToken
-                ) => Promise<vscode.LanguageModelChatInformation[]>;
-            }
-        )._doDiscoverModels(
+        const models = await provider.discoverModels(
             {
                 silent: true,
                 configuration: { providerName: "cloud", baseUrl: "http://example", apiKey: "test-key" },
@@ -136,7 +108,7 @@ suite("LiteLLM model display", () => {
         assert.strictEqual((model as unknown as { detail: string }).detail, "⚡ cloud");
         assert.strictEqual(
             (model as unknown as { tooltip?: string }).tooltip,
-            "Provider: openai, Model: gpt-4 contributed by LiteLLM: cloud via LiteLLM Connector for Copilot"
+            "Provider: openai, Model: gpt-4 via cloud"
         );
     });
 
@@ -169,21 +141,7 @@ suite("LiteLLM model display", () => {
             ],
         });
 
-        // Stub config manager to return a backend
-        const configManager = (provider as unknown as { _configManager: { resolveBackends: () => Promise<unknown> } })
-            ._configManager;
-        sandbox
-            .stub(configManager, "resolveBackends")
-            .resolves([{ name: "local", url: "http://localhost:4000", enabled: true }]);
-
-        const models = await (
-            provider as unknown as {
-                _doDiscoverModels: (
-                    options: { silent: boolean; configuration?: Record<string, unknown> },
-                    t: vscode.CancellationToken
-                ) => Promise<vscode.LanguageModelChatInformation[]>;
-            }
-        )._doDiscoverModels(
+        const models = await provider.discoverModels(
             {
                 silent: true,
                 configuration: { providerName: "local", baseUrl: "http://localhost:4000", apiKey: "test-key" },
@@ -196,7 +154,7 @@ suite("LiteLLM model display", () => {
         assert.strictEqual((model as unknown as { detail: string }).detail, "local");
         assert.strictEqual(
             (model as unknown as { tooltip?: string }).tooltip,
-            "Provider: openai, Model: gpt-3.5-turbo contributed by LiteLLM: local via LiteLLM Connector for Copilot"
+            "Provider: openai, Model: gpt-3.5-turbo via local"
         );
     });
 });

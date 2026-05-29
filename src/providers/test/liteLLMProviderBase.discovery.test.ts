@@ -23,10 +23,25 @@ suite("ModelDiscovery", () => {
 
     test("caches per configuration key", async () => {
         const token = new vscode.CancellationTokenSource().token;
-        sandbox.stub(configManager, "convertProviderConfiguration").resolves({
+        configManager.getConfig.resolves({} as never);
+        configManager.convertProviderConfiguration.returns({
             backendName: "b1",
             baseUrl: "http://b1",
             apiKey: "k",
+            client: {
+                getModelInfo: async () => ({
+                    data: [
+                        {
+                            model_name: "gpt-4o",
+                            model_info: {
+                                litellm_provider: "openai",
+                                mode: "chat",
+                                supports_native_streaming: true,
+                            },
+                        },
+                    ],
+                }),
+            } as never,
         });
 
         const first = await discovery.discover({

@@ -8,7 +8,8 @@ import {
     buildReasoningEffortConfigurationSchema,
     getSupportedReasoningEfforts,
 } from "../../utils/modelCapabilities";
-import type { LiteLLMModelInfo, LiteLLMModelInfoResponse } from "../../types";
+import { deriveGroupNameFromUrl } from "../../utils";
+import type { LiteLLMConfig, LiteLLMModelInfo, LiteLLMModelInfoResponse } from "../../types";
 import type { BackendSession } from "../backendSession";
 import type { DiscoverArgs, DiscoveryDeps } from "./types";
 
@@ -139,11 +140,18 @@ export class ModelDiscovery {
     ): Promise<vscode.LanguageModelChatInformation[]> {
         try {
             if (options.configuration) {
+                const configuredProviderName =
+                    typeof options.configuration.providerName === "string"
+                        ? options.configuration.providerName.trim()
+                        : "";
+                const configuredBaseUrl =
+                    typeof options.configuration.baseUrl === "string" ? options.configuration.baseUrl.trim() : "";
+                const derivedGroupName = deriveGroupNameFromUrl(configuredBaseUrl).trim();
                 const groupName =
                     options.groupName ??
-                    (typeof options.configuration.providerName === "string"
-                        ? options.configuration.providerName
-                        : "default");
+                    (configuredProviderName.length > 0 ? configuredProviderName : undefined) ??
+                    (derivedGroupName.length > 0 ? derivedGroupName : undefined) ??
+                    "default";
                 const session = this.configManager.convertProviderConfiguration(groupName, options.configuration);
                 if (session) {
                     this.onModernConfigurationDetected?.();
@@ -181,7 +189,12 @@ export class ModelDiscovery {
 
         const backendByName = new Map(backends.map((b) => [b.name, b]));
         const infos = models.data.map((entry) =>
-            this.toVSCodeInfo(entry, backendByName.get(entry.backendName), config.forceResponsesEndpoint)
+            this.toVSCodeInfo(
+                entry,
+                backendByName.get(entry.backendName),
+                config.forceResponsesEndpoint,
+                config.modelCapabilitiesOverrides
+            )
         );
 
         this.multiBackendClient = multiClient;
@@ -205,7 +218,8 @@ export class ModelDiscovery {
             this.toVSCodeInfo(
                 entry,
                 { name: session.backendName, url: session.baseUrl, apiKey: session.apiKey },
-                config.forceResponsesEndpoint
+                config.forceResponsesEndpoint,
+                config.modelCapabilitiesOverrides
             )
         );
 
@@ -222,7 +236,8 @@ export class ModelDiscovery {
     private toVSCodeInfo(
         entry: LiteLLMModelInfoResponse["data"][number],
         backend: { name?: string; url?: string; apiKey?: string } | undefined,
-        forceResponsesEndpoint?: boolean
+        forceResponsesEndpoint?: boolean,
+        modelCapabilitiesOverrides?: LiteLLMConfig["modelCapabilitiesOverrides"]
     ): vscode.LanguageModelChatInformation & {
         vendor?: string;
         backendName?: string;
@@ -247,8 +262,9 @@ export class ModelDiscovery {
         const derived = deriveCapabilitiesFromModelInfo(namespacedId, modelInfo);
         this.derivedCapabilitiesCache.set(namespacedId, derived);
 
-        const capabilities = capabilitiesToVSCode(derived, undefined);
-        const tags = getDerivedModelTags(namespacedId, derived, {}, undefined);
+        const capabilityOverrides = modelCapabilitiesOverrides?.[namespacedId] ?? modelCapabilitiesOverrides?.[modelName];
+        const capabilities = capabilitiesToVSCode(derived, capabilityOverrides);
+        const tags = getDerivedModelTags(namespacedId, derived, {}, capabilityOverrides);
         const supportedEfforts = getSupportedReasoningEfforts(modelInfo, namespacedId);
         const reasoningSchema = buildReasoningEffortConfigurationSchema(supportedEfforts, namespacedId, modelInfo);
 

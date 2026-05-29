@@ -181,6 +181,7 @@ export abstract class LiteLLMProviderBase {
         this._modelDiscovery.clearCaches();
         this._lastModelList = [];
         this._modelInfoCache.clear();
+        this._parameterProbeCache.clear();
         this.refreshModelInformation();
         Logger.info("Cleared cache");
     }
@@ -627,7 +628,13 @@ export abstract class LiteLLMProviderBase {
 
                 if (targetBackend) {
                     const responsesRequest = { ...request, model: transportModelId };
-                    return this._transport.sendRequestToLiteLLM(responsesRequest, progress, token, caller, modelInfo);
+                    return await this._transport.sendRequestToLiteLLM(
+                        responsesRequest,
+                        progress,
+                        token,
+                        caller,
+                        modelInfo
+                    );
                 }
             } catch (err) {
                 // Only fall back to /chat/completions if forceResponsesEndpoint allows it

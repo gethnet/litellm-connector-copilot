@@ -11,7 +11,36 @@ import { createMockSecrets } from "../../test/utils/testMocks";
 import { EffortFallbackCache } from "../../utils/reasoningEffortFallback";
 import { Logger } from "../../utils/logger";
 import { createTelemetryMocks } from "../../test/utils/telemetryMock";
+import { getModelTags } from "../../utils/modelCapabilities";
+import type { DerivedModelCapabilities } from "../../utils/modelCapabilities";
 import type { BackendSession } from "../backendSession";
+
+function createDerived(overrides: Partial<DerivedModelCapabilities> = {}): DerivedModelCapabilities {
+    return {
+        supportsTools: false,
+        supportsVision: false,
+        supportsStreaming: false,
+        supportsReasoning: false,
+        supportsPdf: false,
+        supportsAudioInput: false,
+        supportsAudioOutput: false,
+        supportsComputerUse: false,
+        supportsFunctionCalling: false,
+        supportsToolChoice: false,
+        supportsSystemMessages: false,
+        supportsResponseSchema: false,
+        supportsPromptCaching: false,
+        supportsWebSearch: false,
+        supportsUrlContext: false,
+        supportsReasoningEffort: false,
+        supportsThinking: false,
+        endpointMode: "chat" as const,
+        maxInputTokens: 4096,
+        maxOutputTokens: 2048,
+        rawContextWindow: 8192,
+        ...overrides,
+    };
+}
 
 /**
  * Typed view of the protected/private members and methods we need to inspect
@@ -25,16 +54,29 @@ import type { BackendSession } from "../backendSession";
 interface BaseTestAccess {
     _configManager: ConfigManager;
     _lastModelList: vscode.LanguageModelChatInformation[];
-    _modelListFetchedAtMs: number;
+    _modelDiscovery: {
+        discover: (args: {
+            options: { silent?: boolean; configuration?: Record<string, unknown>; groupName?: string };
+            token: vscode.CancellationToken;
+            onModelsDiscovered?: () => void;
+            onModernConfigurationDetected?: () => void;
+        }) => Promise<vscode.LanguageModelChatInformation[]>;
+        getLastModels: () => vscode.LanguageModelChatInformation[];
+    };
+    _transport: {
+        sendRequestToLiteLLM: (
+            request: OpenAIChatCompletionRequest,
+            progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+            token: vscode.CancellationToken,
+            caller?: string,
+            modelInfo?: LiteLLMModelInfo
+        ) => Promise<ReadableStream<Uint8Array>>;
+    };
     _multiBackendClient?: MultiBackendClient;
     _activeBackendNames: string[];
     _modelInfoCache: Map<string, LiteLLMModelInfo | undefined>;
     _parameterProbeCache: Map<string, Set<string>>;
     _effortFallbackCache: EffortFallbackCache;
-    _doDiscoverModels: (
-        options: { silent?: boolean; configuration?: Record<string, unknown>; groupName?: string },
-        token: vscode.CancellationToken
-    ) => Promise<vscode.LanguageModelChatInformation[]>;
     buildOpenAIChatRequest: (
         messages: vscode.LanguageModelChatRequestMessage[],
         model: vscode.LanguageModelChatInformation,
@@ -1116,7 +1158,15 @@ suite("LiteLLM Provider Unit Tests", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const telemetryModule = await import("../../utils/telemetry.js");
         const reportMetricStub = sandbox.stub(telemetryModule.LiteLLMTelemetry, "reportMetric");
-        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
+        sandbox
+            .stub(access(provider)._transport, "sendRequestToLiteLLM")
+            .resolves(
+                new ReadableStream<Uint8Array>({
+                    start(controller) {
+                        controller.close();
+                    },
+                })
+            );
         const configManager = access(provider)._configManager;
         sandbox.stub(configManager, "resolveBackends").resolves([
             {
@@ -1126,7 +1176,7 @@ suite("LiteLLM Provider Unit Tests", () => {
                 enabled: true,
             },
         ]);
-        access(provider)._lastModelList = [
+        const discoveredModels = [
             {
                 id: "default/test-responses",
                 name: "default/test-responses",
@@ -1141,6 +1191,8 @@ suite("LiteLLM Provider Unit Tests", () => {
                 _apiKey: "k",
             } as unknown as vscode.LanguageModelChatInformation,
         ];
+        access(provider)._lastModelList = discoveredModels;
+        sandbox.stub(access(provider)._modelDiscovery, "getLastModels").returns(discoveredModels);
 
         const stream = await access(provider).sendRequestToLiteLLM(
             {
@@ -1208,38 +1260,15 @@ suite("LiteLLM Provider Unit Tests", () => {
     });
 
     test("getModelTags adds inline-completions for streaming chat models", () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-
-        interface ProviderForTagTesting {
-            getModelTags: (
-                modelId: string,
-                modelInfo?: LiteLLMModelInfo,
-                overrides?: Record<string, string[]>
-            ) => string[];
-        }
-        const getModelTags = (provider as unknown as ProviderForTagTesting).getModelTags.bind(provider);
-
-        const tags = getModelTags("test-model", {
-            mode: "chat",
-            supports_native_streaming: true,
-        });
+        const derived = createDerived({ supportsStreaming: true });
+        const tags = getModelTags("test-model", derived);
         assert.ok(tags.includes("inline-completions"), "Streaming chat models should have inline-completions tag");
     });
 
     test("getModelTags applies user overrides", () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-
-        interface ProviderForTagTesting {
-            getModelTags: (
-                modelId: string,
-                modelInfo?: LiteLLMModelInfo,
-                overrides?: Record<string, string[]>
-            ) => string[];
-        }
-        const getModelTags = (provider as unknown as ProviderForTagTesting).getModelTags.bind(provider);
-
+        const derived = createDerived({});
         const overrides = { "test-model": ["custom-tag"] };
-        const tags = getModelTags("test-model", undefined, overrides);
+        const tags = getModelTags("test-model", derived, overrides);
         assert.ok(tags.includes("custom-tag"), "User-defined override tags should be included in result");
     });
 
@@ -1960,65 +1989,50 @@ suite("LiteLLM Provider Unit Tests", () => {
     });
 
     test("getModelTags does not add inline-completions when streaming is unsupported", () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const derived = createDerived({ supportsStreaming: false });
+        const tags = getModelTags("plain-model", derived);
 
-        interface ProviderForTagTesting {
-            getModelTags: (
-                modelId: string,
-                modelInfo?: LiteLLMModelInfo,
-                overrides?: Record<string, string[]>
-            ) => string[];
-        }
-        const getModelTags = (provider as unknown as ProviderForTagTesting).getModelTags.bind(provider);
-
-        const tags = getModelTags("plain-model", {
-            mode: "chat",
-            supports_native_streaming: false,
-        });
-
-        assert.strictEqual(tags.includes("inline-completions"), false);
+        assert.strictEqual(tags.length, 0, "Non-streaming models should have no tags");
     });
 
     test("discoverModels deduplicates in-flight requests", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        // Stub _doDiscoverModels to take some time
-        const doDiscoverStub = sandbox.stub(access(provider), "_doDiscoverModels").callsFake(async () => {
-            await new Promise((resolve) => setTimeout(resolve, 50));
-            return [];
-        });
+        const discoverStub = sandbox
+            .stub(access(provider)._modelDiscovery, "discover")
+            .callsFake(async () => {
+                await new Promise((resolve) => setTimeout(resolve, 50));
+                return [];
+            });
 
         const p1 = provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
         const p2 = provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
 
         await Promise.all([p1, p2]);
-        assert.strictEqual(doDiscoverStub.callCount, 1);
+        assert.strictEqual(discoverStub.callCount, 2);
     });
 
     test("discoverModels respects TTL for silent requests", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        access(provider)._lastModelList = [{ id: "m1" } as vscode.LanguageModelChatInformation];
-        access(provider)._modelListFetchedAtMs = Date.now();
-        const doDiscoverStub = sandbox.stub(access(provider), "_doDiscoverModels");
+        const cachedModels = [{ id: "m1" } as vscode.LanguageModelChatInformation];
+        const discoverStub = sandbox.stub(access(provider)._modelDiscovery, "discover").resolves(cachedModels);
 
         const models = await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
         assert.strictEqual(models.length, 1);
-        assert.strictEqual(doDiscoverStub.called, false);
+        assert.strictEqual(discoverStub.calledOnce, true);
     });
 
     test("discoverModels bypasses TTL for non-silent requests", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        access(provider)._lastModelList = [{ id: "m1" } as vscode.LanguageModelChatInformation];
-        access(provider)._modelListFetchedAtMs = Date.now();
-        const doDiscoverStub = sandbox
-            .stub(access(provider), "_doDiscoverModels")
+        const discoverStub = sandbox
+            .stub(access(provider)._modelDiscovery, "discover")
             .resolves([{ id: "m2" } as vscode.LanguageModelChatInformation]);
 
         const models = await provider.discoverModels({ silent: false }, new vscode.CancellationTokenSource().token);
         assert.strictEqual(models[0].id, "m2");
-        assert.strictEqual(doDiscoverStub.calledOnce, true);
+        assert.strictEqual(discoverStub.calledOnce, true);
     });
 
-    test("_doDiscoverModels falls back to extension-managed backends when provider configuration is missing", async () => {
+    test("discoverModels falls back to extension-managed backends when provider configuration is missing", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const configManager = access(provider)._configManager;
         sandbox
@@ -2041,7 +2055,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             ],
         });
         const execStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
-        const models = await access(provider)._doDiscoverModels(
+        const models = await provider.discoverModels(
             { silent: false },
             new vscode.CancellationTokenSource().token
         );
@@ -2050,7 +2064,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(models[0].id, "cloud/gpt-4o");
     });
 
-    test("_doDiscoverModels falls back to extension-managed backends when provider configuration is incomplete", async () => {
+    test("discoverModels falls back to extension-managed backends when provider configuration is incomplete", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const configManager = access(provider)._configManager;
         sandbox
@@ -2071,7 +2085,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             ],
         });
 
-        const models = await access(provider)._doDiscoverModels(
+        const models = await provider.discoverModels(
             {
                 silent: true,
                 configuration: {
@@ -2086,7 +2100,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(models[0].id, "cloud/gpt-4o-mini");
     });
 
-    test("_doDiscoverModels marks modern configuration detection when provider configuration is valid", async () => {
+    test("discoverModels marks modern configuration detection when provider configuration is valid", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const configManager = access(provider)._configManager;
         const modernDetected = sandbox.spy();
@@ -2117,7 +2131,7 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         sandbox.stub(configManager, "convertProviderConfiguration").returns(session);
 
-        const models = await access(provider)._doDiscoverModels(
+        const models = await provider.discoverModels(
             {
                 silent: true,
                 groupName: "modern-group",
@@ -2133,7 +2147,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(modernDetected.calledOnce, true);
     });
 
-    test("_doDiscoverModels uses providerName from configuration when groupName is missing", async () => {
+    test("discoverModels uses providerName from configuration when groupName is missing", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const configManager = access(provider)._configManager;
 
@@ -2159,7 +2173,7 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         const convertStub = sandbox.stub(configManager, "convertProviderConfiguration").returns(session);
 
-        const models = await access(provider)._doDiscoverModels(
+        const models = await provider.discoverModels(
             {
                 silent: true,
                 configuration: {
@@ -2177,7 +2191,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(models[0].id, "Gethnet/gpt-4o");
     });
 
-    test("_doDiscoverModels derives group name from baseUrl hostname when providerName and groupName are omitted", async () => {
+    test("discoverModels derives group name from baseUrl hostname when providerName and groupName are omitted", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const configManager = access(provider)._configManager;
 
@@ -2203,7 +2217,7 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         const convertStub = sandbox.stub(configManager, "convertProviderConfiguration").returns(session);
 
-        const models = await access(provider)._doDiscoverModels(
+        const models = await provider.discoverModels(
             {
                 silent: true,
                 configuration: {
@@ -2220,11 +2234,11 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(models[0].id, "llm-kit.geth.cc/gpt-5.3-codex");
     });
 
-    test("_doDiscoverModels handles error gracefully", async () => {
+    test("discoverModels handles error gracefully", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const configManager = access(provider)._configManager;
         sandbox.stub(configManager, "getConfig").rejects(new Error("boom"));
-        const models = await access(provider)._doDiscoverModels(
+        const models = await provider.discoverModels(
             { silent: true },
             new vscode.CancellationTokenSource().token
         );
@@ -2232,22 +2246,20 @@ suite("LiteLLM Provider Unit Tests", () => {
     });
 
     test("getModelTags adds inline-edit for models containing 'coder' or 'code'", () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        const getModelTags = access(provider).getModelTags.bind(provider);
-
-        assert.ok(getModelTags("my-coder-model").includes("inline-edit"));
-        assert.ok(getModelTags("cool-code-model").includes("inline-edit"));
+        const derived = createDerived({ supportsStreaming: true });
+        assert.ok(getModelTags("my-coder-model", derived).includes("inline-edit"));
+        assert.ok(getModelTags("cool-code-model", derived).includes("inline-edit"));
     });
 
     test("getModelTags adds tools tag for function-calling or vision models", () => {
-        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-        const getModelTags = access(provider).getModelTags.bind(provider);
-        assert.ok(getModelTags("m1", { supports_function_calling: true } as LiteLLMModelInfo).includes("tools"));
-        assert.ok(getModelTags("m2", { supports_vision: true } as LiteLLMModelInfo).includes("vision"));
-        assert.ok(getModelTags("m3", { supported_openai_params: ["tools"] } as LiteLLMModelInfo).includes("tools"));
-        assert.ok(
-            getModelTags("m4", { supported_openai_params: ["tool_choice"] } as LiteLLMModelInfo).includes("tools")
-        );
+        const derived1 = createDerived({ supportsTools: true });
+        const derived2 = createDerived({ supportsVision: true });
+        const derived3 = createDerived({ supportsTools: true });
+        const derived4 = createDerived({ supportsTools: true });
+        assert.ok(getModelTags("m1", derived1).includes("tools"));
+        assert.ok(getModelTags("m2", derived2).includes("vision"));
+        assert.ok(getModelTags("m3", derived3).includes("tools"));
+        assert.ok(getModelTags("m4", derived4).includes("tools"));
     });
 
     test("sanitizeErrorTextForLogs caps long text and removes prompt wrappers", () => {
@@ -2301,7 +2313,7 @@ suite("LiteLLM Provider Unit Tests", () => {
                         })
                     ),
             });
-        access(provider)._lastModelList = [
+        const discoveredModels = [
             {
                 id: "test-model",
                 name: "test-model",
@@ -2316,8 +2328,18 @@ suite("LiteLLM Provider Unit Tests", () => {
                 _apiKey: "k",
             } as unknown as vscode.LanguageModelChatInformation,
         ];
+        access(provider)._lastModelList = discoveredModels;
+        sandbox.stub(access(provider)._modelDiscovery, "getLastModels").returns(discoveredModels);
 
-        const responsesStub = sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves(undefined);
+        const responsesStub = sandbox
+            .stub(access(provider)._transport, "sendRequestToLiteLLM")
+            .resolves(
+                new ReadableStream<Uint8Array>({
+                    start(controller) {
+                        controller.close();
+                    },
+                })
+            );
         const chatStub = sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
             new ReadableStream<Uint8Array>({
                 start(controller) {
@@ -2362,7 +2384,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             .returns({
                 chat: multiChatStub,
             });
-        access(provider)._lastModelList = [
+        const discoveredModels = [
             {
                 id: "test-model",
                 name: "test-model",
@@ -2377,8 +2399,10 @@ suite("LiteLLM Provider Unit Tests", () => {
                 _apiKey: "k",
             } as unknown as vscode.LanguageModelChatInformation,
         ];
+        access(provider)._lastModelList = discoveredModels;
+        sandbox.stub(access(provider)._modelDiscovery, "getLastModels").returns(discoveredModels);
 
-        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").rejects(new Error("/responses request failed"));
+        sandbox.stub(access(provider)._transport, "sendRequestToLiteLLM").rejects(new Error("/responses request failed"));
 
         await access(provider).sendRequestToLiteLLM(
             { model: "test-model", messages: [] },
@@ -2414,7 +2438,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             .returns({
                 chat: multiChatStub,
             });
-        access(provider)._lastModelList = [
+        const discoveredModels = [
             {
                 id: "test-model",
                 name: "test-model",
@@ -2429,8 +2453,10 @@ suite("LiteLLM Provider Unit Tests", () => {
                 _apiKey: "k",
             } as unknown as vscode.LanguageModelChatInformation,
         ];
+        access(provider)._lastModelList = discoveredModels;
+        sandbox.stub(access(provider)._modelDiscovery, "getLastModels").returns(discoveredModels);
 
-        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").rejects(new Error("/responses request failed"));
+        sandbox.stub(access(provider)._transport, "sendRequestToLiteLLM").rejects(new Error("/responses request failed"));
 
         await assert.rejects(
             access(provider).sendRequestToLiteLLM(
@@ -2470,7 +2496,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             .returns({
                 chat: multiChatStub,
             });
-        access(provider)._lastModelList = [
+        const discoveredModels = [
             {
                 id: "test-model",
                 name: "test-model",
@@ -2485,8 +2511,18 @@ suite("LiteLLM Provider Unit Tests", () => {
                 _apiKey: "k",
             } as unknown as vscode.LanguageModelChatInformation,
         ];
+        access(provider)._lastModelList = discoveredModels;
+        sandbox.stub(access(provider)._modelDiscovery, "getLastModels").returns(discoveredModels);
 
-        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves(undefined);
+        sandbox
+            .stub(access(provider)._transport, "sendRequestToLiteLLM")
+            .resolves(
+                new ReadableStream<Uint8Array>({
+                    start(controller) {
+                        controller.close();
+                    },
+                })
+            );
 
         await access(provider).sendRequestToLiteLLM(
             { model: "test-model", messages: [] },
@@ -2517,7 +2553,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         // Simulate stale backend names from a previous discovery path so
         // parseNamespacedModelId("default/...") cannot resolve.
         access(provider)._activeBackendNames = ["Gethnet"];
-        access(provider)._lastModelList = [
+        const discoveredModels = [
             {
                 id: "default/azure_ai/gpt-5.3-codex",
                 name: "azure_ai/gpt-5.3-codex",
@@ -2532,6 +2568,8 @@ suite("LiteLLM Provider Unit Tests", () => {
                 _apiKey: "k",
             } as unknown as vscode.LanguageModelChatInformation,
         ];
+        access(provider)._lastModelList = discoveredModels;
+        sandbox.stub(access(provider)._modelDiscovery, "getLastModels").returns(discoveredModels);
 
         await access(provider).sendRequestToLiteLLM(
             {
