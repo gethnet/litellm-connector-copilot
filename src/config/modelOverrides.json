@@ -24,12 +24,5 @@
       "reasoning_effort"
     ],
     "notes": "OpenAI o1/o3/o4 models have strict parameter restrictions. Force mandatory override to ensure correct parameter filtering."
-  },
-  {
-    "match": ".*",
-    "supportsReasoning": null,
-    "reasoningEfforts": ["none", "low", "medium", "high"],
-    "defaultEffort": "medium",
-    "notes": "Fallback catch-all; defers support flag to proxy model info."
   }
 ]

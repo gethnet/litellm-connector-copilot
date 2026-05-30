@@ -1,4 +1,4 @@
-import * as vscode from "vscode";
+import type * as vscode from "vscode";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 import { MultiBackendClient } from "../../adapters/multiBackendClient";
 import { isContextOverflowError } from "../../adapters/tokenUtils";

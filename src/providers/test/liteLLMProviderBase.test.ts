@@ -964,12 +964,16 @@ suite("LiteLLM Provider Unit Tests", () => {
             configurationSchema?.properties?.reasoningEffort as {
                 enum: string[];
                 enumItemLabels: string[];
+                default: string;
             }
         )?.enumItemLabels;
-        // `default` must NOT be present in the schema — VS Code resets the picker to `default`
-        // on every provideLanguageModelChatInformation refresh, so omitting it preserves the
-        // user's selected reasoning effort across conversation turns.
-        const defaultValue = (configurationSchema?.properties?.reasoningEffort as Record<string, unknown>)?.default;
+        const defaultValue = (
+            configurationSchema?.properties?.reasoningEffort as {
+                enum: string[];
+                enumItemLabels: string[];
+                default: string;
+            }
+        )?.default;
 
         assert.deepStrictEqual(
             enumValues,
@@ -980,7 +984,9 @@ suite("LiteLLM Provider Unit Tests", () => {
             enumItemLabels?.includes("Medium"),
             "Expected 'Medium' effort label to be present in enumItemLabels (capitalized for picker UX)"
         );
-        assert.strictEqual(defaultValue, undefined, "schema must not carry a default — would reset picker every turn");
+        // `default` must be present so VS Code renders the effort label next to the model name
+        // (e.g. "claude-sonnet-4-6 · Medium") before the user makes an explicit selection.
+        assert.strictEqual(defaultValue, "medium");
     });
 
     test("clearModelCache resets model list and caches", () => {

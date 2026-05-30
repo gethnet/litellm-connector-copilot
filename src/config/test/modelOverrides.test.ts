@@ -48,8 +48,6 @@ suite("modelOverrides", () => {
 
         const gptOverride = overrides.find((entry) => entry.match.includes("gpt"));
         const claudeOverride = overrides.find((entry) => entry.match.startsWith("^claude"));
-        const catchAllIndex = overrides.findIndex((entry) => entry.match === ".*");
-        const catchAll = overrides[catchAllIndex];
 
         assert.ok(gptOverride, "gpt-5 override should be present");
         assert.deepStrictEqual(gptOverride?.reasoningEfforts, ["none", "low", "medium", "high"]);
@@ -59,11 +57,10 @@ suite("modelOverrides", () => {
         assert.deepStrictEqual(claudeOverride?.reasoningEfforts, ["none", "low", "medium", "high"]);
         assert.strictEqual(claudeOverride?.defaultEffort, "medium");
 
-        assert.ok(catchAll, "catch-all override should be present");
-        assert.strictEqual(catchAllIndex, overrides.length - 1, "catch-all should be last");
-        assert.deepStrictEqual(catchAll.reasoningEfforts, CANONICAL_REASONING_EFFORTS);
-        assert.strictEqual(catchAll.defaultEffort, "medium");
-        assert.strictEqual(catchAll.supportsReasoning, null);
+        // NOTE: catch-all ".*" entry has been gated off (see modelOverrides.json).
+        // Reasoning effort schema is now derived solely from the proxy's /model/info response.
+        const catchAll = overrides.find((entry) => entry.match === ".*");
+        assert.strictEqual(catchAll, undefined, "catch-all override should be gated off");
     });
 
     test("user overrides merge before bundled overrides and take precedence", async () => {

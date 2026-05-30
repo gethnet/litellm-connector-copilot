@@ -366,6 +366,7 @@ export function buildReasoningEffortConfigurationSchema(
                   // Per-item descriptions rendered next to each option in the hover popup.
                   // This is what causes VS Code to display the "Faster responses…" / "Balanced…" lines.
                   enumDescriptions: string[];
+                  default?: SupportedReasoningEffort;
                   // Must be "navigation" for VS Code 1.120 to surface this as an inline picker action
                   // rather than hiding it in the secondary configuration UI.
                   group: "navigation";
@@ -377,6 +378,7 @@ export function buildReasoningEffortConfigurationSchema(
         return undefined;
     }
 
+    const defaultEffort = getDefaultReasoningEffort(supportedEfforts, modelId, modelInfo, config);
     return {
         properties: {
             reasoningEffort: {
@@ -389,16 +391,16 @@ export function buildReasoningEffortConfigurationSchema(
                 // Per-item descriptions — renders the explanatory text beside each effort option
                 // in the VS Code model-picker hover popup (e.g. "Balanced reasoning and speed").
                 enumDescriptions: supportedEfforts.map(getEffortDescription),
-                // NOTE: Intentionally no `default` field.
+                // VS Code's `getModelConfigurationDescription` uses `currentConfig[key] ?? propSchema.default`
+                // to render the current effort label next to the model name (e.g. "claude-sonnet-4-6 · Medium").
+                // Without a `default`, no label is shown until the user makes an explicit selection.
                 //
-                // VS Code re-calls provideLanguageModelChatInformation before every chat turn
-                // (to validate the model is still available). If a `default` is present in the
-                // schema, VS Code resets the picker to that value on every refresh — overwriting
-                // whatever effort the user selected. Omitting `default` preserves the user's
-                // choice across turns.
-                //
-                // If you need a starting value for first-time display, the picker already shows
-                // the first enum entry when no value has been selected yet.
+                // Previously this caused effort resets because provideLanguageModelChatInformation was
+                // called before every chat turn (returning new object instances), which caused VS Code to
+                // re-initialize model state and apply the schema default. That root cause has been fixed
+                // by the TTL cache and non-destructive merge changes — the schema default is now safe to
+                // restore so the model name label reflects the active effort level correctly.
+                default: defaultEffort,
                 group: "navigation",
             },
         },

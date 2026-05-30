@@ -484,28 +484,26 @@ suite("modelCapabilities", () => {
             assert.strictEqual(descs?.[3], "Greater reasoning depth but slower");
         });
 
-        test("getDefaultReasoningEffort returns medium for canonical reasoning configuration", () => {
+        test("defaults to medium for canonical reasoning configuration", () => {
             const canonicalEfforts: SupportedReasoningEffort[] = ["none", "minimal", "low", "medium", "high"];
 
             const defaultEffort = getDefaultReasoningEffort(canonicalEfforts, "any-other-model");
             const schema = buildReasoningEffortConfigurationSchema(canonicalEfforts, "any-other-model");
 
             assert.strictEqual(defaultEffort, "medium");
-            // schema must NOT carry a `default` — VS Code resets the picker to `default`
-            // on every provideLanguageModelChatInformation call, so we must omit it to
-            // preserve the user's selected effort across turns.
-            assert.strictEqual((schema?.properties.reasoningEffort as Record<string, unknown>).default, undefined);
+            // `default` is present so VS Code renders the effort label next to the model name
+            // (e.g. "model-name · Medium") before the user makes an explicit selection.
+            assert.strictEqual(schema?.properties.reasoningEffort.default, "medium");
         });
 
-        test("getDefaultReasoningEffort returns medium for Claude reasoning configuration", () => {
+        test("defaults to medium for Claude reasoning configuration", () => {
             const claudeEfforts: SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
 
             const defaultEffort = getDefaultReasoningEffort(claudeEfforts, "claude-haiku-4-5");
             const schema = buildReasoningEffortConfigurationSchema(claudeEfforts, "claude-haiku-4-5");
 
             assert.strictEqual(defaultEffort, "medium");
-            // schema must NOT carry a `default` — same reason as above.
-            assert.strictEqual((schema?.properties.reasoningEffort as Record<string, unknown>).default, undefined);
+            assert.strictEqual(schema?.properties.reasoningEffort.default, "medium");
         });
     });
 });

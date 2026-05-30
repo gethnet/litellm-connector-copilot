@@ -1,4 +1,4 @@
-import * as vscode from "vscode";
+import type * as vscode from "vscode";
 import { MultiBackendClient } from "../../adapters/multiBackendClient";
 import { Logger } from "../../utils/logger";
 import {
@@ -13,7 +13,11 @@ import type { LiteLLMConfig, LiteLLMModelInfo, LiteLLMModelInfoResponse } from "
 import type { BackendSession } from "../backendSession";
 import type { DiscoverArgs, DiscoveryDeps } from "./types";
 
-const TTL_MS = 30_000;
+// 5-minute TTL.  Model lists change rarely (deployments, backend restarts).
+// A short TTL (previously 30 s) caused a full /model/info HTTP fetch before
+// every chat turn — each fetch returned new JS object instances, which VS Code
+// treated as a model-list change and reset the reasoning-effort picker.
+const TTL_MS = 5 * 60 * 1_000;
 
 export class ModelDiscovery {
     private readonly configManager: DiscoveryDeps["configManager"];
@@ -91,22 +95,33 @@ export class ModelDiscovery {
         cached: vscode.LanguageModelChatInformation[],
         fresh: vscode.LanguageModelChatInformation[]
     ): boolean {
-        if (cached.length !== fresh.length) return true;
+        if (cached.length !== fresh.length) {
+            return true;
+        }
         for (let i = 0; i < cached.length; i++) {
             const cachedModel = cached[i] as vscode.LanguageModelChatInformation & { _backendName?: string };
             const freshModel = fresh[i] as vscode.LanguageModelChatInformation & { _backendName?: string };
-            if (cachedModel.id !== freshModel.id) return true;
-            if (cachedModel.name !== freshModel.name) return true;
-            if ((cachedModel as { vendor?: unknown }).vendor !== (freshModel as { vendor?: unknown }).vendor)
+            if (cachedModel.id !== freshModel.id) {
                 return true;
-            if (cachedModel.isUserSelectable !== freshModel.isUserSelectable) return true;
+            }
+            if (cachedModel.name !== freshModel.name) {
+                return true;
+            }
+            if ((cachedModel as { vendor?: unknown }).vendor !== (freshModel as { vendor?: unknown }).vendor) {
+                return true;
+            }
+            if (cachedModel.isUserSelectable !== freshModel.isUserSelectable) {
+                return true;
+            }
             if (
                 JSON.stringify((cachedModel as { category?: unknown }).category) !==
                 JSON.stringify((freshModel as { category?: unknown }).category)
-            )
+            ) {
                 return true;
-            if (JSON.stringify(cachedModel.configurationSchema) !== JSON.stringify(freshModel.configurationSchema))
+            }
+            if (JSON.stringify(cachedModel.configurationSchema) !== JSON.stringify(freshModel.configurationSchema)) {
                 return true;
+            }
         }
         return false;
     }
@@ -117,14 +132,26 @@ export class ModelDiscovery {
             return this.inFlightDiscovery;
         }
 
+        // Honour the TTL for ALL calls — not just silent ones.
+        //
+        // VS Code calls provideLanguageModelChatInformation with silent=false before every
+        // chat turn (to confirm the selected model is still valid).  Previously we only
+        // checked the cache when silent=true, so every turn fired a live /model/info HTTP
+        // request.  Each live fetch creates new JS object instances; VS Code compares model
+        // objects by reference/identity and treats new instances as "model changed", which
+        // resets the reasoning-effort picker back to its default.
+        //
+        // The only legitimate reason to bypass the TTL is an explicit user-triggered cache
+        // clear (clearModelCache / reload command), which sets modelListFetchedAtMs = 0 and
+        // perConfigCache entries to stale, so those calls naturally fall through to doDiscover.
         const now = Date.now();
         if (options.configuration) {
             const key = this.getConfigCacheKey(options.configuration);
             const cached = this.perConfigCache.get(key);
-            if (cached && options.silent && now - cached.fetchedAtMs < TTL_MS) {
+            if (cached && now - cached.fetchedAtMs < TTL_MS) {
                 return cached.models;
             }
-        } else if (options.silent && this.lastModelList.length > 0 && now - this.modelListFetchedAtMs < TTL_MS) {
+        } else if (this.lastModelList.length > 0 && now - this.modelListFetchedAtMs < TTL_MS) {
             return this.lastModelList;
         }
 

@@ -1,4 +1,4 @@
-import * as vscode from "vscode";
+import type * as vscode from "vscode";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../../types";
 import type { ConfigManager } from "../../config/configManager";
 import type { LiteLLMClient } from "../../adapters/litellmClient";

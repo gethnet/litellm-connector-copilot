@@ -323,10 +323,10 @@ export abstract class LiteLLMProviderBase {
         const args: DiscoverArgs = {
             options,
             token,
-            onModelsDiscovered: () => this._onDidChangeLanguageModelChatInformationEmitter.fire(),
             onModernConfigurationDetected: () => this.setModernConfigurationDetectedHandler(() => {}),
         };
 
+        const previousIds = new Set(this._lastModelList.map((m) => m.id));
         const models = await this._modelDiscovery.discover(args);
 
         // Guard: never replace a healthy model list with an empty result.
@@ -342,13 +342,23 @@ export abstract class LiteLLMProviderBase {
 
         this._lastModelList = models;
 
+        // Only fire the change event when the set of model IDs actually changed.
+        // Firing unconditionally on every discover() call tells VS Code "models changed"
+        // even on cache-hit returns, which causes VS Code to re-query and reset the
+        // reasoning-effort picker for the active model.
+        const newIds = new Set(models.map((m) => m.id));
+        const modelSetChanged = newIds.size !== previousIds.size || [...newIds].some((id) => !previousIds.has(id));
+        if (modelSetChanged) {
+            Logger.info("discoverModels: model set changed, firing onDidChangeLanguageModelChatInformation");
+            this._onDidChangeLanguageModelChatInformationEmitter.fire();
+        }
+
         // Non-destructive cache merge: add/update entries for models in the new list
         // and remove entries for models no longer present — but never wipe the whole
         // map in one shot.  A destructive clear() followed by a loop creates a window
         // where concurrent requests (e.g. an in-flight chat turn) read _modelInfoCache
         // and get undefined, causing getReasoningEffort() to fall back to "no effort"
         // and VS Code to reset the effort picker back to "auto".
-        const newIds = new Set(models.map((m) => m.id));
         // Remove stale entries
         for (const id of this._modelInfoCache.keys()) {
             if (!newIds.has(id)) {
@@ -458,19 +468,32 @@ export abstract class LiteLLMProviderBase {
         justification?: string;
         modelConfiguration?: Record<string, unknown>;
     } {
-        // IMPORTANT: VS Code provides per-model configuration via `options.configuration`,
-        // NOT `options.modelConfiguration`. The latter is only available in ChatRequest (message context).
-        // This was a bug - we were reading from the wrong property!
         const opt = options as vscode.ProvideLanguageModelChatResponseOptions & {
             caller?: string;
             justification?: string;
-            // modelConfiguration is NOT in ProvideLanguageModelChatResponseOptions - it's in ChatRequest
-            // The correct property is `configuration`
+            // VS Code 1.120 per-group provider config (baseUrl, apiKey, providerName).
+            // This is the PROVIDER configuration, NOT the per-model picker selections.
             configuration?: Record<string, unknown>;
+            // Per-model picker selections (reasoningEffort, etc.) from configurationSchema.
+            // This is the field defined in the proposed API: ProvideLanguageModelChatResponseOptions.modelConfiguration
+            modelConfiguration?: Record<string, unknown>;
         };
-        // Read from options.configuration (the correct VS Code API), not modelConfiguration
-        // Also check modelConfiguration for backward compatibility with ChatRequest context
-        const modelConfig = opt.configuration ?? opt.modelConfiguration ?? {};
+
+        // The two configuration objects serve different purposes:
+        //   opt.configuration      — provider group config (baseUrl, apiKey) — always present when using 1.120 BYOK
+        //   opt.modelConfiguration — per-model picker selections (reasoningEffort) — present when user changes effort
+        //
+        // Previously: `opt.configuration ?? opt.modelConfiguration` — WRONG.
+        // Because opt.configuration is always populated (it has baseUrl/apiKey), this always resolved to
+        // opt.configuration, which never contains reasoningEffort. The user's effort selection was silently dropped.
+        //
+        // Fix: merge both objects, with modelConfiguration taking precedence for picker-specific keys.
+        // This ensures reasoningEffort from the picker is always visible regardless of provider config presence.
+        const modelConfig: Record<string, unknown> = {
+            ...(opt.configuration ?? {}),
+            ...(opt.modelConfiguration ?? {}),
+        };
+
         return {
             caller: opt.caller,
             justification: opt.justification,
