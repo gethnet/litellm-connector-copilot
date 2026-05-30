@@ -228,6 +228,13 @@ export interface LiteLLMConfig {
     disableCaching?: boolean;
     disableQuotaToolRedaction?: boolean;
     /**
+     * Enable/disable the model override system.
+     * When enabled, merged user and bundled model override rules are applied.
+     * When disabled, only LiteLLM /model/info derived capabilities are used.
+     * Default: true (backwards compatible).
+     */
+    enableModelOverrides?: boolean;
+    /**
      * Reasoning capability overrides supplied by the user. Mirrors the
      * `litellm-connector.modelOverrides` configuration array and is merged with
      * bundled defaults by the override loader.

@@ -15,6 +15,7 @@ export class ConfigManager {
     private static readonly INACTIVITY_TIMEOUT_KEY = "litellm-connector.inactivityTimeout";
     private static readonly DISABLE_CACHING_KEY = "litellm-connector.disableCaching";
     private static readonly DISABLE_QUOTA_TOOL_REDACTION_KEY = "litellm-connector.disableQuotaToolRedaction";
+    private static readonly KEY_MODEL_OVERRIDES_ENABLE = "litellm-connector.enableModelOverrides";
     private static readonly MODEL_CAPABILITIES_OVERRIDES_KEY = "litellm-connector.modelCapabilitiesOverrides";
     private static readonly MODEL_ID_OVERRIDE_KEY = "litellm-connector.modelIdOverride";
     private static readonly INLINE_COMPLETIONS_ENABLED_KEY = "litellm-connector.inlineCompletions.enabled";
@@ -136,6 +137,7 @@ export class ConfigManager {
             ConfigManager.DISABLE_QUOTA_TOOL_REDACTION_KEY,
             false
         );
+        const enableModelOverrides = workspaceConfig.get<boolean>(ConfigManager.KEY_MODEL_OVERRIDES_ENABLE, true);
         // Drop undefined/neutral fields so shape matches expectations
         const modelOverrides: ModelOverride[] = loadUserOverrides(workspaceConfig).map((o) => {
             const cleaned: ModelOverride = { match: o.match, notes: o.notes }; // preserve notes field even if undefined
@@ -227,6 +229,7 @@ export class ConfigManager {
             inactivityTimeout,
             disableCaching,
             disableQuotaToolRedaction,
+            enableModelOverrides,
             modelOverrides,
             modelCapabilitiesOverrides,
             modelIdOverride: modelIdOverride.length > 0 ? modelIdOverride : undefined,

@@ -141,6 +141,12 @@ export function getMergedOverrides(config?: vscode.WorkspaceConfiguration): Mode
 }
 
 export function findOverride(modelId: string, config?: vscode.WorkspaceConfiguration): ModelOverride | undefined {
+    const workspaceConfig = config ?? vscode.workspace.getConfiguration();
+    const enableModelOverrides = workspaceConfig.get<boolean>("litellm-connector.enableModelOverrides", true);
+    if (!enableModelOverrides) {
+        return undefined;
+    }
+
     const overrides = getMergedOverrides(config);
 
     for (const override of overrides) {

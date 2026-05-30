@@ -117,6 +117,14 @@ Send `no-cache` headers to bypass LiteLLM caching when you need fresh responses.
 ### 🔐 **Secure by Design**
 Your API keys and URLs are stored safely in VS Code's encrypted `SecretStorage`. No plaintext secrets.
 
+### 🧩 **Model Override System**
+Fine-grained control over reasoning capabilities for specific models. The override system lets you customize how models are presented to VS Code:
+
+- **`litellm-connector.modelOverrides`** — Define regex-based rules to control reasoning effort levels, tags, and supported parameters for matching models.
+- **`litellm-connector.enableModelOverrides`** — Master toggle (default: `true`). Set to `false` to disable all override rules and rely solely on LiteLLM's `/model/info` auto-discovery. Useful when proxy-reported capabilities are accurate and overrides are no longer needed.
+
+When enabled, user-defined overrides take precedence over bundled defaults. Both are merged with auto-discovered capabilities from the LiteLLM proxy.
+
 ### ⌨️ **Optional Inline Completions**
 Enable LiteLLM-powered inline completions as an alternative to Copilot's default.
 ⚠️ In `2.0.0`, this currently requires manual configuration to operate reliably.
@@ -139,6 +147,7 @@ Enable LiteLLM-powered inline completions as an alternative to Copilot's default
 - � **Multi-Repo Commit Generation** – Commit message generation now correctly identifies the active repository in multi-repo workspaces. Generates the right diff from the right repo every time.
 - 🧪 **Telemetry & Observability** – PostHog-backed telemetry for feature-usage tracking, request metrics, and structured JSONL logging. All non-identifiable and opt-in.
 - 🔧 **Model Capability Overrides** – Manually override VS Code's capability detection (`toolCalling`, `imageInput`) when auto-detection is incorrect. Configure via `litellm-connector.modelCapabilitiesOverrides`.
+- 🧩 **Model Override Gate** – New `litellm-connector.enableModelOverrides` setting lets you disable the entire override system. When off, all capabilities come directly from your LiteLLM proxy's `/model/info` responses. Bundled overrides are now empty by default.
 - 🧠 **Rich Chat Response Parts** – Unified chat provider built on the VS Code 1.120 Language Model APIs. Emits structured text, thinking, data, and tool-call parts so reasoning models render correctly in chat.
 - ⚠️ **Temporary Feature Gap (2.0.0)** – Commit-message generation and inline completions currently require manual configuration; modern-config parity fix is in progress.
 - �📊 **Advanced Token Counting** – Smarter budgeting with local estimation, background refinement, and short-lived caching for faster, more accurate context management.
@@ -165,6 +174,7 @@ Fine-tune your experience with these settings (accessible via VS Code Settings):
 | `litellm-connector.enableResponsesApi` | boolean | `false` | **(Experimental)** Enable the VSCode Responses API integration. |
 | `litellm-connector.disableQuotaToolRedaction` | boolean | `false` | Disable automatic tool removal when a quota error is detected in chat history. |
 | `litellm-connector.modelOverrides` | object | `{}` | Override or add tags for specific models (e.g., `inline-completions,chat,tools`). |
+| `litellm-connector.enableModelOverrides` | boolean | `true` | Enable/disable the model override system. When enabled, merged user and bundled model override rules are applied. When disabled, only LiteLLM `/model/info` derived capabilities are used. |
 | `litellm-connector.modelCapabilitiesOverrides` | object | `{}` | Override model capabilities (`toolCalling`, `imageInput`) reported to VS Code (e.g., `toolCalling,imageInput`). |
 | `litellm-connector.inlineCompletions.enabled` | boolean | `false` | Enable LiteLLM inline completions via VS Code's stable inline completion provider API. **(Deprecated: will be removed)** |
 | `litellm-connector.inlineCompletions.modelId` | string | `""` | **(Deprecated)** Use VS Code's [`inlineChat.defaultModel`](vscode://settings/inlineChat.defaultModel) setting instead. |
