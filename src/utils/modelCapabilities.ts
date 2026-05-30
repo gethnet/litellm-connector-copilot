@@ -366,7 +366,6 @@ export function buildReasoningEffortConfigurationSchema(
                   // Per-item descriptions rendered next to each option in the hover popup.
                   // This is what causes VS Code to display the "Faster responses…" / "Balanced…" lines.
                   enumDescriptions: string[];
-                  default?: SupportedReasoningEffort;
                   // Must be "navigation" for VS Code 1.120 to surface this as an inline picker action
                   // rather than hiding it in the secondary configuration UI.
                   group: "navigation";
@@ -378,7 +377,6 @@ export function buildReasoningEffortConfigurationSchema(
         return undefined;
     }
 
-    const defaultEffort = getDefaultReasoningEffort(supportedEfforts, modelId, modelInfo, config);
     return {
         properties: {
             reasoningEffort: {
@@ -391,7 +389,16 @@ export function buildReasoningEffortConfigurationSchema(
                 // Per-item descriptions — renders the explanatory text beside each effort option
                 // in the VS Code model-picker hover popup (e.g. "Balanced reasoning and speed").
                 enumDescriptions: supportedEfforts.map(getEffortDescription),
-                default: defaultEffort,
+                // NOTE: Intentionally no `default` field.
+                //
+                // VS Code re-calls provideLanguageModelChatInformation before every chat turn
+                // (to validate the model is still available). If a `default` is present in the
+                // schema, VS Code resets the picker to that value on every refresh — overwriting
+                // whatever effort the user selected. Omitting `default` preserves the user's
+                // choice across turns.
+                //
+                // If you need a starting value for first-time display, the picker already shows
+                // the first enum entry when no value has been selected yet.
                 group: "navigation",
             },
         },

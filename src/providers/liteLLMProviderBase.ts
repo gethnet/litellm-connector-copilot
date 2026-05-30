@@ -328,14 +328,41 @@ export abstract class LiteLLMProviderBase {
         };
 
         const models = await this._modelDiscovery.discover(args);
+
+        // Guard: never replace a healthy model list with an empty result.
+        // A transient network error or empty /model/info response during a background
+        // refresh must not cause VS Code to see zero models (which makes it fall back
+        // to the built-in "auto" model and discard the user's selection).
+        if (models.length === 0 && this._lastModelList.length > 0) {
+            Logger.warn(
+                "discoverModels: ignoring empty result — keeping previous model list to avoid losing user's model selection"
+            );
+            return this._lastModelList;
+        }
+
         this._lastModelList = models;
-        this._modelInfoCache.clear();
+
+        // Non-destructive cache merge: add/update entries for models in the new list
+        // and remove entries for models no longer present — but never wipe the whole
+        // map in one shot.  A destructive clear() followed by a loop creates a window
+        // where concurrent requests (e.g. an in-flight chat turn) read _modelInfoCache
+        // and get undefined, causing getReasoningEffort() to fall back to "no effort"
+        // and VS Code to reset the effort picker back to "auto".
+        const newIds = new Set(models.map((m) => m.id));
+        // Remove stale entries
+        for (const id of this._modelInfoCache.keys()) {
+            if (!newIds.has(id)) {
+                this._modelInfoCache.delete(id);
+            }
+        }
+        // Add / refresh entries from the new discovery result
         for (const model of models) {
             const info = this._modelDiscovery.getModelInfo(model.id);
             if (info !== undefined) {
                 this._modelInfoCache.set(model.id, info);
             }
         }
+
         return models;
     }
 

@@ -4,7 +4,6 @@ import * as sinon from "sinon";
 import { LiteLLMChatProvider } from "../";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 import { MultiBackendClient } from "../../adapters/multiBackendClient";
-import { ResponsesClient } from "../../adapters/responsesClient";
 import type { ConfigManager } from "../../config/configManager";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, ResolvedBackend } from "../../types";
 import { createMockSecrets } from "../../test/utils/testMocks";
@@ -965,16 +964,12 @@ suite("LiteLLM Provider Unit Tests", () => {
             configurationSchema?.properties?.reasoningEffort as {
                 enum: string[];
                 enumItemLabels: string[];
-                default: string;
             }
         )?.enumItemLabels;
-        const defaultValue = (
-            configurationSchema?.properties?.reasoningEffort as {
-                enum: string[];
-                enumItemLabels: string[];
-                default: string;
-            }
-        )?.default;
+        // `default` must NOT be present in the schema — VS Code resets the picker to `default`
+        // on every provideLanguageModelChatInformation refresh, so omitting it preserves the
+        // user's selected reasoning effort across conversation turns.
+        const defaultValue = (configurationSchema?.properties?.reasoningEffort as Record<string, unknown>)?.default;
 
         assert.deepStrictEqual(
             enumValues,
@@ -985,7 +980,7 @@ suite("LiteLLM Provider Unit Tests", () => {
             enumItemLabels?.includes("Medium"),
             "Expected 'Medium' effort label to be present in enumItemLabels (capitalized for picker UX)"
         );
-        assert.strictEqual(defaultValue, "medium");
+        assert.strictEqual(defaultValue, undefined, "schema must not carry a default — would reset picker every turn");
     });
 
     test("clearModelCache resets model list and caches", () => {
@@ -1073,7 +1068,6 @@ suite("LiteLLM Provider Unit Tests", () => {
         });
 
         // Ensure we don't accidentally go down the /responses path in this test.
-        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
 
         const modelSelected: vscode.LanguageModelChatInformation = {
             id: "selected-model",

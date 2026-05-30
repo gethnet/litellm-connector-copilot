@@ -173,7 +173,8 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
 - **Adapters**:
   - `src/adapters/litellmClient.ts` — HTTP client and endpoint routing integration
   - `src/adapters/multiBackendClient.ts` — Multi-backend orchestrator and model namespacing
-  - `src/adapters/responsesClient.ts` & `src/adapters/responsesAdapter.ts` — LiteLLM `/responses` endpoint support and payload translation
+  - `src/adapters/responsesAdapter.ts` — LiteLLM `/responses` endpoint payload translation
+  - `/responses` stream event handling (`output_item.delta`, `output_item.done`, anonymous tool buffering) lives in `src/adapters/streaming/liteLLMStreamInterpreter.ts`
   - `src/adapters/tokenUtils.ts` — token budgeting, trimming, and related helpers
 
 - **Config**: `src/config/configManager.ts`

@@ -4,7 +4,6 @@ import * as vscode from "vscode";
 
 import { LiteLLMChatProvider } from "../";
 import { LiteLLMClient } from "../../adapters/litellmClient";
-import { ResponsesClient } from "../../adapters/responsesClient";
 import { Logger } from "../../utils/logger";
 import { LiteLLMTelemetry } from "../../utils/telemetry";
 import { createMockSecrets } from "../../test/utils/testMocks";
@@ -170,8 +169,6 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
             return stream;
         });
 
-        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
-
         const model: vscode.LanguageModelChatInformation = {
             id: "model-1",
             name: "model-1",
@@ -234,8 +231,6 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                     },
                 })
         );
-
-        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
 
         const model: vscode.LanguageModelChatInformation = {
             id: "model-1",
@@ -582,7 +577,6 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                     },
                 })
         );
-        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
 
         const model: vscode.LanguageModelChatInformation = {
             id: "model-1",
@@ -732,7 +726,6 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 },
             })
         );
-        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
 
         const telemetrySpy = sandbox.spy(LiteLLMTelemetry, "reportMetric");
         const parts: vscode.LanguageModelResponsePart[] = [];
@@ -812,7 +805,6 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 },
             })
         );
-        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
 
         const usageParts: vscode.LanguageModelDataPart[] = [];
         await provider.provideLanguageModelChatResponse(
@@ -894,7 +886,6 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 },
             })
         );
-        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
 
         const telemetrySpy = sandbox.spy(LiteLLMTelemetry, "reportMetric");
         const parts: vscode.LanguageModelResponsePart[] = [];
@@ -961,7 +952,6 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 },
             })
         );
-        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
 
         const reported: vscode.LanguageModelResponsePart[] = [];
         await provider.provideLanguageModelChatResponse(

@@ -1,183 +1,81 @@
 import * as assert from "assert";
-import * as vscode from "vscode";
-import { ResponsesClient } from "../../adapters/responsesClient";
-import type { LiteLLMConfig } from "../../types";
+import { interpretStreamEvent, createInitialStreamingState } from "../../adapters/streaming/liteLLMStreamInterpreter";
 
-suite("Responses Client Unit Tests", () => {
-    const config: LiteLLMConfig = { url: "http://localhost:4000", key: "test-key" };
-    const userAgent = "test-ua";
+suite("Responses /responses stream interpreter integration", () => {
+    test("should handle output_item.delta → output_item.done tool call sequence", () => {
+        const state = createInitialStreamingState();
 
-    test("handleEvent processes text delta", async () => {
-        const client = new ResponsesClient(config, userAgent);
-        const reportedParts: vscode.LanguageModelResponsePart[] = [];
-        const progress: vscode.Progress<vscode.LanguageModelResponsePart> = {
-            report: (part) => reportedParts.push(part),
-        };
+        interpretStreamEvent(
+            {
+                type: "response.output_item.delta",
+                item: { type: "function_call", call_id: "c1", name: "search", arguments: '{"q":' },
+            },
+            state
+        );
+        interpretStreamEvent(
+            {
+                type: "response.output_item.delta",
+                item: { type: "function_call", call_id: "c1", arguments: '"test"}' },
+            },
+            state
+        );
 
-        // @ts-expect-error - accessing private method for testing
-        await client.handleEvent({ type: "response.output_text.delta", delta: "Hello" }, progress);
+        const parts = interpretStreamEvent(
+            {
+                type: "response.output_item.done",
+                item: { type: "function_call", call_id: "c1", name: "search", arguments: '{"q":"test"}' },
+            },
+            state
+        );
 
-        assert.strictEqual(reportedParts.length, 1);
-        assert.ok(reportedParts[0] instanceof vscode.LanguageModelTextPart);
-        assert.strictEqual((reportedParts[0] as vscode.LanguageModelTextPart).value, "Hello");
+        const tc = parts.find((p) => p.type === "tool_call");
+        assert.ok(tc && tc.type === "tool_call");
+        assert.strictEqual(tc.id, "c1");
+        assert.strictEqual(tc.name, "search");
+        assert.strictEqual(tc.args, '{"q":"test"}');
     });
 
-    test("handleEvent processes reasoning delta", async () => {
-        const client = new ResponsesClient(config, userAgent);
-        const reportedParts: vscode.LanguageModelResponsePart[] = [];
-        const progress: vscode.Progress<vscode.LanguageModelResponsePart> = {
-            report: (part) => reportedParts.push(part),
-        };
+    test("should handle response.completed usage frame after output_item path", () => {
+        const state = createInitialStreamingState();
 
-        // @ts-expect-error - accessing private method for testing
-        await client.handleEvent({ type: "response.output_reasoning.delta", delta: "Thinking..." }, progress);
+        interpretStreamEvent({ type: "response.output_text.delta", delta: "Hello" }, state);
 
-        assert.strictEqual(reportedParts.length, 1);
-        const ThinkingCtor = (vscode as unknown as Record<string, unknown>).LanguageModelThinkingPart as
-            | (new (
-                  value: string | string[],
-                  id?: string,
-                  metadata?: Record<string, unknown>
-              ) => vscode.LanguageModelResponsePart)
-            | undefined;
-        if (ThinkingCtor) {
-            assert.ok(
-                reportedParts[0] instanceof ThinkingCtor || reportedParts[0] instanceof vscode.LanguageModelTextPart
-            );
-            if (reportedParts[0] instanceof vscode.LanguageModelTextPart) {
-                assert.strictEqual((reportedParts[0] as vscode.LanguageModelTextPart).value, "*Thinking...*");
-            }
-        } else {
-            assert.ok(reportedParts[0] instanceof vscode.LanguageModelTextPart);
-            assert.strictEqual((reportedParts[0] as vscode.LanguageModelTextPart).value, "*Thinking...*");
+        const parts = interpretStreamEvent(
+            { type: "response.completed", response: { usage: { input_tokens: 10, output_tokens: 5 } } },
+            state
+        );
+
+        const usage = parts.find((p) => p.type === "data");
+        assert.ok(usage && usage.type === "data");
+        assert.strictEqual(usage.mimeType, "usage");
+        assert.strictEqual((usage.value as { prompt_tokens: number }).prompt_tokens, 10);
+        assert.strictEqual((usage.value as { completion_tokens: number }).completion_tokens, 5);
+    });
+
+    test("should handle text delta events", () => {
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent({ type: "response.output_text.delta", delta: "Hello World" }, state);
+
+        assert.strictEqual(parts.length, 1);
+        assert.strictEqual(parts[0].type, "text");
+        if (parts[0].type === "text") {
+            assert.strictEqual(parts[0].value, "Hello World");
         }
     });
 
-    test("handleEvent buffers and emits tool calls", async () => {
-        const client = new ResponsesClient(config, userAgent);
-        const reportedParts: vscode.LanguageModelResponsePart[] = [];
-        const progress: vscode.Progress<vscode.LanguageModelResponsePart> = {
-            report: (part) => reportedParts.push(part),
-        };
+    test("should handle reasoning delta events", () => {
+        const state = createInitialStreamingState();
 
-        // @ts-expect-error - accessing private method for testing
-        await client.handleEvent(
-            {
-                type: "response.output_item.delta",
-                item: { type: "function_call", call_id: "call_1", name: "test_tool", arguments: '{"a":' },
-            },
-            progress
+        const parts = interpretStreamEvent(
+            { type: "response.output_reasoning.delta", delta: "Let me think..." },
+            state
         );
 
-        // @ts-expect-error - accessing private method for testing
-        await client.handleEvent(
-            {
-                type: "response.output_item.delta",
-                item: { type: "function_call", call_id: "call_1", arguments: "1}" },
-            },
-            progress
-        );
-
-        assert.strictEqual(reportedParts.length, 0, "Should not emit until done");
-
-        // @ts-expect-error - accessing private method for testing
-        await client.handleEvent(
-            {
-                type: "response.output_item.done",
-                item: { type: "function_call", call_id: "call_1" },
-            },
-            progress
-        );
-
-        assert.strictEqual(reportedParts.length, 1);
-        assert.ok(reportedParts[0] instanceof vscode.LanguageModelToolCallPart);
-        const toolCall = reportedParts[0] as vscode.LanguageModelToolCallPart;
-        assert.strictEqual(toolCall.callId, "call_1");
-        assert.strictEqual(toolCall.name, "test_tool");
-        assert.deepStrictEqual(toolCall.input, { a: 1 });
-    });
-
-    test("handleEvent buffers tool calls per call_id (interleaving safe)", async () => {
-        const client = new ResponsesClient(config, userAgent);
-        const reportedParts: vscode.LanguageModelResponsePart[] = [];
-        const progress: vscode.Progress<vscode.LanguageModelResponsePart> = {
-            report: (part) => reportedParts.push(part),
-        };
-
-        // Tool call A starts
-        // @ts-expect-error - accessing private method for testing
-        await client.handleEvent(
-            {
-                type: "response.output_item.delta",
-                item: { type: "function_call", call_id: "call_A", name: "tool-edit", arguments: '{"a":' },
-            },
-            progress
-        );
-
-        // Tool call B starts before A is done
-        // @ts-expect-error - accessing private method for testing
-        await client.handleEvent(
-            {
-                type: "response.output_item.delta",
-                item: { type: "function_call", call_id: "call_B", name: "tool-read", arguments: '{"b":' },
-            },
-            progress
-        );
-
-        // More args for A
-        // @ts-expect-error - accessing private method for testing
-        await client.handleEvent(
-            {
-                type: "response.output_item.delta",
-                item: { type: "function_call", call_id: "call_A", arguments: "1}" },
-            },
-            progress
-        );
-
-        // More args for B
-        // @ts-expect-error - accessing private method for testing
-        await client.handleEvent(
-            {
-                type: "response.output_item.delta",
-                item: { type: "function_call", call_id: "call_B", arguments: "2}" },
-            },
-            progress
-        );
-
-        assert.strictEqual(reportedParts.length, 0, "Should not emit until done");
-
-        // Done A (should emit A only)
-        // @ts-expect-error - accessing private method for testing
-        await client.handleEvent(
-            {
-                type: "response.output_item.done",
-                item: { type: "function_call", call_id: "call_A" },
-            },
-            progress
-        );
-
-        assert.strictEqual(reportedParts.length, 1);
-        assert.ok(reportedParts[0] instanceof vscode.LanguageModelToolCallPart);
-        const toolCallA = reportedParts[0] as vscode.LanguageModelToolCallPart;
-        assert.strictEqual(toolCallA.callId, "call_A");
-        assert.strictEqual(toolCallA.name, "tool-edit");
-        assert.deepStrictEqual(toolCallA.input, { a: 1 });
-
-        // Done B (should emit B)
-        // @ts-expect-error - accessing private method for testing
-        await client.handleEvent(
-            {
-                type: "response.output_item.done",
-                item: { type: "function_call", call_id: "call_B" },
-            },
-            progress
-        );
-
-        assert.strictEqual(reportedParts.length, 2);
-        assert.ok(reportedParts[1] instanceof vscode.LanguageModelToolCallPart);
-        const toolCallB = reportedParts[1] as vscode.LanguageModelToolCallPart;
-        assert.strictEqual(toolCallB.callId, "call_B");
-        assert.strictEqual(toolCallB.name, "tool-read");
-        assert.deepStrictEqual(toolCallB.input, { b: 2 });
+        assert.strictEqual(parts.length, 1);
+        assert.strictEqual(parts[0].type, "thinking");
+        if (parts[0].type === "thinking") {
+            assert.strictEqual(parts[0].value, "Let me think...");
+        }
     });
 });

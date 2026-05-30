@@ -5,7 +5,6 @@ import { LiteLLMChatProvider } from "../../providers";
 import { LiteLLMCompletionProvider } from "../../providers/liteLLMCompletionProvider";
 import { LiteLLMTelemetry, type IMetrics } from "../../utils/telemetry";
 import { LiteLLMClient } from "../../adapters/litellmClient";
-import { ResponsesClient } from "../../adapters/responsesClient";
 import type { ConfigManager } from "../../config/configManager";
 import { createMockSecrets } from "../utils/testMocks";
 
@@ -54,7 +53,6 @@ suite("Token Telemetry Regression Tests", () => {
             },
         });
         sandbox.stub(LiteLLMClient.prototype, "chat").resolves(mockStream);
-        sandbox.stub(ResponsesClient.prototype, "sendResponsesRequest").resolves();
 
         const model: vscode.LanguageModelChatInformation = {
             id: "gpt-4",

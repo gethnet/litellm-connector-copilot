@@ -211,8 +211,8 @@ export class StreamTokenCapture {
     // ── Internal: intercept every part ──
 
     private _intercept(part: vscode.LanguageModelResponsePart): void {
-        // Thinking must be detected BEFORE TextPart because ResponsesClient
-        // falls back to TextPart("*text*") on older VS Code. If we check
+        // Thinking must be detected BEFORE TextPart because the /responses path
+        // falls back to TextPart("*text*") on older VS Code hosts. If we check
         // TextPart first, the thinking text (with "*" wrappers) would be
         // counted as raw completion tokens and never reach reasoning.
         if (this._isThinkingPart(part)) {
@@ -348,7 +348,7 @@ export class StreamTokenCapture {
         if (ThinkingPart && part instanceof (ThinkingPart as new (...args: unknown[]) => unknown)) {
             return true;
         }
-        // ResponsesClient emits reasoning as TextPart("*text*") — detect that pattern
+        // The /responses path emits reasoning as TextPart("*text*") on older VS Code — detect that pattern
         if (part instanceof vscode.LanguageModelTextPart) {
             const v = part.value;
             return v.startsWith("*") && v.endsWith("*") && v.length > 2;
@@ -363,7 +363,7 @@ export class StreamTokenCapture {
             return tp.value.join("");
         }
         const v = tp.value as string;
-        // Strip the "*" wrapper from ResponsesClient fallback
+        // Strip the "*" wrapper from /responses path fallback
         if (v.startsWith("*") && v.endsWith("*")) {
             return v.slice(1, -1);
         }

@@ -11,6 +11,13 @@ export interface StreamingState {
     textToolParserBuffer: string;
     responseToolCallBuffers: Map<string, { id: string; name?: string; args: string }>;
     responseToolCallOrder: string[];
+    /**
+     * Anonymous tool buffering — used when upstream streams tool args before emitting a stable
+     * call_id (preserved from ResponsesClient robustness).
+     * Note: if multiple anonymous calls interleave without call_ids they cannot be disambiguated.
+     */
+    anonymousResponseToolName: string | undefined;
+    anonymousResponseToolArgs: string;
 }
 
 export function createInitialStreamingState(): StreamingState {
@@ -21,6 +28,8 @@ export function createInitialStreamingState(): StreamingState {
         textToolParserBuffer: "",
         responseToolCallBuffers: new Map(),
         responseToolCallOrder: [],
+        anonymousResponseToolName: undefined,
+        anonymousResponseToolArgs: "",
     };
 }
 
@@ -274,6 +283,42 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
     if (data.type === "response.output_reasoning.delta" && typeof data.delta === "string") {
         thinkingParts.push({ type: "thinking", value: data.delta });
     }
+
+    // 2b. Robust event shape: response.output_item.delta (keyed on item.call_id)
+    // This is the event shape used by ResponsesClient — preserved here for providers
+    // that stream tool args via output_item.delta rather than output_tool_call.*.
+    if (data.type === "response.output_item.delta") {
+        const item = data.item as Record<string, unknown> | undefined;
+        if (item?.type === "function_call") {
+            const callId = typeof item.call_id === "string" ? item.call_id : undefined;
+            const name = typeof item.name === "string" ? item.name : undefined;
+            const argsDelta = typeof item.arguments === "string" ? item.arguments : undefined;
+
+            if (callId) {
+                const existing = state.responseToolCallBuffers.get(callId) ?? { id: callId, name: undefined, args: "" };
+                if (name) {
+                    existing.name = name;
+                }
+                if (argsDelta) {
+                    existing.args += argsDelta;
+                }
+                state.responseToolCallBuffers.set(callId, existing);
+                if (!state.responseToolCallOrder.includes(callId)) {
+                    state.responseToolCallOrder.push(callId);
+                }
+            } else {
+                // No call_id yet — buffer anonymously (providers that stream args before id)
+                if (name) {
+                    state.anonymousResponseToolName = name;
+                }
+                if (argsDelta) {
+                    state.anonymousResponseToolArgs += argsDelta;
+                }
+            }
+        }
+    }
+
+    // 2c. Legacy event shape: response.output_tool_call.* (keyed on delta.id)
     if (typeof data.type === "string" && data.type.startsWith("response.output_tool_call")) {
         const delta = data.delta as Record<string, unknown> | undefined;
         const id = typeof delta?.id === "string" ? delta.id : undefined;
@@ -362,29 +407,86 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
         }
     }
     if (data.type === "response.output_item.done") {
-        // Flush any pending /responses tool calls on item completion
-        for (const id of state.responseToolCallOrder) {
-            const buffer = state.responseToolCallBuffers.get(id);
-            if (!buffer) {
-                continue;
-            }
-            if (buffer.name && buffer.args) {
-                try {
-                    JSON.parse(buffer.args);
-                    toolCallParts.push({
-                        type: "tool_call",
-                        index: toolCallParts.length,
-                        id: buffer.id,
-                        name: buffer.name,
-                        args: buffer.args,
-                    });
-                } catch {
-                    // drop malformed tool call
+        const item = data.item as Record<string, unknown> | undefined;
+        if (item?.type === "function_call") {
+            const callId = typeof item.call_id === "string" ? item.call_id : undefined;
+            const nameFromDone = typeof item.name === "string" ? item.name : undefined;
+            const argsFromDone = typeof item.arguments === "string" ? item.arguments : undefined;
+
+            if (callId) {
+                // Per-callId flush: emit the specific buffered call and remove it from the order
+                // list so response.completed does not double-emit it.
+                const buffer = state.responseToolCallBuffers.get(callId);
+                const name = nameFromDone ?? buffer?.name;
+                const args = argsFromDone ?? buffer?.args;
+                if (name && args) {
+                    try {
+                        JSON.parse(args);
+                        toolCallParts.push({
+                            type: "tool_call",
+                            index: toolCallParts.length,
+                            id: callId,
+                            name,
+                            args,
+                        });
+                    } catch {
+                        // drop malformed tool call
+                    }
+                }
+                state.responseToolCallBuffers.delete(callId);
+                state.responseToolCallOrder = state.responseToolCallOrder.filter((id) => id !== callId);
+            } else {
+                // Anonymous tool call (no stable call_id) — emit best-effort from anonymous buffer.
+                // Preserved from ResponsesClient for providers that never emit a call_id.
+                const name = nameFromDone ?? state.anonymousResponseToolName;
+                const args = argsFromDone ?? state.anonymousResponseToolArgs;
+                if (name && args) {
+                    try {
+                        JSON.parse(args);
+                        toolCallParts.push({
+                            type: "tool_call",
+                            index: toolCallParts.length,
+                            id: "anonymous",
+                            name,
+                            args,
+                        });
+                    } catch {
+                        // drop malformed tool call
+                    }
                 }
             }
+
+            // Reset anonymous buffer regardless of whether we emitted
+            state.anonymousResponseToolName = undefined;
+            state.anonymousResponseToolArgs = "";
+        } else {
+            // No function_call item (e.g., text item, or no item at all) — legacy flush-all.
+            // Preserves backward compat with output_tool_call.* path which relies on
+            // output_item.done to drain all buffered calls when no response.completed follows.
+            for (const id of state.responseToolCallOrder) {
+                const buffer = state.responseToolCallBuffers.get(id);
+                if (!buffer) {
+                    continue;
+                }
+                if (buffer.name && buffer.args) {
+                    try {
+                        JSON.parse(buffer.args);
+                        toolCallParts.push({
+                            type: "tool_call",
+                            index: toolCallParts.length,
+                            id: buffer.id,
+                            name: buffer.name,
+                            args: buffer.args,
+                        });
+                    } catch {
+                        // drop malformed tool call
+                    }
+                }
+            }
+            state.responseToolCallBuffers.clear();
+            state.responseToolCallOrder = [];
         }
-        state.responseToolCallBuffers.clear();
-        state.responseToolCallOrder = [];
+
         finishParts.push({ type: "finish" });
     }
 
