@@ -1,4 +1,4 @@
-import type * as vscode from "vscode";
+import * as vscode from "vscode";
 import { MultiBackendClient } from "../../adapters/multiBackendClient";
 import { Logger } from "../../utils/logger";
 import {
@@ -11,6 +11,7 @@ import {
 import { deriveGroupNameFromUrl } from "../../utils";
 import type { LiteLLMConfig, LiteLLMModelInfo, LiteLLMModelInfoResponse } from "../../types";
 import type { BackendSession } from "../backendSession";
+import { sharedDiscoveryBackoff } from "./discoveryBackoff";
 import type { DiscoverArgs, DiscoveryDeps } from "./types";
 
 // 5-minute TTL.  Model lists change rarely (deployments, backend restarts).
@@ -47,6 +48,7 @@ export class ModelDiscovery {
         this.perConfigCache.clear();
         this.lastModelList = [];
         this.modelListFetchedAtMs = 0;
+        sharedDiscoveryBackoff.reset();
     }
 
     public getModelInfo(id: string): LiteLLMModelInfo | undefined {
@@ -156,9 +158,11 @@ export class ModelDiscovery {
         }
 
         this.inFlightDiscovery = this.doDiscover(options, token);
-        const result = await this.inFlightDiscovery;
-        this.inFlightDiscovery = undefined;
-        return result;
+        try {
+            return await this.inFlightDiscovery;
+        } finally {
+            this.inFlightDiscovery = undefined;
+        }
     }
 
     private async doDiscover(
@@ -199,6 +203,29 @@ export class ModelDiscovery {
             }
             return this.discoverFromBackends(backends, token);
         } catch (err) {
+            // Apply backoff policy on discovery failures.
+            // After 9 failures, we start delaying and eventually block.
+            // After the 10th failure, we throw a Blocked error to signal that VS Code should back off.
+            const decision = sharedDiscoveryBackoff.recordFailure(Date.now());
+
+            // Extract error message for logging
+            const errorMessage = (err instanceof Error ? err.message : String(err)) || "Unknown discovery error";
+
+            // Delay briefly on failure attempts to avoid rapid polling
+            if (decision.delayMs > 0) {
+                await this.sleep(decision.delayMs, token);
+            }
+
+            // On the 10th consecutive failure, block further attempts for a cooldown period
+            if (decision.shouldBlock) {
+                throw vscode.LanguageModelError.Blocked(
+                    `Discovery blocked after ${decision.attempt} consecutive failures. ` +
+                        `The LiteLLM endpoint appears to be unhealthy. ` +
+                        `Please check your configuration and retry later.`
+                );
+            }
+
+            // Return empty array for non-blocked failures (continue operation)
             return [];
         }
     }
@@ -321,5 +348,9 @@ export class ModelDiscovery {
             _backendUrl: backend?.url ?? "",
             _apiKey: backend?.apiKey,
         };
+    }
+
+    private sleep(ms: number, _token?: vscode.CancellationToken): Promise<void> {
+        return new Promise((resolve) => setTimeout(resolve, ms));
     }
 }
