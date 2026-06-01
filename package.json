@@ -17,7 +17,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "2.1.0-dev34",
+	"version": "2.1.0-dev35",
 	"preview": true,
 	"engines": {
 		"vscode": "^1.120.0"
@@ -287,7 +287,7 @@
 				},
 				"litellm-connector.enableModelOverrides": {
 					"type": "boolean",
-					"default": true,
+					"default": false,
 					"markdownDescription": "Enable/disable the model override system. When enabled, merged user and bundled model override rules are applied. When disabled, only LiteLLM `/model/info` derived capabilities are used."
 				},
 				"litellm-connector.sendDefaultParameters": {

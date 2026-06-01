@@ -66,6 +66,7 @@ export class ModelDiscovery {
     public getDiscoveredModelBackend(
         modelId: string
     ): { backendName: string; url: string; apiKey?: string } | undefined {
+        // First, search lastModelList (populated by legacy multi-backend discovery or accumulated per-group discovery)
         const entry = this.lastModelList.find((m) => m.id === modelId) as
             | (vscode.LanguageModelChatInformation & {
                   _backendName?: string;
@@ -73,14 +74,35 @@ export class ModelDiscovery {
                   _apiKey?: string;
               })
             | undefined;
-        if (!entry?._backendName || !entry._backendUrl) {
-            return undefined;
+        if (entry?._backendName && entry._backendUrl) {
+            return {
+                backendName: entry._backendName,
+                url: entry._backendUrl,
+                apiKey: entry._apiKey,
+            };
         }
-        return {
-            backendName: entry._backendName,
-            url: entry._backendUrl,
-            apiKey: entry._apiKey,
-        };
+
+        // Fallback: search per-config cache entries for models from other backends
+        // This handles the case where VS Code has multiple provider groups configured
+        // and we need to route to a backend that wasn't the most recent discovery target
+        for (const cachedEntry of this.perConfigCache.values()) {
+            const cachedModel = cachedEntry.models.find((m) => m.id === modelId) as
+                | (vscode.LanguageModelChatInformation & {
+                      _backendName?: string;
+                      _backendUrl?: string;
+                      _apiKey?: string;
+                  })
+                | undefined;
+            if (cachedModel?._backendName && cachedModel?._backendUrl) {
+                return {
+                    backendName: cachedModel._backendName,
+                    url: cachedModel._backendUrl,
+                    apiKey: cachedModel._apiKey,
+                };
+            }
+        }
+
+        return undefined;
     }
 
     public getActiveBackends(): string[] {
@@ -277,12 +299,25 @@ export class ModelDiscovery {
             )
         );
 
+        // Update per-backend multi-client for this session
+        // Note: This client is only used for legacy paths; per-session routing
+        // uses the backend info stored on the model objects themselves
         this.multiBackendClient = new MultiBackendClient(
             [{ name: session.backendName, url: session.baseUrl, apiKey: session.apiKey, enabled: true }],
             this.userAgent
         );
-        this.activeBackendNames = [session.backendName];
-        this.lastModelList = infos;
+
+        // Track this backend as active (for legacy discovery path compatibility)
+        if (!this.activeBackendNames.includes(session.backendName)) {
+            this.activeBackendNames.push(session.backendName);
+        }
+
+        // Merge new models into lastModelList (accumulate across multiple backends)
+        // This prevents the infinite loop where each backend's discovery overwrites
+        // the previous list, causing VS Code to see "model list changed" and re-query
+        const existingModelIds = new Set(this.lastModelList.map((m) => m.id));
+        const newModels = infos.filter((m) => !existingModelIds.has(m.id));
+        this.lastModelList = [...this.lastModelList, ...newModels];
         this.modelListFetchedAtMs = Date.now();
         return infos;
     }
