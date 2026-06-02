@@ -144,4 +144,70 @@ suite("ModelDiscovery", () => {
         assert.ok(activeBackends.includes("backend-a"), "Should include backend-a");
         assert.ok(activeBackends.includes("backend-b"), "Should include backend-b");
     });
+
+    test("produces consistent namespaced IDs regardless of discovery path", async () => {
+        const token = new vscode.CancellationTokenSource().token;
+        configManager.getConfig.resolves({} as never);
+
+        const modelEntry = {
+            model_name: "gpt-4o",
+            model_info: {
+                key: "gpt-4o-2024-08-06",
+                litellm_provider: "openai",
+                mode: "chat",
+                supports_native_streaming: true,
+            },
+        };
+
+        configManager.convertProviderConfiguration.onFirstCall().returns({
+            backendName: "test-backend",
+            baseUrl: "http://test",
+            apiKey: "test-key",
+            client: {
+                getModelInfo: async () => ({
+                    data: [modelEntry],
+                }),
+            } as never,
+        });
+
+        const models = await discovery.discover({
+            options: { silent: true, configuration: { providerName: "p", baseUrl: "http://test" } },
+            token,
+        });
+
+        assert.strictEqual(models.length, 1);
+        assert.strictEqual(models[0].id, "test-backend/gpt-4o");
+        assert.strictEqual(models[0].name, "gpt-4o");
+    });
+
+    test("skips model entries with missing model_name and logs warning", async () => {
+        const token = new vscode.CancellationTokenSource().token;
+        configManager.getConfig.resolves({} as never);
+
+        const modelEntry = {
+            model_info: {
+                key: "some-key",
+                litellm_provider: "openai",
+                mode: "chat",
+            },
+        };
+
+        configManager.convertProviderConfiguration.onFirstCall().returns({
+            backendName: "test-backend",
+            baseUrl: "http://test",
+            apiKey: "test-key",
+            client: {
+                getModelInfo: async () => ({
+                    data: [modelEntry],
+                }),
+            } as never,
+        });
+
+        const models = await discovery.discover({
+            options: { silent: true, configuration: { providerName: "p", baseUrl: "http://test" } },
+            token,
+        });
+
+        assert.strictEqual(models.length, 0);
+    });
 });

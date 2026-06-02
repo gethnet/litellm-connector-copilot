@@ -123,11 +123,11 @@ export class MultiBackendClient {
                 continue;
             }
             for (const entry of response.data) {
-                const originalId = entry.model_info?.key ?? entry.model_name ?? "unknown";
+                const modelName = entry.model_name ?? "unknown";
                 data.push({
                     ...entry,
                     backendName,
-                    namespacedId: createNamespacedModelId(backendName, originalId),
+                    namespacedId: createNamespacedModelId(backendName, modelName),
                 });
             }
         }

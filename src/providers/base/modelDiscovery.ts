@@ -264,14 +264,17 @@ export class ModelDiscovery {
         }
 
         const backendByName = new Map(backends.map((b) => [b.name, b]));
-        const infos = models.data.map((entry) =>
-            this.toVSCodeInfo(
-                entry,
-                backendByName.get(entry.backendName),
-                config.forceResponsesEndpoint,
-                config.modelCapabilitiesOverrides
+        const infos = models.data
+            .map((entry) =>
+                this.toVSCodeInfo(
+                    entry,
+                    entry.backendName,
+                    backendByName.get(entry.backendName),
+                    config.forceResponsesEndpoint,
+                    config.modelCapabilitiesOverrides
+                )
             )
-        );
+            .filter((info) => info.isUserSelectable !== false);
 
         this.multiBackendClient = multiClient;
         this.activeBackendNames = backends.map((b) => b.name);
@@ -290,14 +293,17 @@ export class ModelDiscovery {
             return [];
         }
 
-        const infos = models.data.map((entry) =>
-            this.toVSCodeInfo(
-                entry,
-                { name: session.backendName, url: session.baseUrl, apiKey: session.apiKey },
-                config.forceResponsesEndpoint,
-                config.modelCapabilitiesOverrides
+        const infos = models.data
+            .map((entry) =>
+                this.toVSCodeInfo(
+                    entry,
+                    session.backendName,
+                    { url: session.baseUrl, apiKey: session.apiKey },
+                    config.forceResponsesEndpoint,
+                    config.modelCapabilitiesOverrides
+                )
             )
-        );
+            .filter((info) => info.isUserSelectable !== false);
 
         // Update per-backend multi-client for this session
         // Note: This client is only used for legacy paths; per-session routing
@@ -324,7 +330,8 @@ export class ModelDiscovery {
 
     private toVSCodeInfo(
         entry: LiteLLMModelInfoResponse["data"][number],
-        backend: { name?: string; url?: string; apiKey?: string } | undefined,
+        backendName: string,
+        backend: { url?: string; apiKey?: string } | undefined,
         forceResponsesEndpoint?: boolean,
         modelCapabilitiesOverrides?: LiteLLMConfig["modelCapabilitiesOverrides"]
     ): vscode.LanguageModelChatInformation & {
@@ -339,9 +346,36 @@ export class ModelDiscovery {
         _backendUrl?: string;
         _apiKey?: string;
     } {
-        const backendName = (entry as any).backendName ?? backend?.name ?? "LiteLLM";
-        const modelName = entry.model_name ?? `${backendName}/unknown`;
-        const namespacedId = (entry as any).namespacedId ?? `${backendName}/${modelName}`;
+        if (!entry.model_name) {
+            Logger.warn(
+                `Skipping model entry without model_name from backend "${backendName}". Entry keys: ${Object.keys(
+                    entry
+                ).join(",")}`
+            );
+            // Return a non-user-selectable placeholder; caller filters these out
+            return {
+                id: `${backendName}/unknown`,
+                name: "unknown",
+                vendor: entry.model_info?.litellm_provider ?? "litellm",
+                backendName,
+                detail: backendName,
+                description: entry.model_info?.litellm_provider ?? "",
+                family: entry.model_info?.litellm_provider ?? "litellm",
+                version: "1.0",
+                maxInputTokens: 0,
+                maxOutputTokens: 0,
+                capabilities: { canGenerate: false },
+                isUserSelectable: false,
+                category: { label: backendName, order: 0 },
+                configurationSchema: undefined,
+                _backendName: backendName,
+                _backendUrl: backend?.url ?? "",
+                _apiKey: backend?.apiKey,
+            } as vscode.LanguageModelChatInformation & { isUserSelectable: boolean };
+        }
+
+        const modelName = entry.model_name;
+        const namespacedId = `${backendName}/${modelName}`;
         let modelInfo = entry.model_info;
         if (forceResponsesEndpoint && modelInfo?.mode === "chat") {
             modelInfo = { ...modelInfo, mode: "responses" as const };
