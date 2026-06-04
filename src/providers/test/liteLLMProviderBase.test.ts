@@ -2074,12 +2074,13 @@ suite("LiteLLM Provider Unit Tests", () => {
         // single allModels array. If we return _lastModelList for vendor-level calls, every
         // model appears twice under the same group header.
         //
-        // Specifically: the empty-result guard in discoverModels() must NOT apply to
-        // vendor-level calls (no options.configuration), because [] is intentional there,
-        // not a transient failure.
+        // The fix is an early return in discoverModels() before any state mutation, so that:
+        //   1. _modelListPerGroup is not mutated
+        //   2. onDidChangeLanguageModelChatInformation is not fired
+        //   3. VS Code does not re-trigger discovery (preventing an infinite loop)
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
-        // Seed _lastModelList as if a prior group-specific discovery has run successfully.
+        // Seed the per-group map as if a prior group-specific discovery has run successfully.
         const seededModel = {
             id: "my-server/gpt-4o",
             vendor: "openai",
@@ -2091,18 +2092,103 @@ suite("LiteLLM Provider Unit Tests", () => {
             capabilities: {},
             isUserSelectable: true,
         } as unknown as vscode.LanguageModelChatInformation;
-        (access(provider) as unknown as { _lastModelList: vscode.LanguageModelChatInformation[] })._lastModelList = [
-            seededModel,
-        ];
+        const internals = access(provider) as unknown as {
+            _modelListPerGroup: Map<string, vscode.LanguageModelChatInformation[]>;
+        };
+        internals._modelListPerGroup.set("http://my-server", [seededModel]);
 
-        // Stub discovery to return [] for the vendor-level call — same as the real code path.
-        sandbox.stub(access(provider)._modelDiscovery, "discover").resolves([]);
+        // _modelDiscovery.discover() must NOT be called for vendor-level — we return early.
+        const discoverSpy = sandbox.spy(access(provider)._modelDiscovery, "discover");
 
         // Vendor-level call: no options.configuration
         const models = await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
 
-        // Must return [], NOT _lastModelList — otherwise VS Code sees duplicates.
+        // Must return [] immediately — no discover() call, no state mutation, no loop.
         assert.strictEqual(models.length, 0, "vendor-level call must return [] regardless of cached _lastModelList");
+        assert.strictEqual(discoverSpy.callCount, 0, "discover() must not be called for vendor-level calls");
+        // Per-group map must be untouched — no infinite-loop trigger
+        assert.strictEqual(
+            internals._modelListPerGroup.get("http://my-server")?.length,
+            1,
+            "_modelListPerGroup must not be mutated by a vendor-level call"
+        );
+    });
+
+    test("per-group model lists are isolated — one group refresh does not trample another", async () => {
+        // Regression test for the infinite-loop / duplicate-model root cause:
+        // _lastModelList was a single flat array. Group B's discovery would overwrite it,
+        // then the previousIds diff would always see a change, fire the change event,
+        // VS Code would re-discover, and the loop would repeat forever.
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        const makeModel = (id: string): vscode.LanguageModelChatInformation =>
+            ({
+                id,
+                vendor: "openai",
+                name: id,
+                version: "",
+                maxInputTokens: 128000,
+                maxOutputTokens: 4096,
+                family: "gpt-4",
+                capabilities: {},
+                isUserSelectable: true,
+            }) as unknown as vscode.LanguageModelChatInformation;
+
+        const groupAModel = makeModel("server-a/gpt-4o");
+        const groupBModel = makeModel("server-b/gpt-4o-mini");
+
+        // Simulate Group A discovery
+        sandbox
+            .stub(access(provider)._modelDiscovery, "discover")
+            .onFirstCall()
+            .resolves([groupAModel])
+            .onSecondCall()
+            .resolves([groupBModel])
+            .onThirdCall()
+            .resolves([groupAModel]); // Group A re-discovers — same result, no change
+
+        const changeEvents: number[] = [];
+        provider.onDidChangeLanguageModelChatInformation(() => changeEvents.push(Date.now()));
+
+        // Group A discovery
+        const groupAResult = await provider.discoverModels(
+            { silent: true, configuration: { baseUrl: "http://server-a", apiKey: "k" } },
+            new vscode.CancellationTokenSource().token
+        );
+        assert.strictEqual(groupAResult.length, 1, "Group A should return 1 model");
+
+        // Group B discovery — must not wipe Group A's models
+        const groupBResult = await provider.discoverModels(
+            { silent: true, configuration: { baseUrl: "http://server-b", apiKey: "k" } },
+            new vscode.CancellationTokenSource().token
+        );
+        assert.strictEqual(groupBResult.length, 1, "Group B should return 1 model");
+
+        // Both groups should be visible in the combined list
+        const combined = (access(provider) as unknown as { _lastModelList: vscode.LanguageModelChatInformation[] })
+            ._lastModelList;
+        assert.strictEqual(combined.length, 2, "Combined list must contain both groups' models");
+        assert.ok(
+            combined.some((m) => m.id === "server-a/gpt-4o"),
+            "Group A model must be present"
+        );
+        assert.ok(
+            combined.some((m) => m.id === "server-b/gpt-4o-mini"),
+            "Group B model must be present"
+        );
+
+        // Group A re-discovers same models — must NOT fire another change event
+        const eventsBefore = changeEvents.length;
+        const groupAResultAgain = await provider.discoverModels(
+            { silent: true, configuration: { baseUrl: "http://server-a", apiKey: "k" } },
+            new vscode.CancellationTokenSource().token
+        );
+        assert.strictEqual(groupAResultAgain.length, 1, "Group A re-discovery should still return 1 model");
+        assert.strictEqual(
+            changeEvents.length,
+            eventsBefore,
+            "Re-discovering same models must not fire change event (prevents infinite loop)"
+        );
     });
 
     test("discoverModels returns empty array when provider configuration is incomplete (legacy path disabled)", async () => {

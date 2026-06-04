@@ -94,7 +94,41 @@ export abstract class LiteLLMProviderBase {
     private _usageOptOutModels = new Set<string>();
     private readonly _parameterProbeCache = new Map<string, Set<string>>();
 
-    protected _lastModelList: vscode.LanguageModelChatInformation[] = [];
+    /**
+     * Per-group model list keyed by the normalized config URL (same key used by
+     * ModelDiscovery.perConfigCache). Each group-specific discovery call writes only
+     * its own slice; groups never trample each other. The union of all values is the
+     * full set VS Code sees and is used for change-event diffing.
+     *
+     * For backwards-compat, `_lastModelList` is kept as a computed getter so callers
+     * that read it (tests, commit provider, etc.) continue to work without changes.
+     */
+    private _modelListPerGroup = new Map<string, vscode.LanguageModelChatInformation[]>();
+
+    protected get _lastModelList(): vscode.LanguageModelChatInformation[] {
+        // Flatten all per-group lists into a single deduplicated array.
+        const seen = new Set<string>();
+        const result: vscode.LanguageModelChatInformation[] = [];
+        for (const group of this._modelListPerGroup.values()) {
+            for (const m of group) {
+                if (!seen.has(m.id)) {
+                    seen.add(m.id);
+                    result.push(m);
+                }
+            }
+        }
+        return result;
+    }
+
+    protected set _lastModelList(models: vscode.LanguageModelChatInformation[]) {
+        // Legacy setter used by clearModelCache() and tests — replaces the entire map
+        // with a single synthetic entry keyed by "_legacy".
+        this._modelListPerGroup.clear();
+        if (models.length > 0) {
+            this._modelListPerGroup.set("_legacy", models);
+        }
+    }
+
     protected _modelInfoCache = new Map<string, LiteLLMModelInfo | undefined>();
     protected _multiBackendClient: MultiBackendClient | undefined;
     protected _activeBackendNames: string[] = [];
@@ -171,7 +205,7 @@ export abstract class LiteLLMProviderBase {
     public clearModelCache(): void {
         Logger.info("Clearing model discovery cache");
         this._modelDiscovery.clearCaches();
-        this._lastModelList = [];
+        this._modelListPerGroup.clear();
         this._modelInfoCache.clear();
         this._parameterProbeCache.clear();
         this.refreshModelInformation();
@@ -322,54 +356,72 @@ export abstract class LiteLLMProviderBase {
             onModernConfigurationDetected: this._onModernConfigurationDetected,
         };
 
+        // Vendor-level calls (no options.configuration) must return [] immediately without
+        // touching _lastModelList or firing onDidChangeLanguageModelChatInformation.
+        //
+        // VS Code's _resolveAllLanguageModels makes TWO discovery calls per refresh cycle:
+        //   1. Vendor-level call  (no configuration) — we return []
+        //   2. Group-specific call (with configuration) — we return real models
+        // It then COMBINES both arrays. If we allow the vendor-level path to update
+        // _lastModelList (setting it to []) and fire the change event, VS Code sees
+        // "models changed" → triggers another full refresh → vendor-level call sets [] again
+        // → fires change event → infinite loop.
+        //
+        // Returning early before any state mutation breaks the loop while still ensuring
+        // the group-specific call's results (the only ones that matter) are unaffected.
+        if (!options.configuration) {
+            return [];
+        }
+
+        // Derive the group cache key from the config URL — same key used by
+        // ModelDiscovery.perConfigCache — so we write into the right per-group slot.
+        const groupKey =
+            typeof options.configuration?.baseUrl === "string"
+                ? options.configuration.baseUrl.replace(/\/+$/, "").trim()
+                : "_default";
+
+        // Snapshot the UNION of all groups before this call so we can diff at the end.
         const previousIds = new Set(this._lastModelList.map((m) => m.id));
+
         const models = await this._modelDiscovery.discover(args);
 
-        // Guard: never replace a healthy model list with an empty result.
+        // Guard: never replace a healthy group list with an empty result.
         // A transient network error or empty /model/info response during a background
-        // refresh must not cause VS Code to see zero models (which makes it fall back
-        // to the built-in "auto" model and discard the user's selection).
-        //
-        // IMPORTANT EXCEPTION: vendor-level calls (no options.configuration) intentionally
-        // return [] — VS Code makes a vendor-level call AND a group-specific call, then
-        // combines both result sets. If we return _lastModelList here for vendor-level calls,
-        // those models are combined with the group-specific results, causing every model to
-        // appear twice under the same group header. An empty result from a vendor-level call
-        // is correct and expected behaviour, not a transient failure.
-        const isVendorLevelCall = !options.configuration;
-        if (models.length === 0 && this._lastModelList.length > 0 && !isVendorLevelCall) {
+        // refresh must not cause VS Code to see zero models for this group.
+        const previousGroupModels = this._modelListPerGroup.get(groupKey) ?? [];
+        if (models.length === 0 && previousGroupModels.length > 0) {
             Logger.warn(
                 "discoverModels: ignoring empty result — keeping previous model list to avoid losing user's model selection"
             );
-            return this._lastModelList;
+            return previousGroupModels;
         }
 
-        this._lastModelList = models;
+        // Write only this group's slice — other groups are untouched.
+        this._modelListPerGroup.set(groupKey, models);
 
-        // Only fire the change event when the set of model IDs actually changed.
-        // Firing unconditionally on every discover() call tells VS Code "models changed"
-        // even on cache-hit returns, which causes VS Code to re-query and reset the
-        // reasoning-effort picker for the active model.
-        const newIds = new Set(models.map((m) => m.id));
+        // Only fire the change event when the UNION of all groups changed.
+        // Comparing just the new group's IDs against previousIds would always detect
+        // a change when a second group is first discovered (it changes the union even
+        // though nothing was removed), which is correct. But comparing the full union
+        // avoids spurious fires when the same group re-discovers the same models.
+        const newIds = new Set(this._lastModelList.map((m) => m.id));
         const modelSetChanged = newIds.size !== previousIds.size || [...newIds].some((id) => !previousIds.has(id));
         if (modelSetChanged) {
             Logger.info("discoverModels: model set changed, firing onDidChangeLanguageModelChatInformation");
             this._onDidChangeLanguageModelChatInformationEmitter.fire();
         }
 
-        // Non-destructive cache merge: add/update entries for models in the new list
-        // and remove entries for models no longer present — but never wipe the whole
-        // map in one shot.  A destructive clear() followed by a loop creates a window
-        // where concurrent requests (e.g. an in-flight chat turn) read _modelInfoCache
-        // and get undefined, causing getReasoningEffort() to fall back to "no effort"
-        // and VS Code to reset the effort picker back to "auto".
-        // Remove stale entries
-        for (const id of this._modelInfoCache.keys()) {
-            if (!newIds.has(id)) {
+        // Non-destructive cache merge for _modelInfoCache.
+        // Only remove entries that belong to THIS group and are no longer present —
+        // never touch another group's entries. A destructive clear() would create a
+        // window where concurrent requests read _modelInfoCache and get undefined.
+        const previousGroupIds = new Set(previousGroupModels.map((m) => m.id));
+        const newGroupIds = new Set(models.map((m) => m.id));
+        for (const id of previousGroupIds) {
+            if (!newGroupIds.has(id)) {
                 this._modelInfoCache.delete(id);
             }
         }
-        // Add / refresh entries from the new discovery result
         for (const model of models) {
             const info = this._modelDiscovery.getModelInfo(model.id);
             if (info !== undefined) {
