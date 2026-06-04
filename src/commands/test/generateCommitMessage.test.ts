@@ -62,13 +62,19 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
 
         // Mock Provider methods
         mockProvider.getModelInfo.returns({ max_input_tokens: 1000 } as unknown as LiteLLMModelInfo);
-        mockProvider.provideCommitMessage.callsFake(async (_diff, _options, _token, onProgress) => {
-            if (onProgress) {
-                onProgress("feat: ");
-                onProgress("test");
-            }
-            return "feat: test";
-        });
+        // The handler now goes through `vscode.lm.selectChatModels` exclusively. Provide a
+        // mock chat model that streams the expected commit message so the input box is
+        // updated via the VS Code route.
+        const model = {
+            sendRequest: sandbox.stub().resolves({
+                stream: (async function* () {
+                    yield new vscode.LanguageModelTextPart("feat: ");
+                    yield new vscode.LanguageModelTextPart("test");
+                })(),
+            }),
+        };
+        const selectModelsStub = vscode.lm.selectChatModels as unknown as sinon.SinonStub;
+        selectModelsStub.resolves([model as unknown as vscode.LanguageModelChat]);
 
         // Mock Progress
         sandbox.stub(vscode.window, "withProgress").callsFake(async (_options, task) => {
@@ -122,6 +128,38 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         assert.strictEqual(mockInputBox.value, "feat: from vscode route");
         assert.strictEqual(mockProvider.provideCommitMessage.called, false);
         assert.strictEqual((model.sendRequest as sinon.SinonStub).calledOnce, true);
+    });
+
+    test("shows error and does not fall back to provider when VS Code route fails", async () => {
+        const registerStub = sandbox.stub(vscode.commands, "registerCommand");
+        registerGenerateCommitMessageCommand(mockProvider as unknown as LiteLLMCommitMessageProvider);
+        const handler = registerStub.firstCall.args[1] as () => Promise<void>;
+
+        mockProvider.getConfigManager.returns({
+            getConfig: async () => ({ commitModelIdOverride: "test-model" }),
+        } as unknown as ConfigManager);
+
+        sandbox.stub(GitUtils, "getStagedDiff").resolves("test-diff");
+        const mockInputBox = { value: "", placeholder: "", enabled: true };
+        const mockRepo = { inputBox: mockInputBox };
+        sandbox.stub(GitUtils, "getGitAPI").resolves({ repositories: [mockRepo] } as unknown as never);
+        mockProvider.getModelInfo.returns({ max_input_tokens: 1000 } as unknown as LiteLLMModelInfo);
+
+        const selectModelsStub = vscode.lm.selectChatModels as unknown as sinon.SinonStub;
+        selectModelsStub.rejects(new Error("vscode route failed"));
+
+        const errorStub = sandbox.stub(vscode.window, "showErrorMessage");
+        sandbox.stub(vscode.window, "withProgress").callsFake(async (_options, task) => {
+            return await task(
+                { report: sandbox.stub() } as vscode.Progress<{ message?: string; increment?: number }>,
+                new vscode.CancellationTokenSource().token
+            );
+        });
+
+        await handler();
+
+        assert.ok(errorStub.called);
+        assert.ok(mockProvider.provideCommitMessage.notCalled);
     });
 
     test("handler reports error if diff retrieval fails", async () => {
@@ -193,7 +231,14 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
 
         sandbox.stub(GitUtils, "getStagedDiff").resolves("diff");
         mockProvider.getModelInfo.returns({ max_input_tokens: 1000 } as unknown as LiteLLMModelInfo);
-        mockProvider.provideCommitMessage.rejects(new Error("provider fail"));
+        // The handler now exclusively uses the VS Code `selectChatModels` route. Reject
+        // `sendRequest` to simulate an upstream provider failure and assert the user sees
+        // an error message.
+        const model = {
+            sendRequest: sandbox.stub().rejects(new Error("provider fail")),
+        };
+        const selectModelsStub = vscode.lm.selectChatModels as unknown as sinon.SinonStub;
+        selectModelsStub.resolves([model as unknown as vscode.LanguageModelChat]);
 
         const errorStub = sandbox.stub(vscode.window, "showErrorMessage");
         sandbox.stub(vscode.window, "withProgress").callsFake(async (_o, task) => {
@@ -275,12 +320,17 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         const getDiffStub = sandbox.stub(GitUtils, "getStagedDiff").resolves("diff-b-content");
 
         mockProvider.getModelInfo.returns({ max_input_tokens: 1000 } as unknown as LiteLLMModelInfo);
-        mockProvider.provideCommitMessage.callsFake(async (_diff, _options, _token, onProgress) => {
-            if (onProgress) {
-                onProgress("fix: update file");
-            }
-            return "fix: update file";
-        });
+        // The handler now uses VS Code's `selectChatModels` route. Stream the commit message
+        // through the mock model so the input box is updated.
+        const model = {
+            sendRequest: sandbox.stub().resolves({
+                stream: (async function* () {
+                    yield new vscode.LanguageModelTextPart("fix: update file");
+                })(),
+            }),
+        };
+        const selectModelsStub = vscode.lm.selectChatModels as unknown as sinon.SinonStub;
+        selectModelsStub.resolves([model as unknown as vscode.LanguageModelChat]);
 
         sandbox.stub(vscode.window, "withProgress").callsFake(async (_options, task) => {
             return await task(
@@ -324,12 +374,17 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         const getDiffStub = sandbox.stub(GitUtils, "getStagedDiff").resolves("diff-a");
 
         mockProvider.getModelInfo.returns({ max_input_tokens: 1000 } as unknown as LiteLLMModelInfo);
-        mockProvider.provideCommitMessage.callsFake(async (_diff, _options, _token, onProgress) => {
-            if (onProgress) {
-                onProgress("chore: update");
-            }
-            return "chore: update";
-        });
+        // The handler uses VS Code's `selectChatModels` route. Stream the commit message
+        // through the mock model so the input box is updated.
+        const model = {
+            sendRequest: sandbox.stub().resolves({
+                stream: (async function* () {
+                    yield new vscode.LanguageModelTextPart("chore: update");
+                })(),
+            }),
+        };
+        const selectModelsStub = vscode.lm.selectChatModels as unknown as sinon.SinonStub;
+        selectModelsStub.resolves([model as unknown as vscode.LanguageModelChat]);
 
         sandbox.stub(vscode.window, "withProgress").callsFake(async (_options, task) => {
             return await task(

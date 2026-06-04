@@ -157,14 +157,14 @@ suite("Extension Activation Unit Tests", () => {
         sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
 
         const execStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
-        sandbox.stub(vscode.window, "showInformationMessage").resolves("Open LiteLLM Configuration" as never);
+        sandbox.stub(vscode.window, "showInformationMessage").resolves("Open Language Models" as never);
 
         extension.activate(context);
 
         // Wait a tick for the isConfigured promise chain and the selection handler.
         await new Promise((r) => setTimeout(r, 0));
 
-        assert.strictEqual(execStub.calledWith("litellm-connector.manage"), true);
+        assert.strictEqual(execStub.calledWith("workbench.action.chat.manage"), true);
     });
 
     test("deactivate does not clear configuration", async () => {

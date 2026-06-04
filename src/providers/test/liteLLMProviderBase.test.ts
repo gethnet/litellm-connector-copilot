@@ -61,6 +61,9 @@ interface BaseTestAccess {
             onModernConfigurationDetected?: () => void;
         }) => Promise<vscode.LanguageModelChatInformation[]>;
         getLastModels: () => vscode.LanguageModelChatInformation[];
+        getDiscoveredModelBackend: (
+            modelId: string
+        ) => { backendName: string; url: string; apiKey?: string } | undefined;
     };
     _transport: {
         sendRequestToLiteLLM: (
@@ -299,6 +302,36 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(request.temperature, 0.5, "Should use provided temperature 0.5");
         assert.strictEqual(request.frequency_penalty, 0.8, "Should use provided frequency_penalty 0.8");
         assert.strictEqual(request.presence_penalty, 0.1, "Should use default presence_penalty 0.1");
+    });
+
+    test("provideTokenCount routes via discovered model backend (not resolveBackends)", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const accessBase = provider as unknown as {
+            _modelDiscovery: {
+                getDiscoveredModelBackend: sinon.SinonStub;
+            };
+            _configManager: {
+                resolveBackends: sinon.SinonStub;
+            };
+        };
+
+        accessBase._modelDiscovery.getDiscoveredModelBackend = sinon.stub().returns({
+            backendName: "llmapi.wolfram.com",
+            url: "https://llmapi.wolfram.com",
+            apiKey: "sk-test",
+        });
+        accessBase._configManager.resolveBackends = sinon
+            .stub()
+            .rejects(new Error("resolveBackends should not be called"));
+
+        const token = new vscode.CancellationTokenSource().token;
+        const model = { id: "llmapi.wolfram.com/gpt-4o" } as vscode.LanguageModelChatInformation;
+
+        const result = await provider.provideTokenCount(model, "x".repeat(600), token);
+
+        assert.strictEqual(result >= 0, true);
+        assert.ok(accessBase._modelDiscovery.getDiscoveredModelBackend.calledOnce);
+        assert.strictEqual(accessBase._configManager.resolveBackends.called, false);
     });
 
     test("buildOpenAIChatRequest applies reasoning effort from modelConfiguration", async () => {
@@ -1029,20 +1062,36 @@ suite("LiteLLM Provider Unit Tests", () => {
             .getConfiguration()
             .update("litellm-connector.baseUrl", "http://localhost:4000", vscode.ConfigurationTarget.Global);
 
-        // Seed last model list with an override model.
+        // Seed last model list with an override model that has backend info attached.
+        const overrideModel = {
+            id: "override-model",
+            name: "override-model",
+            tooltip: "",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 100,
+            maxOutputTokens: 100,
+            capabilities: { toolCalling: true, imageInput: false },
+            tags: ["tools"],
+            _backendName: "localhost:4000",
+            _backendUrl: "http://localhost:4000",
+            _apiKey: "test-key",
+        } as unknown as vscode.LanguageModelChatInformation;
         (provider as unknown as { _lastModelList: vscode.LanguageModelChatInformation[] })._lastModelList = [
-            {
-                id: "override-model",
-                name: "override-model",
-                tooltip: "",
-                family: "litellm",
-                version: "1.0.0",
-                maxInputTokens: 100,
-                maxOutputTokens: 100,
-                capabilities: { toolCalling: true, imageInput: false },
-                tags: ["tools"],
-            } as unknown as vscode.LanguageModelChatInformation,
+            overrideModel,
         ];
+
+        // Stub getDiscoveredModelBackend to return backend info for the override model.
+        const modelDiscovery = (provider as unknown as { _modelDiscovery: unknown })._modelDiscovery as {
+            getDiscoveredModelBackend: (
+                modelId: string
+            ) => { backendName: string; url: string; apiKey?: string } | undefined;
+        };
+        sandbox.stub(modelDiscovery, "getDiscoveredModelBackend").returns({
+            backendName: "localhost:4000",
+            url: "http://localhost:4000",
+            apiKey: "test-key",
+        });
 
         // Stub ConfigManager to return a config with modelIdOverride.
         const configManager = (provider as unknown as { _configManager: unknown })._configManager as {
@@ -1486,29 +1535,14 @@ suite("LiteLLM Provider Unit Tests", () => {
             },
         ];
 
-        // The provider now uses MultiBackendClient which calls getModelInfo on each backend
+        // The provider uses the configuration payload directly per call, so stub the per-call
+        // client to return the model list when discovery runs.
         sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({ data: mockData });
-
-        // Stub config manager to return namespaced ID data
-        interface ConfigManager {
-            getConfig: () => Promise<{ url: string }>;
-            resolveBackends: () => Promise<ResolvedBackend[]>;
-        }
-        interface ProviderWithConfigManager {
-            _configManager: ConfigManager;
-        }
-        const providerWithConfig = provider as unknown as ProviderWithConfigManager;
-        sandbox
-            .stub(providerWithConfig._configManager, "resolveBackends")
-            .resolves([{ name: "default", url: "http://localhost:4000", apiKey: "test-key", enabled: true }]);
-        sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
-            url: "http://localhost:4000",
-        });
 
         const infos = await provider.provideLanguageModelChatInformation(
             {
                 silent: true,
-                configuration: { providerName: "default", baseUrl: "http://localhost:4000", apiKey: "test-key" },
+                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-key" },
             },
             {
                 isCancellationRequested: false,
@@ -1517,7 +1551,9 @@ suite("LiteLLM Provider Unit Tests", () => {
         );
 
         assert.strictEqual(infos.length, 1);
-        assert.strictEqual(infos[0].id, "default/gpt-4");
+        // Model IDs use the URL hostname for routing (e.g. "localhost:4000/gpt-4"), not the legacy
+        // `providerName`. This matches what user settings reference after the per-group migration.
+        assert.strictEqual(infos[0].id, "localhost:4000/gpt-4");
     });
 
     test("provideLanguageModelChatInformation applies capability overrides", async () => {
@@ -1538,31 +1574,22 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({ data: mockData });
 
-        interface ConfigManager {
-            getConfig: () => Promise<{
-                url: string;
-                modelCapabilitiesOverrides: Record<string, { toolCalling?: boolean; imageInput?: boolean }>;
-            }>;
-            resolveBackends: () => Promise<ResolvedBackend[]>;
-        }
+        // Override keys now use the URL-hostname-namespaced model id (e.g. "localhost:4000/gpt-4")
+        // because model IDs are derived from the configured baseUrl, not a legacy `providerName`.
         interface ProviderWithConfigManager {
             _configManager: ConfigManager;
         }
         const providerWithConfig = provider as unknown as ProviderWithConfigManager;
-        sandbox
-            .stub(providerWithConfig._configManager, "resolveBackends")
-            .resolves([{ name: "default", url: "http://localhost:4000", apiKey: "test-key", enabled: true }]);
         sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
-            url: "http://localhost:4000",
             modelCapabilitiesOverrides: {
-                "default/gpt-4": { toolCalling: true, imageInput: true },
+                "localhost:4000/gpt-4": { toolCalling: true, imageInput: true },
             },
-        });
+        } as unknown as Awaited<ReturnType<ConfigManager["getConfig"]>>);
 
         const infos = await provider.provideLanguageModelChatInformation(
             {
                 silent: true,
-                configuration: { providerName: "default", baseUrl: "http://localhost:4000", apiKey: "test-key" },
+                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-key" },
             },
             {
                 isCancellationRequested: false,
@@ -1846,47 +1873,41 @@ suite("LiteLLM Provider Unit Tests", () => {
     test("provideTokenCount kicks off background refinement for large strings", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
-        sandbox.stub(provider as unknown as { _configManager: ConfigManager }, "_configManager").value({
-            getConfig: async () => ({ url: "http://localhost:4000" }),
-            resolveBackends: async () => [
-                { name: "default", url: "http://localhost:4000", apiKey: "test-key", enabled: true },
-            ],
-            convertProviderConfiguration: () => ({
-                backendName: "default",
-                baseUrl: "http://localhost:4000",
-                apiKey: "test-key",
-                client: {
-                    getModelInfo: async () => ({
-                        data: [
-                            {
-                                model_name: "test-model",
-                                model_info: { mode: "chat", supports_native_streaming: true },
-                            },
-                        ],
-                    }),
-                },
-            }),
+        // Seed the discovered model list so getDiscoveredModelBackend() can route the request.
+        // The new token-count path uses the per-config cache instead of resolveBackends().
+        const discoveredModels = [
+            {
+                id: "localhost:4000/test-model",
+                name: "test-model",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 4096,
+                maxOutputTokens: 2048,
+                capabilities: { toolCalling: true, imageInput: false },
+                _backendName: "localhost:4000",
+                _backendUrl: "http://localhost:4000",
+                _apiKey: "test-key",
+            } as unknown as vscode.LanguageModelChatInformation,
+        ];
+        access(provider)._lastModelList = discoveredModels;
+        sandbox.stub(access(provider)._modelDiscovery, "getLastModels").returns(discoveredModels);
+        // getDiscoveredModelBackend looks up the model in the per-config cache; stub it directly
+        // so we don't depend on the cache-population side effects of the discovery pipeline.
+        sandbox.stub(access(provider)._modelDiscovery, "getDiscoveredModelBackend").returns({
+            backendName: "localhost:4000",
+            url: "http://localhost:4000",
+            apiKey: "test-key",
         });
 
-        // Initialize multiBackendClient by calling discoverModels
-        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({ data: [] });
-        await provider.provideLanguageModelChatInformation(
-            {
-                silent: true,
-                configuration: { providerName: "default", baseUrl: "http://localhost:4000", apiKey: "test-key" },
-            },
-            {
-                isCancellationRequested: false,
-                onCancellationRequested: () => ({ dispose() {} }),
-            } as vscode.CancellationToken
-        );
-
         const remoteCount = 123;
+        // The new implementation creates a fresh LiteLLMClient per call against the discovered
+        // backend, so the test stubs the prototype directly.
         const countTokensStub = sandbox
-            .stub(MultiBackendClient.prototype, "countTokens")
+            .stub(LiteLLMClient.prototype, "countTokens")
             .resolves({ token_count: remoteCount });
 
-        const model = { id: "default/test-model" } as vscode.LanguageModelChatInformation;
+        const model = { id: "localhost:4000/test-model" } as vscode.LanguageModelChatInformation;
         const largeText = "a".repeat(600);
         const token = { isCancellationRequested: false } as vscode.CancellationToken;
 
@@ -1894,8 +1915,9 @@ suite("LiteLLM Provider Unit Tests", () => {
         const count1 = await provider.provideTokenCount(model, largeText, token);
         assert.notStrictEqual(count1, remoteCount, "Should return local count immediately");
 
-        // Wait for background debounce and execution
-        await new Promise((resolve) => setTimeout(resolve, 600));
+        // Wait for the background async work to complete (the implementation runs the remote
+        // count immediately after returning the local estimate, not behind a debounce delay).
+        await new Promise((resolve) => setTimeout(resolve, 50));
 
         assert.strictEqual(countTokensStub.callCount, 1, "Should have called remote counter in background");
 
@@ -2028,36 +2050,66 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(discoverStub.calledOnce, true);
     });
 
-    test("discoverModels falls back to extension-managed backends when provider configuration is missing", async () => {
+    test("discoverModels returns empty array when provider configuration is missing (legacy path disabled)", async () => {
+        // OBSOLETE (remove in 1.125): The legacy fallback path has been disabled to prevent
+        // spurious "LiteLLM" group names from appearing in VS Code's model picker.
+        // When VS Code calls the provider without options.configuration (vendor-level discovery),
+        // the provider MUST return an empty array to prevent "orphan" models from being created.
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const configManager = access(provider)._configManager;
         sandbox
             .stub(configManager, "resolveBackends")
             .resolves([{ name: "cloud", url: "http://localhost:4000", apiKey: "k", enabled: true }]);
-        sandbox.stub(MultiBackendClient.prototype, "getModelInfoAll").resolves({
-            data: [
-                {
-                    backendName: "cloud",
-                    namespacedId: "cloud/gpt-4o",
-                    model_name: "gpt-4o",
-                    model_info: {
-                        litellm_provider: "openai",
-                        mode: "chat",
-                        supports_native_streaming: true,
-                        max_input_tokens: 8192,
-                        max_output_tokens: 4096,
-                    } as LiteLLMModelInfo,
-                },
-            ],
-        });
         const execStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
         const models = await provider.discoverModels({ silent: false }, new vscode.CancellationTokenSource().token);
+        // When no configuration is provided, the legacy path should return empty array
+        // to prevent spurious group names from appearing in the model picker.
         assert.strictEqual(execStub.calledWith("litellm-connector.manage"), false);
-        assert.strictEqual(models.length, 1);
-        assert.strictEqual(models[0].id, "cloud/gpt-4o");
+        assert.strictEqual(models.length, 0);
     });
 
-    test("discoverModels falls back to extension-managed backends when provider configuration is incomplete", async () => {
+    test("vendor-level call returns [] even when _lastModelList is populated — prevents duplicate models", async () => {
+        // Regression test: VS Code makes BOTH a vendor-level call (no configuration) AND
+        // group-specific calls (with configuration), then COMBINES both result sets into a
+        // single allModels array. If we return _lastModelList for vendor-level calls, every
+        // model appears twice under the same group header.
+        //
+        // Specifically: the empty-result guard in discoverModels() must NOT apply to
+        // vendor-level calls (no options.configuration), because [] is intentional there,
+        // not a transient failure.
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+
+        // Seed _lastModelList as if a prior group-specific discovery has run successfully.
+        const seededModel = {
+            id: "my-server/gpt-4o",
+            vendor: "openai",
+            name: "GPT-4o",
+            version: "",
+            maxInputTokens: 128000,
+            maxOutputTokens: 16384,
+            family: "gpt-4o",
+            capabilities: {},
+            isUserSelectable: true,
+        } as unknown as vscode.LanguageModelChatInformation;
+        (access(provider) as unknown as { _lastModelList: vscode.LanguageModelChatInformation[] })._lastModelList = [
+            seededModel,
+        ];
+
+        // Stub discovery to return [] for the vendor-level call — same as the real code path.
+        sandbox.stub(access(provider)._modelDiscovery, "discover").resolves([]);
+
+        // Vendor-level call: no options.configuration
+        const models = await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
+
+        // Must return [], NOT _lastModelList — otherwise VS Code sees duplicates.
+        assert.strictEqual(models.length, 0, "vendor-level call must return [] regardless of cached _lastModelList");
+    });
+
+    test("discoverModels returns empty array when provider configuration is incomplete (legacy path disabled)", async () => {
+        // OBSOLETE (remove in 1.125): The legacy fallback path has been disabled to prevent
+        // spurious "LiteLLM" group names from appearing in VS Code's model picker.
+        // When configuration is incomplete (e.g., missing apiKey), convertProviderConfiguration
+        // returns null and the discovery should return empty array instead of falling back.
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const configManager = access(provider)._configManager;
         sandbox
@@ -2083,14 +2135,14 @@ suite("LiteLLM Provider Unit Tests", () => {
                 silent: true,
                 configuration: {
                     baseUrl: "http://localhost:4000",
-                    // missing apiKey -> convertProviderConfiguration should fail, then legacy fallback runs
+                    // missing apiKey -> convertProviderConfiguration should fail, no legacy fallback
                 },
             },
             new vscode.CancellationTokenSource().token
         );
 
-        assert.strictEqual(models.length, 1);
-        assert.strictEqual(models[0].id, "cloud/gpt-4o-mini");
+        // With the legacy path disabled, incomplete configuration returns empty array
+        assert.strictEqual(models.length, 0);
     });
 
     test("discoverModels marks modern configuration detection when provider configuration is valid", async () => {
@@ -2140,12 +2192,12 @@ suite("LiteLLM Provider Unit Tests", () => {
         assert.strictEqual(modernDetected.calledOnce, true);
     });
 
-    test("discoverModels uses providerName from configuration when groupName is missing", async () => {
+    test("discoverModels uses URL hostname as backendName when no groupName is provided", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const configManager = access(provider)._configManager;
 
         const session: BackendSession = {
-            backendName: "Gethnet",
+            backendName: "localhost:4000",
             baseUrl: "http://localhost:4000",
             apiKey: "k",
             client: {
@@ -2169,8 +2221,10 @@ suite("LiteLLM Provider Unit Tests", () => {
         const models = await provider.discoverModels(
             {
                 silent: true,
+                // `providerName` is intentionally not part of the per-group configuration schema;
+                // the routing identity is now derived from the URL hostname regardless of any
+                // legacy `providerName` field that may be present.
                 configuration: {
-                    providerName: "Gethnet",
                     baseUrl: "http://localhost:4000",
                     apiKey: "k",
                 },
@@ -2180,8 +2234,9 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         assert.strictEqual(models.length, 1);
         assert.strictEqual(convertStub.calledOnce, true);
-        assert.strictEqual(convertStub.firstCall.args[0], "Gethnet");
-        assert.strictEqual(models[0].id, "Gethnet/gpt-4o");
+        // The hostname is the routing identity (matches what user settings reference).
+        assert.strictEqual(convertStub.firstCall.args[0], "localhost:4000");
+        assert.strictEqual(models[0].id, "localhost:4000/gpt-4o");
     });
 
     test("discoverModels derives group name from baseUrl hostname when providerName and groupName are omitted", async () => {

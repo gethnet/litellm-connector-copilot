@@ -26,7 +26,7 @@ suite("ConfigManager", () => {
         assert.strictEqual(session?.apiKey, "secret");
     });
 
-    test("convertProviderConfiguration falls back to groupName when providerName is omitted", async () => {
+    test("uses groupName directly as backendName (ignores providerName in config)", async () => {
         const secrets = {
             get: async () => undefined,
             store: async () => {},
@@ -36,13 +36,46 @@ suite("ConfigManager", () => {
         } as unknown as vscode.SecretStorage;
 
         const manager = new ConfigManager(secrets);
-        const session = manager.convertProviderConfiguration("multi-cloud", {
-            baseUrl: "http://localhost:4000",
-            apiKey: "secret",
+        const session = manager.convertProviderConfiguration("llmapi.wolfram.com", {
+            baseUrl: "https://llmapi.wolfram.com",
+            apiKey: "sk-test",
+            providerName: "should-be-ignored",
         });
 
         assert.ok(session);
-        assert.strictEqual(session?.backendName, "multi-cloud");
+        assert.strictEqual(session?.backendName, "llmapi.wolfram.com");
+    });
+
+    test("getConfig no longer exposes legacy url/key/backends", async () => {
+        const secrets = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            keys: async () => [],
+            onDidChange: () => ({ dispose() {} }),
+        } as unknown as vscode.SecretStorage;
+
+        const manager = new ConfigManager(secrets);
+        const config = await manager.getConfig();
+
+        assert.strictEqual(config.url, "");
+        assert.strictEqual(config.key, undefined);
+        assert.strictEqual(config.backends, undefined);
+    });
+
+    test("resolveBackends returns [] when no legacy settings present", async () => {
+        const secrets = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            keys: async () => [],
+            onDidChange: () => ({ dispose() {} }),
+        } as unknown as vscode.SecretStorage;
+
+        const manager = new ConfigManager(secrets);
+        const backends = await manager.resolveBackends();
+
+        assert.deepStrictEqual(backends, []);
     });
 
     test("convertProviderConfiguration returns undefined without a baseUrl", async () => {

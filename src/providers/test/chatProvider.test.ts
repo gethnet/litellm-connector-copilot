@@ -9,6 +9,48 @@ import { LiteLLMTelemetry } from "../../utils/telemetry";
 import { createMockSecrets } from "../../test/utils/testMocks";
 import { createTelemetryMocks } from "../../test/utils/telemetryMock";
 
+/**
+ * Seeds the per-group discovery state on a provider so the new routing path
+ * (`getDiscoveredModelBackend`) finds a backend during `sendRequestToLiteLLM`.
+ *
+ * The migration to per-group configuration moved the routing identity from
+ * `resolveBackends()` (which reads legacy `litellm-connector.url` / `key` settings)
+ * to a per-config discovery cache keyed by the URL hostname. Tests that pre-date the
+ * migration stub `getConfig().url` only; this helper bridges them by registering
+ * a single synthetic model entry that carries the backend metadata the new
+ * `getDiscoveredModelBackend` lookup expects.
+ */
+function seedDiscoveredBackend(sandbox: sinon.SinonSandbox, provider: LiteLLMChatProvider, modelId: string): void {
+    const seededModel = {
+        id: modelId,
+        name: modelId,
+        tooltip: "",
+        family: "litellm",
+        version: "1.0.0",
+        maxInputTokens: 1000,
+        maxOutputTokens: 1000,
+        capabilities: { toolCalling: true, imageInput: false },
+        _backendName: "localhost:4000",
+        _backendUrl: "http://localhost:4000",
+        _apiKey: "test-api-key",
+    } as unknown as vscode.LanguageModelChatInformation;
+
+    const providerInternals = provider as unknown as {
+        _lastModelList: vscode.LanguageModelChatInformation[];
+        _modelDiscovery: {
+            getLastModels: () => vscode.LanguageModelChatInformation[];
+            getDiscoveredModelBackend: (
+                modelId: string
+            ) => { backendName: string; url: string; apiKey: string } | undefined;
+        };
+    };
+    providerInternals._lastModelList = [seededModel];
+    sandbox.stub(providerInternals._modelDiscovery, "getLastModels").returns([seededModel]);
+    sandbox
+        .stub(providerInternals._modelDiscovery, "getDiscoveredModelBackend")
+        .returns({ backendName: "localhost:4000", url: "http://localhost:4000", apiKey: "test-api-key" });
+}
+
 suite("LiteLLM Chat Provider Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
     let telemetryMocks: ReturnType<typeof createTelemetryMocks>;
@@ -126,7 +168,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                     { report: () => {} },
                     new vscode.CancellationTokenSource().token
                 ),
-            /LiteLLM configuration not found/
+            /LiteLLM backend not found|LiteLLM configuration not found/
         );
     });
 
@@ -140,6 +182,11 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         }
         const providerWithConfig = provider as unknown as ProviderWithConfigManager;
         sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        // Seed the discovered model list so the new per-group routing path in
+        // `sendRequestToLiteLLM` (which prefers `getDiscoveredModelBackend` over legacy
+        // `resolveBackends`) finds a backend. Without this the request fails with
+        // "LiteLLM configuration not found" before reaching the stubbed `chat` call.
+        seedDiscoveredBackend(sandbox, provider, "model-1");
 
         const chatStub = sandbox.stub(LiteLLMClient.prototype, "chat");
         const encoder = new TextEncoder();
@@ -218,6 +265,9 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
             .stub(providerWithConfig._configManager, "getConfig")
             .resolves({ url: "http://localhost:4000", modelIdOverride: "override" });
         sandbox.stub(providerWithConfig, "discoverModels").rejects(new Error("refresh failed"));
+        // Seed discovered backend so the routing path doesn't reject before we exercise the
+        // override refresh warning behaviour.
+        seedDiscoveredBackend(sandbox, provider, "model-1");
         const warnStub = sandbox.stub(Logger, "warn");
 
         const chatStub = sandbox.stub(LiteLLMClient.prototype, "chat");
@@ -275,6 +325,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         }
         const providerWithConfig = provider as unknown as ProviderWithConfigManager;
         sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        seedDiscoveredBackend(sandbox, provider, "model-1");
 
         sandbox.stub(LiteLLMClient.prototype, "chat").rejects(new Error("boom"));
 
@@ -328,6 +379,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         }
         const providerWithConfig = provider as unknown as ProviderWithConfigManager;
         sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        seedDiscoveredBackend(sandbox, provider, "model-1");
 
         sandbox
             .stub(LiteLLMClient.prototype, "chat")
@@ -380,6 +432,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         }
         const providerWithConfig = provider as unknown as ProviderWithConfigManager;
         sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        seedDiscoveredBackend(sandbox, provider, "model-1");
 
         sandbox
             .stub(LiteLLMClient.prototype, "chat")
@@ -428,6 +481,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         }
         const providerWithConfig = provider as unknown as ProviderWithConfigManager;
         sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        seedDiscoveredBackend(sandbox, provider, "model-1");
 
         sandbox.stub(LiteLLMClient.prototype, "chat").rejects(new Error("boom"));
 
@@ -565,6 +619,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         }
         const providerWithConfig = provider as unknown as ProviderWithConfigManager;
         sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        seedDiscoveredBackend(sandbox, provider, "model-1");
 
         const encoder = new TextEncoder();
         sandbox.stub(LiteLLMClient.prototype, "chat").callsFake(
@@ -635,6 +690,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         };
 
         sandbox.stub(providerAny._configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        seedDiscoveredBackend(sandbox, provider, "model-usage");
 
         const messages: vscode.LanguageModelChatRequestMessage[] = [
             {
@@ -709,6 +765,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 "getConfig"
             )
             .resolves({ url: "http://localhost:4000" });
+        seedDiscoveredBackend(sandbox, provider, "model-usage");
 
         const encoder = new TextEncoder();
         sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
@@ -784,6 +841,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 "getConfig"
             )
             .resolves({ url: "http://localhost:4000" });
+        seedDiscoveredBackend(sandbox, provider, "model-partial-usage");
 
         const encoder = new TextEncoder();
         sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
@@ -869,6 +927,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 "getConfig"
             )
             .resolves({ url: "http://localhost:4000" });
+        seedDiscoveredBackend(sandbox, provider, "model-tool-only");
 
         const encoder = new TextEncoder();
         sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
@@ -944,6 +1003,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
             url: "http://localhost:4000",
         });
+        seedDiscoveredBackend(sandbox, provider, "model-1");
 
         sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
             new ReadableStream<Uint8Array>({

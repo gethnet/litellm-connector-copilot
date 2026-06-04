@@ -374,6 +374,20 @@ export class TelemetryService implements vscode.Disposable {
         this.disposables.forEach((d: vscode.Disposable) => {
             d.dispose();
         });
-        void this.shutdown();
+        // Note: We intentionally do NOT await shutdown here because:
+        // 1. VS Code's Disposable.dispose() is synchronous by contract
+        // 2. During test teardown, awaiting async operations can cause hangs
+        // 3. The PostHog client shutdown is best-effort cleanup
+        // Use shutdown() directly if you need to await completion.
+        try {
+            // Synchronous flush attempt for graceful shutdown
+            this._flushAggregatedFeatureUsage();
+        } catch {
+            // Ignore errors during dispose
+        }
+        // Fire-and-forget the async shutdown - it will complete in background
+        this.adapter.shutdown().catch(() => {
+            // Silently ignore shutdown errors
+        });
     }
 }

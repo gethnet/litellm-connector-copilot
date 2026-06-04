@@ -223,8 +223,8 @@ export class ConfigManager {
         const trimmedInlineModelId = inlineCompletionsModelId?.trim() ?? "";
 
         return {
-            url,
-            key: key || undefined,
+            url: url || "",
+            key: key ?? undefined,
             backends,
             inactivityTimeout,
             disableCaching,
@@ -313,39 +313,34 @@ export class ConfigManager {
      * raised to >= 1.125, delete this method and all of its call sites.
      */
     async resolveBackends(): Promise<ResolvedBackend[]> {
-        const config = await this.getConfig();
+        const settings = vscode.workspace.getConfiguration();
+        const backends = settings.get<LiteLLMBackend[]>(ConfigManager.BACKENDS_KEY, []);
+        const legacyUrl = settings.get<string>(ConfigManager.BASE_URL_KEY, "").trim();
 
-        if (config.backends && config.backends.length > 0) {
+        // Early guard: no legacy settings configured at all.
+        if ((!backends || backends.length === 0) && !legacyUrl) {
+            return [];
+        }
+
+        if (backends && backends.length > 0) {
             const resolved: ResolvedBackend[] = [];
-            for (const backend of config.backends) {
+            for (const backend of backends) {
                 if (backend.enabled === false) {
                     continue;
                 }
                 const secretKey = this.getApiKeySecretStorageKey(backend.apiKeySecretRef ?? backend.name);
                 const apiKey = await this.secrets.get(secretKey);
-                resolved.push({
-                    name: backend.name,
-                    url: backend.url,
-                    apiKey: apiKey ?? undefined,
-                    enabled: true,
-                });
+                resolved.push({ name: backend.name, url: backend.url, apiKey: apiKey ?? undefined, enabled: true });
             }
             return resolved;
         }
 
-        // Legacy fallback
-        if (config.url) {
-            return [
-                {
-                    name: "default",
-                    url: config.url,
-                    apiKey: config.key,
-                    enabled: true,
-                },
-            ];
-        }
-
-        return [];
+        // Legacy single-backend fallback.
+        const apiKeySecretRef = settings
+            .get<string>(ConfigManager.API_KEY_SECRET_REF_KEY, ConfigManager.DEFAULT_API_KEY_SECRET_REF)
+            .trim();
+        const legacyKey = await this.secrets.get(this.getApiKeySecretStorageKey(apiKeySecretRef));
+        return [{ name: "default", url: legacyUrl, apiKey: legacyKey ?? undefined, enabled: true }];
     }
 
     /**
@@ -359,14 +354,12 @@ export class ConfigManager {
         groupName: string,
         configuration: Record<string, unknown>
     ): BackendSession | undefined {
-        const providerNameFromConfig =
-            typeof configuration.providerName === "string" ? configuration.providerName.trim() : "";
-        const providerName = providerNameFromConfig || groupName.trim();
+        const providerName = groupName.trim();
         const baseUrl = typeof configuration.baseUrl === "string" ? configuration.baseUrl.trim() : "";
         const apiKey = typeof configuration.apiKey === "string" ? configuration.apiKey.trim() : "";
 
         if (!providerName) {
-            Logger.debug("convertProviderConfiguration: missing providerName and groupName");
+            Logger.debug("convertProviderConfiguration: missing groupName");
             return undefined;
         }
 

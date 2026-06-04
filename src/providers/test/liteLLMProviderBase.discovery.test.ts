@@ -58,6 +58,60 @@ suite("ModelDiscovery", () => {
         assert.strictEqual(first[0], second[0]);
     });
 
+    test("uses URL hostname for model ID/routing and groupName for category label", async () => {
+        const configManagerStub = sinon.createStubInstance(ConfigManager);
+        configManagerStub.convertProviderConfiguration.callsFake((name: string) => ({
+            backendName: name,
+            baseUrl: "https://llmapi.wolfram.com",
+            apiKey: "sk-test",
+            client: {
+                getModelInfo: async () => ({
+                    data: [{ model_name: "gpt-4o", model_info: { litellm_provider: "openai" } }],
+                }),
+            } as unknown as never,
+        }));
+        configManagerStub.getConfig.resolves({} as never);
+
+        const discoveryLocal = new ModelDiscovery({
+            configManager: configManagerStub as unknown as ConfigManager,
+            userAgent: "test",
+            onModernConfigurationDetected: () => {},
+        });
+
+        const models = await discoveryLocal.discover({
+            options: {
+                silent: true,
+                configuration: { baseUrl: "https://llmapi.wolfram.com", apiKey: "sk-test" },
+                groupName: "LiteLLM: Wolfram",
+            } as unknown as vscode.PrepareLanguageModelChatModelOptions,
+            token: new vscode.CancellationTokenSource().token,
+        });
+
+        assert.strictEqual(models.length, 1);
+        assert.strictEqual(models[0].id, "llmapi.wolfram.com/gpt-4o");
+        const withCategory = models[0] as vscode.LanguageModelChatInformation & {
+            category?: { label: string; order: number };
+        };
+        assert.strictEqual(withCategory.category?.label, "LiteLLM: Wolfram");
+    });
+
+    test("cache key is the trimmed baseUrl only", async () => {
+        const configManagerStub = sinon.createStubInstance(ConfigManager);
+        const discoveryLocal = new ModelDiscovery({
+            configManager: configManagerStub as unknown as ConfigManager,
+            userAgent: "test",
+            onModernConfigurationDetected: () => {},
+        });
+
+        const key = (
+            discoveryLocal as unknown as {
+                getConfigCacheKey(c: Record<string, unknown>): string;
+            }
+        ).getConfigCacheKey({ baseUrl: "  https://llmapi.wolfram.com  " });
+
+        assert.strictEqual(key, "https://llmapi.wolfram.com");
+    });
+
     test("falls back to legacy path when no configuration", async () => {
         const token = new vscode.CancellationTokenSource().token;
         configManager.resolveBackends.resolves([]);

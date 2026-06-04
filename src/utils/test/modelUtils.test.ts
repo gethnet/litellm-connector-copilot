@@ -3,7 +3,6 @@ import * as sinon from "sinon";
 import { getModelTags } from "../modelCapabilities";
 import type { DerivedModelCapabilities } from "../modelCapabilities";
 import type { ModelCapabilityOverride } from "../../types";
-import type { LiteLLMModelInfo } from "../../types";
 
 suite("Model Tags Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;

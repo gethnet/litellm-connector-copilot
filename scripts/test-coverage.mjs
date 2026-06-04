@@ -40,6 +40,9 @@ if (!existsSync(coveragePath)) {
 
 const testResultsDir = join(process.cwd(), "test-results");
 process.env.VSCODE_TEST_RESULTS_DIR = testResultsDir;
+// Disable PostHog telemetry during tests to prevent fetch mock interference
+// and avoid real HTTP requests during test execution
+process.env.POSTHOG_MOCK = "true";
 clearDirectory(testResultsDir);
 if (!existsSync(testResultsDir)) {
   mkdirSync(testResultsDir, { recursive: true });

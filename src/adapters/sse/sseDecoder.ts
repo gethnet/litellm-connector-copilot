@@ -17,7 +17,9 @@ export async function* decodeSSE(
     let aborted = false;
     const onAbort = () => {
         aborted = true;
-        reader.cancel().catch(() => {});
+        reader.cancel().catch(() => {
+            return undefined;
+        });
     };
     if (signal) {
         if (signal.aborted) {

@@ -3,11 +3,9 @@ import { LiteLLMChatProvider } from "./providers";
 import { ConfigManager } from "./config/configManager";
 import {
     registerManageConfigCommand,
-    registerManageBackendsCommand,
     registerReloadModelsCommand,
     registerShowModelsCommand,
     registerCheckConnectionCommand,
-    registerResetConfigCommand,
 } from "./commands/manageConfig";
 import { showModelPicker } from "./commands/modelPicker";
 import { registerSelectInlineCompletionModelCommand } from "./commands/inlineCompletions";
@@ -27,6 +25,7 @@ let configManagerInstance: ConfigManager | undefined;
 let telemetryServiceInstance: TelemetryService | undefined;
 
 const MODERN_CONFIG_SESSION_KEY = "litellm-connector.isOnModernConfig";
+const MIGRATION_NOTICE_KEY = "litellm-connector.migrationNotice.v1";
 
 export function activate(context: vscode.ExtensionContext): void {
     // Initialize telemetry first so logger can use it
@@ -112,6 +111,27 @@ export function activate(context: vscode.ExtensionContext): void {
     const configManager = configManagerInstance;
     configManager.setTelemetryService(telemetryService);
 
+    const showMigrationNoticeOnce = async (): Promise<void> => {
+        const alreadyShown = context.globalState.get<boolean>(MIGRATION_NOTICE_KEY, false);
+        if (alreadyShown) {
+            return;
+        }
+
+        await context.globalState.update(MIGRATION_NOTICE_KEY, true);
+
+        const openLanguageModels = "Open Language Models";
+        const message =
+            "Configuration now lives in VS Code's Language Models view. Use Add Model... to add or edit LiteLLM.";
+        const choice = await vscode.window.showInformationMessage(message, openLanguageModels);
+        if (choice === openLanguageModels) {
+            try {
+                await vscode.commands.executeCommand("workbench.action.chat.manage");
+            } catch {
+                await vscode.commands.executeCommand("workbench.action.openSettings", "@tag:language-model");
+            }
+        }
+    };
+
     const getModernConfigSessionFlag = (): boolean => {
         return context.workspaceState?.get<boolean>(MODERN_CONFIG_SESSION_KEY, false) === true;
     };
@@ -145,6 +165,8 @@ export function activate(context: vscode.ExtensionContext): void {
     });
 
     // VS Code 1.120+ uses the unified chat provider with per-group configuration support.
+
+    void showMigrationNoticeOnce();
 
     const activeProvider = new LiteLLMChatProvider(context.secrets, ua, effortFallbackCache);
     activeProvider.setTelemetryService(telemetryService);
@@ -264,13 +286,13 @@ export function activate(context: vscode.ExtensionContext): void {
         context.subscriptions.push(
             registerManageConfigCommand(context, configManager, activeProvider, telemetryService)
         );
-        context.subscriptions.push(registerManageBackendsCommand(configManager, activeProvider, telemetryService));
         context.subscriptions.push(registerShowModelsCommand(activeProvider, telemetryService));
         context.subscriptions.push(registerReloadModelsCommand(activeProvider, telemetryService));
         context.subscriptions.push(registerCheckConnectionCommand(configManager, telemetryService));
-        context.subscriptions.push(
-            registerResetConfigCommand(configManager, activeProvider, telemetryService, registerProvider)
-        );
+        context.subscriptions
+            .push
+            // Legacy resetConfig command removed with migration to Language Models UI
+            ();
         context.subscriptions.push(registerSelectInlineCompletionModelCommand(activeProvider));
         context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider, telemetryService));
         context.subscriptions.push(
@@ -305,12 +327,12 @@ export function activate(context: vscode.ExtensionContext): void {
                 Logger.info("Extension not configured. Prompting user...");
                 vscode.window
                     .showInformationMessage(
-                        "LiteLLM Connector is not configured. Open LiteLLM configuration to add your backends.",
-                        "Open LiteLLM Configuration"
+                        "LiteLLM Connector is not configured. Open Language Models to add a LiteLLM provider.",
+                        "Open Language Models"
                     )
                     .then((selection) => {
-                        if (selection === "Open LiteLLM Configuration") {
-                            vscode.commands.executeCommand("litellm-connector.manage");
+                        if (selection === "Open Language Models") {
+                            vscode.commands.executeCommand("workbench.action.chat.manage");
                         }
                     });
             }
@@ -325,6 +347,8 @@ export async function deactivate(): Promise<void> {
         await configManagerInstance.dispose();
     }
     if (telemetryServiceInstance) {
-        await telemetryServiceInstance.dispose();
+        // Use shutdown() instead of dispose() for proper async cleanup
+        await telemetryServiceInstance.shutdown();
+        telemetryServiceInstance.dispose();
     }
 }

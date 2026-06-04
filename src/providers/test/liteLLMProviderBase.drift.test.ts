@@ -82,20 +82,19 @@ suite("Model Drift Detection & State Persistence", () => {
     });
 
     test("calls with different config trigger re-discovery", async () => {
+        // Two distinct base URLs → two distinct cache keys → two discovery calls.
         const config1 = {
-            providerName: "group-1",
             baseUrl: "http://localhost:4000",
             apiKey: "key-1",
         };
         const config2 = {
-            providerName: "group-2",
             baseUrl: "http://localhost:4001",
             apiKey: "key-2",
         };
 
         let callCount = 0;
         const mockSession1: BackendSession = {
-            backendName: "group-1",
+            backendName: "localhost:4000",
             baseUrl: "http://localhost:4000",
             apiKey: "key-1",
             client: {
@@ -113,7 +112,7 @@ suite("Model Drift Detection & State Persistence", () => {
             } as unknown as BackendSession["client"],
         };
         const mockSession2: BackendSession = {
-            backendName: "group-2",
+            backendName: "localhost:4001",
             baseUrl: "http://localhost:4001",
             apiKey: "key-2",
             client: {
@@ -131,11 +130,13 @@ suite("Model Drift Detection & State Persistence", () => {
             } as unknown as BackendSession["client"],
         };
 
-        sandbox.stub(configManager, "convertProviderConfiguration").callsFake((groupName) => {
-            if (groupName === "group-1") {
+        // Discovery now derives the routing identity (passed to convertProviderConfiguration) from
+        // the URL hostname, so we match on hostname here.
+        sandbox.stub(configManager, "convertProviderConfiguration").callsFake((hostname) => {
+            if (hostname === "localhost:4000") {
                 return mockSession1;
             }
-            if (groupName === "group-2") {
+            if (hostname === "localhost:4001") {
                 return mockSession2;
             }
             return undefined;

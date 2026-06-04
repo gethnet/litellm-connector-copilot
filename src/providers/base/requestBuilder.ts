@@ -35,9 +35,8 @@ export class RequestBuilder {
         model: vscode.LanguageModelChatInformation,
         options: vscode.ProvideLanguageModelChatResponseOptions,
         modelInfo?: LiteLLMModelInfo,
-        caller?: string
+        _caller?: string
     ): Promise<OpenAIChatCompletionRequest> {
-        const telemetry = this.getTelemetryOptions(options);
         const config = await this.configManager.getConfig();
 
         const toolRedaction = this.detectQuotaToolRedaction(
@@ -46,7 +45,7 @@ export class RequestBuilder {
             `build-${Math.random().toString(36).slice(2, 10)}`,
             model.id,
             config.disableQuotaToolRedaction === true,
-            caller
+            _caller
         );
         const toolConfig = convertTools({ ...options, tools: toolRedaction.tools });
         const messagesToUse = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo);
@@ -110,9 +109,8 @@ export class RequestBuilder {
         model: vscode.LanguageModelChatInformation,
         options: vscode.ProvideLanguageModelChatResponseOptions,
         modelInfo?: LiteLLMModelInfo,
-        caller?: string
+        _caller?: string
     ): Promise<OpenAIChatCompletionRequest> {
-        const telemetry = this.getTelemetryOptions(options);
         const config = await this.configManager.getConfig();
 
         const toolConfig = convertTools(options);

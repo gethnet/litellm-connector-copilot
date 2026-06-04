@@ -1,7 +1,6 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import { LiteLLMChatProvider } from "../../providers";
-import { LiteLLMClient } from "../../adapters/litellmClient";
 import * as sinon from "sinon";
 import { createMockSecrets } from "../../test/utils/testMocks";
 
@@ -140,7 +139,18 @@ suite("LiteLLM Error Handling Unit Tests", function () {
         });
         const apiError = new Error(`LiteLLM API error: 400 Bad Request\n${errorText}`);
 
-        sandbox.stub(LiteLLMClient.prototype, "chat").rejects(apiError);
+        // Stub `sendRequestToLiteLLM` directly. The new per-group routing checks
+        // `getDiscoveredModelBackend` first and falls back to `resolveBackends`, both of
+        // which return nothing in the unit-test environment. Stubbing the higher-level
+        // method isolates the error-handling behaviour we want to exercise.
+        sandbox
+            .stub(
+                provider as unknown as {
+                    sendRequestToLiteLLM: (request: unknown) => Promise<ReadableStream<Uint8Array>>;
+                },
+                "sendRequestToLiteLLM"
+            )
+            .rejects(apiError);
 
         const model: vscode.LanguageModelChatInformation = {
             id: "test-model",
@@ -194,7 +204,17 @@ suite("LiteLLM Error Handling Unit Tests", function () {
             .resolves({ url: "http://localhost:4000", inactivityTimeout: 60 });
 
         const apiError = new Error(`LiteLLM API error: 400 Bad Request\nSomething went wrong`);
-        sandbox.stub(LiteLLMClient.prototype, "chat").rejects(apiError);
+        // Stub `sendRequestToLiteLLM` directly (see note above for the unsupported-parameter
+        // test) so the request-flow doesn't reject with the "LiteLLM configuration not found"
+        // guard before we reach the API error.
+        sandbox
+            .stub(
+                provider as unknown as {
+                    sendRequestToLiteLLM: (request: unknown) => Promise<ReadableStream<Uint8Array>>;
+                },
+                "sendRequestToLiteLLM"
+            )
+            .rejects(apiError);
 
         const model: vscode.LanguageModelChatInformation = {
             id: "test-model",

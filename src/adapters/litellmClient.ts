@@ -402,6 +402,12 @@ export class LiteLLMClient {
                 if (err instanceof Error && err.name === "AbortError") {
                     throw new Error("Operation cancelled by user", { cause: err });
                 }
+                // Cancellation raised by the inter-attempt sleep (or any nested
+                // cancellable helper) should propagate as cancellation, not be
+                // caught and re-fed into the retry loop.
+                if (err instanceof Error && err.message === "Operation cancelled by user") {
+                    throw err;
+                }
                 if (attempt >= maxRetries) {
                     throw err;
                 }

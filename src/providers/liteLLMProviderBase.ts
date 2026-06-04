@@ -7,8 +7,7 @@ import type {
 } from "vscode";
 
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../types";
-import { deriveGroupNameFromUrl, convertMessages, convertTools } from "../utils";
-import { normalizeMessagesForV2Pipeline } from "../utils";
+import { convertMessages, convertTools, normalizeMessagesForV2Pipeline } from "../utils";
 import { MultiBackendClient, parseNamespacedModelId } from "../adapters/multiBackendClient";
 import {
     trimMessagesToFitBudget,
@@ -16,19 +15,12 @@ import {
     isContextOverflowError,
     countTokens,
 } from "../adapters/tokenUtils";
-import { countTokensForV2Messages, trimV2MessagesForBudget } from "../adapters/tokenUtils";
+import { countTokensForV2Messages } from "../adapters/tokenUtils";
 import { ConfigManager } from "../config/configManager";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
 import type { TelemetryService } from "../telemetry/telemetryService";
-import {
-    deriveCapabilitiesFromModelInfo,
-    capabilitiesToVSCode,
-    getModelTags as getDerivedModelTags,
-    buildReasoningEffortConfigurationSchema,
-    getSupportedReasoningEfforts,
-} from "../utils/modelCapabilities";
-import type { DerivedModelCapabilities } from "../utils/modelCapabilities";
+import { buildReasoningEffortConfigurationSchema, getSupportedReasoningEfforts } from "../utils/modelCapabilities";
 import type { SupportedReasoningEffort } from "../types";
 import {
     EffortFallbackCache,
@@ -240,14 +232,18 @@ export abstract class LiteLLMProviderBase {
                     return localCount;
                 }
 
-                const backends = await this._configManager.resolveBackends();
-                if (backends.length === 0) {
+                const backend = this._modelDiscovery.getDiscoveredModelBackend(model.id);
+                if (!backend) {
                     return localCount;
                 }
 
-                const multiClient = new MultiBackendClient(backends, this.userAgent);
-                const result = await multiClient.countTokens(model.id, request, token);
-                if (result?.token_count != null && !token.isCancellationRequested) {
+                const singleClient = new LiteLLMClient({ url: backend.url, key: backend.apiKey }, this.userAgent);
+                const result = await singleClient.countTokens({ ...request, model: model.id }, token);
+                if (
+                    result?.token_count !== undefined &&
+                    result.token_count !== null &&
+                    !token.isCancellationRequested
+                ) {
                     tokenCountCache.set(cacheKey, { count: result.token_count, timestamp: Date.now() });
                     return result.token_count;
                 }
@@ -323,7 +319,7 @@ export abstract class LiteLLMProviderBase {
         const args: DiscoverArgs = {
             options,
             token,
-            onModernConfigurationDetected: () => this.setModernConfigurationDetectedHandler(() => {}),
+            onModernConfigurationDetected: this._onModernConfigurationDetected,
         };
 
         const previousIds = new Set(this._lastModelList.map((m) => m.id));
@@ -333,7 +329,15 @@ export abstract class LiteLLMProviderBase {
         // A transient network error or empty /model/info response during a background
         // refresh must not cause VS Code to see zero models (which makes it fall back
         // to the built-in "auto" model and discard the user's selection).
-        if (models.length === 0 && this._lastModelList.length > 0) {
+        //
+        // IMPORTANT EXCEPTION: vendor-level calls (no options.configuration) intentionally
+        // return [] — VS Code makes a vendor-level call AND a group-specific call, then
+        // combines both result sets. If we return _lastModelList here for vendor-level calls,
+        // those models are combined with the group-specific results, causing every model to
+        // appear twice under the same group header. An empty result from a vendor-level call
+        // is correct and expected behaviour, not a transient failure.
+        const isVendorLevelCall = !options.configuration;
+        if (models.length === 0 && this._lastModelList.length > 0 && !isVendorLevelCall) {
             Logger.warn(
                 "discoverModels: ignoring empty result — keeping previous model list to avoid losing user's model selection"
             );
@@ -657,11 +661,20 @@ export abstract class LiteLLMProviderBase {
                     },
                 ];
             } else {
+                // OBSOLETE (remove in 1.125): Legacy workspace-settings fallback.
+                // This path exists only for backward compatibility with pre-1.119 configurations.
+                // Modern configuration uses per-group provider configuration.
+                Logger.warn(
+                    `[DEPRECATED] Using legacy workspace-settings path for model "${request.model}". ` +
+                        `Please migrate to per-group provider configuration.`
+                );
                 backends = await this._configManager.resolveBackends();
-            }
-
-            if (backends.length === 0) {
-                throw new Error("LiteLLM configuration not found. Please configure the model provider group.");
+                if (backends.length === 0) {
+                    throw new Error(
+                        `LiteLLM backend not found for model "${request.model}". ` +
+                            `Please ensure the model is discovered and the provider group is properly configured.`
+                    );
+                }
             }
 
             multiClient = new MultiBackendClient(backends, this.userAgent);
@@ -1223,7 +1236,6 @@ export abstract class LiteLLMProviderBase {
  */
 const tokenCountCache = new Map<string, { count: number; timestamp: number }>();
 const CACHE_TTL_MS = 60000; // Increase to 1 minute for better stability
-const DEBOUNCE_MS = 300;
 
 /**
  * Tracks pending background token count requests to avoid redundant network calls.

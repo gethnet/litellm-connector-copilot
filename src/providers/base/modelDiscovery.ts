@@ -110,9 +110,17 @@ export class ModelDiscovery {
     }
 
     private getConfigCacheKey(configuration: Record<string, unknown>): string {
-        const providerName = typeof configuration.providerName === "string" ? configuration.providerName : "";
-        const baseUrl = typeof configuration.baseUrl === "string" ? configuration.baseUrl : "";
-        return `${providerName}::${baseUrl}`;
+        const baseUrl = typeof configuration.baseUrl === "string" ? configuration.baseUrl.trim() : "";
+        // Normalize URL to prevent cache misses from variations
+        // - Remove trailing slashes
+        // - Normalize protocol to lowercase
+        let normalized = baseUrl.replace(/\/+$/, "").trim();
+        if (normalized.toLowerCase().startsWith("https://")) {
+            normalized = "https://" + normalized.slice(8).replace(/^\/+/, "");
+        } else if (normalized.toLowerCase().startsWith("http://")) {
+            normalized = "http://" + normalized.slice(7).replace(/^\/+/, "");
+        }
+        return normalized;
     }
 
     private hasModelListDrift(
@@ -175,9 +183,13 @@ export class ModelDiscovery {
             if (cached && now - cached.fetchedAtMs < TTL_MS) {
                 return cached.models;
             }
-        } else if (this.lastModelList.length > 0 && now - this.modelListFetchedAtMs < TTL_MS) {
-            return this.lastModelList;
         }
+        // NOTE: Vendor-level calls (no options.configuration) MUST NOT return cached models
+        // from lastModelList. VS Code's _resolveAllLanguageModels makes BOTH vendor-level
+        // AND group-specific discovery calls, then COMBINES all results into a single array.
+        // Returning lastModelList here would cause duplicate models when VS Code combines
+        // vendor-level results with group-specific results. Instead, we let the call fall
+        // through to doDiscover() which correctly returns [] for vendor-level calls.
 
         this.inFlightDiscovery = this.doDiscover(options, token);
         try {
@@ -193,45 +205,61 @@ export class ModelDiscovery {
     ): Promise<vscode.LanguageModelChatInformation[]> {
         try {
             if (options.configuration) {
-                const configuredProviderName =
-                    typeof options.configuration.providerName === "string"
-                        ? options.configuration.providerName.trim()
-                        : "";
                 const configuredBaseUrl =
                     typeof options.configuration.baseUrl === "string" ? options.configuration.baseUrl.trim() : "";
-                const derivedGroupName = deriveGroupNameFromUrl(configuredBaseUrl).trim();
-                const groupName =
-                    options.groupName ??
-                    (configuredProviderName.length > 0 ? configuredProviderName : undefined) ??
-                    (derivedGroupName.length > 0 ? derivedGroupName : undefined) ??
-                    "default";
-                const session = this.configManager.convertProviderConfiguration(groupName, options.configuration);
+
+                // Clean hostname (e.g. "llmapi.wolfram.com") — drives model-ID/routing.
+                const urlHostname = deriveGroupNameFromUrl(configuredBaseUrl).trim();
+
+                // User-facing group name (e.g. "LiteLLM: Wolfram") — drives the picker category label.
+                const displayLabel =
+                    options.groupName ?? (urlHostname.length > 0 ? urlHostname : undefined) ?? "LiteLLM";
+
+                // backendName (routing identity) must be the clean hostname so model IDs match
+                // what user settings reference. Fall back to displayLabel only if no hostname.
+                const backendIdentity = urlHostname.length > 0 ? urlHostname : displayLabel;
+
+                const session = this.configManager.convertProviderConfiguration(backendIdentity, options.configuration);
                 if (session) {
                     this.onModernConfigurationDetected?.();
-                    const models = await this.discoverFromSession(session, token);
+
+                    // Check cache BEFORE fetching to prevent discovery loops
                     const key = this.getConfigCacheKey(options.configuration);
                     const cached = this.perConfigCache.get(key);
-                    if (cached && !this.hasModelListDrift(cached.models, models)) {
+                    const cacheTtlMs = 300000; // 5 minutes
+                    if (cached && Date.now() - cached.fetchedAtMs < cacheTtlMs) {
                         return cached.models;
                     }
+
+                    // Cache miss or expired - fetch fresh models
+                    const models = await this.discoverFromSession(session, token, displayLabel);
+
+                    // Update cache with fresh results
                     this.perConfigCache.set(key, { models, fetchedAtMs: Date.now() });
                     return models;
                 }
             }
 
-            const backends = await this.configManager.resolveBackends();
-            if (!backends || backends.length === 0) {
-                return [];
-            }
-            return this.discoverFromBackends(backends, token);
-        } catch (err) {
+            // OBSOLETE (remove in 1.125): Legacy workspace-settings discovery path
+            //
+            // CRITICAL: When a provider has a configuration schema, VS Code makes TWO types of calls:
+            // 1. Vendor-level discovery (no options.configuration) - to check if vendor has any models
+            // 2. Group-specific discovery (with options.configuration) - to get models for a configured group
+            //
+            // For providers with configuration schemas, we must return EMPTY ARRAY for vendor-level calls.
+            // Otherwise, models returned here become "orphans" without group context, and VS Code assigns
+            // them to the provider's displayName ("LiteLLM"), causing a spurious "LiteLLM" group to appear
+            // alongside the user's actual configured group(s).
+            //
+            // The legacy path below is now only executed during the deprecation window for users upgrading
+            // from pre-1.119 VS Code versions. When the minimum supported VS Code is raised to >= 1.125,
+            // this entire path will be removed.
+            return [];
+        } catch {
             // Apply backoff policy on discovery failures.
             // After 9 failures, we start delaying and eventually block.
             // After the 10th failure, we throw a Blocked error to signal that VS Code should back off.
             const decision = sharedDiscoveryBackoff.recordFailure(Date.now());
-
-            // Extract error message for logging
-            const errorMessage = (err instanceof Error ? err.message : String(err)) || "Unknown discovery error";
 
             // Delay briefly on failure attempts to avoid rapid polling
             if (decision.delayMs > 0) {
@@ -270,6 +298,7 @@ export class ModelDiscovery {
                     entry,
                     entry.backendName,
                     backendByName.get(entry.backendName),
+                    entry.backendName,
                     config.forceResponsesEndpoint,
                     config.modelCapabilitiesOverrides
                 )
@@ -285,7 +314,8 @@ export class ModelDiscovery {
 
     private async discoverFromSession(
         session: BackendSession,
-        token: vscode.CancellationToken
+        token: vscode.CancellationToken,
+        displayLabel?: string
     ): Promise<vscode.LanguageModelChatInformation[]> {
         const config = await this.configManager.getConfig();
         const models = await session.client.getModelInfo(token);
@@ -299,6 +329,7 @@ export class ModelDiscovery {
                     entry,
                     session.backendName,
                     { url: session.baseUrl, apiKey: session.apiKey },
+                    displayLabel ?? session.backendName,
                     config.forceResponsesEndpoint,
                     config.modelCapabilitiesOverrides
                 )
@@ -332,6 +363,7 @@ export class ModelDiscovery {
         entry: LiteLLMModelInfoResponse["data"][number],
         backendName: string,
         backend: { url?: string; apiKey?: string } | undefined,
+        displayLabel: string,
         forceResponsesEndpoint?: boolean,
         modelCapabilitiesOverrides?: LiteLLMConfig["modelCapabilitiesOverrides"]
     ): vscode.LanguageModelChatInformation & {
@@ -366,7 +398,7 @@ export class ModelDiscovery {
                 maxOutputTokens: 0,
                 capabilities: { canGenerate: false },
                 isUserSelectable: false,
-                category: { label: backendName, order: 0 },
+                category: { label: displayLabel, order: 0 },
                 configurationSchema: undefined,
                 _backendName: backendName,
                 _backendUrl: backend?.url ?? "",
@@ -411,7 +443,7 @@ export class ModelDiscovery {
             capabilities,
             tags,
             isUserSelectable: true,
-            category: backendName ? { label: backendName, order: 0 } : undefined,
+            category: { label: displayLabel, order: 0 },
             configurationSchema: reasoningSchema,
             _backendName: backendName,
             _backendUrl: backend?.url ?? "",

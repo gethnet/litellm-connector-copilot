@@ -63,11 +63,34 @@ suite("Discovery backoff", () => {
     });
 
     test("ModelDiscovery shares the process-global backoff controller", async () => {
+        // This test verifies that when multiple discovery attempts fail,
+        // they share a global backoff controller that eventually blocks
+        // further discovery attempts.
+
         const recordFailureStub = sandbox.stub(sharedDiscoveryBackoff, "recordFailure").callsFake(() => ({
             attempt: 1,
             delayMs: 500,
             shouldBlock: true,
         }));
+
+        // Note: With the legacy discovery path disabled, backoff is triggered
+        // when HTTP requests to the model endpoint fail. To test backoff behavior,
+        // we need to:
+        // 1. Return a valid session from convertProviderConfiguration
+        // 2. Make the LiteLLMClient.getModelInfo call fail
+
+        // Create a stub client that rejects on getModelInfo
+        const stubClient = {
+            getModelInfo: sandbox.stub().rejects(new Error("HTTP request failed")),
+            getEndpoint: sandbox.stub().returns("http://localhost:4000/v1/chat/completions"),
+        };
+
+        (configManager.convertProviderConfiguration as sinon.SinonStub).returns({
+            backendName: "test-backend",
+            baseUrl: "http://localhost:4000",
+            apiKey: "test-key",
+            client: stubClient,
+        });
 
         const discoveryA = new ModelDiscovery({
             configManager,
@@ -77,11 +100,14 @@ suite("Discovery backoff", () => {
 
         const tokenA = new vscode.CancellationTokenSource().token;
 
-        // Make resolveBackends reject on first call
-        (configManager.resolveBackends as sinon.SinonStub).rejects(new Error("backend resolution failed"));
-
         // First discovery should trigger backoff and block
-        const promise = discoveryA.discover({ options: { silent: false, configuration: {} }, token: tokenA });
+        const promise = discoveryA.discover({
+            options: {
+                silent: false,
+                configuration: { providerName: "test-group", baseUrl: "http://localhost:4000", apiKey: "test-key" },
+            },
+            token: tokenA,
+        });
         await assert.rejects(promise, /Discovery blocked/);
 
         // recordFailure should have been called at least once

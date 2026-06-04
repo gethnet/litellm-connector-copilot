@@ -27,6 +27,10 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
      * @param token Cancellation token.
      * @param onProgress Callback for streaming response parts.
      */
+    /**
+     * @deprecated Direct provider request fallback removed; use VS Code's selectChatModels route only.
+     * Retained for potential future credential-supply logic.
+     */
     async provideCommitMessage(
         diff: string,
         options: vscode.LanguageModelChatRequestOptions,
@@ -178,6 +182,10 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
     /**
      * Resolves the model to use for commit message generation.
      */
+    /**
+     * @deprecated Use vscode.lm.selectChatModels() instead.
+     * Retained for potential future use.
+     */
     private async resolveCommitModel(
         config: LiteLLMConfig,
         token: vscode.CancellationToken
@@ -235,8 +243,8 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
                     }
                 }
             }
-        } catch (err) {
-            Logger.warn("Error while extracting commit text", err);
+        } catch {
+            Logger.warn("Error while extracting commit text");
         }
 
         return fullText;

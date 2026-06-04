@@ -57,7 +57,7 @@ async function tryGenerateViaVSCodeModelRequest(
  * Registers the command to generate a git commit message.
  */
 export function registerGenerateCommitMessageCommand(
-    provider: LiteLLMCommitMessageProvider,
+    _provider: LiteLLMCommitMessageProvider,
     telemetryService?: TelemetryService
 ): vscode.Disposable {
     return vscode.commands.registerCommand("litellm-connector.generateCommitMessage", async (scm: unknown) => {
@@ -68,7 +68,7 @@ export function registerGenerateCommitMessageCommand(
         }
         try {
             // Check if model is configured, if not, show picker
-            const config = await provider.getConfigManager().getConfig();
+            const config = await _provider.getConfigManager().getConfig();
             const modelId = config.commitModelIdOverride;
 
             if (!modelId) {
@@ -77,7 +77,7 @@ export function registerGenerateCommitMessageCommand(
                     "Select Model"
                 );
                 if (result === "Select Model") {
-                    await showModelPicker(provider, {
+                    await showModelPicker(_provider, {
                         title: "Select Commit Message Model",
                         settingKey: "commitModelIdOverride",
                         telemetryService: telemetryService,
@@ -103,7 +103,7 @@ export function registerGenerateCommitMessageCommand(
             }
 
             // Check diff size with precise context calculation
-            const modelInfo = provider.getModelInfo(modelId);
+            const modelInfo = _provider.getModelInfo(modelId);
             const capabilities = deriveCapabilitiesFromModelInfo(modelId, modelInfo);
 
             // Calculate precise budget: MaxInput - MaxOutput - Static Prompts
@@ -185,31 +185,19 @@ export function registerGenerateCommitMessageCommand(
                                 }
                             );
                         } catch (vscodeRouteErr) {
-                            Logger.warn(
-                                "VS Code model request route failed; falling back to direct provider request",
-                                vscodeRouteErr
+                            Logger.error("VS Code model request route failed", vscodeRouteErr);
+                            vscode.window.showErrorMessage(
+                                "Failed to generate commit message: " +
+                                    (vscodeRouteErr instanceof Error ? vscodeRouteErr.message : String(vscodeRouteErr))
                             );
+                            return;
                         }
 
                         if (generatedMessage === undefined) {
-                            await provider.provideCommitMessage(
-                                processedDiff,
-                                {
-                                    modelOptions: {},
-                                } as vscode.LanguageModelChatRequestOptions,
-                                token,
-                                (chunk) => {
-                                    accumulatedText += chunk;
-                                    // Update input box incrementally (streaming effect)
-                                    // We apply a light filter here to hide backticks/markdown tags
-                                    // as they arrive, providing a cleaner UI experience.
-                                    const filtered = accumulatedText
-                                        .replace(/^```(?:\w+)?\s*/, "") // Strip starting block
-                                        .replace(/```$/, ""); // Strip ending block if it just arrived
-                                    inputBox.value = filtered;
-                                }
+                            vscode.window.showErrorMessage(
+                                "Failed to generate commit message: no response from the selected model."
                             );
-                            generatedMessage = stripMarkdownCodeBlocks(accumulatedText);
+                            return;
                         }
 
                         inputBox.value = generatedMessage;

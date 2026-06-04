@@ -42,7 +42,9 @@ suite("LiteLLMCompletionProvider Unit Tests", () => {
     test("provideTextCompletion extracts text from SSE stream", async () => {
         const provider = new LiteLLMCompletionProvider(mockSecrets, userAgent);
 
-        // Seed model cache so resolveCompletionModel can pick it up.
+        // Seed model cache so resolveCompletionModel can pick it up. The model entry also
+        // carries backend metadata so the new per-group routing path can resolve the
+        // discovery cache lookup (`getDiscoveredModelBackend`).
         (provider as unknown as { _lastModelList: vscode.LanguageModelChatInformation[] })._lastModelList = [
             {
                 id: "m1",
@@ -54,8 +56,27 @@ suite("LiteLLMCompletionProvider Unit Tests", () => {
                 maxOutputTokens: 100,
                 capabilities: { toolCalling: true, imageInput: false },
                 tags: ["inline-completions"],
+                _backendName: "localhost:4000",
+                _backendUrl: "http://localhost:4000",
+                _apiKey: "k",
             } as unknown as vscode.LanguageModelChatInformation,
         ];
+        // Stub the discovery service lookups so `sendRequestToLiteLLM` can resolve the
+        // backend for the new routing path.
+        const providerInternals = provider as unknown as {
+            _modelDiscovery: {
+                getLastModels: () => vscode.LanguageModelChatInformation[];
+                getDiscoveredModelBackend: (
+                    modelId: string
+                ) => { backendName: string; url: string; apiKey: string } | undefined;
+            };
+        };
+        sandbox
+            .stub(providerInternals._modelDiscovery, "getLastModels")
+            .returns((provider as unknown as { _lastModelList: vscode.LanguageModelChatInformation[] })._lastModelList);
+        sandbox
+            .stub(providerInternals._modelDiscovery, "getDiscoveredModelBackend")
+            .returns({ backendName: "localhost:4000", url: "http://localhost:4000", apiKey: "k" });
 
         // Ensure config is present.
         const configManager = (provider as unknown as { _configManager: unknown })._configManager as {

@@ -43,6 +43,37 @@ suite("Token Telemetry Regression Tests", () => {
         const configManager = providerAsAny._configManager;
         sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
 
+        // Seed the discovered model list so the new per-group routing path can resolve the
+        // backend. Without this the request fails with "LiteLLM configuration not found"
+        // before reaching the stubbed `chat` call.
+        const seededModel = {
+            id: "gpt-4",
+            name: "GPT-4",
+            tooltip: "",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 8192,
+            maxOutputTokens: 4096,
+            capabilities: { toolCalling: true, imageInput: false },
+            _backendName: "localhost:4000",
+            _backendUrl: "http://localhost:4000",
+            _apiKey: "test-api-key",
+        } as unknown as vscode.LanguageModelChatInformation;
+        const providerInternals = provider as unknown as {
+            _lastModelList: vscode.LanguageModelChatInformation[];
+            _modelDiscovery: {
+                getLastModels: () => vscode.LanguageModelChatInformation[];
+                getDiscoveredModelBackend: (
+                    modelId: string
+                ) => { backendName: string; url: string; apiKey: string } | undefined;
+            };
+        };
+        providerInternals._lastModelList = [seededModel];
+        sandbox.stub(providerInternals._modelDiscovery, "getLastModels").returns([seededModel]);
+        sandbox
+            .stub(providerInternals._modelDiscovery, "getDiscoveredModelBackend")
+            .returns({ backendName: "localhost:4000", url: "http://localhost:4000", apiKey: "test-api-key" });
+
         // Mock LiteLLMClient.chat
         const encoder = new TextEncoder();
         const mockStream = new ReadableStream({
@@ -106,6 +137,35 @@ suite("Token Telemetry Regression Tests", () => {
         const configManager = providerAsAny._configManager;
         sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
 
+        // Seed the discovered backend for the same reason as the success test above.
+        const seededModel = {
+            id: "gpt-4",
+            name: "GPT-4",
+            tooltip: "",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 8192,
+            maxOutputTokens: 4096,
+            capabilities: { toolCalling: true, imageInput: false },
+            _backendName: "localhost:4000",
+            _backendUrl: "http://localhost:4000",
+            _apiKey: "test-api-key",
+        } as unknown as vscode.LanguageModelChatInformation;
+        const providerInternals = provider as unknown as {
+            _lastModelList: vscode.LanguageModelChatInformation[];
+            _modelDiscovery: {
+                getLastModels: () => vscode.LanguageModelChatInformation[];
+                getDiscoveredModelBackend: (
+                    modelId: string
+                ) => { backendName: string; url: string; apiKey: string } | undefined;
+            };
+        };
+        providerInternals._lastModelList = [seededModel];
+        sandbox.stub(providerInternals._modelDiscovery, "getLastModels").returns([seededModel]);
+        sandbox
+            .stub(providerInternals._modelDiscovery, "getDiscoveredModelBackend")
+            .returns({ backendName: "localhost:4000", url: "http://localhost:4000", apiKey: "test-api-key" });
+
         sandbox.stub(LiteLLMClient.prototype, "chat").rejects(new Error("LiteLLM API error\nSomething went wrong"));
 
         const model: vscode.LanguageModelChatInformation = {
@@ -155,24 +215,36 @@ suite("Token Telemetry Regression Tests", () => {
         const providerAsAny = provider as unknown as {
             _configManager: ConfigManager;
             _lastModelList: vscode.LanguageModelChatInformation[];
+            _modelDiscovery: {
+                getLastModels: () => vscode.LanguageModelChatInformation[];
+                getDiscoveredModelBackend: (
+                    modelId: string
+                ) => { backendName: string; url: string; apiKey: string } | undefined;
+            };
         };
         const configManager = providerAsAny._configManager;
         sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
 
-        // Setup model list for resolution
-        providerAsAny._lastModelList = [
-            {
-                id: "gpt-4",
-                name: "GPT-4",
-                tooltip: "",
-                family: "litellm",
-                version: "1.0.0",
-                maxInputTokens: 8192,
-                maxOutputTokens: 4096,
-                capabilities: { toolCalling: true, imageInput: false },
-                tags: ["inline-completions"],
-            } as unknown as vscode.LanguageModelChatInformation,
-        ];
+        // Seed the discovered backend so the new per-group routing path resolves correctly.
+        const seededModel = {
+            id: "gpt-4",
+            name: "GPT-4",
+            tooltip: "",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 8192,
+            maxOutputTokens: 4096,
+            capabilities: { toolCalling: true, imageInput: false },
+            tags: ["inline-completions"],
+            _backendName: "localhost:4000",
+            _backendUrl: "http://localhost:4000",
+            _apiKey: "test-api-key",
+        } as unknown as vscode.LanguageModelChatInformation;
+        providerAsAny._lastModelList = [seededModel];
+        sandbox.stub(providerAsAny._modelDiscovery, "getLastModels").returns([seededModel]);
+        sandbox
+            .stub(providerAsAny._modelDiscovery, "getDiscoveredModelBackend")
+            .returns({ backendName: "localhost:4000", url: "http://localhost:4000", apiKey: "test-api-key" });
 
         const encoder = new TextEncoder();
         const mockStream = new ReadableStream({

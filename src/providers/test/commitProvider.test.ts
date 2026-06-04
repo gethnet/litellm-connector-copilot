@@ -64,6 +64,12 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
         const providerWithCache = provider as unknown as {
             _lastModelList: vscode.LanguageModelChatInformation[];
             _configManager: { getConfig: () => Promise<{ url: string; key?: string }> };
+            _modelDiscovery: {
+                getLastModels: () => vscode.LanguageModelChatInformation[];
+                getDiscoveredModelBackend: (
+                    modelId: string
+                ) => { backendName: string; url: string; apiKey: string } | undefined;
+            };
         };
         providerWithCache._lastModelList = [
             {
@@ -76,8 +82,15 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
                 maxOutputTokens: 1000,
                 capabilities: { toolCalling: true, imageInput: false },
                 tags: ["scm-generator"],
-            } as vscode.LanguageModelChatInformation,
+                _backendName: "localhost:4000",
+                _backendUrl: "http://localhost:4000",
+                _apiKey: "test-key",
+            } as unknown as vscode.LanguageModelChatInformation,
         ];
+        sandbox.stub(providerWithCache._modelDiscovery, "getLastModels").returns(providerWithCache._lastModelList);
+        sandbox
+            .stub(providerWithCache._modelDiscovery, "getDiscoveredModelBackend")
+            .returns({ backendName: "localhost:4000", url: "http://localhost:4000", apiKey: "test-key" });
 
         // Mock config
         const configManager = providerWithCache._configManager;
@@ -229,6 +242,12 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
         const providerWithCache = provider as unknown as {
             _lastModelList: vscode.LanguageModelChatInformation[];
             _configManager: { getConfig: () => Promise<{ url: string; key?: string }> };
+            _modelDiscovery: {
+                getLastModels: () => vscode.LanguageModelChatInformation[];
+                getDiscoveredModelBackend: (
+                    modelId: string
+                ) => { backendName: string; url: string; apiKey: string } | undefined;
+            };
         };
         providerWithCache._lastModelList = [
             {
@@ -241,8 +260,15 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
                 maxOutputTokens: 1000,
                 capabilities: { toolCalling: true, imageInput: false },
                 tags: ["scm-generator"],
-            } as vscode.LanguageModelChatInformation,
+                _backendName: "localhost:4000",
+                _backendUrl: "http://localhost:4000",
+                _apiKey: "test-key",
+            } as unknown as vscode.LanguageModelChatInformation,
         ];
+        sandbox.stub(providerWithCache._modelDiscovery, "getLastModels").returns(providerWithCache._lastModelList);
+        sandbox
+            .stub(providerWithCache._modelDiscovery, "getDiscoveredModelBackend")
+            .returns({ backendName: "localhost:4000", url: "http://localhost:4000", apiKey: "test-key" });
 
         // Mock config
         const configManager = providerWithCache._configManager;
@@ -287,10 +313,29 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
         const providerWithCacheAndConfig = provider as unknown as {
             _lastModelList: vscode.LanguageModelChatInformation[];
             _configManager: ConfigManager;
+            _modelDiscovery: {
+                getLastModels: () => vscode.LanguageModelChatInformation[];
+                getDiscoveredModelBackend: (
+                    modelId: string
+                ) => { backendName: string; url: string; apiKey: string } | undefined;
+            };
         };
         providerWithCacheAndConfig._lastModelList = [
             { id: "m1", tags: ["scm-generator"] } as unknown as vscode.LanguageModelChatInformation,
         ];
+        // Seed backend metadata for the new per-group routing path.
+        const seededModel = {
+            id: "m1",
+            tags: ["scm-generator"],
+            _backendName: "localhost:4000",
+            _backendUrl: "http://localhost:4000",
+            _apiKey: "k",
+        } as unknown as vscode.LanguageModelChatInformation;
+        providerWithCacheAndConfig._lastModelList = [seededModel];
+        sandbox.stub(providerWithCacheAndConfig._modelDiscovery, "getLastModels").returns([seededModel]);
+        sandbox
+            .stub(providerWithCacheAndConfig._modelDiscovery, "getDiscoveredModelBackend")
+            .returns({ backendName: "localhost:4000", url: "http://localhost:4000", apiKey: "k" });
 
         sandbox.stub(providerWithCacheAndConfig._configManager, "getConfig").resolves({ url: "u", key: "k" });
         sandbox.stub(LiteLLMClient.prototype, "chat").rejects(new Error("API failure"));
@@ -311,10 +356,25 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
         const providerWithCacheAndConfig = provider as unknown as {
             _lastModelList: vscode.LanguageModelChatInformation[];
             _configManager: ConfigManager;
+            _modelDiscovery: {
+                getLastModels: () => vscode.LanguageModelChatInformation[];
+                getDiscoveredModelBackend: (
+                    modelId: string
+                ) => { backendName: string; url: string; apiKey: string } | undefined;
+            };
         };
-        providerWithCacheAndConfig._lastModelList = [
-            { id: "m1", tags: ["scm-generator"] } as unknown as vscode.LanguageModelChatInformation,
-        ];
+        const seededModel = {
+            id: "m1",
+            tags: ["scm-generator"],
+            _backendName: "localhost:4000",
+            _backendUrl: "http://localhost:4000",
+            _apiKey: "k",
+        } as unknown as vscode.LanguageModelChatInformation;
+        providerWithCacheAndConfig._lastModelList = [seededModel];
+        sandbox.stub(providerWithCacheAndConfig._modelDiscovery, "getLastModels").returns([seededModel]);
+        sandbox
+            .stub(providerWithCacheAndConfig._modelDiscovery, "getDiscoveredModelBackend")
+            .returns({ backendName: "localhost:4000", url: "http://localhost:4000", apiKey: "k" });
 
         sandbox.stub(providerWithCacheAndConfig._configManager, "getConfig").resolves({ url: "u", key: "k" });
         sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
@@ -378,19 +438,35 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
             url: "http://localhost:4000",
             commitModelIdOverride: "commit-model",
         });
+        const seededModel = {
+            id: "commit-model",
+            name: "commit-model",
+            tooltip: "",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 100,
+            maxOutputTokens: 100,
+            capabilities: { toolCalling: true, imageInput: false },
+            tags: ["scm-generator"],
+            _backendName: "localhost:4000",
+            _backendUrl: "http://localhost:4000",
+            _apiKey: "k",
+        } as unknown as vscode.LanguageModelChatInformation;
         (provider as unknown as { _lastModelList: vscode.LanguageModelChatInformation[] })._lastModelList = [
-            {
-                id: "commit-model",
-                name: "commit-model",
-                tooltip: "",
-                family: "litellm",
-                version: "1.0.0",
-                maxInputTokens: 100,
-                maxOutputTokens: 100,
-                capabilities: { toolCalling: true, imageInput: false },
-                tags: ["scm-generator"],
-            } as unknown as vscode.LanguageModelChatInformation,
+            seededModel,
         ];
+        const providerInternals = provider as unknown as {
+            _modelDiscovery: {
+                getLastModels: () => vscode.LanguageModelChatInformation[];
+                getDiscoveredModelBackend: (
+                    modelId: string
+                ) => { backendName: string; url: string; apiKey: string } | undefined;
+            };
+        };
+        sandbox.stub(providerInternals._modelDiscovery, "getLastModels").returns([seededModel]);
+        sandbox
+            .stub(providerInternals._modelDiscovery, "getDiscoveredModelBackend")
+            .returns({ backendName: "localhost:4000", url: "http://localhost:4000", apiKey: "k" });
 
         const encoder = new TextEncoder();
         sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
