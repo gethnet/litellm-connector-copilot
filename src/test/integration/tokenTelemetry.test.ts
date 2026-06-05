@@ -41,7 +41,7 @@ suite("Token Telemetry Regression Tests", () => {
         // Mock ConfigManager
         const providerAsAny = provider as unknown as { _configManager: ConfigManager };
         const configManager = providerAsAny._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        sandbox.stub(configManager, "getConfig").resolves({});
 
         // Seed the discovered model list so the new per-group routing path can resolve the
         // backend. Without this the request fails with "LiteLLM configuration not found"
@@ -135,7 +135,7 @@ suite("Token Telemetry Regression Tests", () => {
 
         const providerAsAny = provider as unknown as { _configManager: ConfigManager };
         const configManager = providerAsAny._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        sandbox.stub(configManager, "getConfig").resolves({});
 
         // Seed the discovered backend for the same reason as the success test above.
         const seededModel = {
@@ -223,7 +223,7 @@ suite("Token Telemetry Regression Tests", () => {
             };
         };
         const configManager = providerAsAny._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        sandbox.stub(configManager, "getConfig").resolves({});
 
         // Seed the discovered backend so the new per-group routing path resolves correctly.
         const seededModel = {

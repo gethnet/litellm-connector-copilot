@@ -5,7 +5,7 @@ import { LiteLLMChatProvider } from "../";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 import { MultiBackendClient } from "../../adapters/multiBackendClient";
 import type { ConfigManager } from "../../config/configManager";
-import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, ResolvedBackend } from "../../types";
+import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../../types";
 import { createMockSecrets } from "../../test/utils/testMocks";
 import { EffortFallbackCache } from "../../utils/reasoningEffortFallback";
 import { Logger } from "../../utils/logger";
@@ -192,7 +192,6 @@ suite("LiteLLM Provider Unit Tests", () => {
         const build = access(provider).buildOpenAIChatRequest.bind(provider);
         const configManager = access(provider)._configManager;
         sandbox.stub(configManager, "getConfig").resolves({
-            url: "http://localhost:4000",
             sendDefaultParameters: false,
         });
 
@@ -235,7 +234,6 @@ suite("LiteLLM Provider Unit Tests", () => {
         const build = access(provider).buildOpenAIChatRequest.bind(provider);
         const configManager = access(provider)._configManager;
         sandbox.stub(configManager, "getConfig").resolves({
-            url: "http://localhost:4000",
             sendDefaultParameters: true,
         });
 
@@ -274,7 +272,6 @@ suite("LiteLLM Provider Unit Tests", () => {
         const build = access(provider).buildOpenAIChatRequest.bind(provider);
         const configManager = access(provider)._configManager;
         sandbox.stub(configManager, "getConfig").resolves({
-            url: "http://localhost:4000",
             sendDefaultParameters: true,
         });
 
@@ -338,7 +335,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const build = access(provider).buildOpenAIChatRequest.bind(provider);
         const configManager = access(provider)._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        sandbox.stub(configManager, "getConfig").resolves({});
 
         const model = createReasoningModel();
 
@@ -371,7 +368,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent, cache);
         const build = access(provider).buildOpenAIChatRequest.bind(provider);
         const configManager = access(provider)._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        sandbox.stub(configManager, "getConfig").resolves({});
 
         const request = await build(
             createMessages(),
@@ -418,7 +415,7 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent, cache);
         const configManager = access(provider)._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        sandbox.stub(configManager, "getConfig").resolves({});
 
         const request = await access(provider).buildOpenAIChatRequest(
             createMessages(),
@@ -468,7 +465,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const build = access(provider).buildOpenAIChatRequest.bind(provider);
         const configManager = access(provider)._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        sandbox.stub(configManager, "getConfig").resolves({});
 
         const model = {
             id: "reasoning-model",
@@ -503,7 +500,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const build = access(provider).buildOpenAIChatRequest.bind(provider);
         const configManager = access(provider)._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        sandbox.stub(configManager, "getConfig").resolves({});
 
         const modelInfo: LiteLLMModelInfo = { supports_reasoning: true };
 
@@ -523,7 +520,7 @@ suite("LiteLLM Provider Unit Tests", () => {
     test("sendRequestWithRetry retries once on reasoning 4xx and succeeds", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent, new EffortFallbackCache());
         const configManager = access(provider)._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        sandbox.stub(configManager, "getConfig").resolves({});
 
         const request = await access(provider).buildOpenAIChatRequest(
             createMessages(),
@@ -576,7 +573,7 @@ suite("LiteLLM Provider Unit Tests", () => {
         cache.clear();
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent, cache);
         const configManager = access(provider)._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        sandbox.stub(configManager, "getConfig").resolves({});
 
         const requestFactory = async () =>
             access(provider).buildOpenAIChatRequest(
@@ -653,7 +650,7 @@ suite("LiteLLM Provider Unit Tests", () => {
     test("sendRequestWithRetry does not retry on non-reasoning 5xx errors", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent, new EffortFallbackCache());
         const configManager = access(provider)._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        sandbox.stub(configManager, "getConfig").resolves({});
 
         const request = await access(provider).buildOpenAIChatRequest(
             createMessages(),
@@ -692,7 +689,7 @@ suite("LiteLLM Provider Unit Tests", () => {
     test("sendRequestWithRetry does not retry on 4xx errors that are unrelated to reasoning", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent, new EffortFallbackCache());
         const configManager = access(provider)._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        sandbox.stub(configManager, "getConfig").resolves({});
 
         const request = await access(provider).buildOpenAIChatRequest(
             createMessages(),
@@ -731,7 +728,7 @@ suite("LiteLLM Provider Unit Tests", () => {
     test("sendRequestWithRetry enforces retry cap of five attempts", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent, new EffortFallbackCache());
         const configManager = access(provider)._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        sandbox.stub(configManager, "getConfig").resolves({});
 
         const request = await access(provider).buildOpenAIChatRequest(
             createMessages(),
@@ -771,7 +768,7 @@ suite("LiteLLM Provider Unit Tests", () => {
     test("sendRequestWithRetry retries once without stream_options include_usage on unknown parameter rejection", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent, new EffortFallbackCache());
         const configManager = access(provider)._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        sandbox.stub(configManager, "getConfig").resolves({});
 
         const model = {
             id: "azure_ai/gpt-5.3-codex",
@@ -844,7 +841,7 @@ suite("LiteLLM Provider Unit Tests", () => {
     test("sendRequestWithRetry logs trace payload summary on failures", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent, new EffortFallbackCache());
         const configManager = access(provider)._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+        sandbox.stub(configManager, "getConfig").resolves({});
 
         const traceStub = sandbox.stub(Logger, "trace");
 
@@ -1081,24 +1078,19 @@ suite("LiteLLM Provider Unit Tests", () => {
             overrideModel,
         ];
 
-        // Stub getDiscoveredModelBackend to return backend info for the override model.
+        // Stub the base provider's getDiscoveredModelBackend (which the transport uses to
+        // resolve the model to a backend client). The base provider's method looks at
+        // `_modelDiscovery.getLastModels()` for the model entry.
         const modelDiscovery = (provider as unknown as { _modelDiscovery: unknown })._modelDiscovery as {
-            getDiscoveredModelBackend: (
-                modelId: string
-            ) => { backendName: string; url: string; apiKey?: string } | undefined;
+            getLastModels: () => vscode.LanguageModelChatInformation[];
         };
-        sandbox.stub(modelDiscovery, "getDiscoveredModelBackend").returns({
-            backendName: "localhost:4000",
-            url: "http://localhost:4000",
-            apiKey: "test-key",
-        });
+        sandbox.stub(modelDiscovery, "getLastModels").returns([overrideModel]);
 
         // Stub ConfigManager to return a config with modelIdOverride.
         const configManager = (provider as unknown as { _configManager: unknown })._configManager as {
             getConfig: () => Promise<unknown>;
         };
         sandbox.stub(configManager, "getConfig").resolves({
-            url: "http://localhost:4000",
             key: "k",
             disableQuotaToolRedaction: false,
             disableCaching: true,
@@ -1215,14 +1207,8 @@ suite("LiteLLM Provider Unit Tests", () => {
             })
         );
         const configManager = access(provider)._configManager;
-        sandbox.stub(configManager, "resolveBackends").resolves([
-            {
-                name: "default",
-                url: "http://localhost:4000",
-                apiKey: "k",
-                enabled: true,
-            },
-        ]);
+        // `resolveBackends` was removed when workspace-settings fallback was disabled.
+        (configManager as unknown as { resolveBackends?: undefined }).resolveBackends = undefined;
         const discoveredModels = [
             {
                 id: "default/test-responses",
@@ -1990,16 +1976,13 @@ suite("LiteLLM Provider Unit Tests", () => {
 
         interface ProviderWithConfigManager {
             _configManager: {
-                getConfig: () => Promise<{ url: string }>;
-                resolveBackends: () => Promise<ResolvedBackend[]>;
+                getConfig: () => Promise<unknown>;
             };
         }
         const providerWithConfig = provider as unknown as ProviderWithConfigManager;
-        sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
-            url: "http://localhost:4000",
-        });
-        sandbox.stub(providerWithConfig._configManager, "resolveBackends").resolves([]);
+        sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({});
 
+        // No per-group configuration → no models
         const infos = await provider.provideLanguageModelChatInformation(
             { silent: true },
             new vscode.CancellationTokenSource().token
@@ -2052,15 +2035,16 @@ suite("LiteLLM Provider Unit Tests", () => {
     }); */
 
     test("discoverModels returns empty array when provider configuration is missing (legacy path disabled)", async () => {
-        // OBSOLETE (remove in 1.125): The legacy fallback path has been disabled to prevent
-        // spurious "LiteLLM" group names from appearing in VS Code's model picker.
-        // When VS Code calls the provider without options.configuration (vendor-level discovery),
-        // the provider MUST return an empty array to prevent "orphan" models from being created.
+        // The legacy fallback path has been disabled to prevent spurious "LiteLLM" group names
+        // from appearing in VS Code's model picker. When VS Code calls the provider without
+        // options.configuration (vendor-level discovery), the provider MUST return an empty
+        // array to prevent "orphan" models from being created.
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const configManager = access(provider)._configManager;
-        sandbox
-            .stub(configManager, "resolveBackends")
-            .resolves([{ name: "cloud", url: "http://localhost:4000", apiKey: "k", enabled: true }]);
+        // `resolveBackends` was removed when workspace-settings fallback was disabled.
+        // Cast the stub through `never` so the test still compiles while documenting the
+        // removal.
+        (configManager as unknown as { resolveBackends?: undefined }).resolveBackends = undefined;
         const execStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
         const models = await provider.discoverModels({ silent: false }, new vscode.CancellationTokenSource().token);
         // When no configuration is provided, the legacy path should return empty array
@@ -2193,15 +2177,14 @@ suite("LiteLLM Provider Unit Tests", () => {
     });
 
     test("discoverModels returns empty array when provider configuration is incomplete (legacy path disabled)", async () => {
-        // OBSOLETE (remove in 1.125): The legacy fallback path has been disabled to prevent
-        // spurious "LiteLLM" group names from appearing in VS Code's model picker.
-        // When configuration is incomplete (e.g., missing apiKey), convertProviderConfiguration
-        // returns null and the discovery should return empty array instead of falling back.
+        // The legacy fallback path has been disabled to prevent spurious "LiteLLM" group
+        // names from appearing in VS Code's model picker. When configuration is incomplete
+        // (e.g., missing apiKey), convertProviderConfiguration returns null and the discovery
+        // should return empty array instead of falling back.
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const configManager = access(provider)._configManager;
-        sandbox
-            .stub(configManager, "resolveBackends")
-            .resolves([{ name: "cloud", url: "http://localhost:4000", apiKey: "k", enabled: true }]);
+        // `resolveBackends` was removed when workspace-settings fallback was disabled.
+        (configManager as unknown as { resolveBackends?: undefined }).resolveBackends = undefined;
         sandbox.stub(MultiBackendClient.prototype, "getModelInfoAll").resolves({
             data: [
                 {
@@ -2498,7 +2481,6 @@ suite("LiteLLM Provider Unit Tests", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
         sandbox.stub(access(provider)._configManager, "getConfig").resolves({
-            url: "http://localhost:4000",
             forceResponsesEndpoint: true,
             allowChatCompletionsFallback: true,
         });
@@ -2554,7 +2536,6 @@ suite("LiteLLM Provider Unit Tests", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
         sandbox.stub(access(provider)._configManager, "getConfig").resolves({
-            url: "http://localhost:4000",
             forceResponsesEndpoint: true,
             allowChatCompletionsFallback: false,
         });
@@ -2614,7 +2595,6 @@ suite("LiteLLM Provider Unit Tests", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 
         sandbox.stub(access(provider)._configManager, "getConfig").resolves({
-            url: "http://localhost:4000",
             forceResponsesEndpoint: true,
             allowChatCompletionsFallback: true,
         });

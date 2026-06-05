@@ -58,25 +58,11 @@ suite("ConfigManager", () => {
         const manager = new ConfigManager(secrets);
         const config = await manager.getConfig();
 
-        assert.strictEqual(config.url, "");
-        assert.strictEqual(config.key, undefined);
-        assert.strictEqual(config.backends, undefined);
+        // url, key, and backends are no longer part of LiteLLMConfig (VS Code 1.120+ per-group configuration)
+        assert.strictEqual(config.modelIdOverride, undefined);
     });
 
-    test("resolveBackends returns [] when no legacy settings present", async () => {
-        const secrets = {
-            get: async () => undefined,
-            store: async () => {},
-            delete: async () => {},
-            keys: async () => [],
-            onDidChange: () => ({ dispose() {} }),
-        } as unknown as vscode.SecretStorage;
-
-        const manager = new ConfigManager(secrets);
-        const backends = await manager.resolveBackends();
-
-        assert.deepStrictEqual(backends, []);
-    });
+    // resolveBackends test removed - method no longer exists (VS Code 1.120+ per-group configuration)
 
     test("convertProviderConfiguration returns undefined without a baseUrl", async () => {
         const secrets = {

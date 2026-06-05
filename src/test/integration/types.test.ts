@@ -12,13 +12,10 @@ import type {
 suite("Types Unit Tests", () => {
     test("LiteLLMConfig supports optional inline completions fields", () => {
         const cfg: LiteLLMConfig = {
-            url: "http://localhost:4000",
-            key: "k",
             inlineCompletionsEnabled: true,
             inlineCompletionsModelId: "m1",
         };
 
-        assert.strictEqual(cfg.url, "http://localhost:4000");
         assert.strictEqual(cfg.inlineCompletionsEnabled, true);
         assert.strictEqual(cfg.inlineCompletionsModelId, "m1");
     });

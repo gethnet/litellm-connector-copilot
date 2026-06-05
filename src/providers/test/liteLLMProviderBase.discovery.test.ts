@@ -114,7 +114,9 @@ suite("ModelDiscovery", () => {
 
     test("falls back to legacy path when no configuration", async () => {
         const token = new vscode.CancellationTokenSource().token;
-        configManager.resolveBackends.resolves([]);
+        // Legacy `resolveBackends` shim removed; new code path returns empty
+        // when no per-group `options.configuration` is provided.
+        (configManager as unknown as { resolveBackends?: sinon.SinonStub }).resolveBackends = undefined;
 
         const models = await discovery.discover({ options: { silent: false }, token });
         assert.deepStrictEqual(models, []);

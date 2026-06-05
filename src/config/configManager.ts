@@ -220,49 +220,6 @@ export class ConfigManager {
     }
 
     /**
-     * Returns all enabled backends with their API keys resolved from SecretStorage.
-     * Falls back to legacy single-backend config if backends array is empty.
-     *
-     * @deprecated OBSOLETE — scheduled for removal in VS Code 1.125. The legacy
-     * workspace-settings backends path (`litellm-connector.backends`,
-     * `litellm-connector.url`/`litellm-connector.key`) is preserved only for users
-     * upgrading from pre-1.119 VS Code. New code paths must use the per-group
-     * configuration delivered via `options.configuration` in the VS Code 1.120
-     * Language Model Chat Provider API. When the minimum supported VS Code is
-     * raised to >= 1.125, delete this method and all of its call sites.
-     */
-    async resolveBackends(): Promise<ResolvedBackend[]> {
-        const settings = vscode.workspace.getConfiguration();
-        const backends = settings.get<LiteLLMBackend[]>(ConfigManager.BACKENDS_KEY, []);
-        const legacyUrl = settings.get<string>(ConfigManager.BASE_URL_KEY, "").trim();
-
-        // Early guard: no legacy settings configured at all.
-        if ((!backends || backends.length === 0) && !legacyUrl) {
-            return [];
-        }
-
-        if (backends && backends.length > 0) {
-            const resolved: ResolvedBackend[] = [];
-            for (const backend of backends) {
-                if (backend.enabled === false) {
-                    continue;
-                }
-                const secretKey = this.getApiKeySecretStorageKey(backend.apiKeySecretRef ?? backend.name);
-                const apiKey = await this.secrets.get(secretKey);
-                resolved.push({ name: backend.name, url: backend.url, apiKey: apiKey ?? undefined, enabled: true });
-            }
-            return resolved;
-        }
-
-        // Legacy single-backend fallback.
-        const apiKeySecretRef = settings
-            .get<string>(ConfigManager.API_KEY_SECRET_REF_KEY, ConfigManager.DEFAULT_API_KEY_SECRET_REF)
-            .trim();
-        const legacyKey = await this.secrets.get(this.getApiKeySecretStorageKey(apiKeySecretRef));
-        return [{ name: "default", url: legacyUrl, apiKey: legacyKey ?? undefined, enabled: true }];
-    }
-
-    /**
      * Converts VS Code per-group provider configuration into a BackendSession.
      * Required fields: baseUrl (http/https), apiKey.
      *

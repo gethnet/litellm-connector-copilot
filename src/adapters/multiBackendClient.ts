@@ -4,7 +4,6 @@ import type {
     LiteLLMModelInfo,
     LiteLLMTokenCounterRequest,
     LiteLLMTokenCounterResponse,
-    ResolvedBackend,
 } from "../types";
 import { LiteLLMClient } from "./litellmClient";
 import { Logger } from "../utils/logger";
@@ -65,11 +64,17 @@ export class MultiBackendClient {
     private readonly backendNames: string[] = [];
     private _telemetryService?: TelemetryService;
 
-    constructor(
-        backends: ResolvedBackend[],
+    /**
+     * Configuration for a single backend in the multi-backend setup.
+     */
+    public constructor(
+        backends: readonly { name: string; url: string; apiKey?: string; enabled: boolean }[],
         private readonly userAgent: string
     ) {
         for (const backend of backends) {
+            if (!backend.enabled) {
+                continue;
+            }
             const client = new LiteLLMClient({ url: backend.url, key: backend.apiKey }, userAgent);
             this.clients.set(backend.name, client);
             this.backendNames.push(backend.name);

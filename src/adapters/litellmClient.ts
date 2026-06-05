@@ -1,6 +1,6 @@
 import type * as vscode from "vscode";
 import type {
-    LiteLLMConfig,
+    LiteLLMClientConfig,
     LiteLLMModelInfoResponse,
     OpenAIChatCompletionRequest,
     LiteLLMResponsesRequest,
@@ -18,7 +18,7 @@ export class LiteLLMClient {
     private _telemetryService?: TelemetryService;
 
     constructor(
-        private readonly config: LiteLLMConfig,
+        private readonly config: LiteLLMClientConfig,
         private readonly userAgent: string
     ) {}
 

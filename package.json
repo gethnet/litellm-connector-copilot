@@ -17,7 +17,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "2.1.0-dev45",
+	"version": "2.1.0-dev47",
 	"preview": true,
 	"engines": {
 		"vscode": "^1.120.0"
@@ -118,47 +118,6 @@
 		"configuration": {
 			"title": "LiteLLM Connector",
 			"properties": {
-				"litellm-connector.baseUrl": {
-					"type": "string",
-					"default": "",
-					"description": "Base URL for the LiteLLM proxy server (used for model discovery and requests)."
-				},
-				"litellm-connector.backends": {
-					"type": "array",
-					"default": [],
-					"description": "List of LiteLLM backends to connect to. Each backend requires a unique name and a base URL.",
-					"items": {
-						"type": "object",
-						"required": [
-							"name",
-							"url"
-						],
-						"properties": {
-							"name": {
-								"type": "string",
-								"description": "Unique name for the backend."
-							},
-							"url": {
-								"type": "string",
-								"description": "Base URL for the LiteLLM proxy server."
-							},
-							"apiKeySecretRef": {
-								"type": "string",
-								"description": "Reference name for the API key in SecretStorage."
-							},
-							"enabled": {
-								"type": "boolean",
-								"default": true,
-								"description": "Whether this backend is currently enabled."
-							}
-						}
-					}
-				},
-				"litellm-connector.apiKeySecretRef": {
-					"type": "string",
-					"default": "default",
-					"description": "Reference name for the API key stored in VS Code SecretStorage."
-				},
 				"litellm-connector.modelIdOverride": {
 					"type": "string",
 					"default": "",

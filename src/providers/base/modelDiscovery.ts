@@ -280,38 +280,6 @@ export class ModelDiscovery {
         }
     }
 
-    private async discoverFromBackends(
-        backends: { name: string; url: string; apiKey?: string; enabled: boolean }[],
-        token: vscode.CancellationToken
-    ): Promise<vscode.LanguageModelChatInformation[]> {
-        const config = await this.configManager.getConfig();
-        const multiClient = new MultiBackendClient(backends, this.userAgent);
-        const models = await multiClient.getModelInfoAll(token);
-        if (!models?.data?.length) {
-            return [];
-        }
-
-        const backendByName = new Map(backends.map((b) => [b.name, b]));
-        const infos = models.data
-            .map((entry) =>
-                this.toVSCodeInfo(
-                    entry,
-                    entry.backendName,
-                    backendByName.get(entry.backendName),
-                    entry.backendName,
-                    config.forceResponsesEndpoint,
-                    config.modelCapabilitiesOverrides
-                )
-            )
-            .filter((info) => info.isUserSelectable !== false);
-
-        this.multiBackendClient = multiClient;
-        this.activeBackendNames = backends.map((b) => b.name);
-        this.lastModelList = infos;
-        this.modelListFetchedAtMs = Date.now();
-        return infos;
-    }
-
     private async discoverFromSession(
         session: BackendSession,
         token: vscode.CancellationToken,
@@ -336,15 +304,14 @@ export class ModelDiscovery {
             )
             .filter((info) => info.isUserSelectable !== false);
 
-        // Update per-backend multi-client for this session
-        // Note: This client is only used for legacy paths; per-session routing
-        // uses the backend info stored on the model objects themselves
+        // Update per-backend multi-client for this session. The provider base uses this
+        // client to route request streams via `resolveModelBackend()`.
         this.multiBackendClient = new MultiBackendClient(
             [{ name: session.backendName, url: session.baseUrl, apiKey: session.apiKey, enabled: true }],
             this.userAgent
         );
 
-        // Track this backend as active (for legacy discovery path compatibility)
+        // Track this backend as active for namespaced model-id parsing.
         if (!this.activeBackendNames.includes(session.backendName)) {
             this.activeBackendNames.push(session.backendName);
         }

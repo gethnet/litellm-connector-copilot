@@ -4,6 +4,7 @@ import * as sinon from "sinon";
 import { LiteLLMCommitMessageProvider } from "../liteLLMCommitProvider";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 import type { ConfigManager } from "../../config/configManager";
+import type { LiteLLMConfig } from "../../types";
 import { createTelemetryMocks } from "../../test/utils/telemetryMock";
 
 /**
@@ -19,7 +20,7 @@ interface CommitProviderInternals {
         onProgress?: (text: string) => void
     ) => Promise<string>;
     resolveCommitModel: (
-        options: Record<string, unknown>,
+        options: LiteLLMConfig,
         token: vscode.CancellationToken
     ) => Promise<vscode.LanguageModelChatInformation | undefined>;
 }
@@ -63,7 +64,7 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
         // Seed model list
         const providerWithCache = provider as unknown as {
             _lastModelList: vscode.LanguageModelChatInformation[];
-            _configManager: { getConfig: () => Promise<{ url: string; key?: string }> };
+            _configManager: { getConfig: () => Promise<unknown> };
             _modelDiscovery: {
                 getLastModels: () => vscode.LanguageModelChatInformation[];
                 getDiscoveredModelBackend: (
@@ -94,10 +95,7 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
 
         // Mock config
         const configManager = providerWithCache._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({
-            url: "http://localhost:4000",
-            key: "test-key",
-        });
+        sandbox.stub(configManager, "getConfig").resolves({});
 
         // Mock LiteLLMClient.chat
         const chatStub = sandbox.stub(LiteLLMClient.prototype, "chat");
@@ -241,7 +239,7 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
         // Seed model list
         const providerWithCache = provider as unknown as {
             _lastModelList: vscode.LanguageModelChatInformation[];
-            _configManager: { getConfig: () => Promise<{ url: string; key?: string }> };
+            _configManager: { getConfig: () => Promise<unknown> };
             _modelDiscovery: {
                 getLastModels: () => vscode.LanguageModelChatInformation[];
                 getDiscoveredModelBackend: (
@@ -272,10 +270,7 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
 
         // Mock config
         const configManager = providerWithCache._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({
-            url: "http://localhost:4000",
-            key: "test-key",
-        });
+        sandbox.stub(configManager, "getConfig").resolves({});
 
         // Mock LiteLLMClient.chat with markdown code blocks
         const chatStub = sandbox.stub(LiteLLMClient.prototype, "chat");
@@ -337,7 +332,7 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
             .stub(providerWithCacheAndConfig._modelDiscovery, "getDiscoveredModelBackend")
             .returns({ backendName: "localhost:4000", url: "http://localhost:4000", apiKey: "k" });
 
-        sandbox.stub(providerWithCacheAndConfig._configManager, "getConfig").resolves({ url: "u", key: "k" });
+        sandbox.stub(providerWithCacheAndConfig._configManager, "getConfig").resolves({});
         sandbox.stub(LiteLLMClient.prototype, "chat").rejects(new Error("API failure"));
 
         await assert.rejects(
@@ -376,7 +371,7 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
             .stub(providerWithCacheAndConfig._modelDiscovery, "getDiscoveredModelBackend")
             .returns({ backendName: "localhost:4000", url: "http://localhost:4000", apiKey: "k" });
 
-        sandbox.stub(providerWithCacheAndConfig._configManager, "getConfig").resolves({ url: "u", key: "k" });
+        sandbox.stub(providerWithCacheAndConfig._configManager, "getConfig").resolves({});
         sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
             new ReadableStream({
                 start(controller) {
@@ -486,10 +481,13 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
         assert.strictEqual(result, "");
     });
 
-    test("provideCommitMessage throws when config URL is missing", async () => {
+    test("provideCommitMessage throws when no model is discovered", async () => {
         const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
         const configManager = commitInternals(provider)._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "" });
+        sandbox.stub(configManager, "getConfig").resolves({});
+        // No model is discovered → the provider should throw "No model available"
+        commitInternals(provider)._lastModelList = [];
+        sandbox.stub(provider, "discoverModels").resolves([]);
 
         await assert.rejects(
             () =>
@@ -498,14 +496,14 @@ suite("LiteLLMCommitMessageProvider Unit Tests", () => {
                     {} as unknown as vscode.LanguageModelChatRequestOptions,
                     new vscode.CancellationTokenSource().token
                 ),
-            /configuration not found/
+            /No model available/
         );
     });
 
     test("provideCommitMessage throws when no model available", async () => {
         const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
         const configManager = commitInternals(provider)._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "http://url" });
+        sandbox.stub(configManager, "getConfig").resolves({});
         commitInternals(provider)._lastModelList = [];
         sandbox.stub(provider, "discoverModels").resolves([]);
 

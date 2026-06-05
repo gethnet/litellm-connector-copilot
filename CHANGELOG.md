@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.0] - 2026-06-05
+
+### 💥 Breaking / Behavior Changes
+
+* **Removed Legacy Workspace-Settings Configuration**: The `litellm-connector.baseUrl`, `litellm-connector.backends`, and `litellm-connector.apiKeySecretRef` workspace settings have been removed. Configuration now comes exclusively from VS Code 1.120+ per-group provider configuration via the `languageModelChatProviders` contribution point.
+* **Removed Legacy Config Management Commands**: The `litellm-connector.checkConnection` command and its menu entries have been removed.
+* **Removed Legacy ConfigManager Methods**: `setConfig()`, `addBackend()`, `removeBackend()`, `updateBackend()`, `listBackends()`, `isConfigured()`, `cleanupAllConfiguration()`, and `resolveBackends()` have been removed from `ConfigManager`.
+* **Removed Legacy Type Fields**: `LiteLLMConfig.url`, `.key`, and `.backends` fields have been removed. The `LiteLLMBackend` and `ResolvedBackend` interfaces have been deleted.
+* **Removed `discoverFromBackends`**: The unused legacy multi-backend discovery path has been removed from `ModelDiscovery`.
+
+### 🧭 Migration
+
+Users still on the legacy workspace-settings configuration will need to migrate to VS Code 1.120+ per-group provider configuration:
+1. Open the **Language Models** view in VS Code
+2. Use **Add Model...** to add a LiteLLM provider
+3. Enter your base URL and API key when prompted
+4. The new configuration will replace any existing workspace settings
+
 ## [2.0.1] - 2026-05-14
 
 ### 🧭 Improvements

@@ -122,108 +122,13 @@ export interface LiteLLMParams {
 }
 
 /**
- * Configuration for a single LiteLLM proxy backend.
- * Multiple backends can be configured; each contributes models to the aggregated model list.
- *
- * @deprecated OBSOLETE — scheduled for removal in VS Code 1.125. Backend definition has
- * moved to the per-group `options.configuration` payload delivered by the VS Code 1.120
- * Language Model Chat Provider API. This type, the `LiteLLMConfig.backends` field, and
- * the `litellm-connector.backends` workspace setting must be deleted when the minimum
- * supported VS Code is raised to >= 1.125.
- */
-export interface LiteLLMBackend {
-    /** Human-readable label (e.g., "Cloud", "Local GPU", "Team Alpha"). */
-    name: string;
-    /** Base URL of the LiteLLM proxy (e.g., "http://localhost:4000"). */
-    url: string;
-    /**
-     * Reference key into VS Code SecretStorage for the API key.
-     * The actual secret is stored under "litellm-connector.apiKey.{apiKeySecretRef}".
-     * Defaults to the backend name if not specified.
-     */
-    apiKeySecretRef?: string;
-    /** Whether this backend is enabled. Defaults to true. */
-    enabled?: boolean;
-}
-
-/**
- * Represents a backend configuration per VS Code language model group (VS Code 1.119+).
- * Each group can have its own backend to support per-group routing.
- */
-export interface LiteLLMGroupConfiguration {
-    /** Unique group identifier (e.g., "chat", "completion"). */
-    groupName: string;
-    /** Match models by prefix/substring (e.g., "gpt-", "claude-"). Better performance than regex. */
-    modelPrefix?: string;
-    /** Match models by regex pattern (e.g., "gpt-[0-9]+"). More flexible. */
-    modelRegex?: string;
-    /** Human-readable label (e.g., "Team A Backend"). */
-    label?: string;
-    /** Base URL of the backend. Required if not Using 'backend' reference. */
-    backendUrl?: string;
-    /**
-     * Reference key when abstracting configuration across groups.
-     * Points to a backend name in the backends array.
-     */
-    backendRef?: string;
-    /** API key reference in SecretStorage. Required if backend is not explicitly defined. */
-    apiKeySecretRef?: string;
-
-    /** @internal Optional fields for internal routing logic */
-    backendName?: string;
-    url?: string;
-    apiKey?: string;
-}
-
-/**
- * Resolved backend with its API key, used internally for routing.
- *
- * @deprecated OBSOLETE — scheduled for removal in VS Code 1.125 alongside the rest of
- * the legacy multi-backend / single-backend workspace-settings discovery path. Per-group
- * sessions in the 1.120 system are represented by `BackendSession` instead.
- */
-export interface ResolvedBackend {
-    name: string;
-    url: string;
-    apiKey?: string;
-    enabled: boolean;
-}
-
-/**
- * LiteLLM configuration stored in VS Code settings.
- *
- * NOTE: All fields except the per-group `options.configuration` derivatives below are
- * part of the OBSOLETE legacy path scheduled for removal in VS Code 1.125. New code
- * must source backend connection details from `options.configuration` provided by the
- * 1.120 Language Model Chat Provider API. Only the workspace-scoped ergonomic toggles
- * (`disableCaching`, `inactivityTimeout`, model overrides, etc.) are intended to
- * survive the deprecation; the `url`, `key`, and `backends` fields will be removed.
+ * LiteLLM workspace-level configuration. Backend connection details
+ * (baseUrl, apiKey) are delivered by VS Code 1.120 per-group
+ * `options.configuration` payloads on every provider call; they are NOT
+ * stored in workspace settings. This type only carries workspace-scoped
+ * ergonomic toggles and overrides.
  */
 export interface LiteLLMConfig {
-    /**
-     * @deprecated Legacy single-backend base URL. Removed in VS Code 1.125.
-     * Use `options.configuration.baseUrl` from the 1.120 provider API instead.
-     */
-    url: string;
-    /**
-     * @deprecated Legacy single-backend API key. Removed in VS Code 1.125.
-     * Use `options.configuration.apiKey` from the 1.120 provider API instead.
-     */
-    key?: string;
-
-    /**
-     * Multi-backend configuration. When populated, models from all enabled backends
-     * are aggregated. Model IDs are prefixed with "{backendName}/".
-     * Takes precedence over legacy url/key when non-empty.
-     *
-     * @deprecated OBSOLETE — scheduled for removal in VS Code 1.125. Each backend
-     * should be represented as an independent provider configuration group via the
-     * VS Code 1.120 `languageModelChatProviders` contribution. When the minimum
-     * supported VS Code is raised to >= 1.125, delete this field along with the
-     * `litellm-connector.backends` workspace setting.
-     */
-    backends?: LiteLLMBackend[];
-
     inactivityTimeout?: number;
     disableCaching?: boolean;
     disableQuotaToolRedaction?: boolean;
@@ -287,14 +192,21 @@ export interface LiteLLMConfig {
      */
     allowChatCompletionsFallback?: boolean;
 
-    /**
-     * Per-language-model group backend assignments (VS Code 1.119+ groups API).
-     * Allows different groups to use different backends (e.g., dev vs production).
-     */
-    groupConfigurations?: LiteLLMGroupConfiguration[];
-
     /** When enabled, send default values for temperature, frequency_penalty, and presence_penalty if not provided by VS Code. */
     sendDefaultParameters?: boolean;
+}
+
+/**
+ * Connection-level configuration for a single LiteLLM proxy. Each
+ * `LiteLLMClient` is bound to exactly one proxy and carries its baseUrl
+ * and API key. The `disableCaching` flag is duplicated here so the client
+ * can opt the connection itself out of `Cache-Control` headers without
+ * needing access to the workspace-level `LiteLLMConfig`.
+ */
+export interface LiteLLMClientConfig {
+    url: string;
+    key?: string;
+    disableCaching?: boolean;
 }
 
 /**

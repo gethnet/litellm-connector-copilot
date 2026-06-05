@@ -137,10 +137,10 @@ suite("LiteLLM Error Handling Unit Tests", function () {
         });
         const apiError = new Error(`LiteLLM API error: 400 Bad Request\n${errorText}`);
 
-        // Stub `sendRequestToLiteLLM` directly. The new per-group routing checks
-        // `getDiscoveredModelBackend` first and falls back to `resolveBackends`, both of
-        // which return nothing in the unit-test environment. Stubbing the higher-level
-        // method isolates the error-handling behaviour we want to exercise.
+        // Stub `sendRequestToLiteLLM` directly. The per-group routing checks
+        // `getDiscoveredModelBackend` to find a backend for the model. In the unit-test
+        // environment no model is discovered, so the routing returns nothing. Stubbing
+        // the higher-level method isolates the error-handling behaviour we want to exercise.
         sandbox
             .stub(
                 provider as unknown as {

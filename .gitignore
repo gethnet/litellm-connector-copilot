@@ -10,6 +10,8 @@ node_modules
 .vscode-test/
 *.vsix
 
+.investigate
+
 # Auto-generated VS Code type definitions
 **/vscode.d.ts
 **/vscode.proposed.*

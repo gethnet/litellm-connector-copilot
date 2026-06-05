@@ -713,20 +713,12 @@ export abstract class LiteLLMProviderBase {
                     },
                 ];
             } else {
-                // OBSOLETE (remove in 1.125): Legacy workspace-settings fallback.
-                // This path exists only for backward compatibility with pre-1.119 configurations.
-                // Modern configuration uses per-group provider configuration.
-                Logger.warn(
-                    `[DEPRECATED] Using legacy workspace-settings path for model "${request.model}". ` +
-                        `Please migrate to per-group provider configuration.`
+                // Legacy workspace-settings fallback was removed in 1.125.
+                // All backend configuration now comes from VS Code per-group provider settings.
+                throw new Error(
+                    `LiteLLM backend not found for model "${request.model}". ` +
+                        `Please ensure the model is discovered and the provider group is properly configured.`
                 );
-                backends = await this._configManager.resolveBackends();
-                if (backends.length === 0) {
-                    throw new Error(
-                        `LiteLLM backend not found for model "${request.model}". ` +
-                            `Please ensure the model is discovered and the provider group is properly configured.`
-                    );
-                }
             }
 
             multiClient = new MultiBackendClient(backends, this.userAgent);

@@ -78,8 +78,7 @@ suite("ConfigManager Unit Tests", () => {
     test("getConfig returns empty values when nothing is stored", async () => {
         const manager = new ConfigManager(mockSecrets);
         const config = await manager.getConfig();
-        assert.strictEqual(config.url, "");
-        assert.strictEqual(config.key, undefined);
+        // url and key are no longer part of LiteLLMConfig (VS Code 1.120+ per-group configuration)
         assert.strictEqual(config.modelIdOverride, undefined);
     });
 
@@ -149,32 +148,7 @@ suite("ConfigManager Unit Tests", () => {
         ]);
     });
 
-    test("resolveBackends returns resolved backends with API keys", async () => {
-        settingsMap.set("litellm-connector.backends", [
-            { name: "cloud", url: "http://cloud:4000", apiKeySecretRef: "cloud" },
-        ]);
-        secretsMap.set("litellm-connector.apiKey.cloud", "sk-cloud");
-
-        const manager = new ConfigManager(mockSecrets);
-        const resolved = await manager.resolveBackends();
-
-        assert.strictEqual(resolved.length, 1);
-        assert.strictEqual(resolved[0].name, "cloud");
-        assert.strictEqual(resolved[0].apiKey, "sk-cloud");
-    });
-
-    test("resolveBackends skips disabled backends", async () => {
-        settingsMap.set("litellm-connector.backends", [
-            { name: "cloud", url: "http://cloud:4000", enabled: true },
-            { name: "local", url: "http://local:4000", enabled: false },
-        ]);
-
-        const manager = new ConfigManager(mockSecrets);
-        const resolved = await manager.resolveBackends();
-
-        assert.strictEqual(resolved.length, 1);
-        assert.strictEqual(resolved[0].name, "cloud");
-    });
+    // resolveBackends tests removed - method no longer exists (VS Code 1.120+ per-group configuration)
 
     test("reportFeatureToggles calls telemetry service with correct toggles", async () => {
         const manager = new ConfigManager(mockSecrets);

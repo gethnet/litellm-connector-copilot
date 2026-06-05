@@ -2,7 +2,6 @@ import * as assert from "assert";
 import * as sinon from "sinon";
 import { MultiBackendClient, parseNamespacedModelId, createNamespacedModelId } from "../multiBackendClient";
 import type { LiteLLMClient } from "../litellmClient";
-import type { ResolvedBackend } from "../../types";
 
 suite("MultiBackendClient Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -33,7 +32,7 @@ suite("MultiBackendClient Unit Tests", () => {
     });
 
     test("getModelInfoAll aggregates models from all backends", async () => {
-        const backends: ResolvedBackend[] = [
+        const backends = [
             { name: "cloud", url: "http://cloud:4000", apiKey: "sk-cloud", enabled: true },
             { name: "local", url: "http://local:4000", enabled: true },
         ];
@@ -60,7 +59,7 @@ suite("MultiBackendClient Unit Tests", () => {
     });
 
     test("getModelInfoAll continues when one backend fails", async () => {
-        const backends: ResolvedBackend[] = [
+        const backends = [
             { name: "cloud", url: "http://cloud:4000", enabled: true },
             { name: "local", url: "http://local:4000", enabled: true },
         ];
@@ -80,9 +79,7 @@ suite("MultiBackendClient Unit Tests", () => {
     });
 
     test("chat routes to correct backend and strips prefix", async () => {
-        const backends: ResolvedBackend[] = [{ name: "cloud", url: "http://cloud:4000", enabled: true }];
-
-        const client = new MultiBackendClient(backends, "test-ua");
+        const client = new MultiBackendClient([{ name: "cloud", url: "http://cloud:4000", enabled: true }], "test-ua");
         const clients = (client as unknown as { clients: Map<string, LiteLLMClient> }).clients;
         const chatStub = sandbox.stub(clients.get("cloud")!, "chat").resolves(new ReadableStream());
 
@@ -94,12 +91,13 @@ suite("MultiBackendClient Unit Tests", () => {
     });
 
     test("chat throws for unknown backend prefix with multiple backends", async () => {
-        const backends: ResolvedBackend[] = [
-            { name: "cloud", url: "http://cloud:4000", enabled: true },
-            { name: "local", url: "http://local:4000", enabled: true },
-        ];
-
-        const client = new MultiBackendClient(backends, "test-ua");
+        const client = new MultiBackendClient(
+            [
+                { name: "cloud", url: "http://cloud:4000", enabled: true },
+                { name: "local", url: "http://local:4000", enabled: true },
+            ],
+            "test-ua"
+        );
 
         await assert.rejects(
             () => client.chat("unknown/model", { model: "unknown/model", messages: [], stream: true }),
@@ -108,9 +106,10 @@ suite("MultiBackendClient Unit Tests", () => {
     });
 
     test("chat falls back to sole backend when no prefix", async () => {
-        const backends: ResolvedBackend[] = [{ name: "default", url: "http://default:4000", enabled: true }];
-
-        const client = new MultiBackendClient(backends, "test-ua");
+        const client = new MultiBackendClient(
+            [{ name: "default", url: "http://default:4000", enabled: true }],
+            "test-ua"
+        );
         const clients = (client as unknown as { clients: Map<string, LiteLLMClient> }).clients;
         const chatStub = sandbox.stub(clients.get("default")!, "chat").resolves(new ReadableStream());
 
@@ -121,9 +120,7 @@ suite("MultiBackendClient Unit Tests", () => {
     });
 
     test("countTokens routes to correct backend and strips prefix", async () => {
-        const backends: ResolvedBackend[] = [{ name: "cloud", url: "http://cloud:4000", enabled: true }];
-
-        const client = new MultiBackendClient(backends, "test-ua");
+        const client = new MultiBackendClient([{ name: "cloud", url: "http://cloud:4000", enabled: true }], "test-ua");
         const clients = (client as unknown as { clients: Map<string, LiteLLMClient> }).clients;
         const countStub = sandbox.stub(clients.get("cloud")!, "countTokens").resolves({ token_count: 10 });
 
@@ -134,12 +131,13 @@ suite("MultiBackendClient Unit Tests", () => {
     });
 
     test("checkConnectionAll returns per-backend results and handles failures", async () => {
-        const backends: ResolvedBackend[] = [
-            { name: "b1", url: "u1", enabled: true },
-            { name: "b2", url: "u2", enabled: true },
-        ];
-
-        const client = new MultiBackendClient(backends, "test-ua");
+        const client = new MultiBackendClient(
+            [
+                { name: "b1", url: "u1", enabled: true },
+                { name: "b2", url: "u2", enabled: true },
+            ],
+            "test-ua"
+        );
         const clients = (client as unknown as { clients: Map<string, LiteLLMClient> }).clients;
 
         sandbox.stub(clients.get("b1")!, "getModelInfo").resolves({
@@ -158,7 +156,7 @@ suite("MultiBackendClient Unit Tests", () => {
         assert.strictEqual(results[1].error, "conn failed");
     });
 
-    test("backendCount returns correct count", () => {
+    test("backendCount returns correct count of active backends", () => {
         const client = new MultiBackendClient(
             [
                 { name: "b1", url: "u1", enabled: true },
@@ -166,7 +164,8 @@ suite("MultiBackendClient Unit Tests", () => {
             ],
             "ua"
         );
-        assert.strictEqual(client.backendCount, 2);
+        // Disabled backends are not instantiated, so backendCount is 1.
+        assert.strictEqual(client.backendCount, 1);
     });
 
     test("getBackendNames returns all names", () => {

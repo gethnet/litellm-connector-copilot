@@ -53,11 +53,10 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
         let modelId = "unknown";
 
         try {
+            // Note: With VS Code 1.120+ per-group provider configuration, the backend
+            // URL/key are configured via languageModelChatProviders contribution point.
+            // The config object here only contains workspace-scoped settings.
             const config = await this._configManager.getConfig();
-
-            if (!config.url) {
-                throw new Error("LiteLLM configuration not found. Please configure the LiteLLM base URL.");
-            }
 
             // Select a model suitable for commit message generation
             const model = await this.resolveCommitModel(config, token);

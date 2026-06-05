@@ -53,7 +53,7 @@ Your support keeps this project alive and improving! ❤️
 5. **Open** Copilot Chat and pick a model from your configured backend/provider group label (for example, `Cloud`, `Local`, `CoolProvider`)
 6. **Start chatting!** 🎉
 
-> **Preferred configuration path**: Use the VS Code **Language Models provider-group** flow (modern config) for full VS Code 1.120+ model-picker/category behavior. Legacy settings (`litellm-connector.baseUrl` / `litellm-connector.backends`) remain compatibility fallbacks.
+> **Configuration path**: This extension uses VS Code's **Language Models provider-group** flow (VS Code 1.120+) for full model-picker/category behavior. All backend connection details are configured through VS Code's native Language Models settings — no workspace settings required.
 
 > **Multi-Backend Power**: Configure multiple LiteLLM provider groups (for example local + cloud + internal). Models are namespaced and grouped by backend so it is clear which provider each model comes from.
 
@@ -165,9 +165,6 @@ Fine-tune your experience with these settings (accessible via VS Code Settings):
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `litellm-connector.baseUrl` | string | `""` | Legacy/fallback single-backend URL (kept for compatibility). |
-| `litellm-connector.backends` | array | `[]` | Legacy/fallback multi-backend list (kept for compatibility and classic management flow). |
-| `litellm-connector.apiKeySecretRef` | string | `"default"` | Reference name for the API key stored in VS Code SecretStorage. |
 | `litellm-connector.commitModelIdOverride` | string | `""` | Override the model used for git commit message generation. Leave empty to disable. |
 | `litellm-connector.inactivityTimeout` | number | `60` | Seconds of inactivity before the connection is considered idle. |
 | `litellm-connector.disableCaching` | boolean | `true` | Send `no-cache` headers to bypass LiteLLM caching. |
