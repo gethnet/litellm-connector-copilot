@@ -5,7 +5,6 @@ import * as sinon from "sinon";
 import * as extension from "../../extension";
 import { ConfigManager } from "../../config/configManager";
 import * as providers from "../../providers";
-import { InlineCompletionsRegistrar } from "../../inlineCompletions/registerInlineCompletions";
 import { createMockSecrets, createMockOutputChannel } from "../utils/testMocks";
 
 suite("Extension Activation Unit Tests", () => {
@@ -50,9 +49,6 @@ suite("Extension Activation Unit Tests", () => {
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
         // vscode.version is a non-configurable property in the test host; don't stub it.
 
-        // Inline registrar should be created+initialized.
-        const initStub = sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
-
         // Config prompt path: treat as configured.
         sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
 
@@ -71,7 +67,6 @@ suite("Extension Activation Unit Tests", () => {
 
         extension.activate(context);
 
-        assert.ok(initStub.calledOnce);
         // Should have pushed registrar + lm registration + multiple command disposables.
         assert.ok(context.subscriptions.length >= 2);
     });
@@ -86,7 +81,6 @@ suite("Extension Activation Unit Tests", () => {
         sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
         sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
-        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
         sandbox.stub(vscode.window, "showInformationMessage");
 
         sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
@@ -109,7 +103,6 @@ suite("Extension Activation Unit Tests", () => {
         sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
         sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
-        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
         sandbox.stub(vscode.window, "showInformationMessage");
         sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
         sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
@@ -148,7 +141,6 @@ suite("Extension Activation Unit Tests", () => {
         sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
 
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
-        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
 
         // Not configured => show prompt.
         sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(false);
@@ -178,7 +170,6 @@ suite("Extension Activation Unit Tests", () => {
 
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
         // vscode.version is a non-configurable property in the test host; don't stub it.
-        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
         sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
         sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
         sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
@@ -199,7 +190,6 @@ suite("Extension Activation Unit Tests", () => {
         sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
 
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
-        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
 
         const executeCommandStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
         const isConfiguredStub = sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
@@ -227,7 +217,6 @@ suite("Extension Activation Unit Tests", () => {
 
         sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
-        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
         sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(false);
 
         const executeCommandStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
@@ -264,7 +253,6 @@ suite("Extension Activation Unit Tests", () => {
 
         sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
-        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
         sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(false);
         sandbox.stub(vscode.window, "showInformationMessage");
         sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
@@ -288,7 +276,6 @@ suite("Extension Activation Unit Tests", () => {
         sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
 
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
-        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
         sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
         sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
         sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
@@ -311,7 +298,6 @@ suite("Extension Activation Unit Tests", () => {
 
         // Extension not found.
         sandbox.stub(vscode.extensions, "getExtension").returns(undefined);
-        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
         sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
         sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
         sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
@@ -331,7 +317,6 @@ suite("Extension Activation Unit Tests", () => {
         sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
 
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
-        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
         sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
 
         // Throw during registration.
@@ -354,7 +339,6 @@ suite("Extension Activation Unit Tests", () => {
         sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
 
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
-        sandbox.stub(InlineCompletionsRegistrar.prototype, "initialize");
 
         sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(false);
         sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);

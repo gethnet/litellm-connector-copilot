@@ -17,7 +17,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "2.1.0-dev43",
+	"version": "2.1.0-dev45",
 	"preview": true,
 	"engines": {
 		"vscode": "^1.120.0"
@@ -89,10 +89,6 @@
 		],
 		"commands": [
 			{
-				"command": "litellm-connector.inlineCompletions.selectModel",
-				"title": "LiteLLM: Select Inline Completion Model"
-			},
-			{
 				"command": "litellm-connector.showModels",
 				"title": "LiteLLM: Show Available Models"
 			},
@@ -116,10 +112,6 @@
 				"command": "litellm-connector.generateCommitMessage",
 				"title": "Generate Commit Message",
 				"icon": "$(sparkle)"
-			},
-			{
-				"command": "litellm-connector.generateCommitMessage.selectModel",
-				"title": "LiteLLM: Select Commit Message Model"
 			}
 		],
 		"menus": {
@@ -175,29 +167,16 @@
 					"default": "default",
 					"description": "Reference name for the API key stored in VS Code SecretStorage."
 				},
-				"litellm-connector.inlineCompletions.enabled": {
-					"type": "boolean",
-					"default": false,
-					"description": "Enable LiteLLM inline completions via VS Code's stable inline completion provider API. Disable to use Copilot or other inline completion providers.",
-					"deprecationMessage": "This is going away"
-				},
-				"litellm-connector.inlineCompletions.modelId": {
-					"type": "string",
-					"default": "",
-					"markdownDescription": "Use VS Code's inline chat default model setting instead. Configure [In-line Chat Model](vscode://settings/inlineChat.defaultModel) or Settings UI → Inline Chat → Default Model.",
-					"markdownDeprecationMessage": "Use VS Code's ['inlineChat.defaultModel' setting](vscode://settings/inlineChat.defaultModel) to control the default model for inline chat."
-				},
 				"litellm-connector.modelIdOverride": {
 					"type": "string",
 					"default": "",
-					"markdownDeprecationMessage": "Deprecated: use `litellm-connector.inlineCompletions.modelId` instead.",
-					"description": "(Deprecated) Optional: force a specific LiteLLM model id for inline completions."
+					"description": "(Deprecated) Optional: force a specific LiteLLM model id for legacy workflows."
 				},
 				"litellm-connector.commitModelIdOverride": {
 					"type": "string",
 					"default": "",
 					"description": "Override the model ID for git commit message generation. If empty, the feature is disabled.",
-					"markdownDescription": "Override the model ID for git commit message generation. [Select Model](command:litellm-connector.generateCommitMessage.selectModel) to choose from discovered models. If empty, the feature is disabled."
+					"markdownDescription": "Override the model ID for git commit message generation. If empty, the feature is disabled."
 				},
 				"litellm-connector.enableResponsesApi": {
 					"type": "boolean",

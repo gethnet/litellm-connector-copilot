@@ -7,14 +7,11 @@ import {
     registerShowModelsCommand,
     registerCheckConnectionCommand,
 } from "./commands/manageConfig";
-import { showModelPicker } from "./commands/modelPicker";
-import { registerSelectInlineCompletionModelCommand } from "./commands/inlineCompletions";
 import { registerGenerateCommitMessageCommand } from "./commands/generateCommitMessage";
 import { LiteLLMCommitMessageProvider } from "./providers/liteLLMCommitProvider";
 import { Logger } from "./utils/logger";
 import { StructuredLogger } from "./observability";
 import { PostHogHook } from "./observability/posthogHook";
-import { InlineCompletionsRegistrar } from "./inlineCompletions/registerInlineCompletions";
 import { TelemetryService } from "./telemetry/telemetryService";
 import { LiteLLMTelemetry } from "./utils/telemetry";
 import { setTelemetryService as setTokenUtilsTelemetryService } from "./adapters/tokenUtils";
@@ -149,14 +146,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Track feature adoption
     telemetryService.captureFeatureAdoption("chat");
-    telemetryService.captureFeatureAdoption("inline-completions");
     telemetryService.captureFeatureAdoption("commit-generation");
     telemetryService.captureFeatureAdoption("model-picker");
 
     // Emit feature usage snapshot after config is loaded
     void configManager.getConfig().then((config) => {
         telemetryService.captureFeatureUsageSnapshot({
-            "inline-completions": config.inlineCompletionsEnabled ?? false,
             "responses-api": config.v2ApiEnabled ?? false,
             "commit-message": !!(config.commitModelIdOverride && config.commitModelIdOverride.length > 0),
             caching: !config.disableCaching,
@@ -289,32 +284,11 @@ export function activate(context: vscode.ExtensionContext): void {
         context.subscriptions.push(registerShowModelsCommand(activeProvider, telemetryService));
         context.subscriptions.push(registerReloadModelsCommand(activeProvider, telemetryService));
         context.subscriptions.push(registerCheckConnectionCommand(configManager, telemetryService));
-        context.subscriptions
-            .push
-            // Legacy resetConfig command removed with migration to Language Models UI
-            ();
-        context.subscriptions.push(registerSelectInlineCompletionModelCommand(activeProvider));
         context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider, telemetryService));
-        context.subscriptions.push(
-            vscode.commands.registerCommand("litellm-connector.generateCommitMessage.selectModel", async () => {
-                await showModelPicker(commitProvider, {
-                    title: "Select Commit Message Model",
-                    settingKey: "commitModelIdOverride",
-                    telemetryService: telemetryService,
-                    caller: "commit-message",
-                });
-            })
-        );
         Logger.info("Config command registered.");
     } catch (cmdErr) {
         Logger.error("Failed to register commands", cmdErr);
     }
-
-    // Stable inline completions (optional; disabled by default)
-    const inlineRegistrar = new InlineCompletionsRegistrar(context.secrets, ua, context, effortFallbackCache);
-    inlineRegistrar.setTelemetryService(telemetryService);
-    inlineRegistrar.initialize();
-    context.subscriptions.push(inlineRegistrar);
 
     // Configuration onboarding is handled via the classic manage command,
     // which routes users directly into multi-backend management.
