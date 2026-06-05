@@ -101,14 +101,6 @@
 				"title": "LiteLLM: Manage Configuration"
 			},
 			{
-				"command": "litellm-connector.checkConnection",
-				"title": "LiteLLM: Check Connection"
-			},
-			{
-				"command": "litellm-connector.reset",
-				"title": "LiteLLM: Reset All Configuration (Nuke)"
-			},
-			{
 				"command": "litellm-connector.generateCommitMessage",
 				"title": "Generate Commit Message",
 				"icon": "$(sparkle)"

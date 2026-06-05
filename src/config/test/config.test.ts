@@ -83,75 +83,6 @@ suite("ConfigManager Unit Tests", () => {
         assert.strictEqual(config.modelIdOverride, undefined);
     });
 
-    test("setConfig and getConfig roundtrip", async () => {
-        const manager = new ConfigManager(mockSecrets);
-        const testConfig = { url: "https://api.example.com", key: "sk-123" };
-
-        await manager.setConfig(testConfig);
-        const config = await manager.getConfig();
-
-        assert.strictEqual(config.url, "https://api.example.com");
-        assert.strictEqual(config.key, "sk-123");
-    });
-
-    test("setConfig deletes keys when values are missing", async () => {
-        const manager = new ConfigManager(mockSecrets);
-        await manager.setConfig({ url: "https://api.example.com", key: "sk-123" });
-
-        await manager.setConfig({ url: "", key: "" });
-        const config = await manager.getConfig();
-
-        assert.strictEqual(config.url, "");
-        assert.strictEqual(config.key, undefined);
-        // baseUrl is stored in settings; only the API key secret should be deleted.
-        assert.strictEqual(secretsMap.size, 0);
-    });
-
-    test("isConfigured returns true when url or backends are present", async () => {
-        const manager = new ConfigManager(mockSecrets);
-
-        assert.strictEqual(await manager.isConfigured(), false);
-
-        await manager.setConfig({ url: "https://api.example.com" });
-        assert.strictEqual(await manager.isConfigured(), true);
-
-        await manager.setConfig({ url: "" });
-        assert.strictEqual(await manager.isConfigured(), false);
-
-        settingsMap.set("litellm-connector.backends", [{ name: "cloud", url: "http://cloud:4000" }]);
-        assert.strictEqual(await manager.isConfigured(), true);
-    });
-
-    test("getConfig migrates legacy url to backends[0]", async () => {
-        settingsMap.set("litellm-connector.baseUrl", "http://localhost:4000");
-        secretsMap.set("litellm-connector.apiKey.default", "sk-test");
-
-        const manager = new ConfigManager(mockSecrets);
-        const config = await manager.getConfig();
-
-        assert.strictEqual(config.url, "http://localhost:4000");
-        assert.ok(config.backends);
-        assert.strictEqual(config.backends.length, 1);
-        assert.strictEqual(config.backends[0].name, "default");
-        assert.strictEqual(config.backends[0].url, "http://localhost:4000");
-    });
-
-    test("getConfig uses backends array when configured", async () => {
-        settingsMap.set("litellm-connector.baseUrl", "http://old:4000");
-        settingsMap.set("litellm-connector.backends", [
-            { name: "cloud", url: "http://cloud:4000" },
-            { name: "local", url: "http://local:4000" },
-        ]);
-
-        const manager = new ConfigManager(mockSecrets);
-        const config = await manager.getConfig();
-
-        assert.ok(config.backends);
-        assert.strictEqual(config.backends.length, 2);
-        assert.strictEqual(config.backends[0].name, "cloud");
-        assert.strictEqual(config.backends[1].name, "local");
-    });
-
     test("getConfig reads modelCapabilitiesOverrides", async () => {
         settingsMap.set("litellm-connector.modelCapabilitiesOverrides", {
             "gpt-4o": "toolCalling, imageInput",
@@ -245,37 +176,6 @@ suite("ConfigManager Unit Tests", () => {
         assert.strictEqual(resolved[0].name, "cloud");
     });
 
-    test("addBackend stores backend and API key", async () => {
-        const manager = new ConfigManager(mockSecrets);
-        await manager.addBackend({ name: "new-backend", url: "http://new:4000" }, "sk-new");
-
-        const backends = await manager.listBackends();
-        assert.ok(backends.some((b) => b.name === "new-backend"));
-        assert.strictEqual(secretsMap.get("litellm-connector.apiKey.new-backend"), "sk-new");
-    });
-
-    test("addBackend throws on duplicate name", async () => {
-        settingsMap.set("litellm-connector.backends", [{ name: "existing", url: "http://existing:4000" }]);
-
-        const manager = new ConfigManager(mockSecrets);
-        await assert.rejects(
-            () => manager.addBackend({ name: "existing", url: "http://other:4000" }),
-            /already exists/
-        );
-    });
-
-    test("removeBackend removes backend and cleans up secret", async () => {
-        settingsMap.set("litellm-connector.backends", [{ name: "to-remove", url: "http://remove:4000" }]);
-        secretsMap.set("litellm-connector.apiKey.to-remove", "sk-remove");
-
-        const manager = new ConfigManager(mockSecrets);
-        await manager.removeBackend("to-remove");
-
-        const backends = await manager.listBackends();
-        assert.strictEqual(backends.length, 0);
-        assert.strictEqual(secretsMap.has("litellm-connector.apiKey.to-remove"), false);
-    });
-
     test("reportFeatureToggles calls telemetry service with correct toggles", async () => {
         const manager = new ConfigManager(mockSecrets);
         const captureStub = sinon.stub();
@@ -366,42 +266,6 @@ suite("ConfigManager Unit Tests", () => {
     });
 
     // experimental emitUsageData setting removed
-
-    test("cleanupAllConfiguration removes all stored configuration", async () => {
-        const manager = new ConfigManager(mockSecrets);
-
-        // Set up initial config
-        await manager.setConfig({ url: "https://api.example.com", key: "sk-123" });
-
-        // Sanity check precondition
-        const before = await manager.getConfig();
-        assert.strictEqual(before.url, "https://api.example.com");
-        assert.strictEqual(before.key, "sk-123");
-
-        // Clean up all configuration
-        await manager.cleanupAllConfiguration();
-
-        // Verify configuration is cleared
-        const clearedConfig = await manager.getConfig();
-        assert.strictEqual(clearedConfig.url, "");
-        assert.strictEqual(clearedConfig.key, undefined);
-    });
-
-    test("updateBackend updates existing entry and key", async () => {
-        settingsMap.set("litellm-connector.backends", [{ name: "b1", url: "u1", enabled: true }]);
-        const manager = new ConfigManager(mockSecrets);
-
-        await manager.updateBackend("b1", { url: "u2" }, "new-key");
-        const backends = await manager.listBackends();
-        assert.strictEqual(backends[0].url, "u2");
-        assert.strictEqual(secretsMap.get("litellm-connector.apiKey.b1"), "new-key");
-    });
-
-    test("updateBackend and removeBackend throw if not found", async () => {
-        const manager = new ConfigManager(mockSecrets);
-        await assert.rejects(() => manager.updateBackend("none", {}), /not found/);
-        await assert.rejects(() => manager.removeBackend("none"), /not found/);
-    });
 
     test("reportFeatureToggles is a no-op without telemetry service", async () => {
         const manager = new ConfigManager(mockSecrets);

@@ -118,12 +118,10 @@ suite("LiteLLM Error Handling Unit Tests", function () {
 
         interface ProviderWithConfig {
             _configManager: {
-                isConfigured: () => Promise<boolean>;
                 getConfig: () => Promise<{ url: string; inactivityTimeout?: number }>;
             };
         }
         const providerWithConfig = provider as unknown as ProviderWithConfig;
-        sandbox.stub(providerWithConfig._configManager, "isConfigured").resolves(true);
         sandbox
             .stub(providerWithConfig._configManager, "getConfig")
             .resolves({ url: "http://localhost:4000", inactivityTimeout: 60 });
@@ -193,12 +191,10 @@ suite("LiteLLM Error Handling Unit Tests", function () {
 
         interface ProviderWithConfig {
             _configManager: {
-                isConfigured: () => Promise<boolean>;
                 getConfig: () => Promise<{ url: string; inactivityTimeout?: number }>;
             };
         }
         const providerWithConfig = provider as unknown as ProviderWithConfig;
-        sandbox.stub(providerWithConfig._configManager, "isConfigured").resolves(true);
         sandbox
             .stub(providerWithConfig._configManager, "getConfig")
             .resolves({ url: "http://localhost:4000", inactivityTimeout: 60 });

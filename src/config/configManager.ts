@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { LiteLLMBackend, LiteLLMConfig, ModelOverride, ResolvedBackend } from "../types";
+import type { LiteLLMConfig, ModelOverride } from "../types";
 import type { TelemetryService } from "../telemetry/telemetryService";
 import { LiteLLMClient } from "../adapters/litellmClient";
 import type { BackendSession } from "../providers/backendSession";
@@ -7,11 +7,6 @@ import { Logger } from "../utils/logger";
 import { loadUserOverrides, toStringArray } from "./modelOverrides";
 
 export class ConfigManager {
-    private static readonly BASE_URL_KEY = "litellm-connector.baseUrl";
-    private static readonly API_KEY_KEY = "litellm-connector.apiKey";
-    private static readonly API_KEY_SECRET_REF_KEY = "litellm-connector.apiKeySecretRef";
-    private static readonly DEFAULT_API_KEY_SECRET_REF = "default";
-    private static readonly BACKENDS_KEY = "litellm-connector.backends";
     private static readonly INACTIVITY_TIMEOUT_KEY = "litellm-connector.inactivityTimeout";
     private static readonly DISABLE_CACHING_KEY = "litellm-connector.disableCaching";
     private static readonly DISABLE_QUOTA_TOOL_REDACTION_KEY = "litellm-connector.disableQuotaToolRedaction";
@@ -78,58 +73,16 @@ export class ConfigManager {
         this._telemetryService = service;
     }
 
-    private getApiKeySecretStorageKey(ref: string): string {
-        // Namespace secret storage keys so we can support multiple keys in the future.
-        return `${ConfigManager.API_KEY_KEY}.${ref}`;
-    }
-
     /**
-     * Retrieves the current LiteLLM configuration from secret storage.
+     * Retrieves the current LiteLLM workspace-level configuration.
+     *
+     * Backend connection details (baseUrl, apiKey) are NOT read here — they are
+     * delivered by VS Code 1.120 per-group `options.configuration` payloads on
+     * every provider call. This method now only returns workspace-scoped
+     * ergonomic toggles and overrides.
      */
     async getConfig(): Promise<LiteLLMConfig> {
         const workspaceConfig = vscode.workspace.getConfiguration();
-
-        // Base URL is stored in plain-text settings (global user settings).
-        const url = workspaceConfig.get<string>(ConfigManager.BASE_URL_KEY, "").trim();
-
-        // API key is stored in SecretStorage. Settings only store a reference to which secret entry to use.
-        const apiKeySecretRef = workspaceConfig.get<string>(
-            ConfigManager.API_KEY_SECRET_REF_KEY,
-            ConfigManager.DEFAULT_API_KEY_SECRET_REF
-        );
-        const key = await this.secrets.get(this.getApiKeySecretStorageKey(apiKeySecretRef?.trim() ?? ""));
-
-        // Read multi-backend array from settings
-        const backendsRaw = workspaceConfig.get<
-            { name: string; url: string; apiKeySecretRef?: string; enabled?: boolean }[]
-        >(ConfigManager.BACKENDS_KEY, []);
-
-        let backends: LiteLLMBackend[] | undefined;
-
-        if (backendsRaw.length > 0) {
-            // Multi-backend config takes precedence
-            backends = backendsRaw.map((b) => ({
-                name: b.name,
-                url: b.url,
-                apiKeySecretRef: b.apiKeySecretRef ?? b.name,
-                enabled: b.enabled !== false,
-            }));
-        } else if (url) {
-            // OBSOLETE LEGACY PATH — remove in VS Code 1.125.
-            // Legacy single-backend migration: pre-1.119 users stored a single backend as
-            // top-level `litellm-connector.url` + `litellm-connector.key`. We promote that
-            // shape to a single-element backends[] so the rest of the pipeline can treat
-            // it uniformly. Once the minimum supported VS Code is >= 1.125, delete this
-            // branch (and the BASE_URL_KEY / API_KEY_KEY handling it depends on).
-            backends = [
-                {
-                    name: "default",
-                    url,
-                    apiKeySecretRef: ConfigManager.DEFAULT_API_KEY_SECRET_REF,
-                    enabled: true,
-                },
-            ];
-        }
 
         const inactivityTimeout = workspaceConfig.get<number>(ConfigManager.INACTIVITY_TIMEOUT_KEY, 60);
         const disableCaching = workspaceConfig.get<boolean>(ConfigManager.DISABLE_CACHING_KEY, true);
@@ -223,9 +176,6 @@ export class ConfigManager {
         const trimmedInlineModelId = inlineCompletionsModelId?.trim() ?? "";
 
         return {
-            url: url || "",
-            key: key ?? undefined,
-            backends,
             inactivityTimeout,
             disableCaching,
             disableQuotaToolRedaction,
@@ -246,37 +196,6 @@ export class ConfigManager {
             forceResponsesEndpoint,
             allowChatCompletionsFallback,
         };
-    }
-
-    /**
-     * Stores the LiteLLM configuration in secret storage.
-     */
-    async setConfig(config: LiteLLMConfig): Promise<void> {
-        // Base URL is stored in global user settings (plain text).
-        const settings = vscode.workspace.getConfiguration();
-        await settings.update(
-            ConfigManager.BASE_URL_KEY,
-            config.url ? config.url.trim() : "",
-            vscode.ConfigurationTarget.Global
-        );
-
-        // API key is stored in SecretStorage, referenced by a stable setting.
-        const apiKeySecretRef = settings
-            .get<string>(ConfigManager.API_KEY_SECRET_REF_KEY, ConfigManager.DEFAULT_API_KEY_SECRET_REF)
-            .trim();
-        const secretKey = this.getApiKeySecretStorageKey(apiKeySecretRef);
-        if (config.key) {
-            await this.secrets.store(secretKey, config.key);
-        } else {
-            await this.secrets.delete(secretKey);
-        }
-
-        // If backends are provided, write them
-        if (config.backends && config.backends.length > 0) {
-            await vscode.workspace
-                .getConfiguration()
-                .update(ConfigManager.BACKENDS_KEY, config.backends, vscode.ConfigurationTarget.Global);
-        }
     }
 
     /**
@@ -383,115 +302,10 @@ export class ConfigManager {
     }
 
     /**
-     * Adds a new backend to the configuration.
-     */
-    async addBackend(backend: LiteLLMBackend, apiKey?: string): Promise<void> {
-        const existing = vscode.workspace.getConfiguration().get<LiteLLMBackend[]>(ConfigManager.BACKENDS_KEY, []);
-        if (existing.some((b) => b.name === backend.name)) {
-            throw new Error(`Backend "${backend.name}" already exists. Use updateBackend() to modify.`);
-        }
-        existing.push(backend);
-        await vscode.workspace
-            .getConfiguration()
-            .update(ConfigManager.BACKENDS_KEY, existing, vscode.ConfigurationTarget.Global);
-
-        if (apiKey) {
-            const secretKey = this.getApiKeySecretStorageKey(backend.apiKeySecretRef ?? backend.name);
-            await this.secrets.store(secretKey, apiKey);
-        }
-    }
-
-    /**
-     * Removes a backend by name.
-     */
-    async removeBackend(name: string): Promise<void> {
-        const existing = vscode.workspace.getConfiguration().get<LiteLLMBackend[]>(ConfigManager.BACKENDS_KEY, []);
-        const backend = existing.find((b) => b.name === name);
-        if (!backend) {
-            throw new Error(`Backend "${name}" not found.`);
-        }
-        const filtered = existing.filter((b) => b.name !== name);
-        await vscode.workspace
-            .getConfiguration()
-            .update(ConfigManager.BACKENDS_KEY, filtered, vscode.ConfigurationTarget.Global);
-
-        const secretKey = this.getApiKeySecretStorageKey(backend.apiKeySecretRef ?? name);
-        await this.secrets.delete(secretKey);
-    }
-
-    /**
-     * Updates an existing backend.
-     */
-    async updateBackend(name: string, updates: Partial<LiteLLMBackend>, apiKey?: string): Promise<void> {
-        const existing = vscode.workspace.getConfiguration().get<LiteLLMBackend[]>(ConfigManager.BACKENDS_KEY, []);
-        const index = existing.findIndex((b) => b.name === name);
-        if (index === -1) {
-            throw new Error(`Backend "${name}" not found.`);
-        }
-        existing[index] = { ...existing[index], ...updates };
-        await vscode.workspace
-            .getConfiguration()
-            .update(ConfigManager.BACKENDS_KEY, existing, vscode.ConfigurationTarget.Global);
-
-        if (apiKey !== undefined) {
-            const secretKey = this.getApiKeySecretStorageKey(existing[index].apiKeySecretRef ?? name);
-            if (apiKey) {
-                await this.secrets.store(secretKey, apiKey);
-            } else {
-                await this.secrets.delete(secretKey);
-            }
-        }
-    }
-
-    /**
-     * Lists all configured backends.
-     */
-    async listBackends(): Promise<LiteLLMBackend[]> {
-        return vscode.workspace.getConfiguration().get<LiteLLMBackend[]>(ConfigManager.BACKENDS_KEY, []);
-    }
-
-    /**
-     * Checks if the configuration is complete.
-     */
-    async isConfigured(): Promise<boolean> {
-        const config = await this.getConfig();
-        return (config.backends && config.backends.length > 0) || !!config.url;
-    }
-
-    /**
      * Dispose hook to align with ExtensionContext subscription lifecycle.
      * Currently a no-op because ConfigManager does not hold disposable resources.
      */
     async dispose(): Promise<void> {
         this._telemetryService = undefined;
-    }
-
-    /**
-     * Cleans up all LiteLLM configuration data.
-     * Called on uninstall/reset to remove customized settings.
-     */
-    async cleanupAllConfiguration(): Promise<void> {
-        try {
-            // Clear canonical API key secret entry
-            const settings = vscode.workspace.getConfiguration();
-            const apiKeySecretRef = settings
-                .get<string>(ConfigManager.API_KEY_SECRET_REF_KEY, ConfigManager.DEFAULT_API_KEY_SECRET_REF)
-                .trim();
-            await this.secrets.delete(this.getApiKeySecretStorageKey(apiKeySecretRef));
-
-            // Clear configuration settings
-            try {
-                await settings.update(ConfigManager.BASE_URL_KEY, "", vscode.ConfigurationTarget.Global);
-                await settings.update(
-                    ConfigManager.API_KEY_SECRET_REF_KEY,
-                    undefined,
-                    vscode.ConfigurationTarget.Global
-                );
-            } catch (err) {
-                console.warn("[LiteLLM Connector] Error clearing configuration settings:", err);
-            }
-        } catch (err) {
-            console.error("[LiteLLM Connector] Error during cleanup:", err);
-        }
     }
 }

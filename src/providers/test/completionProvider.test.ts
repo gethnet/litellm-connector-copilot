@@ -130,10 +130,13 @@ suite("LiteLLMCompletionProvider Unit Tests", () => {
         const provider = new LiteLLMCompletionProvider(mockSecrets, userAgent);
         const reportStub = sandbox.stub(LiteLLMTelemetry, "reportMetric");
 
-        // Force a configuration error
+        // Force a "no model available" error: empty model list, no override.
+        (provider as unknown as { _lastModelList: vscode.LanguageModelChatInformation[] })._lastModelList = [];
+        sandbox.stub(provider, "discoverModels" as keyof LiteLLMCompletionProvider).resolves();
+
         const configManager = (provider as unknown as { _configManager: { getConfig: () => Promise<unknown> } })
             ._configManager;
-        sandbox.stub(configManager, "getConfig").resolves({ url: "" });
+        sandbox.stub(configManager, "getConfig").resolves({ url: "http://localhost:4000" });
 
         try {
             await provider.provideTextCompletion("prompt", {}, {
@@ -147,7 +150,7 @@ suite("LiteLLMCompletionProvider Unit Tests", () => {
         assert.ok(reportStub.calledOnce);
         const metric = reportStub.firstCall.args[0];
         assert.strictEqual(metric.status, "failure");
-        assert.ok(metric.error?.includes("configuration not found"));
+        assert.ok(metric.error?.includes("No model available"));
     });
 
     test("provideTextCompletion throws if no model available", async () => {

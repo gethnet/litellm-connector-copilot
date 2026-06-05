@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 import type { ConfigManager } from "../config/configManager";
 import type { LiteLLMChatProvider } from "../providers";
 import type { TelemetryService } from "../telemetry/telemetryService";
-import { MultiBackendClient } from "../adapters/multiBackendClient";
 
 function createConfigHandler(
     _configManager: ConfigManager,
@@ -125,52 +124,3 @@ export function registerReloadModelsCommand(
         }
     });
 }
-
-export function registerCheckConnectionCommand(
-    configManager: ConfigManager,
-    telemetryService?: TelemetryService
-): vscode.Disposable {
-    return vscode.commands.registerCommand("litellm-connector.checkConnection", async () => {
-        if (telemetryService) {
-            telemetryService.captureCommandExecuted("litellm-connector.checkConnection");
-        }
-        const backends = await configManager.resolveBackends();
-        if (backends.length === 0) {
-            vscode.window.showWarningMessage("No enabled backends configured.");
-            return;
-        }
-
-        await vscode.window.withProgress(
-            {
-                location: vscode.ProgressLocation.Notification,
-                title: "LiteLLM: Checking connections",
-                cancellable: true,
-            },
-            async (_progress, token) => {
-                const multiClient = new MultiBackendClient(backends, "litellm-connector-copilot");
-                try {
-                    const results = await multiClient.checkConnectionAll(token);
-                    const successCount = results.filter((r) => !r.error).length;
-                    const details = results
-                        .map(
-                            (r) => `${r.backendName}: ${r.error ? `$(error) ${r.error}` : `$(check) ${r.latencyMs}ms`}`
-                        )
-                        .join("\n");
-
-                    if (successCount === results.length) {
-                        vscode.window.showInformationMessage(`LiteLLM: All ${results.length} connections successful!`);
-                    } else {
-                        vscode.window.showWarningMessage(
-                            `LiteLLM: ${successCount}/${results.length} connections successful.\n\n${details}`
-                        );
-                    }
-                } catch (err) {
-                    const msg = err instanceof Error ? err.message : String(err);
-                    vscode.window.showErrorMessage(`LiteLLM: Connection check failed: ${msg}`);
-                }
-            }
-        );
-    });
-}
-
-// Legacy management commands removed; configuration now uses VS Code Language Models UI.

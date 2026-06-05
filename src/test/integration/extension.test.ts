@@ -3,28 +3,11 @@ import * as vscode from "vscode";
 import * as sinon from "sinon";
 
 import * as extension from "../../extension";
-import { ConfigManager } from "../../config/configManager";
 import * as providers from "../../providers";
-import { createMockSecrets, createMockOutputChannel } from "../utils/testMocks";
+import { createMockSecrets, createMockOutputChannel, createMockMemento } from "../utils/testMocks";
 
 suite("Extension Activation Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
-
-    const createMockMemento = (seed?: Record<string, unknown>): vscode.Memento => {
-        const store = new Map<string, unknown>(Object.entries(seed ?? {}));
-        return {
-            get: <T>(key: string, defaultValue?: T): T | undefined => {
-                if (store.has(key)) {
-                    return store.get(key) as T;
-                }
-                return defaultValue;
-            },
-            update: async (key: string, value: unknown) => {
-                store.set(key, value);
-            },
-            keys: () => [...store.keys()],
-        } as vscode.Memento;
-    };
 
     setup(() => {
         sandbox = sinon.createSandbox();
@@ -48,9 +31,6 @@ suite("Extension Activation Unit Tests", () => {
         // UA builder.
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
         // vscode.version is a non-configurable property in the test host; don't stub it.
-
-        // Config prompt path: treat as configured.
-        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
 
         // Avoid unexpected UI prompts.
         sandbox.stub(vscode.window, "showInformationMessage");
@@ -80,7 +60,6 @@ suite("Extension Activation Unit Tests", () => {
 
         sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
-        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
         sandbox.stub(vscode.window, "showInformationMessage");
 
         sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
@@ -102,7 +81,6 @@ suite("Extension Activation Unit Tests", () => {
 
         sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
-        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
         sandbox.stub(vscode.window, "showInformationMessage");
         sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
         sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
@@ -130,35 +108,6 @@ suite("Extension Activation Unit Tests", () => {
         assert.strictEqual(clearModelCacheStub.calledOnce, false);
     });
 
-    test("activate opens LiteLLM configuration when not configured", async () => {
-        const mockSecrets = createMockSecrets();
-
-        const context = {
-            subscriptions: [],
-            secrets: mockSecrets,
-        } as unknown as vscode.ExtensionContext;
-
-        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
-
-        sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
-
-        // Not configured => show prompt.
-        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(false);
-
-        sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
-        sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
-
-        const execStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
-        sandbox.stub(vscode.window, "showInformationMessage").resolves("Open Language Models" as never);
-
-        extension.activate(context);
-
-        // Wait a tick for the isConfigured promise chain and the selection handler.
-        await new Promise((r) => setTimeout(r, 0));
-
-        assert.strictEqual(execStub.calledWith("workbench.action.chat.manage"), true);
-    });
-
     test("deactivate does not clear configuration", async () => {
         // Ensure Logger doesn't explode if used during deactivate.
         sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
@@ -170,67 +119,12 @@ suite("Extension Activation Unit Tests", () => {
 
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
         // vscode.version is a non-configurable property in the test host; don't stub it.
-        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
         sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
         sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
 
         extension.activate(context);
         await extension.deactivate();
         // No cleanup should be triggered on deactivate; settings/secrets should persist.
-    });
-
-    test("activate skips classic configuration prompt when provider is already configured", async () => {
-        const mockSecrets = createMockSecrets();
-
-        const context = {
-            subscriptions: [],
-            secrets: mockSecrets,
-        } as unknown as vscode.ExtensionContext;
-
-        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
-
-        sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
-
-        const executeCommandStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
-        const isConfiguredStub = sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
-
-        sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
-        sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
-
-        extension.activate(context);
-
-        // Wait a tick
-        await new Promise((r) => setTimeout(r, 0));
-
-        assert.strictEqual(isConfiguredStub.called, true);
-        assert.strictEqual(executeCommandStub.calledWith("litellm-connector.manage"), false);
-    });
-
-    test("activate skips classic configuration prompt when modern config session flag is set", async () => {
-        const mockSecrets = createMockSecrets();
-
-        const context = {
-            subscriptions: [],
-            secrets: mockSecrets,
-            workspaceState: createMockMemento({ "litellm-connector.isOnModernConfig": true }),
-        } as unknown as vscode.ExtensionContext;
-
-        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
-        sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
-        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(false);
-
-        const executeCommandStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
-        const infoStub = sandbox.stub(vscode.window, "showInformationMessage");
-
-        sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
-        sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
-
-        extension.activate(context);
-
-        await new Promise((r) => setTimeout(r, 0));
-
-        assert.strictEqual(infoStub.called, false);
-        assert.strictEqual(executeCommandStub.calledWith("litellm-connector.manage"), false);
     });
 
     test("activate persists modern config session flag when provider detects valid config", async () => {
@@ -253,7 +147,6 @@ suite("Extension Activation Unit Tests", () => {
 
         sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
-        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(false);
         sandbox.stub(vscode.window, "showInformationMessage");
         sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
         sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
@@ -276,7 +169,6 @@ suite("Extension Activation Unit Tests", () => {
         sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
 
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
-        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
         sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
         sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
 
@@ -298,7 +190,6 @@ suite("Extension Activation Unit Tests", () => {
 
         // Extension not found.
         sandbox.stub(vscode.extensions, "getExtension").returns(undefined);
-        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
         sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
         sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
 
@@ -317,7 +208,6 @@ suite("Extension Activation Unit Tests", () => {
         sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
 
         sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
-        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(true);
 
         // Throw during registration.
         sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").throws(new Error("reg failed"));
@@ -326,32 +216,5 @@ suite("Extension Activation Unit Tests", () => {
         extension.activate(context);
         // Should not throw and continue activation.
         assert.ok(context.subscriptions.length > 0);
-    });
-
-    test("activate handles configuration prompt dismissal", async () => {
-        const mockSecrets = createMockSecrets();
-
-        const context = {
-            subscriptions: [],
-            secrets: mockSecrets,
-        } as unknown as vscode.ExtensionContext;
-
-        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
-
-        sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
-
-        sandbox.stub(ConfigManager.prototype, "isConfigured").resolves(false);
-        sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
-        sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
-
-        const execStub = sandbox.stub(vscode.commands, "executeCommand").resolves(undefined);
-        // Dismiss prompt.
-        sandbox.stub(vscode.window, "showInformationMessage").resolves(undefined);
-
-        extension.activate(context);
-
-        await new Promise((r) => setTimeout(r, 0));
-
-        assert.strictEqual(execStub.calledWith("litellm-connector.manage"), false);
     });
 });

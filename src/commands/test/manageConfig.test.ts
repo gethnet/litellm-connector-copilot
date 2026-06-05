@@ -5,7 +5,6 @@ import {
     registerManageConfigCommand,
     registerReloadModelsCommand,
     registerShowModelsCommand,
-    registerCheckConnectionCommand,
 } from "../../commands/manageConfig";
 import { ConfigManager } from "../../config/configManager";
 import type { LiteLLMChatProvider } from "../../providers";
@@ -73,27 +72,6 @@ suite("ManageConfig Command Unit Tests", () => {
         await handler?.();
 
         assert.ok(infoStub.calledOnce);
-    });
-
-    test("checkConnection: warns when no enabled backends are configured", async () => {
-        const configManagerStub = sandbox.createStubInstance(ConfigManager);
-        configManagerStub.resolveBackends.resolves([]);
-
-        const warnStub = sandbox.stub(vscode.window, "showWarningMessage");
-
-        let handler: (() => Promise<void>) | undefined;
-        sandbox.stub(vscode.commands, "registerCommand").callsFake((id, cb) => {
-            if (id === "litellm-connector.checkConnection") {
-                handler = cb as () => Promise<void>;
-            }
-            return { dispose: sandbox.stub() } as vscode.Disposable;
-        });
-
-        registerCheckConnectionCommand(configManagerStub as unknown as ConfigManager);
-        await handler?.();
-
-        assert.strictEqual(warnStub.calledOnce, true);
-        assert.ok(String(warnStub.firstCall.args[0]).includes("No enabled backends"));
     });
 });
 

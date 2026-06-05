@@ -47,10 +47,6 @@ export class LiteLLMCompletionProvider extends LiteLLMProviderBase {
         let tokensIn: number | undefined;
 
         try {
-            if (!(await this._configManager.isConfigured())) {
-                throw new Error("LiteLLM configuration not found. Please configure at least one backend.");
-            }
-
             const config = await this._configManager.getConfig();
 
             const model = await this.resolveCompletionModel(config, token);

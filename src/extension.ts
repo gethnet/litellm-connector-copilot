@@ -5,7 +5,6 @@ import {
     registerManageConfigCommand,
     registerReloadModelsCommand,
     registerShowModelsCommand,
-    registerCheckConnectionCommand,
 } from "./commands/manageConfig";
 import { registerGenerateCommitMessageCommand } from "./commands/generateCommitMessage";
 import { LiteLLMCommitMessageProvider } from "./providers/liteLLMCommitProvider";
@@ -109,6 +108,11 @@ export function activate(context: vscode.ExtensionContext): void {
     configManager.setTelemetryService(telemetryService);
 
     const showMigrationNoticeOnce = async (): Promise<void> => {
+        // globalState is always present on a real ExtensionContext, but tests may
+        // provide a partial stub. Bail out silently if it is missing.
+        if (!context.globalState) {
+            return;
+        }
         const alreadyShown = context.globalState.get<boolean>(MIGRATION_NOTICE_KEY, false);
         if (alreadyShown) {
             return;
@@ -283,37 +287,16 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         context.subscriptions.push(registerShowModelsCommand(activeProvider, telemetryService));
         context.subscriptions.push(registerReloadModelsCommand(activeProvider, telemetryService));
-        context.subscriptions.push(registerCheckConnectionCommand(configManager, telemetryService));
         context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider, telemetryService));
         Logger.info("Config command registered.");
     } catch (cmdErr) {
         Logger.error("Failed to register commands", cmdErr);
     }
 
-    // Configuration onboarding is handled via the classic manage command,
-    // which routes users directly into multi-backend management.
-    // Proactively check configuration and prompt user if missing
-    configManager
-        .isConfigured()
-        .then((configured) => {
-            const isOnModernConfig = getModernConfigSessionFlag();
-            if (!configured && !isOnModernConfig) {
-                Logger.info("Extension not configured. Prompting user...");
-                vscode.window
-                    .showInformationMessage(
-                        "LiteLLM Connector is not configured. Open Language Models to add a LiteLLM provider.",
-                        "Open Language Models"
-                    )
-                    .then((selection) => {
-                        if (selection === "Open Language Models") {
-                            vscode.commands.executeCommand("workbench.action.chat.manage");
-                        }
-                    });
-            }
-        })
-        .catch((err) => {
-            Logger.error("Error checking configuration status", err);
-        });
+    // Onboarding for users on legacy configurations is handled by
+    // `showMigrationNoticeOnce` above. Modern per-group configuration requires
+    // no extension-side prompt — VS Code surfaces the model picker empty until
+    // a provider group is added via "Add Model...".
 }
 
 export async function deactivate(): Promise<void> {
