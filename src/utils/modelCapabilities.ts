@@ -40,7 +40,13 @@ export function deriveCapabilitiesFromModelInfo(
     );
 
     // Check ALL supports_* fields from model_info (treat null as undefined)
-    const supportsTools = !!(supportedParams.includes("tools") || supportedParams.includes("functions"));
+    const supportsTools = !!(
+        supportedParams.includes("tools") ||
+        supportedParams.includes("functions") ||
+        supportedParams.includes("tool_choice") ||
+        modelInfo?.supports_function_calling === true ||
+        modelInfo?.supports_tool_choice === true
+    );
     const supportsFunctionCalling = modelInfo?.supports_function_calling === true;
     const supportsToolChoice = modelInfo?.supports_tool_choice === true;
     const supportsVision =

@@ -72,6 +72,16 @@ suite("modelCapabilities - Reasoning Overhaul", () => {
             assert.strictEqual(result.supportsTools, true);
         });
 
+        test("detects tools from sparse flags even when supported_openai_params is empty", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                supported_openai_params: [],
+                supports_function_calling: true,
+                supports_tool_choice: true,
+            };
+            const result = deriveCapabilitiesFromModelInfo("test-model", modelInfo);
+            assert.strictEqual(result.supportsTools, true);
+        });
+
         test("detects streaming from supported_openai_params", () => {
             const modelInfo: LiteLLMModelInfo = {
                 supported_openai_params: ["stream", "temperature"],
