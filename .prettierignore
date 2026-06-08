@@ -1,6 +1,7 @@
 dist/**
 .vscode/**
 .vscode-test/**
+.worktrees/**
 .git-blame-ignore-revs
 **/*.md
 **/*.yml

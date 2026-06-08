@@ -1,9 +1,10 @@
 import type * as vscode from "vscode";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../../types";
 import type { LiteLLMClient } from "../../adapters/litellmClient";
+import type { ConfigManager as configMgr } from "../../config/configManager";
 
 export interface RequestBuilderDeps {
-    configManager: import("../../config/configManager").ConfigManager;
+    configManager: configMgr;
     getReasoningEffort: (
         options: vscode.ProvideLanguageModelChatResponseOptions,
         model: vscode.LanguageModelChatInformation,
@@ -40,7 +41,7 @@ export interface RequestBuilderDeps {
 }
 
 export interface TransportDeps {
-    configManager: import("../../config/configManager").ConfigManager;
+    configManager: configMgr;
     userAgent: string;
     logger: {
         info: (msg: string, err?: unknown) => void;

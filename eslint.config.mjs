@@ -16,6 +16,7 @@ export default defineConfig(
 		'dist',
 		'esbuild.js',
 		'**/*.d.ts',
+		'.worktrees',
 		'coverage'
 	]),
 
