@@ -20,6 +20,12 @@ suite("RequestBuilder", () => {
             isParameterSupported: () => true,
             getTelemetryOptions: () => ({ caller: "test", justification: undefined, modelConfiguration: {} }),
             usageOptOutModels: new Set(),
+            extractRawModelName: (id: string) => {
+                // Test mirror of `LiteLLMProviderRegistry.extractRawName`:
+                // strip everything up to and including the first `/`.
+                const slash = id.indexOf("/");
+                return slash < 0 ? id : id.slice(slash + 1);
+            },
         });
     });
 

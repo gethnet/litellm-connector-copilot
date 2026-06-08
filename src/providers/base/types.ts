@@ -1,18 +1,9 @@
 import type * as vscode from "vscode";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../../types";
-import type { ConfigManager } from "../../config/configManager";
 import type { LiteLLMClient } from "../../adapters/litellmClient";
-import type { MultiBackendClient } from "../../adapters/multiBackendClient";
-import type { BackendSession } from "../backendSession";
-
-export interface DiscoveryDeps {
-    configManager: ConfigManager;
-    userAgent: string;
-    onModernConfigurationDetected?: () => void;
-}
 
 export interface RequestBuilderDeps {
-    configManager: ConfigManager;
+    configManager: import("../../config/configManager").ConfigManager;
     getReasoningEffort: (
         options: vscode.ProvideLanguageModelChatResponseOptions,
         model: vscode.LanguageModelChatInformation,
@@ -38,13 +29,19 @@ export interface RequestBuilderDeps {
         modelConfiguration?: Record<string, unknown>;
     };
     usageOptOutModels: Set<string>;
+    /**
+     * Strips the routing prefix from a model id to recover the raw
+     * LiteLLM model name (e.g. `wolfram.com/azure_ai/gpt-5.4-mini` →
+     * `azure_ai/gpt-5.4-mini`). Used for `request.model` in the
+     * OpenAI-compatible body and for capability/parameter lookups that
+     * are keyed on the raw model family.
+     */
+    extractRawModelName: (modelId: string) => string;
 }
 
 export interface TransportDeps {
-    configManager: ConfigManager;
+    configManager: import("../../config/configManager").ConfigManager;
     userAgent: string;
-    getDiscoveredModelBackend: (modelId: string) => { backendName: string; url: string; apiKey?: string } | undefined;
-    getTransportModelId: (modelId: string) => string;
     logger: {
         info: (msg: string, err?: unknown) => void;
         warn: (msg: string, err?: unknown) => void;
@@ -53,10 +50,6 @@ export interface TransportDeps {
         trace: (msg: string, err?: unknown) => void;
     };
     liteLLMClientFactory?: (backend: { url: string; key?: string }) => LiteLLMClient;
-    multiBackendClientFactory?: (
-        backends: { name: string; url: string; apiKey?: string; enabled: boolean }[],
-        userAgent: string
-    ) => MultiBackendClient;
 }
 
 export interface SendRequestArgs {
@@ -68,13 +61,11 @@ export interface SendRequestArgs {
     token: vscode.CancellationToken;
     caller?: string;
     modelInfo?: LiteLLMModelInfo;
-}
-
-export interface DiscoverArgs {
-    options: { silent?: boolean; configuration?: Record<string, unknown>; groupName?: string };
-    token: vscode.CancellationToken;
-    backends?: { name: string; url: string; apiKey?: string; enabled: boolean }[];
-    session?: BackendSession;
-    onModelsDiscovered?: () => void;
-    onModernConfigurationDetected?: () => void;
+    /**
+     * Per-group provider configuration passed by VS Code on the originating
+     * call. When present, the transport uses its `baseUrl` / `apiKey` directly
+     * to construct the LiteLLM client. When absent, the request cannot be
+     * routed and the transport throws a configuration error.
+     */
+    configuration?: Record<string, unknown>;
 }

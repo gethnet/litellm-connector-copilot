@@ -151,7 +151,7 @@ Enable LiteLLM-powered inline completions as an alternative to Copilot's default
 - 🧠 **Rich Chat Response Parts** – Unified chat provider built on the VS Code 1.120 Language Model APIs. Emits structured text, thinking, data, and tool-call parts so reasoning models render correctly in chat.
 - ⚠️ **Temporary Feature Gap (2.0.0)** – Commit-message generation and inline completions currently require manual configuration; modern-config parity fix is in progress.
 - �📊 **Advanced Token Counting** – Smarter budgeting with local estimation, background refinement, and short-lived caching for faster, more accurate context management.
-- 🏎️ **Optimized Model Discovery** – Intelligent discovery throttling with in-flight deduplication and TTL caching to prevent excessive proxy lookups.
+- 🏎️ **Stateless Model Discovery** – Every picker refresh issues a fresh `/model/info` request against the configured backend. The BackendRegistry is the single source of truth for backends and their associated models (public read, internal write).
 - 🧼 **SCM Message Sanitization** – Clean commit messages by automatically stripping triple backticks and Markdown artifacts.
 - ✍️ **Git Commit Generation** – Generate structured, conventional commits directly from the SCM view using any LiteLLM-supported model.
 - 🔍 **Connection Diagnostics** – Use the `LiteLLM: Check Connection` command to instantly validate your proxy and authentication setup.

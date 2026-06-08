@@ -641,4 +641,73 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
         assert.strictEqual(textPart.type, "text");
         assert.strictEqual(textPart.value, "hello");
     });
+
+    test("should parse tagged text tool calls into structured tool_call parts", () => {
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent(
+            {
+                choices: [
+                    {
+                        delta: {
+                            content:
+                                'before <tool_call>{"id":"call_text_1","name":"search","arguments":{"query":"vscode"}}</tool_call> after',
+                        },
+                    },
+                ],
+            },
+            state
+        );
+
+        const toolCallPart = parts.find((part) => part.type === "tool_call");
+        assert.ok(toolCallPart && toolCallPart.type === "tool_call");
+        if (toolCallPart && toolCallPart.type === "tool_call") {
+            assert.strictEqual(toolCallPart.name, "search");
+            assert.strictEqual(toolCallPart.args, '{"query":"vscode"}');
+        }
+
+        const textOutput = parts
+            .filter((part): part is Extract<(typeof parts)[number], { type: "text" }> => part.type === "text")
+            .map((part) => part.value)
+            .join("");
+        assert.strictEqual(textOutput, "before  after");
+    });
+
+    test("should buffer split tagged text tool calls and emit once closed", () => {
+        const state = createInitialStreamingState();
+
+        const firstParts = interpretStreamEvent(
+            {
+                choices: [
+                    {
+                        delta: {
+                            content: '<|tool_call_begin|>{"name":"filesystem","arguments":{"path":"/tmp"}',
+                        },
+                    },
+                ],
+            },
+            state
+        );
+        assert.strictEqual(firstParts.length, 0, "first partial chunk should not emit output yet");
+
+        const secondParts = interpretStreamEvent(
+            {
+                choices: [
+                    {
+                        delta: {
+                            content: "}<|tool_call_end|>",
+                        },
+                    },
+                ],
+            },
+            state
+        );
+
+        const toolCallPart = secondParts.find((part) => part.type === "tool_call");
+        assert.ok(toolCallPart && toolCallPart.type === "tool_call");
+        if (toolCallPart && toolCallPart.type === "tool_call") {
+            assert.strictEqual(toolCallPart.name, "filesystem");
+            assert.strictEqual(toolCallPart.args, '{"path":"/tmp"}');
+        }
+    });
 });

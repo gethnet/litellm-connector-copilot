@@ -29,21 +29,20 @@ suite("ConfigManager Unit Tests", () => {
         // Stub workspace configuration reads so tests are deterministic and don't depend on VS Code defaults.
         // We return explicit values for the keys ConfigManager reads.
         configGetStub = sinon.stub();
+        // Note: legacy `litellm-connector.baseUrl`, `.apiKeySecretRef`, and
+        // `.emitUsageData` settings are no longer read by ConfigManager
+        // (VS Code 1.120+ per-group configuration). Stubs for them have been
+        // removed; tests that previously relied on these returns are covered
+        // by the per-test `configGetStub.callsFake(...)` overrides below.
         configGetStub.callsFake((key: string, defaultValue?: unknown) => {
             if (settingsMap.has(key)) {
                 return settingsMap.get(key);
             }
             switch (key) {
-                case "litellm-connector.baseUrl":
-                    return "";
-                case "litellm-connector.apiKeySecretRef":
-                    return "default";
                 case "litellm-connector.inactivityTimeout":
                     return 60;
                 case "litellm-connector.disableCaching":
                     return true;
-                case "litellm-connector.emitUsageData":
-                    return false;
                 case "litellm-connector.disableQuotaToolRedaction":
                     return false;
                 case "litellm-connector.modelOverrides":
@@ -161,7 +160,6 @@ suite("ConfigManager Unit Tests", () => {
         settingsMap.set("litellm-connector.inlineCompletions.enabled", true);
         settingsMap.set("litellm-connector.enableResponsesApi", true);
         settingsMap.set("litellm-connector.commitModelIdOverride", "gpt-4");
-        settingsMap.set("litellm-connector.emitUsageData", true);
         settingsMap.set("litellm-connector.disableCaching", false);
         settingsMap.set("litellm-connector.disableQuotaToolRedaction", false);
 
@@ -181,12 +179,6 @@ suite("ConfigManager Unit Tests", () => {
     test("getConfig reads modelIdOverride and trims whitespace", async () => {
         // Override the stubbed config value for this test.
         configGetStub.callsFake((key: string, defaultValue?: unknown) => {
-            if (key === "litellm-connector.baseUrl") {
-                return "";
-            }
-            if (key === "litellm-connector.apiKeySecretRef") {
-                return "default";
-            }
             if (key === "litellm-connector.modelIdOverride") {
                 return "  gpt-4o  ";
             }
@@ -211,12 +203,6 @@ suite("ConfigManager Unit Tests", () => {
 
     test("getConfig treats whitespace-only modelIdOverride as unset", async () => {
         configGetStub.callsFake((key: string, defaultValue?: unknown) => {
-            if (key === "litellm-connector.baseUrl") {
-                return "";
-            }
-            if (key === "litellm-connector.apiKeySecretRef") {
-                return "default";
-            }
             if (key === "litellm-connector.modelIdOverride") {
                 return "   ";
             }
@@ -238,8 +224,6 @@ suite("ConfigManager Unit Tests", () => {
         const cfg = await manager.getConfig();
         assert.strictEqual(cfg.modelIdOverride, undefined);
     });
-
-    // experimental emitUsageData setting removed
 
     test("reportFeatureToggles is a no-op without telemetry service", async () => {
         const manager = new ConfigManager(mockSecrets);

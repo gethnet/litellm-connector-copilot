@@ -113,6 +113,150 @@ function normalizeUsagePayload(usage: RawUsagePayload): OpenAIUsagePayload {
     return normalized;
 }
 
+interface ParsedTextToolCall {
+    id?: string;
+    name: string;
+    args: string;
+}
+
+function toJsonArgumentString(value: unknown): string {
+    if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) {
+            return "{}";
+        }
+        try {
+            JSON.parse(trimmed);
+            return trimmed;
+        } catch {
+            return JSON.stringify({ value });
+        }
+    }
+
+    if (value === undefined || value === null) {
+        return "{}";
+    }
+
+    if (typeof value === "object") {
+        try {
+            return JSON.stringify(value);
+        } catch {
+            return "{}";
+        }
+    }
+
+    return JSON.stringify({ value });
+}
+
+function parseTextToolPayload(payload: unknown): ParsedTextToolCall[] {
+    if (!payload || typeof payload !== "object") {
+        return [];
+    }
+
+    const record = payload as Record<string, unknown>;
+
+    if (Array.isArray(record.tool_calls)) {
+        const calls: ParsedTextToolCall[] = [];
+        for (const entry of record.tool_calls) {
+            if (!entry || typeof entry !== "object") {
+                continue;
+            }
+            const callRecord = entry as Record<string, unknown>;
+            const fn =
+                callRecord.function && typeof callRecord.function === "object"
+                    ? (callRecord.function as Record<string, unknown>)
+                    : undefined;
+            const name =
+                typeof fn?.name === "string"
+                    ? fn.name
+                    : typeof callRecord.name === "string"
+                      ? callRecord.name
+                      : undefined;
+
+            if (!name) {
+                continue;
+            }
+
+            calls.push({
+                id: typeof callRecord.id === "string" ? callRecord.id : undefined,
+                name,
+                args: toJsonArgumentString(fn?.arguments ?? callRecord.arguments),
+            });
+        }
+        return calls;
+    }
+
+    const functionObject =
+        record.function && typeof record.function === "object"
+            ? (record.function as Record<string, unknown>)
+            : undefined;
+    const name =
+        typeof record.name === "string"
+            ? record.name
+            : typeof functionObject?.name === "string"
+              ? functionObject.name
+              : undefined;
+    if (!name) {
+        return [];
+    }
+
+    return [
+        {
+            id: typeof record.id === "string" ? record.id : undefined,
+            name,
+            args: toJsonArgumentString(record.arguments ?? functionObject?.arguments ?? record.input),
+        },
+    ];
+}
+
+function parseTaggedToolCalls(text: string): { textWithoutParsedCalls: string; toolCalls: ParsedTextToolCall[] } {
+    const toolCalls: ParsedTextToolCall[] = [];
+    let remaining = text;
+
+    const patterns = [/<tool_call>([\s\S]*?)<\/tool_call>/g, /<\|tool_call_begin\|>([\s\S]*?)<\|tool_call_end\|>/g];
+
+    for (const pattern of patterns) {
+        remaining = remaining.replace(pattern, (fullMatch: string, payloadText: string): string => {
+            const payloadTrimmed = payloadText.trim();
+            if (!payloadTrimmed) {
+                return "";
+            }
+            try {
+                const parsedPayload = JSON.parse(payloadTrimmed) as unknown;
+                const parsedCalls = parseTextToolPayload(parsedPayload);
+                if (parsedCalls.length > 0) {
+                    toolCalls.push(...parsedCalls);
+                    return "";
+                }
+            } catch {
+                // Keep original text when payload is not valid JSON.
+            }
+            return fullMatch;
+        });
+    }
+
+    return { textWithoutParsedCalls: remaining, toolCalls };
+}
+
+function splitStableTextAndPendingTaggedContent(text: string): { stableText: string; pendingText: string } {
+    const openers = ["<tool_call>", "<|tool_call_begin|>"];
+    const closestOpenIndex = Math.max(...openers.map((token) => text.lastIndexOf(token)));
+    if (closestOpenIndex < 0) {
+        return { stableText: text, pendingText: "" };
+    }
+
+    const pendingCandidate = text.slice(closestOpenIndex);
+    const hasClosingTag = pendingCandidate.includes("</tool_call>") || pendingCandidate.includes("<|tool_call_end|>");
+    if (hasClosingTag) {
+        return { stableText: text, pendingText: "" };
+    }
+
+    return {
+        stableText: text.slice(0, closestOpenIndex),
+        pendingText: pendingCandidate,
+    };
+}
+
 /**
  * Interprets a single JSON frame from LiteLLM (OpenAI or /responses format)
  * and returns a list of emitted parts.
@@ -156,7 +300,37 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
         const delta = choice.delta as Record<string, unknown> | undefined;
 
         if (delta && typeof delta.content === "string" && delta.content) {
-            textParts.push({ type: "text", value: delta.content });
+            // Some LiteLLM backends emit tool calls as tagged text payloads
+            // (for example <tool_call>{...}</tool_call>) instead of structured
+            // delta.tool_calls arrays. Parse those tags here so VS Code receives
+            // LanguageModelToolCallPart instead of raw JSON text.
+            const combinedText = `${state.textToolParserBuffer}${delta.content}`;
+            const { stableText, pendingText } = splitStableTextAndPendingTaggedContent(combinedText);
+            const { textWithoutParsedCalls, toolCalls } = parseTaggedToolCalls(stableText);
+            state.textToolParserBuffer = pendingText;
+
+            if (textWithoutParsedCalls) {
+                textParts.push({ type: "text", value: textWithoutParsedCalls });
+            }
+
+            for (const parsedToolCall of toolCalls) {
+                const normalizedId = normalizeToolCallId(
+                    parsedToolCall.id && parsedToolCall.id.trim().length > 0
+                        ? parsedToolCall.id
+                        : `text_tool_call_${state.emittedTextToolCallIds.size + toolCallParts.length + 1}`
+                );
+                if (state.emittedTextToolCallIds.has(normalizedId)) {
+                    continue;
+                }
+                toolCallParts.push({
+                    type: "tool_call",
+                    index: toolCallParts.length,
+                    id: normalizedId,
+                    name: parsedToolCall.name,
+                    args: parsedToolCall.args,
+                });
+                state.emittedTextToolCallIds.add(normalizedId);
+            }
         }
 
         if (delta?.tool_calls && Array.isArray(delta.tool_calls)) {
@@ -215,6 +389,32 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
         }
 
         if (choice.finish_reason && typeof choice.finish_reason === "string") {
+            if (state.textToolParserBuffer.trim().length > 0) {
+                const { textWithoutParsedCalls, toolCalls } = parseTaggedToolCalls(state.textToolParserBuffer);
+                if (textWithoutParsedCalls) {
+                    textParts.push({ type: "text", value: textWithoutParsedCalls });
+                }
+                for (const parsedToolCall of toolCalls) {
+                    const normalizedId = normalizeToolCallId(
+                        parsedToolCall.id && parsedToolCall.id.trim().length > 0
+                            ? parsedToolCall.id
+                            : `text_tool_call_${state.emittedTextToolCallIds.size + toolCallParts.length + 1}`
+                    );
+                    if (state.emittedTextToolCallIds.has(normalizedId)) {
+                        continue;
+                    }
+                    toolCallParts.push({
+                        type: "tool_call",
+                        index: toolCallParts.length,
+                        id: normalizedId,
+                        name: parsedToolCall.name,
+                        args: parsedToolCall.args,
+                    });
+                    state.emittedTextToolCallIds.add(normalizedId);
+                }
+                state.textToolParserBuffer = "";
+            }
+
             for (const [index, buffer] of state.toolCallBuffers) {
                 if (buffer.id && buffer.name && buffer.args) {
                     const isDuplicate = state.emittedTextToolCallIds.has(buffer.id);

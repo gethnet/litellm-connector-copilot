@@ -86,7 +86,8 @@ When introducing a new folder or module, make the ownership boundary obvious fro
 
 **Provider Architecture Pattern**:
 - **Base class** (`LiteLLMProviderBase`): Handles ALL orchestration logic
-  - Model discovery and caching
+  - Wires the BackendRegistry's `onDidChange` event to VS Code's
+    `onDidChangeLanguageModelChatInformation`
   - Message ingress pipeline (normalization, validation, filtering, trimming, error detection)
   - HTTP client interaction with endpoint routing
   - Telemetry and error handling
@@ -95,6 +96,7 @@ When introducing a new folder or module, make the ownership boundary obvious fro
   - `LiteLLMCompletionProvider`: Implements `LanguageModelTextCompletionProvider`, wraps prompts
   - Both delegate request building to base, eliminating duplication
 - **Benefit**: Adding new provider types requires minimal code (protocol wrapper only)
+- **BackendRegistry** (`LiteLLMProviderRegistry`): The single source of truth for backends and their associated models. Owns the discovery HTTP fetch, the per-group namespacing, the change detection, and the per-model capability caches. See "BackendRegistry contract" below.
 
 ### Secrets
 - Store API keys only via `ConfigManager` / `SecretStorage`.
@@ -136,7 +138,9 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
 
 - **Base Orchestrator**: `src/providers/liteLLMProviderBase.ts`
   - Owns the shared request lifecycle used by provider implementations
-  - Centralizes model discovery, caching, and shared validation
+  - Wires the BackendRegistry's `onDidChange` event to VS Code's
+    `onDidChangeLanguageModelChatInformation` so the picker refreshes when
+    a backend's model set actually changes
   - Runs the common ingress pipeline (normalization, validation, parameter filtering, trimming, error detection)
   - Delegates transport concerns to adapter/client layers
   - Centralizes telemetry, logging, and shared error handling
@@ -187,6 +191,63 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
 **Structural rule of thumb**: shared cross-provider behavior belongs in the base class or adapters; VS Code protocol specifics belong in the single derived provider that owns that protocol. Do not fork chat-protocol logic into version-suffixed siblings.
 
 When architecture changes, update this section in the same change so the document remains a reliable map of the codebase.
+
+#### BackendRegistry contract (`src/providers/litellmProviderRegistry.ts`)
+
+The `BackendRegistry` (class `LiteLLMProviderRegistry`) is the **single
+source of truth for backends and their associated models**. It owns the
+discovery HTTP fetch, the per-group namespacing, the change detection, and
+the per-model capability caches.
+
+The contract is **public read, internal write**:
+
+- **Public surface (read + ingress)**:
+  - `discoverModels(options, token)` — the only way for VS Code (or any
+    consumer) to fetch a model list and populate the registry. The
+    registry owns the HTTP fetch, the namespacing (`<routing>/<rawModel>`
+    ids), and the change detection; consumers see a single ingress that
+    returns the model list, updates the registry, and fires the change
+    event as a unit.
+  - `lookup(id)` — resolve a namespaced id to its routing entry
+    (`{baseUrl, apiKey, rawModelName, routingIdentity}`). The response
+    path uses this as the fallback when VS Code does not pass the
+    per-group BYOK config on the call.
+  - `findBackendForRawName(name)` — workspace-override routing lookup.
+  - `extractRawName(id)` — strip the routing prefix from a namespaced id.
+  - `getModelInfo(id)` / `getDerivedCapabilities(id)` — read the
+    per-model capability caches populated during discovery. These are
+    NOT a model-list cache — they cache the capability info for known
+    models and feed the request hot path.
+  - `size()`, `clear()`, `clearCaches()` — registration-state reads
+    and reset. `clear()` wipes the routing table (user-initiated
+    reload); `clearCaches()` wipes the capability caches and the
+    backoff controller.
+  - `onDidChange` — fires when a backend's model set has actually
+    changed. The base provider subscribes once and forwards to VS
+    Code's `onDidChangeLanguageModelChatInformation`.
+
+- **Internal surface (write — NOT part of the public contract)**:
+  - `setModelsForBackend(...)`, `getModelsForBackend(baseUrl)`,
+    `getModelIdsForBackend(baseUrl)` — internal write/read, used only
+    by `discoverModels` itself for change detection. They are
+    TypeScript `private` and MUST NOT be called from outside the
+    class. Tests that need to seed a known (id → backend) mapping
+    cast via `unknown` to a typed test seam.
+
+**Why merge discovery into the registry?** The previous design kept
+`ModelDiscovery` as a separate class and the registry as a pure data
+structure. The base provider had to call `modelDiscovery.discover(...)`,
+then `registry.setModelsForBackend`, then check
+`registry.getModelIdsForBackend` for change detection — a three-step
+orchestration that was easy to get wrong (write-before-compare silently
+broke change detection). With the merge, `discoverModels` is the only
+call site that needs to know the write protocol exists, and consumers
+see a single ingress.
+
+**Stateless by design**: there is no model-list cache, no in-flight
+de-duplication, and no TTL. Every `discoverModels` call is a single
+HTTP round-trip. The "ghost cache" is gone, and the picker always
+reflects the live state of the backend.
 
 ### Key logic (extension)
 
@@ -304,4 +365,4 @@ Any code you edit must be brought up to these standards:
   - Use `ConfigManager.convertProviderConfiguration()` to unify config sources
 - [ ] All `LanguageModelChatInformation` entries returned from `provideLanguageModelChatInformation` set `isUserSelectable: true` so they appear in the VS Code model picker
 - [ ] Telemetry includes `caller` context to distinguish invocation source ("inline-completions", "terminal-chat", etc.)
-- [ ] Model discovery and caching tested for correctness and performance (shared across all providers)
+- [ ] Model discovery tested for correctness and performance via the BackendRegistry (shared across all providers)

@@ -11,14 +11,12 @@ import { createTelemetryMocks } from "../../test/utils/telemetryMock";
 
 /**
  * Seeds the per-group discovery state on a provider so the new routing path
- * (`getDiscoveredModelBackend`) finds a backend during `sendRequestToLiteLLM`.
+ * (`resolveBackendForCall`) finds a backend during the request flow.
  *
- * The migration to per-group configuration moved the routing identity from
- * `resolveBackends()` (which reads legacy `litellm-connector.url` / `key` settings)
- * to a per-config discovery cache keyed by the URL hostname. Tests that pre-date the
- * migration stub `getConfig().url` only; this helper bridges them by registering
- * a single synthetic model entry that carries the backend metadata the new
- * `getDiscoveredModelBackend` lookup expects.
+ * The single-provider architecture moved routing identity from a global model
+ * list keyed by hostname-namespaced IDs to call-time configuration. Tests
+ * pre-dating the migration stub `getConfig().url` only; this helper bridges
+ * them by stubbing `resolveBackendForCall` to return a known session.
  */
 function seedDiscoveredBackend(sandbox: sinon.SinonSandbox, provider: LiteLLMChatProvider, modelId: string): void {
     const seededModel = {
@@ -30,25 +28,42 @@ function seedDiscoveredBackend(sandbox: sinon.SinonSandbox, provider: LiteLLMCha
         maxInputTokens: 1000,
         maxOutputTokens: 1000,
         capabilities: { toolCalling: true, imageInput: false },
-        _backendName: "localhost:4000",
-        _backendUrl: "http://localhost:4000",
-        _apiKey: "test-api-key",
     } as unknown as vscode.LanguageModelChatInformation;
 
-    const providerInternals = provider as unknown as {
-        _lastModelList: vscode.LanguageModelChatInformation[];
-        _modelDiscovery: {
-            getLastModels: () => vscode.LanguageModelChatInformation[];
-            getDiscoveredModelBackend: (
-                modelId: string
-            ) => { backendName: string; url: string; apiKey: string } | undefined;
+    // The BackendRegistry is the single source of truth. We reach into
+    // its private `setModelsForBackend` write path to seed a known
+    // (id → backend) mapping without going through the public
+    // `discoverModels` ingress. This is a test-only seam: production
+    // code never calls `setModelsForBackend` directly. We use a typed
+    // `Internals` interface (cast via `unknown`) to keep this typed
+    // and avoid `any` casts at the call site. The test cares about
+    // the response-time routing path, not the discovery HTTP fetch.
+    interface Internals {
+        _registry: {
+            setModelsForBackend: (
+                baseUrl: string,
+                apiKey: string,
+                routingIdentity: string,
+                models: vscode.LanguageModelChatInformation[]
+            ) => void;
         };
-    };
-    providerInternals._lastModelList = [seededModel];
-    sandbox.stub(providerInternals._modelDiscovery, "getLastModels").returns([seededModel]);
-    sandbox
-        .stub(providerInternals._modelDiscovery, "getDiscoveredModelBackend")
-        .returns({ backendName: "localhost:4000", url: "http://localhost:4000", apiKey: "test-api-key" });
+        _configManager: {
+            convertProviderConfiguration: (
+                groupName: string,
+                configuration: Record<string, unknown>
+            ) => { backendName: string; baseUrl: string; apiKey: string } | undefined;
+        };
+    }
+    const providerInternals = provider as unknown as Internals;
+    providerInternals._registry.setModelsForBackend("http://localhost:4000", "test-api-key", "localhost:4000", [
+        seededModel,
+    ]);
+    sandbox.stub(providerInternals._configManager, "convertProviderConfiguration").returns({
+        backendName: "localhost:4000",
+        baseUrl: "http://localhost:4000",
+        apiKey: "test-api-key",
+        client: {} as never,
+    } as never);
 }
 
 suite("LiteLLM Chat Provider Unit Tests", () => {
@@ -164,11 +179,11 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                         tools: [],
                         toolMode: vscode.LanguageModelChatToolMode.Auto,
                         requestInitiator: "test",
-                    },
+                    } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
                     { report: () => {} },
                     new vscode.CancellationTokenSource().token
                 ),
-            /LiteLLM backend not found|LiteLLM configuration not found/
+            /No baseUrl|No apiKey|configure the LiteLLM provider group/i
         );
     });
 
@@ -243,7 +258,11 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 tools: [],
                 toolMode: vscode.LanguageModelChatToolMode.Auto,
                 requestInitiator: "test",
-            },
+                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-api-key" } as unknown as Record<
+                    string,
+                    unknown
+                >,
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
             { report: () => {} },
             new vscode.CancellationTokenSource().token
         );
@@ -307,7 +326,11 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 tools: [],
                 toolMode: vscode.LanguageModelChatToolMode.Auto,
                 requestInitiator: "test",
-            },
+                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-api-key" } as unknown as Record<
+                    string,
+                    unknown
+                >,
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
             { report: () => {} },
             new vscode.CancellationTokenSource().token
         );
@@ -361,7 +384,11 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                         tools: [],
                         toolMode: vscode.LanguageModelChatToolMode.Auto,
                         requestInitiator: "test",
-                    },
+                        configuration: {
+                            baseUrl: "http://localhost:4000",
+                            apiKey: "test-api-key",
+                        } as unknown as Record<string, unknown>,
+                    } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
                     { report: () => {} },
                     token
                 ),
@@ -414,7 +441,11 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                         tools: [],
                         toolMode: vscode.LanguageModelChatToolMode.Auto,
                         requestInitiator: "test",
-                    },
+                        configuration: {
+                            baseUrl: "http://localhost:4000",
+                            apiKey: "test-api-key",
+                        } as unknown as Record<string, unknown>,
+                    } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
                     { report: () => {} },
                     new vscode.CancellationTokenSource().token
                 ),
@@ -465,7 +496,11 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                         tools: [],
                         toolMode: vscode.LanguageModelChatToolMode.Auto,
                         requestInitiator: "test",
-                    },
+                        configuration: {
+                            baseUrl: "http://localhost:4000",
+                            apiKey: "test-api-key",
+                        } as unknown as Record<string, unknown>,
+                    } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
                     { report: () => {} },
                     new vscode.CancellationTokenSource().token
                 ),
@@ -512,7 +547,11 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                         tools: [],
                         toolMode: vscode.LanguageModelChatToolMode.Auto,
                         requestInitiator: "test",
-                    },
+                        configuration: {
+                            baseUrl: "http://localhost:4000",
+                            apiKey: "test-api-key",
+                        } as unknown as Record<string, unknown>,
+                    } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
                     { report: () => {} },
                     new vscode.CancellationTokenSource().token
                 ),
@@ -659,7 +698,11 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 tools: [],
                 toolMode: vscode.LanguageModelChatToolMode.Auto,
                 requestInitiator: "test",
-            },
+                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-api-key" } as unknown as Record<
+                    string,
+                    unknown
+                >,
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
             { report: (part) => reported.push(part) },
             new vscode.CancellationTokenSource().token
         );
@@ -713,7 +756,16 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         const requestBody = await providerAny.buildOpenAIChatRequest(
             messages,
             model,
-            { modelOptions: {}, tools: [], toolMode: vscode.LanguageModelChatToolMode.Auto, requestInitiator: "test" },
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-api-key" } as unknown as Record<
+                    string,
+                    unknown
+                >,
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
             undefined,
             "chat"
         );
@@ -739,7 +791,16 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         await provider.provideLanguageModelChatResponse(
             model,
             messages,
-            { modelOptions: {}, tools: [], toolMode: vscode.LanguageModelChatToolMode.Auto, requestInitiator: "test" },
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-api-key" } as unknown as Record<
+                    string,
+                    unknown
+                >,
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
             { report: (part) => reported.push(part) },
             new vscode.CancellationTokenSource().token
         );
@@ -804,7 +865,16 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                     content: [new vscode.LanguageModelTextPart("hi")],
                 },
             ],
-            { modelOptions: {}, tools: [], toolMode: vscode.LanguageModelChatToolMode.Auto, requestInitiator: "test" },
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-api-key" } as unknown as Record<
+                    string,
+                    unknown
+                >,
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
             { report: (part) => parts.push(part) },
             new vscode.CancellationTokenSource().token
         );
@@ -883,7 +953,16 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                     content: [new vscode.LanguageModelTextPart("hi")],
                 },
             ],
-            { modelOptions: {}, tools: [], toolMode: vscode.LanguageModelChatToolMode.Auto, requestInitiator: "test" },
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-api-key" } as unknown as Record<
+                    string,
+                    unknown
+                >,
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
             {
                 report: (part) => {
                     if (part instanceof vscode.LanguageModelDataPart && part.mimeType === "usage") {
@@ -966,7 +1045,16 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                     content: [new vscode.LanguageModelTextPart("hi")],
                 },
             ],
-            { modelOptions: {}, tools: [], toolMode: vscode.LanguageModelChatToolMode.Auto, requestInitiator: "test" },
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-api-key" } as unknown as Record<
+                    string,
+                    unknown
+                >,
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
             { report: (part) => parts.push(part) },
             new vscode.CancellationTokenSource().token
         );
@@ -1037,7 +1125,11 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                 tools: [],
                 toolMode: vscode.LanguageModelChatToolMode.Auto,
                 requestInitiator: "test",
-            },
+                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-api-key" } as unknown as Record<
+                    string,
+                    unknown
+                >,
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
             { report: (part) => reported.push(part) },
             new vscode.CancellationTokenSource().token
         );

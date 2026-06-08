@@ -189,9 +189,10 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
     async provideTokenCount(
         model: LanguageModelChatInformation,
         text: string | LanguageModelChatRequestMessage,
-        token: CancellationToken
+        token: CancellationToken,
+        configuration?: Record<string, unknown>
     ): Promise<number> {
-        return super.provideTokenCount(model, text, token);
+        return super.provideTokenCount(model, text, token, configuration);
     }
 
     async provideLanguageModelChatResponse(
@@ -245,13 +246,23 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 justification || "none"
             }`
         );
+        Logger.trace(
+            `Chat request: received model id="${model.id}" name="${model.name}" hasOptionsConfig=${(options as { configuration?: unknown }).configuration !== undefined}`
+        );
 
         // <Line of Code>; // TODO: Remove by v2.3 if still commented
         // let reservedOutputTokensForRequest: number | undefined;
         // let totalTokenMaxForRequest: number | undefined;
 
-        const modelInfo = this._modelInfoCache.get(model.id);
-        this._tokenCapture = new StreamTokenCapture(model.id, progress, modelInfo);
+        // Capability lookups go directly to the BackendRegistry — the single
+        // source of truth. There is no per-provider mirror cache, so a stale
+        // entry from a previous backend cannot be served for a different
+        // backend's request.
+        const modelInfo = this._registry.getModelInfo(model.id);
+        // `StreamTokenCapture` uses the model id for `countTokens` heuristics
+        // (tokenizer family lookup). The namespaced id breaks those heuristics,
+        // so we hand it the raw model name instead.
+        this._tokenCapture = new StreamTokenCapture(this.getRawModelName(model.id), progress, modelInfo);
         const tokenCapture = this._tokenCapture;
         const trackingProgress = tokenCapture.progress;
 
@@ -259,24 +270,36 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             const config = await this._configManager.getConfig();
 
             // Optional model override (primarily for completions). If set, we try to use it.
-            // If the override isn't in cache yet, attempt a best-effort refresh.
+            // If the override isn't registered yet, attempt a best-effort refresh.
+            //
+            // The override is a RAW model name (e.g. `azure_ai/gpt-5.4-mini`),
+            // not the namespaced id. The registry is keyed by namespaced id, so
+            // we use `findBackendForRawName` to resolve the override back to a
+            // backend before adopting it.
             let modelToUse = model;
             if (config.modelIdOverride) {
                 const overrideId = config.modelIdOverride;
-                const cachedOverride = this._lastModelList.find(
-                    (m: vscode.LanguageModelChatInformation) => m.id === overrideId
-                );
-                if (cachedOverride) {
-                    modelToUse = cachedOverride;
+                if (this._registry.findBackendForRawName(overrideId)) {
+                    Logger.trace(
+                        `Chat request: applying modelIdOverride overrideId="${overrideId}" originalModelId="${model.id}"`
+                    );
+                    // The override is reachable; we know its baseUrl/apiKey from
+                    // the registry. Synthesize a minimal LanguageModelChatInformation
+                    // that VS Code will accept (it only needs the id and family
+                    // for downstream request building).
+                    modelToUse = {
+                        ...model,
+                        id: overrideId,
+                    };
                 } else {
                     try {
-                        Logger.info(`modelIdOverride set to '${overrideId}' but not in cache; refreshing model list`);
+                        Logger.info(`modelIdOverride set to '${overrideId}' but not registered; refreshing model list`);
                         await this.discoverModels({ silent: true }, token);
-                        const refreshed = this._lastModelList.find(
-                            (m: vscode.LanguageModelChatInformation) => m.id === overrideId
-                        );
-                        if (refreshed) {
-                            modelToUse = refreshed;
+                        if (this._registry.findBackendForRawName(overrideId)) {
+                            Logger.trace(
+                                `Chat request: applying modelIdOverride after refresh overrideId="${overrideId}" originalModelId="${model.id}"`
+                            );
+                            modelToUse = { ...model, id: overrideId };
                         } else {
                             Logger.warn(
                                 `modelIdOverride '${overrideId}' not found after refresh; using selected model '${model.id}'`
@@ -287,11 +310,29 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                     }
                 }
             }
+            Logger.trace(
+                `Chat request: modelToUse.id="${modelToUse.id}" rawModelName="${this.getRawModelName(modelToUse.id)}"`
+            );
 
-            const modelInfo = this._modelInfoCache.get(modelToUse.id);
+            // Capability lookup goes directly to the BackendRegistry. The
+            // `modelToUse.id` is either the namespaced id VS Code handed us
+            // or, when `modelIdOverride` rewrote it, the raw model name; the
+            // registry's `lookup` will return `undefined` for the raw-name
+            // case and `getModelInfo` will also return `undefined` for it
+            // (capabilities are stored under the namespaced key), so the
+            // request builder will use the override path's defaults. This
+            // is the same single-source-of-truth read as above.
+            const modelInfo = this._registry.getModelInfo(modelToUse.id);
             const requestBody = await this.buildOpenAIChatRequest(messages, modelToUse, options, modelInfo, caller);
+            // The model id in `modelToUse` is the namespaced `<routing>/<raw>`
+            // form VS Code hands us. The tokenizer heuristics (and the
+            // `isParameterSupported` / `usageOptOutModels` lookups inside the
+            // request builder) key off the raw model family, not the routing
+            // prefix. The request builder extracts the raw name internally
+            // before populating `request.model`.
+            const rawModelIdForTokenizers = this.getRawModelName(modelToUse.id);
             const estimatedTransportInputTokens =
-                countOpenAIChatMessagesTokens(requestBody.messages, modelToUse.id, modelInfo) +
+                countOpenAIChatMessagesTokens(requestBody.messages, rawModelIdForTokenizers, modelInfo) +
                 estimateToolTokens(requestBody.tools);
             const reservedOutputTokens = getReservedOutputTokens(modelToUse, requestBody.max_tokens, {
                 estimatedInputTokens: estimatedTransportInputTokens,
@@ -304,7 +345,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             tokenCapture.setEstimatedPromptTokens(estimatedTransportInputTokens);
             const systemPromptContent = requestBody.messages.find((m) => m.role === "system")?.content;
             if (typeof systemPromptContent === "string") {
-                tokenCapture.setEstimatedSystemPromptTokens(countTokens(systemPromptContent, modelToUse.id, modelInfo));
+                tokenCapture.setEstimatedSystemPromptTokens(
+                    countTokens(systemPromptContent, rawModelIdForTokenizers, modelInfo)
+                );
             }
             tokenCapture.setReservedOutputTokens(reservedOutputTokens);
             tokenCapture.setTotalTokenMax(totalTokenMax);

@@ -3,8 +3,19 @@ import * as sinon from "sinon";
 import * as vscode from "vscode";
 import { ConfigManager } from "../../../config/configManager";
 import { DiscoveryBackoffController, sharedDiscoveryBackoff, type DiscoveryBackoffDecision } from "../discoveryBackoff";
-import { ModelDiscovery } from "../modelDiscovery";
+import { LiteLLMProviderRegistry } from "../../liteLLMProviderRegistry";
 
+/**
+ * Tests for the shared discovery backoff controller and its integration
+ * with the BackendRegistry. The backoff lives at the discovery boundary:
+ * when an HTTP `/model/info` request fails, the registry consults
+ * `sharedDiscoveryBackoff.recordFailure(...)` and either sleeps for the
+ * computed delay or surfaces a `vscode.LanguageModelError.Blocked` once
+ * the failure threshold is exceeded.
+ *
+ * The `clearCaches()` method on the registry resets the shared controller
+ * so a user-initiated reload starts from a clean slate.
+ */
 suite("Discovery backoff", () => {
     let sandbox: sinon.SinonSandbox;
     let configManager: sinon.SinonStubbedInstance<ConfigManager>;
@@ -37,7 +48,6 @@ suite("Discovery backoff", () => {
         assert.strictEqual(ninth.attempt, 9);
         assert.strictEqual(ninth.delayMs, 4_500);
         assert.strictEqual(ninth.shouldBlock, false);
-        assert.strictEqual(ninth.delayMs, Math.min(7_500, 4_500));
 
         const tenth = backoff.recordFailure(9_000);
         assert.strictEqual(tenth.attempt, 10);
@@ -62,7 +72,7 @@ suite("Discovery backoff", () => {
         assert.strictEqual(resetDecision.shouldBlock, false);
     });
 
-    test("ModelDiscovery shares the process-global backoff controller", async () => {
+    test("LiteLLMProviderRegistry shares the process-global backoff controller", async () => {
         // This test verifies that when multiple discovery attempts fail,
         // they share a global backoff controller that eventually blocks
         // further discovery attempts.
@@ -72,12 +82,6 @@ suite("Discovery backoff", () => {
             delayMs: 500,
             shouldBlock: true,
         }));
-
-        // Note: With the legacy discovery path disabled, backoff is triggered
-        // when HTTP requests to the model endpoint fail. To test backoff behavior,
-        // we need to:
-        // 1. Return a valid session from convertProviderConfiguration
-        // 2. Make the LiteLLMClient.getModelInfo call fail
 
         // Create a stub client that rejects on getModelInfo
         const stubClient = {
@@ -92,22 +96,22 @@ suite("Discovery backoff", () => {
             client: stubClient,
         });
 
-        const discoveryA = new ModelDiscovery({
-            configManager,
+        const registry = new LiteLLMProviderRegistry({
+            configManager: configManager as unknown as ConfigManager,
             userAgent: "test",
             onModernConfigurationDetected: () => {},
         });
 
-        const tokenA = new vscode.CancellationTokenSource().token;
+        const token = new vscode.CancellationTokenSource().token;
 
         // First discovery should trigger backoff and block
-        const promise = discoveryA.discover({
-            options: {
+        const promise = registry.discoverModels(
+            {
                 silent: false,
-                configuration: { providerName: "test-group", baseUrl: "http://localhost:4000", apiKey: "test-key" },
+                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-key" },
             },
-            token: tokenA,
-        });
+            token
+        );
         await assert.rejects(promise, /Discovery blocked/);
 
         // recordFailure should have been called at least once
@@ -115,8 +119,8 @@ suite("Discovery backoff", () => {
     });
 
     test("clearCaches resets the shared backoff state", () => {
-        const discovery = new ModelDiscovery({
-            configManager,
+        const registry = new LiteLLMProviderRegistry({
+            configManager: configManager as unknown as ConfigManager,
             userAgent: "test",
             onModernConfigurationDetected: () => {},
         });
@@ -124,7 +128,7 @@ suite("Discovery backoff", () => {
         sharedDiscoveryBackoff.recordFailure(0);
         sharedDiscoveryBackoff.recordFailure(1_000);
 
-        discovery.clearCaches();
+        registry.clearCaches();
 
         const decision = sharedDiscoveryBackoff.recordFailure(0);
         assert.strictEqual(decision.attempt, 1);

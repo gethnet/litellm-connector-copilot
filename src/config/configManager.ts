@@ -4,6 +4,7 @@ import type { TelemetryService } from "../telemetry/telemetryService";
 import { LiteLLMClient } from "../adapters/litellmClient";
 import type { BackendSession } from "../providers/backendSession";
 import { Logger } from "../utils/logger";
+import { deriveGroupNameFromUrl } from "../utils";
 import { loadUserOverrides, toStringArray } from "./modelOverrides";
 
 export class ConfigManager {
@@ -221,37 +222,49 @@ export class ConfigManager {
 
     /**
      * Converts VS Code per-group provider configuration into a BackendSession.
-     * Required fields: baseUrl (http/https), apiKey.
      *
-     * `providerName` is optional because VS Code group-based configuration already
-     * carries the user-entered group name separately as `groupName`.
+     * Required fields (per `package.json` `languageModelChatProviders.configuration`):
+     *   - `baseUrl`  — must start with http:// or https://
+     *   - `apiKey`   — non-empty string (encrypted by VS Code)
+     *
+     * `groupName` is the user-entered group label from VS Code 1.120's group
+     * picker. It is NOT required: when absent, `BackendSession.backendName`
+     * falls back to a hostname derived from `baseUrl`. The discovery layer
+     * uses `baseUrl` as the cache key regardless of the group name, so a
+     * missing or stale groupName has no effect on routing.
+     *
+     * `providerName` (if present in the payload) is ignored. It is a legacy
+     * field from the multi-backend era and is no longer part of the schema.
      */
     convertProviderConfiguration(
         groupName: string,
         configuration: Record<string, unknown>
     ): BackendSession | undefined {
-        const providerName = groupName.trim();
         const baseUrl = typeof configuration.baseUrl === "string" ? configuration.baseUrl.trim() : "";
         const apiKey = typeof configuration.apiKey === "string" ? configuration.apiKey.trim() : "";
 
-        if (!providerName) {
-            Logger.debug("convertProviderConfiguration: missing groupName");
-            return undefined;
-        }
-
         if (!baseUrl || !/^https?:\/\//i.test(baseUrl)) {
-            Logger.debug("convertProviderConfiguration: baseUrl must start with http:// or https://");
+            Logger.warn(
+                "convertProviderConfiguration: rejected — baseUrl must start with http:// or https:// (got a non-http value)"
+            );
             return undefined;
         }
 
         if (!apiKey) {
-            Logger.debug("convertProviderConfiguration: missing apiKey in configuration");
+            Logger.warn("convertProviderConfiguration: rejected — apiKey is empty in per-group configuration");
             return undefined;
         }
 
+        // Derive a stable backendName from the canonical group name; fall back to a
+        // hostname+port derived from baseUrl when the user has not entered a group
+        // name. Reuse the same helper the discovery layer uses to compute the
+        // picker's category label, so the two stay in sync.
+        const trimmedGroupName = groupName.trim();
+        const backendName = trimmedGroupName || deriveGroupNameFromUrl(baseUrl) || baseUrl;
+
         const userAgent = "litellm-vscode-chat/vscode-1.120+";
         return {
-            backendName: providerName,
+            backendName,
             baseUrl,
             apiKey,
             client: new LiteLLMClient({ url: baseUrl, key: apiKey }, userAgent),

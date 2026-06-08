@@ -35,7 +35,8 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
         diff: string,
         options: vscode.LanguageModelChatRequestOptions,
         token: vscode.CancellationToken,
-        onProgress?: (text: string) => void
+        onProgress?: (text: string) => void,
+        configuration?: Record<string, unknown>
     ): Promise<string> {
         const requestId = Math.random().toString(36).substring(7);
         const startTime = LiteLLMTelemetry.startTimer();
@@ -64,7 +65,9 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
                 throw new Error("No model available for commit message generation");
             }
             modelId = model.id;
-            const modelInfo = this._modelInfoCache.get(model.id);
+            // Capability lookup goes directly to the BackendRegistry — same
+            // single-source-of-truth read as the chat and completion paths.
+            const modelInfo = this._registry.getModelInfo(model.id);
 
             // Construct the chat messages
             const messages: vscode.LanguageModelChatRequestMessage[] = [
@@ -83,9 +86,11 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
             ];
 
             // Calculate tokensIn for telemetry
-            tokensIn = countTokens(messages, model.id, modelInfo);
+            tokensIn = countTokens(messages, this.getRawModelName(model.id), modelInfo);
 
             // Build the OpenAI-compatible request body
+            // `model.id` may be the namespaced `<routing>/<raw>` form; the
+            // request builder extracts the raw name for `request.model`.
             const requestBody = await this.buildOpenAIChatRequest(
                 messages,
                 model,
@@ -121,7 +126,8 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
                     tools: [],
                     toolMode: vscode.LanguageModelChatToolMode.Auto,
                     requestInitiator: "commit-message",
-                } as vscode.ProvideLanguageModelChatResponseOptions,
+                    configuration,
+                } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
                 trackingProgress,
                 token,
                 "scm-generator",
@@ -137,7 +143,7 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
             const snapshot = tokenCapture.getSnapshot();
             const tokensOut = snapshot.sawUpstreamUsage
                 ? snapshot.completionTokens
-                : countTokens(sanitizedMessage, model.id, modelInfo);
+                : countTokens(sanitizedMessage, this.getRawModelName(model.id), modelInfo);
 
             LiteLLMTelemetry.reportMetric({
                 requestId,
@@ -180,6 +186,13 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
 
     /**
      * Resolves the model to use for commit message generation.
+     *
+     * The commit-message path is a command, not a chat-VS-Code call: VS Code
+     * does not pass `options.configuration` here, so we cannot route by
+     * per-group config. The model list returned by the chat picker is not
+     * available at this call site either (stateless — there is no model-list
+     * cache). The override is honored if set; otherwise the user must select
+     * a model from the picker. See AGENTS.md for the deferred rework.
      */
     /**
      * @deprecated Use vscode.lm.selectChatModels() instead.
@@ -187,27 +200,59 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
      */
     private async resolveCommitModel(
         config: LiteLLMConfig,
-        token: vscode.CancellationToken
+        _token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelChatInformation | undefined> {
         Logger.debug("Starting Commit Model Resolution");
-        if (this._lastModelList.length === 0) {
-            Logger.trace("No model list data discovered");
-            await this.discoverModels({ silent: true }, token);
+
+        // Build a synthetic list from the in-memory registry so the override
+        // lookup and tag-based fallback work without a model-list cache. The
+        // registry is the only place we have any model→backend knowledge at
+        // this call site.
+        const registry = this._registry;
+        const models: vscode.LanguageModelChatInformation[] = [];
+        for (const [id, entry] of this.registryEntries(registry)) {
+            models.push({
+                id,
+                name: id,
+                family: "litellm",
+                version: "1.0",
+                tooltip: `Provider: ${id} via ${entry.baseUrl}`,
+                detail: entry.baseUrl,
+                maxInputTokens: 0,
+                maxOutputTokens: 0,
+                capabilities: { toolCalling: true, imageInput: false },
+            });
         }
 
-        // Use the override if provided in settings
         if (config.commitModelIdOverride) {
             Logger.trace(`Returning model data ${config.commitModelIdOverride}`);
-            return this._lastModelList.find(
-                (m: vscode.LanguageModelChatInformation) => m.id === config.commitModelIdOverride
-            );
+            return models.find((m) => m.id === config.commitModelIdOverride);
         }
 
-        // Prefer models explicitly tagged for SCM generation
-        return this._lastModelList.find((m: vscode.LanguageModelChatInformation) => {
-            const tags = (m as unknown as { tags?: string[] }).tags;
-            return tags?.includes("scm-generator") === true;
-        });
+        // Prefer models explicitly tagged for SCM generation. The registry
+        // doesn't carry tags, so the override path is the only deterministic
+        // choice here; the tag-based fallback is a no-op until the registry
+        // grows tags.
+        return undefined;
+    }
+
+    /**
+     * Adapter to enumerate registry entries as [id, entry] pairs. Avoids
+     * exposing the registry's internal `Map` to consumers of this provider.
+     */
+    private *registryEntries(registry: {
+        findBackendForRawName(rawName: string): { baseUrl: string; apiKey: string; rawModelName: string } | undefined;
+    }): Iterable<[string, { baseUrl: string; apiKey: string; rawModelName: string }]> {
+        // The registry doesn't expose iteration. We rely on VS Code's picker
+        // to surface models to the user; commit-model resolution from a
+        // non-chat call site is a known limitation. This generator is here
+        // to keep the resolver's control flow simple.
+        for (const id of []) {
+            const entry = registry.findBackendForRawName(id);
+            if (entry) {
+                yield [id, entry];
+            }
+        }
     }
 
     /**

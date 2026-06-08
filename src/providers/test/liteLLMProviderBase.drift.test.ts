@@ -30,7 +30,13 @@ suite("Model Drift Detection & State Persistence", () => {
         sandbox.restore();
     });
 
-    test("consecutive calls with same config return cached models (same references)", async () => {
+    test("consecutive calls with same config produce stable model ids (stateless re-fetch)", async () => {
+        // The discovery layer is stateless: every call performs a fresh
+        // `/model/info` HTTP request. Two calls produce two independent
+        // fetches, so the returned `LanguageModelChatInformation` object
+        // references differ. The model id and other derived values are
+        // stable across calls because the routing identity (derived from
+        // the URL hostname) does not change.
         const config = {
             providerName: "test-group",
             baseUrl: "http://localhost:4000",
@@ -74,7 +80,9 @@ suite("Model Drift Detection & State Persistence", () => {
 
         assert.strictEqual(models1.length, 1, "Should have 1 model");
         assert.strictEqual(models2.length, 1, "Should have 1 model");
-        assert.strictEqual(models1[0], models2[0], "Model objects should be same reference (cached)");
+        // Namespaced id is stable across calls because the routing
+        // identity (URL hostname) does not change.
+        assert.strictEqual(models1[0].id, models2[0].id, "Model id should be stable across calls (stateless re-fetch)");
 
         const schema1 = (models1[0] as LanguageModelChatInformation).configurationSchema;
         const schema2 = (models2[0] as LanguageModelChatInformation).configurationSchema;
@@ -130,13 +138,14 @@ suite("Model Drift Detection & State Persistence", () => {
             } as unknown as BackendSession["client"],
         };
 
-        // Discovery now derives the routing identity (passed to convertProviderConfiguration) from
-        // the URL hostname, so we match on hostname here.
-        sandbox.stub(configManager, "convertProviderConfiguration").callsFake((hostname) => {
-            if (hostname === "localhost:4000") {
+        // Discovery no longer threads groupName through to convertProviderConfiguration —
+        // the URL is the routing identity. The picker's label is derived separately. We
+        // match on the configuration payload (second arg) to return the right session.
+        sandbox.stub(configManager, "convertProviderConfiguration").callsFake((_groupName, config) => {
+            if (config === config1) {
                 return mockSession1;
             }
-            if (hostname === "localhost:4001") {
+            if (config === config2) {
                 return mockSession2;
             }
             return undefined;
@@ -155,7 +164,12 @@ suite("Model Drift Detection & State Persistence", () => {
         assert.strictEqual(callCount, 2, "Should have called discovery twice for different configs");
     });
 
-    test("model list only updates on drift (same models, no update)", async () => {
+    test("model list only updates on drift (same models, no update event)", async () => {
+        // The stateless design re-fetches every call. The change event
+        // fires ONLY when the model id set returned for a given baseUrl
+        // differs from the prior delivery. Two identical fetches produce
+        // identical id sets, so the change event is NOT fired on the
+        // second call.
         const config = {
             providerName: "test-group",
             baseUrl: "http://localhost:4000",
@@ -184,17 +198,22 @@ suite("Model Drift Detection & State Persistence", () => {
         };
         sandbox.stub(configManager, "convertProviderConfiguration").returns(mockSession);
 
-        const models1 = await provider.discoverModels(
+        const fired: number[] = [];
+        provider.onDidChangeLanguageModelChatInformation(() => fired.push(1));
+
+        await provider.discoverModels(
+            { silent: true, configuration: config },
+            new vscode.CancellationTokenSource().token
+        );
+        await provider.discoverModels(
             { silent: true, configuration: config },
             new vscode.CancellationTokenSource().token
         );
 
-        const models2 = await provider.discoverModels(
-            { silent: true, configuration: config },
-            new vscode.CancellationTokenSource().token
-        );
-
-        assert.strictEqual(models1[0], models2[0], "Should return cached model object (no recreation)");
+        // First call fires; second call with the same model set MUST NOT
+        // fire. This is the change-detection invariant the registry
+        // owns; the base provider subscribes to it and forwards to VS Code.
+        assert.strictEqual(fired.length, 1, "change event should fire only on the first call");
     });
 
     test("clearModelCache clears per-config cache", async () => {

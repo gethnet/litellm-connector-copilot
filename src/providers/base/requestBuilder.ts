@@ -19,6 +19,7 @@ export class RequestBuilder {
     private readonly isParameterSupported: RequestBuilderDeps["isParameterSupported"];
     private readonly getTelemetryOptions: RequestBuilderDeps["getTelemetryOptions"];
     private readonly usageOptOutModels: RequestBuilderDeps["usageOptOutModels"];
+    private readonly extractRawModelName: RequestBuilderDeps["extractRawModelName"];
 
     constructor(deps: RequestBuilderDeps) {
         this.configManager = deps.configManager;
@@ -28,6 +29,7 @@ export class RequestBuilder {
         this.isParameterSupported = deps.isParameterSupported;
         this.getTelemetryOptions = deps.getTelemetryOptions;
         this.usageOptOutModels = deps.usageOptOutModels;
+        this.extractRawModelName = deps.extractRawModelName;
     }
 
     public async buildOpenAIChatRequest(
@@ -39,11 +41,17 @@ export class RequestBuilder {
     ): Promise<OpenAIChatCompletionRequest> {
         const config = await this.configManager.getConfig();
 
+        // `model.id` is the namespaced `<routing>/<raw>` form VS Code hands
+        // us at response time. The LiteLLM request body, the capability
+        // lookup, the parameter-supported probes, and the usage-opt-out
+        // set all need the RAW model name (the part after the first `/`).
+        const rawModelId = this.extractRawModelName(model.id);
+
         const toolRedaction = this.detectQuotaToolRedaction(
             messages,
             options.tools ?? [],
             `build-${Math.random().toString(36).slice(2, 10)}`,
-            model.id,
+            rawModelId,
             config.disableQuotaToolRedaction === true,
             _caller
         );
@@ -56,7 +64,7 @@ export class RequestBuilder {
         const mo = (options.modelOptions as Record<string, unknown>) ?? {};
 
         const requestBody: OpenAIChatCompletionRequest = {
-            model: model.id,
+            model: rawModelId,
             messages: openaiMessages,
             stream: true,
             max_tokens:
@@ -66,26 +74,26 @@ export class RequestBuilder {
             ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         };
 
-        if (!this.usageOptOutModels.has(model.id)) {
+        if (!this.usageOptOutModels.has(rawModelId)) {
             requestBody.stream_options = { include_usage: true } as { include_usage?: boolean };
         }
 
-        if (this.isParameterSupported("temperature", modelInfo, model.id)) {
+        if (this.isParameterSupported("temperature", modelInfo, rawModelId)) {
             const temp = mo.temperature as number | undefined;
             requestBody.temperature = temp ?? (config.sendDefaultParameters ? 0.7 : undefined);
         }
-        if (this.isParameterSupported("frequency_penalty", modelInfo, model.id)) {
+        if (this.isParameterSupported("frequency_penalty", modelInfo, rawModelId)) {
             const fp = mo.frequency_penalty as number | undefined;
             requestBody.frequency_penalty = fp ?? (config.sendDefaultParameters ? 0.2 : undefined);
         }
-        if (this.isParameterSupported("presence_penalty", modelInfo, model.id)) {
+        if (this.isParameterSupported("presence_penalty", modelInfo, rawModelId)) {
             const pp = mo.presence_penalty as number | undefined;
             requestBody.presence_penalty = pp ?? (config.sendDefaultParameters ? 0.1 : undefined);
         }
-        if (this.isParameterSupported("stop", modelInfo, model.id) && mo.stop) {
+        if (this.isParameterSupported("stop", modelInfo, rawModelId) && mo.stop) {
             requestBody.stop = mo.stop as string | string[];
         }
-        if (this.isParameterSupported("top_p", modelInfo, model.id) && typeof mo.top_p === "number") {
+        if (this.isParameterSupported("top_p", modelInfo, rawModelId) && typeof mo.top_p === "number") {
             requestBody.top_p = mo.top_p;
         }
 
@@ -99,7 +107,7 @@ export class RequestBuilder {
         this.stripUnsupportedParametersFromRequest(
             requestBody as unknown as Record<string, unknown>,
             modelInfo,
-            model.id
+            rawModelId
         );
         return requestBody;
     }
@@ -113,6 +121,10 @@ export class RequestBuilder {
     ): Promise<OpenAIChatCompletionRequest> {
         const config = await this.configManager.getConfig();
 
+        // See `buildOpenAIChatRequest` for the rationale: `model.id` is
+        // namespaced, the body needs the raw model name.
+        const rawModelId = this.extractRawModelName(model.id);
+
         const toolConfig = convertTools(options);
         const trimmedMessages = trimV2MessagesForBudget(messages, toolConfig.tools, model, modelInfo);
         validateV2Messages(trimmedMessages);
@@ -121,7 +133,7 @@ export class RequestBuilder {
         const mo = (options.modelOptions as Record<string, unknown>) ?? {};
 
         const requestBody: OpenAIChatCompletionRequest = {
-            model: model.id,
+            model: rawModelId,
             messages: convertV2MessagesToOpenAI(trimmedMessages),
             stream: true,
             max_tokens:
@@ -131,19 +143,19 @@ export class RequestBuilder {
             ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         };
 
-        if (this.isParameterSupported("temperature", modelInfo, model.id)) {
+        if (this.isParameterSupported("temperature", modelInfo, rawModelId)) {
             const temp = mo.temperature as number | undefined;
             requestBody.temperature = temp ?? (config.sendDefaultParameters ? 0.7 : undefined);
         }
-        if (this.isParameterSupported("frequency_penalty", modelInfo, model.id)) {
+        if (this.isParameterSupported("frequency_penalty", modelInfo, rawModelId)) {
             const fp = mo.frequency_penalty as number | undefined;
             requestBody.frequency_penalty = fp ?? (config.sendDefaultParameters ? 0.2 : undefined);
         }
-        if (this.isParameterSupported("presence_penalty", modelInfo, model.id)) {
+        if (this.isParameterSupported("presence_penalty", modelInfo, rawModelId)) {
             const pp = mo.presence_penalty as number | undefined;
             requestBody.presence_penalty = pp ?? (config.sendDefaultParameters ? 0.1 : undefined);
         }
-        if (this.isParameterSupported("top_p", modelInfo, model.id) && typeof mo.top_p === "number") {
+        if (this.isParameterSupported("top_p", modelInfo, rawModelId) && typeof mo.top_p === "number") {
             requestBody.top_p = mo.top_p;
         }
 
@@ -157,7 +169,7 @@ export class RequestBuilder {
         this.stripUnsupportedParametersFromRequest(
             requestBody as unknown as Record<string, unknown>,
             modelInfo,
-            model.id
+            rawModelId
         );
         return requestBody;
     }

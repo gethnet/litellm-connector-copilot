@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### 🛠️ Refactors
+
+* **BackendRegistry Owns Discovery**: `ModelDiscovery` has been merged into `LiteLLMProviderRegistry`. The registry is now the single source of truth for backends and their associated models, with **public read, internal write** contract. `discoverModels(options, token)` is the only public ingress for populating the registry; the internal write methods (`setModelsForBackend`, `getModelsForBackend`, `getModelIdsForBackend`) are now `private`. The base provider subscribes to the registry's `onDidChange` event and forwards to VS Code's `onDidChangeLanguageModelChatInformation`. See `AGENTS.md` for the full contract.
+
 ## [2.2.0] - 2026-06-05
 
 ### 💥 Breaking / Behavior Changes
