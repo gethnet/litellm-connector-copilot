@@ -15,6 +15,7 @@ import { TelemetryService } from "./telemetry/telemetryService";
 import { LiteLLMTelemetry } from "./utils/telemetry";
 import { setTelemetryService as setTokenUtilsTelemetryService } from "./adapters/tokenUtils";
 import { EffortFallbackCache } from "./utils/reasoningEffortFallback";
+import { LegacyConfigMigration } from "./config/legacyConfigMigration";
 
 // Store the config manager for cleanup on deactivation
 let configManagerInstance: ConfigManager | undefined;
@@ -293,10 +294,23 @@ export function activate(context: vscode.ExtensionContext): void {
         Logger.error("Failed to register commands", cmdErr);
     }
 
-    // Onboarding for users on legacy configurations is handled by
-    // `showMigrationNoticeOnce` above. Modern per-group configuration requires
-    // no extension-side prompt — VS Code surfaces the model picker empty until
-    // a provider group is added via "Add Model...".
+    // Legacy configuration migration
+    const legacyMigration = new LegacyConfigMigration(context, configManager, telemetryService);
+    void legacyMigration
+        .runMigrationIfNeeded()
+        .then(async (result) => {
+            if (!result?.migrated) {
+                return;
+            }
+            Logger.info(`Migration completed: ${result.groupsCreated} groups created`);
+            // Give VS Code time to settle before refreshing model list
+            setTimeout(() => {
+                activeProvider.refreshModelInformation();
+            }, 500);
+        })
+        .catch((err) => {
+            Logger.error("Migration check failed", err);
+        });
 }
 
 export async function deactivate(): Promise<void> {

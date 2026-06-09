@@ -17,7 +17,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "2.1.0-dev66",
+	"version": "2.1.0-dev67",
 	"preview": true,
 	"engines": {
 		"vscode": "^1.120.0"
@@ -259,7 +259,7 @@
 		"@eslint/js": "^10.0.0",
 		"@stylistic/eslint-plugin": "^5.7.1",
 		"@types/mocha": "^10.0.10",
-		"@types/node": "^22.19.11",
+		"@types/node": "^22.19.20",
 		"@types/sinon": "^21.0.0",
 		"@types/vscode": "^1.120.0",
 		"@vscode/dts": "^0.4.1",
@@ -271,19 +271,15 @@
 		"mocha-junit-reporter": "^2.2.1",
 		"mocha-multi-reporters": "^1.5.0",
 		"ovsx": "^0.10.6",
-		"posthog-js": "^1.364.7",
-		"posthog-node": "^5.28.11",
-		"prettier": "^3.1.0",
+		"posthog-js": "^1.383.2",
+		"posthog-node": "^5.36.7",
+		"prettier": "^3.8.4",
 		"rimraf": "^6.0.1",
 		"sinon": "^21.0.1",
 		"typescript": "^6.0.3",
-		"typescript-eslint": "^8.39.0",
+		"typescript-eslint": "^8.61.0",
 		"vscode": "^1.1.37",
 		"zx": "^8.8.5"
-	},
-	"dependencies": {
-		"posthog-js": "^1.371.2",
-		"posthog-node": "^5.30.0"
 	},
 	"enabledApiProposals": [
 		"chatProvider",
