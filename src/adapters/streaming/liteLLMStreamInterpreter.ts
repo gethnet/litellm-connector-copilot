@@ -2,6 +2,7 @@ export type { V2EmittedPart as EmittedPart } from "../../providers/v2Types";
 import type { V2EmittedPart as EmittedPart } from "../../providers/v2Types";
 import type { OpenAIUsageCompletionTokenDetails, OpenAIUsagePayload, OpenAIUsagePromptTokenDetails } from "../../types";
 import { isCacheControlMimeType, normalizeToolCallId } from "../../utils";
+import { sanitizeToolName } from "../../utils/toolNameUtils";
 import { StructuredLogger } from "../../observability/structuredLogger";
 
 export interface StreamingState {
@@ -358,7 +359,9 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                     if (newId && state.emittedTextToolCallIds.has(newId)) {
                         continue;
                     }
-                    buffer = { id: newId, name: fn?.name || "", args: fn?.arguments || "" };
+                    // Apply tool name sanitization for AWS Bedrock Converse API compliance (64-char limit)
+                    const { name: sanitizedName } = sanitizeToolName(fn?.name || "");
+                    buffer = { id: newId, name: sanitizedName, args: fn?.arguments || "" };
                     state.toolCallBuffers.set(index, buffer);
                     StructuredLogger.trace("stream.tool_call_buffered", {
                         toolName: fn?.name,
@@ -497,7 +500,9 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
             if (callId) {
                 const existing = state.responseToolCallBuffers.get(callId) ?? { id: callId, name: undefined, args: "" };
                 if (name) {
-                    existing.name = name;
+                    // Apply tool name sanitization for AWS Bedrock Converse API compliance (64-char limit)
+                    const { name: sanitizedName } = sanitizeToolName(name);
+                    existing.name = sanitizedName;
                 }
                 if (argsDelta) {
                     existing.args += argsDelta;
@@ -509,7 +514,9 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
             } else {
                 // No call_id yet — buffer anonymously (providers that stream args before id)
                 if (name) {
-                    state.anonymousResponseToolName = name;
+                    // Apply tool name sanitization for AWS Bedrock Converse API compliance (64-char limit)
+                    const { name: sanitizedName } = sanitizeToolName(name);
+                    state.anonymousResponseToolName = sanitizedName;
                 }
                 if (argsDelta) {
                     state.anonymousResponseToolArgs += argsDelta;
@@ -525,7 +532,9 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
         if (id) {
             const existing = state.responseToolCallBuffers.get(id) ?? { id, name: undefined, args: "" };
             if (typeof delta?.name === "string") {
-                existing.name = delta.name;
+                // Apply tool name sanitization for AWS Bedrock Converse API compliance (64-char limit)
+                const { name: sanitizedName } = sanitizeToolName(delta.name);
+                existing.name = sanitizedName;
             }
             if (typeof delta?.arguments === "string") {
                 existing.args += delta.arguments;
