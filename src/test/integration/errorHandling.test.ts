@@ -1,7 +1,6 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import { LiteLLMChatProvider } from "../../providers";
-import { LiteLLMClient } from "../../adapters/litellmClient";
 import * as sinon from "sinon";
 import { createMockSecrets } from "../../test/utils/testMocks";
 
@@ -119,12 +118,10 @@ suite("LiteLLM Error Handling Unit Tests", function () {
 
         interface ProviderWithConfig {
             _configManager: {
-                isConfigured: () => Promise<boolean>;
                 getConfig: () => Promise<{ url: string; inactivityTimeout?: number }>;
             };
         }
         const providerWithConfig = provider as unknown as ProviderWithConfig;
-        sandbox.stub(providerWithConfig._configManager, "isConfigured").resolves(true);
         sandbox
             .stub(providerWithConfig._configManager, "getConfig")
             .resolves({ url: "http://localhost:4000", inactivityTimeout: 60 });
@@ -140,7 +137,18 @@ suite("LiteLLM Error Handling Unit Tests", function () {
         });
         const apiError = new Error(`LiteLLM API error: 400 Bad Request\n${errorText}`);
 
-        sandbox.stub(LiteLLMClient.prototype, "chat").rejects(apiError);
+        // Stub `sendRequestToLiteLLM` directly. The per-group routing checks
+        // `getDiscoveredModelBackend` to find a backend for the model. In the unit-test
+        // environment no model is discovered, so the routing returns nothing. Stubbing
+        // the higher-level method isolates the error-handling behaviour we want to exercise.
+        sandbox
+            .stub(
+                provider as unknown as {
+                    sendRequestToLiteLLM: (request: unknown) => Promise<ReadableStream<Uint8Array>>;
+                },
+                "sendRequestToLiteLLM"
+            )
+            .rejects(apiError);
 
         const model: vscode.LanguageModelChatInformation = {
             id: "test-model",
@@ -183,18 +191,26 @@ suite("LiteLLM Error Handling Unit Tests", function () {
 
         interface ProviderWithConfig {
             _configManager: {
-                isConfigured: () => Promise<boolean>;
                 getConfig: () => Promise<{ url: string; inactivityTimeout?: number }>;
             };
         }
         const providerWithConfig = provider as unknown as ProviderWithConfig;
-        sandbox.stub(providerWithConfig._configManager, "isConfigured").resolves(true);
         sandbox
             .stub(providerWithConfig._configManager, "getConfig")
             .resolves({ url: "http://localhost:4000", inactivityTimeout: 60 });
 
         const apiError = new Error(`LiteLLM API error: 400 Bad Request\nSomething went wrong`);
-        sandbox.stub(LiteLLMClient.prototype, "chat").rejects(apiError);
+        // Stub `sendRequestToLiteLLM` directly (see note above for the unsupported-parameter
+        // test) so the request-flow doesn't reject with the "LiteLLM configuration not found"
+        // guard before we reach the API error.
+        sandbox
+            .stub(
+                provider as unknown as {
+                    sendRequestToLiteLLM: (request: unknown) => Promise<ReadableStream<Uint8Array>>;
+                },
+                "sendRequestToLiteLLM"
+            )
+            .rejects(apiError);
 
         const model: vscode.LanguageModelChatInformation = {
             id: "test-model",

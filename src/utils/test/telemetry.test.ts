@@ -3,7 +3,6 @@ import * as sinon from "sinon";
 import type { IMetrics } from "..//telemetry";
 import { LiteLLMTelemetry } from "..//telemetry";
 import { Logger } from "..//logger";
-import type { TelemetryEvent } from "../../telemetry/types";
 import type { TelemetryService } from "../../telemetry/telemetryService";
 
 /**
@@ -18,14 +17,18 @@ function firstArg<T>(stub: sinon.SinonStub): T {
 
 suite("Telemetry Unit Tests", () => {
     let loggerDebugStub: sinon.SinonStub;
+    let loggerInfoStub: sinon.SinonStub;
     let sandbox: sinon.SinonSandbox;
 
     setup(() => {
         sandbox = sinon.createSandbox();
         loggerDebugStub = sandbox.stub(Logger, "debug");
+        loggerInfoStub = sandbox.stub(Logger, "info");
+        LiteLLMTelemetry.setTelemetryService(undefined as unknown as TelemetryService);
     });
 
     teardown(() => {
+        LiteLLMTelemetry.setTelemetryService(undefined as unknown as TelemetryService);
         sandbox.restore();
     });
 
@@ -43,6 +46,13 @@ suite("Telemetry Unit Tests", () => {
         const logMessage = firstArg<string>(loggerDebugStub);
         assert.ok(logMessage.includes("[Telemetry]"));
         assert.ok(logMessage.includes('"requestId":"123"'));
+        assert.ok(loggerInfoStub.calledOnce);
+        const infoMessage = firstArg<string>(loggerInfoStub);
+        assert.ok(infoMessage.includes("[TokenUsage]"));
+        assert.ok(infoMessage.includes("tokens_in=0"));
+        assert.ok(infoMessage.includes("tokens_out=0"));
+        assert.ok(infoMessage.includes("token_count_max=n/a"));
+        assert.ok(infoMessage.includes("total_token_max=n/a"));
     });
 
     test("IMetrics interface includes cacheReadRatio field", () => {
@@ -80,11 +90,13 @@ suite("Telemetry Unit Tests", () => {
     });
 
     test("captureRequestCompletedWithCache passes cacheReadRatio to capture method", () => {
-        const captureStub = sandbox.stub();
+        const captureRequestCompletedWithCache = sandbox.stub();
+        const captureRequestFailed = sandbox.stub();
+        const captureRequestCachingBypassed = sandbox.stub();
         const telemetryServiceStub = {
-            capture: captureStub,
-            captureRequestCompletedWithCache: sandbox.stub(),
-            captureRequestFailed: sandbox.stub(),
+            captureRequestCompletedWithCache,
+            captureRequestFailed,
+            captureRequestCachingBypassed,
         } as unknown as TelemetryService;
 
         LiteLLMTelemetry.setTelemetryService(telemetryServiceStub);
@@ -102,17 +114,23 @@ suite("Telemetry Unit Tests", () => {
 
         LiteLLMTelemetry.reportMetric(customProps);
 
-        assert.ok(captureStub.calledOnce);
-        const capturedEvent = firstArg<TelemetryEvent>(captureStub);
-        assert.ok(capturedEvent.properties.cache_read_ratio === 0.25);
+        assert.strictEqual(loggerInfoStub.calledOnce, true);
+        assert.strictEqual(captureRequestCompletedWithCache.calledOnce, true);
+        interface CompletedWithCacheProps {
+            cacheReadRatio?: number;
+        }
+        const props = firstArg<CompletedWithCacheProps>(captureRequestCompletedWithCache);
+        assert.strictEqual(props.cacheReadRatio, 0.25);
+        assert.strictEqual(captureRequestFailed.called, false);
+        assert.strictEqual(captureRequestCachingBypassed.called, false);
     });
 
     test("captureRequestCompletedWithCache omits cacheReadRatio when undefined", () => {
-        const captureStub = sandbox.stub();
+        const captureRequestCompletedWithCache = sandbox.stub();
         const telemetryServiceStub = {
-            capture: captureStub,
-            captureRequestCompletedWithCache: sandbox.stub(),
+            captureRequestCompletedWithCache,
             captureRequestFailed: sandbox.stub(),
+            captureRequestCachingBypassed: sandbox.stub(),
         } as unknown as TelemetryService;
 
         LiteLLMTelemetry.setTelemetryService(telemetryServiceStub);
@@ -130,10 +148,45 @@ suite("Telemetry Unit Tests", () => {
 
         LiteLLMTelemetry.reportMetric(customProps);
 
-        assert.ok(captureStub.calledOnce);
-        const capturedEvent = firstArg<TelemetryEvent>(captureStub);
-        // Ensure cache_read_ratio property is not present when undefined
-        assert.ok(capturedEvent.properties.cache_read_ratio === undefined);
+        assert.strictEqual(captureRequestCompletedWithCache.calledOnce, true);
+        interface CompletedWithCacheProps {
+            cacheReadRatio?: number;
+        }
+        const props = firstArg<CompletedWithCacheProps>(captureRequestCompletedWithCache);
+        assert.strictEqual(props.cacheReadRatio, undefined);
+    });
+
+    test("reportMetric forwards caching_bypassed status to captureRequestCachingBypassed", () => {
+        const captureRequestCachingBypassed = sandbox.stub();
+        const telemetryServiceStub = {
+            captureRequestCompletedWithCache: sandbox.stub(),
+            captureRequestFailed: sandbox.stub(),
+            captureRequestCachingBypassed,
+        } as unknown as TelemetryService;
+
+        LiteLLMTelemetry.setTelemetryService(telemetryServiceStub);
+
+        LiteLLMTelemetry.reportMetric({
+            requestId: "req-cache-bypass-123",
+            model: "anthropic/claude-3",
+            status: "caching_bypassed",
+            caller: "chat",
+            error: "provider_caching_not_supported",
+        });
+
+        assert.strictEqual(captureRequestCachingBypassed.calledOnce, true);
+        interface CachingBypassedProps {
+            request_id: string;
+            caller: string;
+            model: string;
+            endpoint: string;
+            reason?: string;
+        }
+        const props = firstArg<CachingBypassedProps>(captureRequestCachingBypassed);
+        assert.strictEqual(props.request_id, "req-cache-bypass-123");
+        assert.strictEqual(props.caller, "chat");
+        assert.strictEqual(props.endpoint, "unknown");
+        assert.strictEqual(props.reason, "provider_caching_not_supported");
     });
 
     test("Timer methods return numbers", () => {
@@ -203,6 +256,8 @@ suite("Telemetry Unit Tests", () => {
         const captureRequestFailed = sandbox.stub();
         const telemetryServiceStub = {
             captureRequestFailed,
+            captureRequestCompletedWithCache: sandbox.stub(),
+            captureRequestCachingBypassed: sandbox.stub(),
         } as unknown as TelemetryService;
 
         LiteLLMTelemetry.setTelemetryService(telemetryServiceStub);

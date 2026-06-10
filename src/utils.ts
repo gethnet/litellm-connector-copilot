@@ -8,45 +8,111 @@ import type {
     OpenAIToolCall,
     OpenAIChatMessageContentItem,
 } from "./types";
+import { Logger } from "./utils/logger";
 
 /**
- * OpenAI-compatible tool_call ids are commonly limited to <= 40 chars.
- * VS Code tool call ids can be longer; LiteLLM/OpenAI will reject them.
+ * Normalize tool call IDs to be compatible with OpenAI-compatible providers
+ * and strict models like z.AI GLM that enforce shorter length limits.
+ *
+ * Constraints:
+ * - OpenAI-compatible tool_call_id requires minimum ~42 characters
+ * - z.AI GLM models enforce maximum ~63 characters
+ * - Strict models (e.g. gpt-5.3-codex) require IDs start with 'fc_'
  *
  * Strategy:
- * - Always ensure IDs start with 'fc_' to satisfy strict models (e.g. gpt-5.3-codex).
- * - For longer ids, deterministically shrink to <= 40 using a stable hash.
- * - Preserve a readable prefix for debugging.
+ * - Always ensure IDs start with 'fc_' to satisfy strict models
+ * - Generate IDs in the safe range of 42–63 characters
+ * - Use deterministic hashing for stability (same input → same output)
+ * - Preserve a readable middle fragment for debugging
+ *
+ * @param id - The input tool call ID (may be empty, too short, too long, or non-compliant)
+ * @param maxLen - Maximum length (default 50, must be >= 42 and <= 63)
+ * @returns Normalized ID in range [42, maxLen] starting with 'fc_'
  */
-export function normalizeToolCallId(id: string, maxLen = 40): string {
+export function normalizeToolCallId(id: string, maxLen = 56): string {
+    // Enforce safe bounds: must be at least 42 (OpenAI minimum) and at most 63 (z.AI limit)
+    const MIN_LENGTH = 42;
+    const MAX_SAFE_LENGTH = 63;
+    // Shift by 3 chars to account for "fc_"
+    const MIN_LENGTH_NO_PREFIX = 39;
+    const MAX_LENGTH_NO_PREFIX = 60;
+    const effectiveMaxLen = Math.max(MIN_LENGTH, Math.min(maxLen, MAX_SAFE_LENGTH));
+    const effectiveMaxLen_NoPrefix = Math.max(MIN_LENGTH_NO_PREFIX, Math.min(maxLen, MAX_LENGTH_NO_PREFIX));
+
     const raw = (id || "").trim();
     const prefix = "fc_";
-
+    let tcId: string;
+    let tcHasPrefix = false;
+    let tcNoPrefixLength: number;
+    // If ID is empty, generate a deterministic one in the safe range
     if (!raw) {
-        const generated = prefix + stableHash("empty").slice(0, maxLen - prefix.length);
-        Logger.trace(`[normalizeToolCallId] Empty ID provided, generated: ${generated}`);
+        // Generate: fc_ + hash (padded to ensure >= 42 chars)
+        // EffectiveMaxLen (e.g., 50) - prefix length (3) = 47 chars from hash
+        const hashPart = stableHash("empty")
+            .repeat(4)
+            .slice(0, effectiveMaxLen - prefix.length);
+        const generated = `${prefix}${hashPart}`;
+        Logger.trace(`[normalizeToolCallId] Empty ID provided, generated: ${generated} (len: ${generated.length})`);
         return generated;
     }
 
-    // If it already starts with fc_ and is short enough, keep it
-    if (raw.startsWith(prefix) && raw.length <= maxLen) {
-        Logger.trace(`[normalizeToolCallId] Valid ID kept as-is: ${raw}`);
-        return raw;
+    if (raw.includes("fc_")) {
+        tcId = raw.split("fc_")[1];
+        tcHasPrefix = true;
+        tcNoPrefixLength = tcId.length;
+    } else {
+        tcId = raw;
+        tcNoPrefixLength = tcId.length;
     }
 
-    // Otherwise, normalize it to ensure it starts with fc_
+    if (tcHasPrefix) {
+        if (tcNoPrefixLength >= MIN_LENGTH_NO_PREFIX && tcNoPrefixLength <= effectiveMaxLen_NoPrefix) {
+            Logger.trace(`[normalizeToolCallId] Valid ID kept as-is: ${raw} (len: ${raw.length})`);
+            return raw;
+        }
+
+        // If it already starts with fc_ and is in the safe range, keep it
+        if (tcNoPrefixLength >= MIN_LENGTH_NO_PREFIX && tcNoPrefixLength <= effectiveMaxLen_NoPrefix) {
+            Logger.trace(`[normalizeToolCallId] Valid ID kept as-is: ${raw} (len: ${raw.length})`);
+            return raw;
+        }
+
+        // If it starts with fc_ but is too short, pad it deterministically
+        if (tcNoPrefixLength < MIN_LENGTH_NO_PREFIX) {
+            const padding = stableHash(tcId, MIN_LENGTH_NO_PREFIX - tcNoPrefixLength);
+            const padded = `fc_${tcId}${padding}`; // checks were done against the un-prefixed variant
+            Logger.trace(`[normalizeToolCallId] Short fc_ ID padded: ${tcId} -> ${padded} (len: ${padded.length})`);
+            return padded;
+        }
+    }
+
+    // Otherwise, normalize it to ensure it starts with fc_ and is in safe range
     // Strip common prefixes we want to replace to keep the middle part readable
     const cleanRaw = raw.replace(/^call_|^tc_/, "");
     const safeMiddle = cleanRaw.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 10);
     const hash = stableHash(raw); // Hash the FULL original ID for stability
-    const out = `${prefix}${safeMiddle}_${hash}`;
-    const final = out.length <= maxLen ? out : out.slice(0, maxLen);
 
-    Logger.trace(`[normalizeToolCallId] ID normalized to satisfy prefix/length: ${raw} -> ${final}`);
+    // Build initial: fc_ + safeMiddle + _ + hash = 3 + 10 + 1 + 16 = 30 chars minimum
+    // We need at least 42 chars, so pad the hash portion to reach minimum length
+    let baseOut = `${prefix}${safeMiddle}_${hash}`;
+
+    // Pad to minimum length
+    while (baseOut.length < MIN_LENGTH) {
+        baseOut += stableHash(raw).slice(0, 2);
+    }
+
+    let final: string;
+    if (baseOut.length > effectiveMaxLen) {
+        final = baseOut.slice(0, effectiveMaxLen);
+    } else {
+        final = baseOut;
+    }
+
+    Logger.trace(`[normalizeToolCallId] ID normalized: ${raw} -> ${final} (len: ${final.length})`);
     return final;
 }
 
-function stableHash(input: string): string {
+function stableHash(input: string, minLen = 16): string {
     // Must work in BOTH extension host (node) and web bundle.
     // Use a small, deterministic, non-crypto hash (FNV-1a 64-bit) and encode as hex.
     // Collision risk is low for our use (shrinking IDs) and avoids bundling Node builtins.
@@ -56,9 +122,8 @@ function stableHash(input: string): string {
         hash ^= BigInt(ch.codePointAt(0) ?? 0);
         hash = (hash * prime) & 0xffffffffffffffffn;
     }
-    return hash.toString(16).padStart(16, "0");
+    return hash.toString(minLen).padStart(minLen, "0");
 }
-import { Logger } from "./utils/logger";
 
 // Tool calling sanitization helpers
 
@@ -839,5 +904,25 @@ export function tryParseJSONObject(text: string): { ok: true; value: Record<stri
         return { ok: false };
     } catch {
         return { ok: false };
+    }
+}
+
+/**
+ * Derives a human-readable group name from a URL by returning the hostname and
+ * non-default port (if present). Returns an empty string for invalid or empty
+ * input so callers can fall back to other heuristics.
+ */
+export function deriveGroupNameFromUrl(url: string): string {
+    if (typeof url !== "string" || url.length === 0) {
+        return "";
+    }
+    try {
+        const parsed = new URL(url);
+        const isDefaultPort =
+            (parsed.protocol === "https:" && (parsed.port === "" || parsed.port === "443")) ||
+            (parsed.protocol === "http:" && (parsed.port === "" || parsed.port === "80"));
+        return parsed.hostname + (parsed.port && !isDefaultPort ? `:${parsed.port}` : "");
+    } catch {
+        return "";
     }
 }

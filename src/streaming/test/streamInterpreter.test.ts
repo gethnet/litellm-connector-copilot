@@ -151,10 +151,10 @@ suite("Stream Interpreter Unit Tests", () => {
         const parts1 = interpretStreamEvent(event1, state);
         const toolCalls1 = parts1.filter((p) => p.type === "tool_call");
         assert.strictEqual(toolCalls1.length, 1, "First turn should emit 1 tool call");
-        // IDs are now normalized to start with 'fc_' and be <= 40 chars
+        // IDs are now normalized to start with 'fc_' and be >= 42 chars
         const emittedId1 = (toolCalls1[0] as { id: string }).id;
         assert.ok(emittedId1.startsWith("fc_"), `Expected normalized ID to start with 'fc_', got: ${emittedId1}`);
-        assert.ok(emittedId1.length <= 40, `Expected normalized ID <= 40 chars, got: ${emittedId1.length}`);
+        assert.ok(emittedId1.length >= 42, `Expected normalized ID >= 40 chars, got: ${emittedId1.length}`);
 
         // Second turn: same tool call ID should NOT be emitted again
         // This simulates a model that re-sends previous tool calls in history

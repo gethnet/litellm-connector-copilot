@@ -161,6 +161,7 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
         // through unchanged so reasoning effort works identically across endpoints
         // and the connector keeps a single canonical request shape.
         reasoning_effort: requestBody.reasoning_effort,
+        stream_options: requestBody.stream_options,
     };
 
     if (requestBody.tools) {

@@ -7,6 +7,7 @@ import type { TelemetryService } from "../../telemetry/telemetryService";
 suite("ConfigManager Unit Tests", () => {
     let mockSecrets: vscode.SecretStorage;
     let secretsMap: Map<string, string>;
+    let configManager: ConfigManager;
     let getConfigurationStub: sinon.SinonStub;
     let configGetStub: sinon.SinonStub;
     let settingsMap: Map<string, unknown>;
@@ -28,21 +29,20 @@ suite("ConfigManager Unit Tests", () => {
         // Stub workspace configuration reads so tests are deterministic and don't depend on VS Code defaults.
         // We return explicit values for the keys ConfigManager reads.
         configGetStub = sinon.stub();
+        // Note: legacy `litellm-connector.baseUrl`, `.apiKeySecretRef`, and
+        // `.emitUsageData` settings are no longer read by ConfigManager
+        // (VS Code 1.120+ per-group configuration). Stubs for them have been
+        // removed; tests that previously relied on these returns are covered
+        // by the per-test `configGetStub.callsFake(...)` overrides below.
         configGetStub.callsFake((key: string, defaultValue?: unknown) => {
             if (settingsMap.has(key)) {
                 return settingsMap.get(key);
             }
             switch (key) {
-                case "litellm-connector.baseUrl":
-                    return "";
-                case "litellm-connector.apiKeySecretRef":
-                    return "default";
                 case "litellm-connector.inactivityTimeout":
                     return 60;
                 case "litellm-connector.disableCaching":
                     return true;
-                case "litellm-connector.emitUsageData":
-                    return false;
                 case "litellm-connector.disableQuotaToolRedaction":
                     return false;
                 case "litellm-connector.modelOverrides":
@@ -67,6 +67,7 @@ suite("ConfigManager Unit Tests", () => {
             },
             has: () => false,
         } as unknown as vscode.WorkspaceConfiguration);
+        configManager = new ConfigManager(mockSecrets);
     });
 
     teardown(() => {
@@ -76,78 +77,8 @@ suite("ConfigManager Unit Tests", () => {
     test("getConfig returns empty values when nothing is stored", async () => {
         const manager = new ConfigManager(mockSecrets);
         const config = await manager.getConfig();
-        assert.strictEqual(config.url, "");
-        assert.strictEqual(config.key, undefined);
+        // url and key are no longer part of LiteLLMConfig (VS Code 1.120+ per-group configuration)
         assert.strictEqual(config.modelIdOverride, undefined);
-    });
-
-    test("setConfig and getConfig roundtrip", async () => {
-        const manager = new ConfigManager(mockSecrets);
-        const testConfig = { url: "https://api.example.com", key: "sk-123" };
-
-        await manager.setConfig(testConfig);
-        const config = await manager.getConfig();
-
-        assert.strictEqual(config.url, "https://api.example.com");
-        assert.strictEqual(config.key, "sk-123");
-    });
-
-    test("setConfig deletes keys when values are missing", async () => {
-        const manager = new ConfigManager(mockSecrets);
-        await manager.setConfig({ url: "https://api.example.com", key: "sk-123" });
-
-        await manager.setConfig({ url: "", key: "" });
-        const config = await manager.getConfig();
-
-        assert.strictEqual(config.url, "");
-        assert.strictEqual(config.key, undefined);
-        // baseUrl is stored in settings; only the API key secret should be deleted.
-        assert.strictEqual(secretsMap.size, 0);
-    });
-
-    test("isConfigured returns true when url or backends are present", async () => {
-        const manager = new ConfigManager(mockSecrets);
-
-        assert.strictEqual(await manager.isConfigured(), false);
-
-        await manager.setConfig({ url: "https://api.example.com" });
-        assert.strictEqual(await manager.isConfigured(), true);
-
-        await manager.setConfig({ url: "" });
-        assert.strictEqual(await manager.isConfigured(), false);
-
-        settingsMap.set("litellm-connector.backends", [{ name: "cloud", url: "http://cloud:4000" }]);
-        assert.strictEqual(await manager.isConfigured(), true);
-    });
-
-    test("getConfig migrates legacy url to backends[0]", async () => {
-        settingsMap.set("litellm-connector.baseUrl", "http://localhost:4000");
-        secretsMap.set("litellm-connector.apiKey.default", "sk-test");
-
-        const manager = new ConfigManager(mockSecrets);
-        const config = await manager.getConfig();
-
-        assert.strictEqual(config.url, "http://localhost:4000");
-        assert.ok(config.backends);
-        assert.strictEqual(config.backends.length, 1);
-        assert.strictEqual(config.backends[0].name, "default");
-        assert.strictEqual(config.backends[0].url, "http://localhost:4000");
-    });
-
-    test("getConfig uses backends array when configured", async () => {
-        settingsMap.set("litellm-connector.baseUrl", "http://old:4000");
-        settingsMap.set("litellm-connector.backends", [
-            { name: "cloud", url: "http://cloud:4000" },
-            { name: "local", url: "http://local:4000" },
-        ]);
-
-        const manager = new ConfigManager(mockSecrets);
-        const config = await manager.getConfig();
-
-        assert.ok(config.backends);
-        assert.strictEqual(config.backends.length, 2);
-        assert.strictEqual(config.backends[0].name, "cloud");
-        assert.strictEqual(config.backends[1].name, "local");
     });
 
     test("getConfig reads modelCapabilitiesOverrides", async () => {
@@ -179,8 +110,8 @@ suite("ConfigManager Unit Tests", () => {
             {
                 match: "gpt-5",
                 supportsReasoning: true,
-                reasoningEfforts: ["high", "xhigh"],
-                defaultEffort: "xhigh",
+                reasoningEfforts: ["none", "low", "medium", "high"],
+                defaultEffort: "medium",
             },
             {
                 match: "",
@@ -189,8 +120,8 @@ suite("ConfigManager Unit Tests", () => {
             {
                 match: "claude-3",
                 supportsReasoning: null,
-                reasoningEfforts: ["minimal", "low"],
-                defaultEffort: "low",
+                reasoningEfforts: ["none", "low", "medium", "high"],
+                defaultEffort: "medium",
                 notes: "keep minimal",
             },
         ]);
@@ -202,77 +133,21 @@ suite("ConfigManager Unit Tests", () => {
             {
                 match: "gpt-5",
                 supportsReasoning: true,
-                reasoningEfforts: ["high", "xhigh"],
-                defaultEffort: "xhigh",
+                reasoningEfforts: ["none", "low", "medium", "high"],
+                defaultEffort: "medium",
                 notes: undefined,
             },
             {
                 match: "claude-3",
                 supportsReasoning: null,
-                reasoningEfforts: ["minimal", "low"],
-                defaultEffort: "low",
+                reasoningEfforts: ["none", "low", "medium", "high"],
+                defaultEffort: "medium",
                 notes: "keep minimal",
             },
         ]);
     });
 
-    test("resolveBackends returns resolved backends with API keys", async () => {
-        settingsMap.set("litellm-connector.backends", [
-            { name: "cloud", url: "http://cloud:4000", apiKeySecretRef: "cloud" },
-        ]);
-        secretsMap.set("litellm-connector.apiKey.cloud", "sk-cloud");
-
-        const manager = new ConfigManager(mockSecrets);
-        const resolved = await manager.resolveBackends();
-
-        assert.strictEqual(resolved.length, 1);
-        assert.strictEqual(resolved[0].name, "cloud");
-        assert.strictEqual(resolved[0].apiKey, "sk-cloud");
-    });
-
-    test("resolveBackends skips disabled backends", async () => {
-        settingsMap.set("litellm-connector.backends", [
-            { name: "cloud", url: "http://cloud:4000", enabled: true },
-            { name: "local", url: "http://local:4000", enabled: false },
-        ]);
-
-        const manager = new ConfigManager(mockSecrets);
-        const resolved = await manager.resolveBackends();
-
-        assert.strictEqual(resolved.length, 1);
-        assert.strictEqual(resolved[0].name, "cloud");
-    });
-
-    test("addBackend stores backend and API key", async () => {
-        const manager = new ConfigManager(mockSecrets);
-        await manager.addBackend({ name: "new-backend", url: "http://new:4000" }, "sk-new");
-
-        const backends = await manager.listBackends();
-        assert.ok(backends.some((b) => b.name === "new-backend"));
-        assert.strictEqual(secretsMap.get("litellm-connector.apiKey.new-backend"), "sk-new");
-    });
-
-    test("addBackend throws on duplicate name", async () => {
-        settingsMap.set("litellm-connector.backends", [{ name: "existing", url: "http://existing:4000" }]);
-
-        const manager = new ConfigManager(mockSecrets);
-        await assert.rejects(
-            () => manager.addBackend({ name: "existing", url: "http://other:4000" }),
-            /already exists/
-        );
-    });
-
-    test("removeBackend removes backend and cleans up secret", async () => {
-        settingsMap.set("litellm-connector.backends", [{ name: "to-remove", url: "http://remove:4000" }]);
-        secretsMap.set("litellm-connector.apiKey.to-remove", "sk-remove");
-
-        const manager = new ConfigManager(mockSecrets);
-        await manager.removeBackend("to-remove");
-
-        const backends = await manager.listBackends();
-        assert.strictEqual(backends.length, 0);
-        assert.strictEqual(secretsMap.has("litellm-connector.apiKey.to-remove"), false);
-    });
+    // resolveBackends tests removed - method no longer exists (VS Code 1.120+ per-group configuration)
 
     test("reportFeatureToggles calls telemetry service with correct toggles", async () => {
         const manager = new ConfigManager(mockSecrets);
@@ -285,17 +160,18 @@ suite("ConfigManager Unit Tests", () => {
         settingsMap.set("litellm-connector.inlineCompletions.enabled", true);
         settingsMap.set("litellm-connector.enableResponsesApi", true);
         settingsMap.set("litellm-connector.commitModelIdOverride", "gpt-4");
-        settingsMap.set("litellm-connector.emitUsageData", true);
         settingsMap.set("litellm-connector.disableCaching", false);
         settingsMap.set("litellm-connector.disableQuotaToolRedaction", false);
 
+        settingsMap.set("litellm-connector.forceResponsesEndpoint", true);
+        settingsMap.set("litellm-connector.allowChatCompletionsFallback", true);
+
         await manager.reportFeatureToggles("test_source");
 
-        assert.strictEqual(captureStub.callCount, 6);
+        assert.strictEqual(captureStub.callCount, 5);
         assert.ok(captureStub.calledWith("inline-completions", true, "test_source"));
         assert.ok(captureStub.calledWith("responses-api", true, "test_source"));
         assert.ok(captureStub.calledWith("commit-message", true, "test_source"));
-        assert.ok(captureStub.calledWith("usage-data", true, "test_source"));
         assert.ok(captureStub.calledWith("caching", true, "test_source"));
         assert.ok(captureStub.calledWith("quota-tool-redaction", true, "test_source"));
     });
@@ -303,12 +179,6 @@ suite("ConfigManager Unit Tests", () => {
     test("getConfig reads modelIdOverride and trims whitespace", async () => {
         // Override the stubbed config value for this test.
         configGetStub.callsFake((key: string, defaultValue?: unknown) => {
-            if (key === "litellm-connector.baseUrl") {
-                return "";
-            }
-            if (key === "litellm-connector.apiKeySecretRef") {
-                return "default";
-            }
             if (key === "litellm-connector.modelIdOverride") {
                 return "  gpt-4o  ";
             }
@@ -333,12 +203,6 @@ suite("ConfigManager Unit Tests", () => {
 
     test("getConfig treats whitespace-only modelIdOverride as unset", async () => {
         configGetStub.callsFake((key: string, defaultValue?: unknown) => {
-            if (key === "litellm-connector.baseUrl") {
-                return "";
-            }
-            if (key === "litellm-connector.apiKeySecretRef") {
-                return "default";
-            }
             if (key === "litellm-connector.modelIdOverride") {
                 return "   ";
             }
@@ -361,54 +225,33 @@ suite("ConfigManager Unit Tests", () => {
         assert.strictEqual(cfg.modelIdOverride, undefined);
     });
 
-    test("getConfig reads experimental usage emission flag", async () => {
-        settingsMap.set("litellm-connector.emitUsageData", true);
-
-        const manager = new ConfigManager(mockSecrets);
-        const cfg = await manager.getConfig();
-
-        assert.strictEqual(cfg.experimentalEmitUsageData, true);
-    });
-
-    test("cleanupAllConfiguration removes all stored configuration", async () => {
-        const manager = new ConfigManager(mockSecrets);
-
-        // Set up initial config
-        await manager.setConfig({ url: "https://api.example.com", key: "sk-123" });
-
-        // Sanity check precondition
-        const before = await manager.getConfig();
-        assert.strictEqual(before.url, "https://api.example.com");
-        assert.strictEqual(before.key, "sk-123");
-
-        // Clean up all configuration
-        await manager.cleanupAllConfiguration();
-
-        // Verify configuration is cleared
-        const clearedConfig = await manager.getConfig();
-        assert.strictEqual(clearedConfig.url, "");
-        assert.strictEqual(clearedConfig.key, undefined);
-    });
-
-    test("updateBackend updates existing entry and key", async () => {
-        settingsMap.set("litellm-connector.backends", [{ name: "b1", url: "u1", enabled: true }]);
-        const manager = new ConfigManager(mockSecrets);
-
-        await manager.updateBackend("b1", { url: "u2" }, "new-key");
-        const backends = await manager.listBackends();
-        assert.strictEqual(backends[0].url, "u2");
-        assert.strictEqual(secretsMap.get("litellm-connector.apiKey.b1"), "new-key");
-    });
-
-    test("updateBackend and removeBackend throw if not found", async () => {
-        const manager = new ConfigManager(mockSecrets);
-        await assert.rejects(() => manager.updateBackend("none", {}), /not found/);
-        await assert.rejects(() => manager.removeBackend("none"), /not found/);
-    });
-
     test("reportFeatureToggles is a no-op without telemetry service", async () => {
         const manager = new ConfigManager(mockSecrets);
         // This should not throw
         await manager.reportFeatureToggles("test");
+    });
+
+    test("should read forceResponsesEndpoint from workspace settings", async () => {
+        settingsMap.set("litellm-connector.forceResponsesEndpoint", false);
+        const config = await configManager.getConfig();
+        assert.strictEqual(config.forceResponsesEndpoint, false);
+    });
+
+    test("should default forceResponsesEndpoint to true when not set", async () => {
+        settingsMap.delete("litellm-connector.forceResponsesEndpoint");
+        const config = await configManager.getConfig();
+        assert.strictEqual(config.forceResponsesEndpoint, true);
+    });
+
+    test("should read allowChatCompletionsFallback from workspace settings", async () => {
+        settingsMap.set("litellm-connector.allowChatCompletionsFallback", true);
+        const config = await configManager.getConfig();
+        assert.strictEqual(config.allowChatCompletionsFallback, true);
+    });
+
+    test("should default allowChatCompletionsFallback to false when not set", async () => {
+        settingsMap.delete("litellm-connector.allowChatCompletionsFallback");
+        const config = await configManager.getConfig();
+        assert.strictEqual(config.allowChatCompletionsFallback, false);
     });
 });

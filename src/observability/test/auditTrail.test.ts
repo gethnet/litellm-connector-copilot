@@ -122,6 +122,26 @@ suite("AuditTrail", () => {
         assert.strictEqual(summary.errors[0], JSON.stringify({ foo: "bar" }));
     });
 
+    test("endRequest handles warning with non-string message field", () => {
+        const requestId = "test-request-id";
+        AuditTrail.startRequest(requestId);
+
+        const warnEvent: LogEvent = {
+            timestamp: new Date().toISOString(),
+            requestId,
+            level: "warn",
+            event: "param.suppressed",
+            data: { message: { complex: "object" } }, // non-string message
+        };
+
+        AuditTrail.recordEvent(warnEvent);
+        sinon.stub(StructuredLogger, "info");
+
+        const summary = AuditTrail.endRequest(requestId, "m", "e", "c");
+        assert.strictEqual(summary.warnings.length, 1);
+        assert.strictEqual(summary.warnings[0], JSON.stringify({ message: { complex: "object" } }));
+    });
+
     test("endRequest uses current time if startRequest was not called", () => {
         const requestId = "untracked-id";
         sinon.stub(StructuredLogger, "info");

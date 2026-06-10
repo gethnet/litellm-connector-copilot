@@ -79,3 +79,23 @@ export function createMockOutputChannel(): vscode.LogOutputChannel {
         replace: noop,
     } as unknown as vscode.LogOutputChannel;
 }
+
+/**
+ * Creates a mock vscode.Memento (suitable for `globalState` and `workspaceState`)
+ * backed by an in-memory Map. Tests pass a seed object to pre-populate state.
+ */
+export function createMockMemento(seed?: Record<string, unknown>): vscode.Memento {
+    const store = new Map<string, unknown>(Object.entries(seed ?? {}));
+    return {
+        get: <T>(key: string, defaultValue?: T): T | undefined => {
+            if (store.has(key)) {
+                return store.get(key) as T;
+            }
+            return defaultValue;
+        },
+        update: async (key: string, value: unknown) => {
+            store.set(key, value);
+        },
+        keys: () => [...store.keys()],
+    } as vscode.Memento;
+}

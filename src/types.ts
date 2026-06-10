@@ -38,6 +38,41 @@ export interface OpenAIChatMessage {
 }
 
 /**
+ * OpenAI-compatible breakdown of prompt token usage.
+ */
+export interface OpenAIUsagePromptTokenDetails {
+    cached_tokens?: number;
+    cache_creation_input_tokens?: number;
+}
+
+/**
+ * OpenAI-compatible breakdown of completion token usage.
+ * Extra fields like `tool_tokens` are preserved when upstream providers expose them.
+ */
+export interface OpenAIUsageCompletionTokenDetails {
+    reasoning_tokens?: number;
+    accepted_prediction_tokens?: number;
+    rejected_prediction_tokens?: number;
+    tool_tokens?: number;
+}
+
+/**
+ * Usage payload emitted back to VS Code through a `LanguageModelDataPart`.
+ * Required fields match the OpenAI usage object so VS Code's BYOK plumbing can parse it,
+ * while optional fields carry richer budgeting diagnostics.
+ */
+export interface OpenAIUsagePayload {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    prompt_tokens_details?: OpenAIUsagePromptTokenDetails;
+    completion_tokens_details?: OpenAIUsageCompletionTokenDetails;
+    system_prompt_tokens?: number;
+    reserved_output_tokens?: number;
+    total_token_max?: number;
+}
+
+/**
  * Capability overrides for a single model.
  * Undefined fields are left at their auto-derived values.
  */
@@ -52,13 +87,24 @@ export interface ModelCapabilityOverride {
     pdfInput?: boolean;
 }
 
-export type SupportedReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type SupportedReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface ModelOverride {
+    /** Regex pattern to match model IDs */
     match: string;
-    supportsReasoning: boolean | null;
+    /** Override for supports_reasoning */
+    supportsReasoning?: boolean | null;
+    /** Override for supported reasoning efforts */
     reasoningEfforts?: SupportedReasoningEffort[];
+    /** Default reasoning effort when reasoning is supported */
     defaultEffort?: SupportedReasoningEffort;
+    /** Force this override to be mandatory (ignore remote LiteLLM values) */
+    forceMandatory?: boolean;
+    /** Custom tags to add to model */
+    tags?: string[];
+    /** Override for supported_openai_params */
+    supportedOpenaiParams?: string[];
+    /** Additional notes about this override */
     notes?: string;
 }
 
@@ -76,115 +122,23 @@ export interface LiteLLMParams {
 }
 
 /**
- * Configuration for a single LiteLLM proxy backend.
- * Multiple backends can be configured; each contributes models to the aggregated model list.
- *
- * @deprecated OBSOLETE — scheduled for removal in VS Code 1.125. Backend definition has
- * moved to the per-group `options.configuration` payload delivered by the VS Code 1.120
- * Language Model Chat Provider API. This type, the `LiteLLMConfig.backends` field, and
- * the `litellm-connector.backends` workspace setting must be deleted when the minimum
- * supported VS Code is raised to >= 1.125.
- */
-export interface LiteLLMBackend {
-    /** Human-readable label (e.g., "Cloud", "Local GPU", "Team Alpha"). */
-    name: string;
-    /** Base URL of the LiteLLM proxy (e.g., "http://localhost:4000"). */
-    url: string;
-    /**
-     * Reference key into VS Code SecretStorage for the API key.
-     * The actual secret is stored under "litellm-connector.apiKey.{apiKeySecretRef}".
-     * Defaults to the backend name if not specified.
-     */
-    apiKeySecretRef?: string;
-    /** Whether this backend is enabled. Defaults to true. */
-    enabled?: boolean;
-}
-
-/**
- * Represents a backend configuration per VS Code language model group (VS Code 1.119+).
- * Each group can have its own backend to support per-group routing.
- */
-export interface LiteLLMGroupConfiguration {
-    /** Unique group identifier (e.g., "chat", "completion"). */
-    groupName: string;
-    /** Match models by prefix/substring (e.g., "gpt-", "claude-"). Better performance than regex. */
-    modelPrefix?: string;
-    /** Match models by regex pattern (e.g., "gpt-[0-9]+"). More flexible. */
-    modelRegex?: string;
-    /** Human-readable label (e.g., "Team A Backend"). */
-    label?: string;
-    /** Base URL of the backend. Required if not Using 'backend' reference. */
-    backendUrl?: string;
-    /**
-     * Reference key when abstracting configuration across groups.
-     * Points to a backend name in the backends array.
-     */
-    backendRef?: string;
-    /** API key reference in SecretStorage. Required if backend is not explicitly defined. */
-    apiKeySecretRef?: string;
-
-    /** @internal Optional fields for internal routing logic */
-    backendName?: string;
-    url?: string;
-    apiKey?: string;
-}
-
-/**
- * Resolved backend with its API key, used internally for routing.
- *
- * @deprecated OBSOLETE — scheduled for removal in VS Code 1.125 alongside the rest of
- * the legacy multi-backend / single-backend workspace-settings discovery path. Per-group
- * sessions in the 1.120 system are represented by `BackendSession` instead.
- */
-export interface ResolvedBackend {
-    name: string;
-    url: string;
-    apiKey?: string;
-    enabled: boolean;
-}
-
-/**
- * LiteLLM configuration stored in VS Code settings.
- *
- * NOTE: All fields except the per-group `options.configuration` derivatives below are
- * part of the OBSOLETE legacy path scheduled for removal in VS Code 1.125. New code
- * must source backend connection details from `options.configuration` provided by the
- * 1.120 Language Model Chat Provider API. Only the workspace-scoped ergonomic toggles
- * (`disableCaching`, `inactivityTimeout`, model overrides, etc.) are intended to
- * survive the deprecation; the `url`, `key`, and `backends` fields will be removed.
+ * LiteLLM workspace-level configuration. Backend connection details
+ * (baseUrl, apiKey) are delivered by VS Code 1.120 per-group
+ * `options.configuration` payloads on every provider call; they are NOT
+ * stored in workspace settings. This type only carries workspace-scoped
+ * ergonomic toggles and overrides.
  */
 export interface LiteLLMConfig {
-    /**
-     * @deprecated Legacy single-backend base URL. Removed in VS Code 1.125.
-     * Use `options.configuration.baseUrl` from the 1.120 provider API instead.
-     */
-    url: string;
-    /**
-     * @deprecated Legacy single-backend API key. Removed in VS Code 1.125.
-     * Use `options.configuration.apiKey` from the 1.120 provider API instead.
-     */
-    key?: string;
-
-    /**
-     * Multi-backend configuration. When populated, models from all enabled backends
-     * are aggregated. Model IDs are prefixed with "{backendName}/".
-     * Takes precedence over legacy url/key when non-empty.
-     *
-     * @deprecated OBSOLETE — scheduled for removal in VS Code 1.125. Each backend
-     * should be represented as an independent provider configuration group via the
-     * VS Code 1.120 `languageModelChatProviders` contribution. When the minimum
-     * supported VS Code is raised to >= 1.125, delete this field along with the
-     * `litellm-connector.backends` workspace setting.
-     */
-    backends?: LiteLLMBackend[];
-
     inactivityTimeout?: number;
     disableCaching?: boolean;
-    /**
-     * Experimental: emit token usage metadata as a response data part for manual UI probing.
-     */
-    experimentalEmitUsageData?: boolean;
     disableQuotaToolRedaction?: boolean;
+    /**
+     * Enable/disable the model override system.
+     * When enabled, merged user and bundled model override rules are applied.
+     * When disabled, only LiteLLM /model/info derived capabilities are used.
+     * Default: true (backwards compatible).
+     */
+    enableModelOverrides?: boolean;
     /**
      * Reasoning capability overrides supplied by the user. Mirrors the
      * `litellm-connector.modelOverrides` configuration array and is merged with
@@ -225,13 +179,34 @@ export interface LiteLLMConfig {
     enableResponses?: boolean;
 
     /**
-     * Per-language-model group backend assignments (VS Code 1.119+ groups API).
-     * Allows different groups to use different backends (e.g., dev vs production).
+     * When true, forces all models to use the `/responses` endpoint instead of per-model mode selection.
+     * This ensures consistent behavior across models, especially for those that require reasoning support.
+     * Default: true (JSON-only, not in Settings UI).
      */
-    groupConfigurations?: LiteLLMGroupConfiguration[];
+    forceResponsesEndpoint?: boolean;
+
+    /**
+     * When true and forceResponsesEndpoint is true, falls back to `/chat/completions` if `/responses` fails.
+     * This is an escape hatch for models that cannot use /responses.
+     * Default: false (JSON-only, not in Settings UI).
+     */
+    allowChatCompletionsFallback?: boolean;
 
     /** When enabled, send default values for temperature, frequency_penalty, and presence_penalty if not provided by VS Code. */
     sendDefaultParameters?: boolean;
+}
+
+/**
+ * Connection-level configuration for a single LiteLLM proxy. Each
+ * `LiteLLMClient` is bound to exactly one proxy and carries its baseUrl
+ * and API key. The `disableCaching` flag is duplicated here so the client
+ * can opt the connection itself out of `Cache-Control` headers without
+ * needing access to the workspace-level `LiteLLMConfig`.
+ */
+export interface LiteLLMClientConfig {
+    url: string;
+    key?: string;
+    disableCaching?: boolean;
 }
 
 /**
@@ -261,9 +236,20 @@ export interface LiteLLMModelInfo {
     supports_native_streaming?: boolean | null;
     supports_web_search?: boolean | null;
     supports_url_context?: boolean | null;
-    supports_reasoning?: boolean;
+    supports_reasoning?: boolean | null;
     supports_computer_use?: boolean | null;
-    supported_openai_params?: string[];
+    // Extended reasoning effort support fields from LiteLLM
+    // (for future use when LiteLLM provides explicit effort level fields)
+    supports_minimal_reasoning_effort?: boolean | null;
+    supports_low_reasoning_effort?: boolean | null;
+    supports_medium_reasoning_effort?: boolean | null;
+    supports_high_reasoning_effort?: boolean | null;
+    supports_xhigh_reasoning_effort?: boolean | null;
+    supports_max_reasoning_effort?: boolean | null;
+    // Supported parameters array - must be validated before API calls
+    supported_openai_params?: string[] | null;
+    // Modalities for advanced capability detection
+    modalities?: string[];
     tags?: string[];
     [key: string]: unknown; // Allow additional fields for extensibility
 }
@@ -319,6 +305,7 @@ export interface OpenAIChatCompletionRequest {
     stop?: string | string[];
     tools?: OpenAIFunctionToolDef[];
     tool_choice?: string | object;
+    stream_options?: { include_usage?: boolean };
     /**
      * OpenAI-compatible reasoning effort hint accepted by LiteLLM in flat top-level
      * snake_case form on both `/chat/completions` and `/responses`. LiteLLM translates
@@ -370,6 +357,7 @@ export interface LiteLLMResponsesRequest {
      * the canonical chat-shaped request body during transformation.
      */
     reasoning_effort?: string;
+    stream_options?: { include_usage?: boolean };
     /**
      * LiteLLM passthrough body.
      * Used for features like caching controls.

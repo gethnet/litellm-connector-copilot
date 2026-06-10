@@ -2,6 +2,82 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0] - 2026-06-10
+
+### 💥 Breaking / Behavior Changes — READ BEFORE UPGRADING
+
+> ⚠️ **Configuration has fundamentally changed in this release.** If you were using the old workspace-settings approach (`litellm-connector.baseUrl`, `litellm-connector.backends`, `litellm-connector.apiKey`), those settings are **gone**. The extension now uses VS Code's built-in **Language Models provider-group** UI (VS Code 1.120+) as the sole configuration path.
+>
+> **What to do if things go sideways after upgrading:**
+> 1. Run **`LiteLLM: Reset All Configuration`** from the Command Palette to clear any stale state.
+> 2. Open VS Code's **Language Models** settings panel (Settings → Language Models, or via `LiteLLM: Manage Configuration`).
+> 3. Add a new LiteLLM provider group with your base URL and API key.
+> 4. If you had multiple backends, add one provider group per backend.
+> 5. After saving, wait a moment for model discovery to complete, or run **`LiteLLM: Reload Models`**.
+>
+> **The automatic migration** runs on first activation and attempts to move your old secrets/settings into the new provider-group format via a guided notification. If that prompt is dismissed or fails, follow the manual steps above.
+
+* **Removed Legacy Workspace-Settings Configuration**: The `litellm-connector.baseUrl`, `litellm-connector.backends`, and `litellm-connector.apiKeySecretRef` workspace settings have been removed. Configuration now comes exclusively from VS Code 1.120+ per-group provider configuration via the `languageModelChatProviders` contribution point.
+* **Removed `litellm-connector.checkConnection` command** and its menu entries. Use `LiteLLM: Reload Models` to verify discovery is working.
+* **Removed Legacy ConfigManager Methods**: `setConfig()`, `addBackend()`, `removeBackend()`, `updateBackend()`, `listBackends()`, `isConfigured()`, `cleanupAllConfiguration()`, and `resolveBackends()` have been removed from `ConfigManager`.
+* **Removed Legacy Type Fields**: `LiteLLMConfig.url`, `.key`, and `.backends` fields have been removed. The `LiteLLMBackend` and `ResolvedBackend` interfaces have been deleted.
+* **Git commit generation and inline completions now require `commitModelIdOverride`** to be set explicitly in settings. They no longer auto-detect a model. The previous 2.0.0 temporary limitation is now codified as the permanent behavior.
+
+### ✨ Features
+
+* **Automatic Legacy Config Migration**: On first activation after upgrading, the extension detects old workspace-settings / `SecretStorage` configurations and shows a guided notification to help you migrate to the new provider-group format. Migration state is tracked so the prompt only appears once. (`src/config/legacyConfigMigration.ts`)
+* **Per-Group Isolation**: Each configured provider group gets its own model discovery state. Multiple LiteLLM backends no longer share or bleed state between groups.
+* **Model Override Master Toggle** (`litellm-connector.enableModelOverrides`): A new boolean setting lets you disable all override rules and rely purely on `/model/info` from the LiteLLM proxy. Useful when proxy-reported capabilities are accurate.
+* **Tool Name Sanitization for Bedrock**: Tool names are automatically sanitized for Bedrock-compatible providers that reject non-alphanumeric characters.
+* **Tool Call ID Normalization**: Tool call IDs are normalized to ≤40 characters for strict providers (e.g., GPT-5 / o-series).
+* **Image & PDF Token Estimation**: Token budget calculation now estimates tokens consumed by image and PDF data parts (closes #76).
+* **Discovery Backoff**: Repeated model discovery failures now trigger an exponential backoff to prevent hammering a proxy that is down.
+* **Structured Logging Guidance**: `StructuredLogger` now has a documented per-level decision table so log noise is consistent and predictable.
+* **Audit Trail / Prompt Audit Tooling**: Added hook system for observability, including a PostHog hook and an audit trail for prompt and response inspection.
+
+### 🛠️ Refactors
+
+* **BackendRegistry Owns Discovery**: `ModelDiscovery` has been merged into `LiteLLMProviderRegistry`. The registry is now the single source of truth for backends and their associated models, with a **public read, internal write** contract. `discoverModels(options, token)` is the only public ingress for populating the registry; internal write methods are now `private`. The base provider subscribes to the registry's `onDidChange` event and forwards to VS Code's `onDidChangeLanguageModelChatInformation`.
+* **Provider Base Split**: The provider base was split into dedicated discovery, request, and transport service layers under `src/providers/base/` for clearer single-responsibility boundaries.
+* **Streaming Interpreter Unified**: `/responses` stream event handling has been migrated into the shared `LiteLLMStreamInterpreter` so both the chat provider and responses adapter share one stream-parsing path.
+* **TypeScript Strict Typing**: Broad `any` elimination pass across adapters, config, providers, and tests. All new code conforms to the `typescript-no-any` rule.
+
+### 🐛 Fixes
+
+* **Streaming abort on cancellation**: Streaming requests are now correctly aborted when the user cancels or the inactivity timeout fires.
+* **Reasoning effort preserved across refreshes**: Selected reasoning effort is no longer reset when model discovery refreshes the picker.
+* **Sparse tool capability detection fixed**: Models with partial tool-capability indicators are now detected correctly.
+* **Provider group names derived from base URLs**: When no explicit name is provided, provider group labels are derived from the base URL for clearer picker display.
+
+### 📊 Telemetry & Observability
+
+* **Centralized streaming token capture**: Token usage is captured in one place across the streaming path and reported consistently.
+* **Enriched token usage reporting**: Input, output, and reserved output budgets are all reported in telemetry events.
+* **Commit generation routing telemetry**: Token usage and routing decisions during commit message generation are now captured.
+* **Tokenizer observability**: Tokenizer selection and fallback events are logged for diagnosability.
+
+### 🧪 Tests
+
+* Broadened coverage across streaming, observability, and activation flows.
+* Expanded `messageConverter` coverage.
+* Refactored transport tests for clarity and improved configuration handling coverage.
+
+### 🧭 Migration Guide (Legacy → 2.1.0)
+
+If you were using any of the following **old workspace settings**, they no longer exist:
+
+| Old Setting | Action |
+|---|---|
+| `litellm-connector.baseUrl` | Add a provider group in the Language Models UI |
+| `litellm-connector.backends` | Add one provider group per backend |
+| `litellm-connector.apiKey` / `apiKeySecretRef` | Enter API key when adding a provider group |
+
+**Step-by-step:**
+1. After upgrading, watch for the **migration notification** on startup — it will guide you through re-entering your backends.
+2. If you dismiss it or need to redo it: open **Command Palette** → **`LiteLLM: Manage Configuration`** → follow prompts.
+3. If you get stuck: **`LiteLLM: Reset All Configuration`** clears everything so you can start fresh.
+4. Verify with **`LiteLLM: Reload Models`** — your models should appear in the picker grouped by backend name.
+
 ## [2.0.1] - 2026-05-14
 
 ### 🧭 Improvements

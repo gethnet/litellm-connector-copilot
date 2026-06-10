@@ -4,11 +4,17 @@
 package-lock.json
 .idea/
 
+# Worktrees
+.worktrees
+main-registry-rebuild
+
 out
 dist
 node_modules
 .vscode-test/
 *.vsix
+
+.investigate
 
 # Auto-generated VS Code type definitions
 **/vscode.d.ts

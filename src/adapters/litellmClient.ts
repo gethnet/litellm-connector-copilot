@@ -1,6 +1,6 @@
 import type * as vscode from "vscode";
 import type {
-    LiteLLMConfig,
+    LiteLLMClientConfig,
     LiteLLMModelInfoResponse,
     OpenAIChatCompletionRequest,
     LiteLLMResponsesRequest,
@@ -18,7 +18,7 @@ export class LiteLLMClient {
     private _telemetryService?: TelemetryService;
 
     constructor(
-        private readonly config: LiteLLMConfig,
+        private readonly config: LiteLLMClientConfig,
         private readonly userAgent: string
     ) {}
 
@@ -401,6 +401,12 @@ export class LiteLLMClient {
             } catch (err: unknown) {
                 if (err instanceof Error && err.name === "AbortError") {
                     throw new Error("Operation cancelled by user", { cause: err });
+                }
+                // Cancellation raised by the inter-attempt sleep (or any nested
+                // cancellable helper) should propagate as cancellation, not be
+                // caught and re-fed into the retry loop.
+                if (err instanceof Error && err.message === "Operation cancelled by user") {
+                    throw err;
                 }
                 if (attempt >= maxRetries) {
                     throw err;

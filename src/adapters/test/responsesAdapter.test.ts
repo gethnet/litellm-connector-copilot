@@ -92,7 +92,7 @@ suite("Responses Adapter Unit Tests", () => {
         assert.strictEqual(toolOutputs[1].call_id, normalizeToolCallId("call_456"));
     });
 
-    test("transformToResponsesFormat shrinks overlong tool call IDs to <= 40 chars", () => {
+    test("transformToResponsesFormat shrinks overlong tool call IDs to <= 42 chars", () => {
         const longId = "x".repeat(42);
         const body = transformToResponsesFormat({
             model: "m",
@@ -106,7 +106,7 @@ suite("Responses Adapter Unit Tests", () => {
         });
 
         const expected = normalizeToolCallId(longId);
-        assert.ok(expected.length <= 40);
+        assert.ok(expected.length <= 42);
 
         const input = body.input as Record<string, unknown>[];
         const allIds = input
@@ -115,7 +115,7 @@ suite("Responses Adapter Unit Tests", () => {
             .filter((x): x is string => typeof x === "string");
 
         assert.ok(allIds.includes(expected));
-        assert.ok(allIds.every((x) => x.length <= 40));
+        assert.ok(allIds.every((x) => x.length <= 42));
     });
 
     test("transformToResponsesFormat handles tool call with missing id field", () => {

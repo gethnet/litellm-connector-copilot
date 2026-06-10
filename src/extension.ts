@@ -3,30 +3,26 @@ import { LiteLLMChatProvider } from "./providers";
 import { ConfigManager } from "./config/configManager";
 import {
     registerManageConfigCommand,
-    registerManageBackendsCommand,
     registerReloadModelsCommand,
     registerShowModelsCommand,
-    registerCheckConnectionCommand,
-    registerResetConfigCommand,
 } from "./commands/manageConfig";
-import { showModelPicker } from "./commands/modelPicker";
-import { registerSelectInlineCompletionModelCommand } from "./commands/inlineCompletions";
 import { registerGenerateCommitMessageCommand } from "./commands/generateCommitMessage";
 import { LiteLLMCommitMessageProvider } from "./providers/liteLLMCommitProvider";
 import { Logger } from "./utils/logger";
 import { StructuredLogger } from "./observability";
 import { PostHogHook } from "./observability/posthogHook";
-import { InlineCompletionsRegistrar } from "./inlineCompletions/registerInlineCompletions";
 import { TelemetryService } from "./telemetry/telemetryService";
 import { LiteLLMTelemetry } from "./utils/telemetry";
 import { setTelemetryService as setTokenUtilsTelemetryService } from "./adapters/tokenUtils";
 import { EffortFallbackCache } from "./utils/reasoningEffortFallback";
+import { LegacyConfigMigration } from "./config/legacyConfigMigration";
 
 // Store the config manager for cleanup on deactivation
 let configManagerInstance: ConfigManager | undefined;
 let telemetryServiceInstance: TelemetryService | undefined;
 
 const MODERN_CONFIG_SESSION_KEY = "litellm-connector.isOnModernConfig";
+const MIGRATION_NOTICE_KEY = "litellm-connector.migrationNotice.v1";
 
 export function activate(context: vscode.ExtensionContext): void {
     // Initialize telemetry first so logger can use it
@@ -112,6 +108,32 @@ export function activate(context: vscode.ExtensionContext): void {
     const configManager = configManagerInstance;
     configManager.setTelemetryService(telemetryService);
 
+    const showMigrationNoticeOnce = async (): Promise<void> => {
+        // globalState is always present on a real ExtensionContext, but tests may
+        // provide a partial stub. Bail out silently if it is missing.
+        if (!context.globalState) {
+            return;
+        }
+        const alreadyShown = context.globalState.get<boolean>(MIGRATION_NOTICE_KEY, false);
+        if (alreadyShown) {
+            return;
+        }
+
+        await context.globalState.update(MIGRATION_NOTICE_KEY, true);
+
+        const openLanguageModels = "Open Language Models";
+        const message =
+            "Configuration now lives in VS Code's Language Models view. Use Add Model... to add or edit LiteLLM.";
+        const choice = await vscode.window.showInformationMessage(message, openLanguageModels);
+        if (choice === openLanguageModels) {
+            try {
+                await vscode.commands.executeCommand("workbench.action.chat.manage");
+            } catch {
+                await vscode.commands.executeCommand("workbench.action.openSettings", "@tag:language-model");
+            }
+        }
+    };
+
     const getModernConfigSessionFlag = (): boolean => {
         return context.workspaceState?.get<boolean>(MODERN_CONFIG_SESSION_KEY, false) === true;
     };
@@ -129,23 +151,22 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Track feature adoption
     telemetryService.captureFeatureAdoption("chat");
-    telemetryService.captureFeatureAdoption("inline-completions");
     telemetryService.captureFeatureAdoption("commit-generation");
     telemetryService.captureFeatureAdoption("model-picker");
 
     // Emit feature usage snapshot after config is loaded
     void configManager.getConfig().then((config) => {
         telemetryService.captureFeatureUsageSnapshot({
-            "inline-completions": config.inlineCompletionsEnabled ?? false,
             "responses-api": config.v2ApiEnabled ?? false,
             "commit-message": !!(config.commitModelIdOverride && config.commitModelIdOverride.length > 0),
-            "usage-data": config.experimentalEmitUsageData ?? false,
             caching: !config.disableCaching,
             "quota-tool-redaction": !config.disableQuotaToolRedaction,
         });
     });
 
     // VS Code 1.120+ uses the unified chat provider with per-group configuration support.
+
+    void showMigrationNoticeOnce();
 
     const activeProvider = new LiteLLMChatProvider(context.secrets, ua, effortFallbackCache);
     activeProvider.setTelemetryService(telemetryService);
@@ -230,19 +251,26 @@ export function activate(context: vscode.ExtensionContext): void {
     // Re-query models after settings updates so newly completed Language Models provider
     // configuration flows are reflected without requiring a reload.
     let refreshModelsTimer: NodeJS.Timeout | undefined;
-    const scheduleModelRefresh = () => {
+    const refreshModelInformation = () => {
         if (refreshModelsTimer) {
             clearTimeout(refreshModelsTimer);
         }
         refreshModelsTimer = setTimeout(() => {
             refreshModelsTimer = undefined;
-            Logger.info("Configuration changed; clearing model cache and refreshing model information...");
-            activeProvider.clearModelCache();
+            Logger.info("Configuration changed; refreshing model information...");
+            activeProvider.refreshModelInformation();
         }, 250);
     };
     context.subscriptions.push(
-        vscode.workspace.onDidChangeConfiguration(() => {
-            scheduleModelRefresh();
+        vscode.workspace.onDidChangeConfiguration((e) => {
+            // Only refresh when LiteLM-specific settings change, not generic provider config
+            // (e.affectsConfiguration) returns true for the top-level "litellm-connector.*" path
+            if (
+                e.affectsConfiguration("litellm-connector.modelOverrides") ||
+                e.affectsConfiguration("litellm-connector.backendGroups")
+            ) {
+                refreshModelInformation();
+            }
         })
     );
     context.subscriptions.push({
@@ -258,59 +286,30 @@ export function activate(context: vscode.ExtensionContext): void {
         context.subscriptions.push(
             registerManageConfigCommand(context, configManager, activeProvider, telemetryService)
         );
-        context.subscriptions.push(registerManageBackendsCommand(configManager, activeProvider, telemetryService));
         context.subscriptions.push(registerShowModelsCommand(activeProvider, telemetryService));
         context.subscriptions.push(registerReloadModelsCommand(activeProvider, telemetryService));
-        context.subscriptions.push(registerCheckConnectionCommand(configManager, telemetryService));
-        context.subscriptions.push(
-            registerResetConfigCommand(configManager, activeProvider, telemetryService, registerProvider)
-        );
-        context.subscriptions.push(registerSelectInlineCompletionModelCommand(activeProvider));
         context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider, telemetryService));
-        context.subscriptions.push(
-            vscode.commands.registerCommand("litellm-connector.generateCommitMessage.selectModel", async () => {
-                await showModelPicker(commitProvider, {
-                    title: "Select Commit Message Model",
-                    settingKey: "commitModelIdOverride",
-                    telemetryService: telemetryService,
-                    caller: "commit-message",
-                });
-            })
-        );
         Logger.info("Config command registered.");
     } catch (cmdErr) {
         Logger.error("Failed to register commands", cmdErr);
     }
 
-    // Stable inline completions (optional; disabled by default)
-    const inlineRegistrar = new InlineCompletionsRegistrar(context.secrets, ua, context, effortFallbackCache);
-    inlineRegistrar.setTelemetryService(telemetryService);
-    inlineRegistrar.initialize();
-    context.subscriptions.push(inlineRegistrar);
-
-    // Configuration onboarding is handled via the classic manage command,
-    // which routes users directly into multi-backend management.
-    // Proactively check configuration and prompt user if missing
-    configManager
-        .isConfigured()
-        .then((configured) => {
-            const isOnModernConfig = getModernConfigSessionFlag();
-            if (!configured && !isOnModernConfig) {
-                Logger.info("Extension not configured. Prompting user...");
-                vscode.window
-                    .showInformationMessage(
-                        "LiteLLM Connector is not configured. Open LiteLLM configuration to add your backends.",
-                        "Open LiteLLM Configuration"
-                    )
-                    .then((selection) => {
-                        if (selection === "Open LiteLLM Configuration") {
-                            vscode.commands.executeCommand("litellm-connector.manage");
-                        }
-                    });
+    // Legacy configuration migration
+    const legacyMigration = new LegacyConfigMigration(context, configManager, telemetryService);
+    void legacyMigration
+        .runMigrationIfNeeded()
+        .then(async (result) => {
+            if (!result?.migrated) {
+                return;
             }
+            Logger.info(`Migration completed: ${result.groupsCreated} groups created`);
+            // Give VS Code time to settle before refreshing model list
+            setTimeout(() => {
+                activeProvider.refreshModelInformation();
+            }, 500);
         })
         .catch((err) => {
-            Logger.error("Error checking configuration status", err);
+            Logger.error("Migration check failed", err);
         });
 }
 
@@ -319,6 +318,8 @@ export async function deactivate(): Promise<void> {
         await configManagerInstance.dispose();
     }
     if (telemetryServiceInstance) {
-        await telemetryServiceInstance.dispose();
+        // Use shutdown() instead of dispose() for proper async cleanup
+        await telemetryServiceInstance.shutdown();
+        telemetryServiceInstance.dispose();
     }
 }

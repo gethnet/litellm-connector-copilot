@@ -13,6 +13,7 @@ on:
       - bugfix/**
       - enhance/**
       - feat/**
+      - dev/*
   pull_request:
     branches:
       - main
@@ -45,7 +46,7 @@ jobs:
           POSTHOG_MOCK: true
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: ${{ github.workspace }}/coverage/lcov.info
           fail_ci_if_error: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' }}
@@ -53,7 +54,7 @@ jobs:
 
       - name: Upload test results to Codecov
         if: always()
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: ${{ github.workspace }}/test-results/test-results.xml
           report_type: test_results

@@ -2,6 +2,7 @@ import type { V2ChatMessage, V2MessagePart } from "../providers/v2Types";
 import type { OpenAIChatMessage, OpenAIChatMessageContentItem, OpenAIToolCall, OpenAIChatRole } from "../types";
 import { Logger } from "../utils/logger";
 import { isCacheControlMimeType } from "../utils";
+import { sanitizeToolName, logToolNameTruncationLegacy } from "../utils/toolNameUtils";
 
 /**
  * Options for message conversion from V2 format to OpenAI format.
@@ -223,7 +224,27 @@ function toOpenAIToolCall(
         });
     }
 
-    return { id, type: "function", function: { name: part.name, arguments: args } };
+    // Sanitize tool name for AWS Bedrock Converse API (64-char limit + naming rules).
+    // The Bedrock toolUse.name field rejects names longer than 64 characters, names
+    // starting with non-letter characters, and names with unsupported punctuation.
+    const sanitized = sanitizeToolName(part.name);
+    if (sanitized.wasTruncated) {
+        logToolNameTruncationLegacy({
+            originalName: part.name,
+            source: "messageConverter.toOpenAIToolCall",
+        });
+    } else if (sanitized.name !== part.name) {
+        Logger.trace("[convertMessagesToOpenAI] tool_name_normalized", {
+            originalName: part.name,
+            sanitizedName: sanitized.name,
+        });
+    }
+
+    return {
+        id,
+        type: "function",
+        function: { name: sanitized.name, arguments: args },
+    };
 }
 
 /**

@@ -19,6 +19,18 @@ suite("modelCapabilities", () => {
                 supportsStreaming: true,
                 supportsReasoning: false,
                 supportsPdf: false,
+                supportsAudioInput: false,
+                supportsAudioOutput: false,
+                supportsComputerUse: false,
+                supportsFunctionCalling: false,
+                supportsToolChoice: false,
+                supportsSystemMessages: false,
+                supportsResponseSchema: false,
+                supportsPromptCaching: false,
+                supportsWebSearch: false,
+                supportsUrlContext: false,
+                supportsReasoningEffort: false,
+                supportsThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -36,6 +48,18 @@ suite("modelCapabilities", () => {
                 supportsStreaming: true,
                 supportsReasoning: false,
                 supportsPdf: false,
+                supportsAudioInput: false,
+                supportsAudioOutput: false,
+                supportsComputerUse: false,
+                supportsFunctionCalling: false,
+                supportsToolChoice: false,
+                supportsSystemMessages: false,
+                supportsResponseSchema: false,
+                supportsPromptCaching: false,
+                supportsWebSearch: false,
+                supportsUrlContext: false,
+                supportsReasoningEffort: false,
+                supportsThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -54,6 +78,18 @@ suite("modelCapabilities", () => {
                 supportsStreaming: true,
                 supportsReasoning: false,
                 supportsPdf: false,
+                supportsAudioInput: false,
+                supportsAudioOutput: false,
+                supportsComputerUse: false,
+                supportsFunctionCalling: false,
+                supportsToolChoice: false,
+                supportsSystemMessages: false,
+                supportsResponseSchema: false,
+                supportsPromptCaching: false,
+                supportsWebSearch: false,
+                supportsUrlContext: false,
+                supportsReasoningEffort: false,
+                supportsThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -72,6 +108,18 @@ suite("modelCapabilities", () => {
                 supportsStreaming: true,
                 supportsReasoning: false,
                 supportsPdf: false,
+                supportsAudioInput: false,
+                supportsAudioOutput: false,
+                supportsComputerUse: false,
+                supportsFunctionCalling: false,
+                supportsToolChoice: false,
+                supportsSystemMessages: false,
+                supportsResponseSchema: false,
+                supportsPromptCaching: false,
+                supportsWebSearch: false,
+                supportsUrlContext: false,
+                supportsReasoningEffort: false,
+                supportsThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -90,6 +138,18 @@ suite("modelCapabilities", () => {
                 supportsStreaming: true,
                 supportsReasoning: false,
                 supportsPdf: false,
+                supportsAudioInput: false,
+                supportsAudioOutput: false,
+                supportsComputerUse: false,
+                supportsFunctionCalling: false,
+                supportsToolChoice: false,
+                supportsSystemMessages: false,
+                supportsResponseSchema: false,
+                supportsPromptCaching: false,
+                supportsWebSearch: false,
+                supportsUrlContext: false,
+                supportsReasoningEffort: false,
+                supportsThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -110,6 +170,18 @@ suite("modelCapabilities", () => {
                 supportsStreaming: true,
                 supportsReasoning: false,
                 supportsPdf: false,
+                supportsAudioInput: false,
+                supportsAudioOutput: false,
+                supportsComputerUse: false,
+                supportsFunctionCalling: false,
+                supportsToolChoice: false,
+                supportsSystemMessages: false,
+                supportsResponseSchema: false,
+                supportsPromptCaching: false,
+                supportsWebSearch: false,
+                supportsUrlContext: false,
+                supportsReasoningEffort: false,
+                supportsThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -128,6 +200,18 @@ suite("modelCapabilities", () => {
                 supportsStreaming: true,
                 supportsReasoning: false,
                 supportsPdf: false,
+                supportsAudioInput: false,
+                supportsAudioOutput: false,
+                supportsComputerUse: false,
+                supportsFunctionCalling: false,
+                supportsToolChoice: false,
+                supportsSystemMessages: false,
+                supportsResponseSchema: false,
+                supportsPromptCaching: false,
+                supportsWebSearch: false,
+                supportsUrlContext: false,
+                supportsReasoningEffort: false,
+                supportsThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -146,6 +230,18 @@ suite("modelCapabilities", () => {
                 supportsStreaming: true,
                 supportsReasoning: false,
                 supportsPdf: false,
+                supportsAudioInput: false,
+                supportsAudioOutput: false,
+                supportsComputerUse: false,
+                supportsFunctionCalling: false,
+                supportsToolChoice: false,
+                supportsSystemMessages: false,
+                supportsResponseSchema: false,
+                supportsPromptCaching: false,
+                supportsWebSearch: false,
+                supportsUrlContext: false,
+                supportsReasoningEffort: false,
+                supportsThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -158,18 +254,29 @@ suite("modelCapabilities", () => {
         });
 
         test("adds reasoning and pdf tags based on capabilities", () => {
-            const derived = {
+            const tags = getModelTags("test", {
                 supportsTools: false,
                 supportsVision: false,
                 supportsStreaming: false,
                 supportsReasoning: true,
                 supportsPdf: true,
+                supportsAudioInput: false,
+                supportsAudioOutput: false,
+                supportsComputerUse: false,
+                supportsFunctionCalling: false,
+                supportsToolChoice: false,
+                supportsSystemMessages: false,
+                supportsResponseSchema: false,
+                supportsPromptCaching: false,
+                supportsWebSearch: false,
+                supportsUrlContext: false,
+                supportsReasoningEffort: false,
+                supportsThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100,
                 maxOutputTokens: 100,
                 rawContextWindow: 200,
-            };
-            const tags = getModelTags("test", derived);
+            });
             assert.ok(tags.includes("reasoning"), "should have reasoning tag");
             assert.ok(tags.includes("pdf"), "should have pdf tag");
         });
@@ -181,6 +288,18 @@ suite("modelCapabilities", () => {
                 supportsStreaming: false,
                 supportsReasoning: false,
                 supportsPdf: false,
+                supportsAudioInput: false,
+                supportsAudioOutput: false,
+                supportsComputerUse: false,
+                supportsFunctionCalling: false,
+                supportsToolChoice: false,
+                supportsSystemMessages: false,
+                supportsResponseSchema: false,
+                supportsPromptCaching: false,
+                supportsWebSearch: false,
+                supportsUrlContext: false,
+                supportsReasoningEffort: false,
+                supportsThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100,
                 maxOutputTokens: 100,
@@ -199,6 +318,18 @@ suite("modelCapabilities", () => {
                 supportsStreaming: true,
                 supportsReasoning: false,
                 supportsPdf: false,
+                supportsAudioInput: false,
+                supportsAudioOutput: false,
+                supportsComputerUse: false,
+                supportsFunctionCalling: false,
+                supportsToolChoice: false,
+                supportsSystemMessages: false,
+                supportsResponseSchema: false,
+                supportsPromptCaching: false,
+                supportsWebSearch: false,
+                supportsUrlContext: false,
+                supportsReasoningEffort: false,
+                supportsThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -229,16 +360,9 @@ suite("modelCapabilities", () => {
     });
 
     suite("getSupportedReasoningEfforts", () => {
-        const canonicalGpt5Efforts: SupportedReasoningEffort[] = ["none", "minimal", "low", "medium", "high", "xhigh"];
+        const canonicalGpt5Efforts: SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
         const claudeEfforts: SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
-        const canonicalCatchAllEfforts: SupportedReasoningEffort[] = [
-            "none",
-            "minimal",
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-        ];
+        const canonicalCatchAllEfforts: SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
 
         test("returns the canonical GPT-5 effort ladder for gpt-5-mini", () => {
             const modelInfo: LiteLLMModelInfo = {
@@ -252,7 +376,7 @@ suite("modelCapabilities", () => {
             assert.deepStrictEqual(result, canonicalGpt5Efforts);
         });
 
-        test("returns canonical GPT-5 ladder even when only xhigh is flagged", () => {
+        test("returns only efforts that are explicitly supported", () => {
             const modelInfo: LiteLLMModelInfo = {
                 id: "gpt-5.4-mini",
                 name: "GPT-5.4 Mini",
@@ -262,7 +386,8 @@ suite("modelCapabilities", () => {
 
             const result = getSupportedReasoningEfforts(modelInfo, "gpt-5.4-mini");
 
-            assert.deepStrictEqual(result, canonicalGpt5Efforts);
+            // Canonical ladder is now limited to none/low/medium/high.
+            assert.deepStrictEqual(result, ["none", "low", "medium", "high"]);
         });
 
         test("returns Claude ladder for claude-haiku-4-5", () => {
@@ -349,25 +474,26 @@ suite("modelCapabilities", () => {
             // that appears alongside each option in the model picker hover popup (e.g.
             // "Balanced reasoning and speed" for "medium"). Without this, the picker shows only
             // labels with no guidance — exactly what Copilot's own models provide.
-            const schema = buildReasoningEffortConfigurationSchema(["none", "low", "medium", "high", "xhigh"]);
+            const schema = buildReasoningEffortConfigurationSchema(["none", "low", "medium", "high"]);
             const descs = schema?.properties.reasoningEffort.enumDescriptions;
             assert.ok(Array.isArray(descs), "Expected enumDescriptions to be an array");
-            assert.strictEqual(descs?.length, 5, "Expected one description per enum value");
+            assert.strictEqual(descs?.length, 4, "Expected one description per enum value");
             assert.strictEqual(descs?.[0], "No reasoning applied");
             assert.strictEqual(descs?.[1], "Faster responses with less reasoning");
             assert.strictEqual(descs?.[2], "Balanced reasoning and speed");
             assert.strictEqual(descs?.[3], "Greater reasoning depth but slower");
-            assert.strictEqual(descs?.[4], "Maximum reasoning depth but slower");
         });
 
-        test("defaults to minimal for canonical reasoning configuration", () => {
+        test("defaults to medium for canonical reasoning configuration", () => {
             const canonicalEfforts: SupportedReasoningEffort[] = ["none", "minimal", "low", "medium", "high"];
 
             const defaultEffort = getDefaultReasoningEffort(canonicalEfforts, "any-other-model");
             const schema = buildReasoningEffortConfigurationSchema(canonicalEfforts, "any-other-model");
 
-            assert.strictEqual(defaultEffort, "minimal");
-            assert.strictEqual(schema?.properties.reasoningEffort.default, "minimal");
+            assert.strictEqual(defaultEffort, "medium");
+            // `default` is present so VS Code renders the effort label next to the model name
+            // (e.g. "model-name · Medium") before the user makes an explicit selection.
+            assert.strictEqual(schema?.properties.reasoningEffort.default, "medium");
         });
 
         test("defaults to medium for Claude reasoning configuration", () => {

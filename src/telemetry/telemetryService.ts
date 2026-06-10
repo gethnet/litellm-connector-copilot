@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { PostHogAdapter } from "./posthogAdapter";
 import type {
+    LegacyConfigMigrationEvent,
     TelemetryEvent,
     TelemetryCaptureExceptionOptions,
     TelemetryEventProperties,
@@ -75,6 +76,47 @@ export class TelemetryService implements vscode.Disposable {
         this.adapter.capture(telemetryEvent);
     }
 
+    /**
+     * Normalizes request lifecycle telemetry to snake_case properties while preserving
+     * ergonomic camelCase inputs at call sites.
+     */
+    private captureRequestLifecycleEvent(
+        eventName: "chat_request" | "request_completed" | "request_failed" | "request_caching_bypassed",
+        props: {
+            request_id: string;
+            caller: string;
+            model: string;
+            endpoint?: string;
+            durationMs?: number;
+            tokensIn?: number;
+            tokensOut?: number;
+            cacheReadRatio?: number;
+            errorType?: string;
+            error?: string;
+            stack?: string;
+            status?: string;
+            reason?: string;
+        }
+    ): void {
+        const properties: TelemetryEventProperties = {
+            request_id: props.request_id,
+            caller: props.caller,
+            model: props.model,
+            endpoint: props.endpoint ?? "unknown",
+            duration_ms: props.durationMs ?? 0,
+            status: props.status,
+            tokens_in: props.tokensIn,
+            tokens_out: props.tokensOut,
+            cache_read_ratio: props.cacheReadRatio,
+            error_type: props.errorType,
+            error: props.error,
+            stack: props.stack,
+            reason: props.reason,
+        };
+
+        this.capture(eventName, properties);
+    }
+
     public captureException(error: Error, options?: TelemetryCaptureExceptionOptions): void {
         const fullProperties: TelemetryEventProperties = {
             ...options?.properties,
@@ -144,15 +186,23 @@ export class TelemetryService implements vscode.Disposable {
         error?: string;
         stack?: string;
     }): void {
-        this.capture("chat_request", props);
+        this.captureRequestLifecycleEvent("chat_request", props);
     }
 
     captureInlineCompletionRequest(props: { status: string; durationMs: number; model: string }): void {
-        this.capture("inline_completion_request", props);
+        this.capture("inline_completion_request", {
+            status: props.status,
+            duration_ms: props.durationMs,
+            model: props.model,
+        });
     }
 
     captureCommitMessageGenerated(props: { model: string; durationMs: number; status: string }): void {
-        this.capture("commit_message_generated", props);
+        this.capture("commit_message_generated", {
+            model: props.model,
+            duration_ms: props.durationMs,
+            status: props.status,
+        });
     }
 
     captureModelPickerOpened(caller: string): void {
@@ -173,7 +223,7 @@ export class TelemetryService implements vscode.Disposable {
         tokensIn: number;
         tokensOut: number;
     }): void {
-        this.capture("request_completed", props);
+        this.captureRequestLifecycleEvent("request_completed", props);
     }
 
     captureRequestCompletedWithCache(props: {
@@ -186,12 +236,7 @@ export class TelemetryService implements vscode.Disposable {
         tokensOut: number;
         cacheReadRatio?: number;
     }): void {
-        // Preserve backward compatibility by falling back to standard captureRequestCompleted
-        const { cacheReadRatio, ...baseProps } = props;
-        this.capture(
-            "request_completed",
-            cacheReadRatio !== undefined ? { ...baseProps, cache_read_ratio: cacheReadRatio } : baseProps
-        );
+        this.captureRequestLifecycleEvent("request_completed", props);
     }
 
     captureRequestFailed(props: {
@@ -202,7 +247,17 @@ export class TelemetryService implements vscode.Disposable {
         durationMs: number;
         errorType: string;
     }): void {
-        this.capture("request_failed", props);
+        this.captureRequestLifecycleEvent("request_failed", props);
+    }
+
+    captureRequestCachingBypassed(props: {
+        request_id: string;
+        caller: string;
+        model: string;
+        endpoint?: string;
+        reason?: string;
+    }): void {
+        this.captureRequestLifecycleEvent("request_caching_bypassed", props);
     }
 
     captureQuotaError(model: string, caller: string): void {
@@ -263,6 +318,14 @@ export class TelemetryService implements vscode.Disposable {
         this.capture("modern_config_status", props);
     }
 
+    public captureLegacyConfigMigration(data: LegacyConfigMigrationEvent): void {
+        this.capture("legacy_config_migrated", {
+            backend_count: data.backend_count,
+            group_name: data.group_name,
+            source: data.source,
+        });
+    }
+
     captureFeatureUsed(featureName: string, _caller: string): void {
         this._captureAggregatedFeatureUsage(featureName);
     }
@@ -320,6 +383,20 @@ export class TelemetryService implements vscode.Disposable {
         this.disposables.forEach((d: vscode.Disposable) => {
             d.dispose();
         });
-        void this.shutdown();
+        // Note: We intentionally do NOT await shutdown here because:
+        // 1. VS Code's Disposable.dispose() is synchronous by contract
+        // 2. During test teardown, awaiting async operations can cause hangs
+        // 3. The PostHog client shutdown is best-effort cleanup
+        // Use shutdown() directly if you need to await completion.
+        try {
+            // Synchronous flush attempt for graceful shutdown
+            this._flushAggregatedFeatureUsage();
+        } catch {
+            // Ignore errors during dispose
+        }
+        // Fire-and-forget the async shutdown - it will complete in background
+        this.adapter.shutdown().catch(() => {
+            // Silently ignore shutdown errors
+        });
     }
 }

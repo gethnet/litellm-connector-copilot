@@ -1,4 +1,4 @@
-import * as vscode from "vscode";
+import type * as vscode from "vscode";
 import type {
     CancellationToken,
     LanguageModelChatInformation,
@@ -13,12 +13,19 @@ import { tryParseJSONObject } from "../utils";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
 import { LiteLLMProviderBase } from "./liteLLMProviderBase";
-import { countTokens } from "../adapters/tokenUtils";
+import {
+    countOpenAIChatMessagesTokens,
+    countTokens,
+    estimateToolTokens,
+    getReservedOutputTokens,
+    getTotalTokenLimit,
+} from "../adapters/tokenUtils";
 import { decodeSSE } from "../adapters/sse/sseDecoder";
 import { createInitialStreamingState, interpretStreamEvent } from "../adapters/streaming/liteLLMStreamInterpreter";
 import type { StreamingState } from "../adapters/streaming/liteLLMStreamInterpreter";
 import { emitPartsToVSCode } from "../adapters/streaming/vscodePartEmitter";
 import type { EffortFallbackCache } from "../utils/reasoningEffortFallback";
+import { StreamTokenCapture } from "../adapters/streaming/streamTokenCapture";
 
 /**
  * Chat provider implementation for VS Code's LanguageModelChatProvider.
@@ -29,55 +36,130 @@ import type { EffortFallbackCache } from "../utils/reasoningEffortFallback";
 export class LiteLLMChatProvider extends LiteLLMProviderBase implements LanguageModelChatProvider {
     // Streaming state
     private _streamingState: StreamingState = createInitialStreamingState();
-    private _partialAssistantText = "";
+    private _tokenCapture?: StreamTokenCapture;
 
     constructor(secrets: vscode.SecretStorage, userAgent: string, effortFallbackCache?: EffortFallbackCache) {
         super(secrets, userAgent, effortFallbackCache);
     }
 
-    private emitExperimentalUsageData(
-        progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-        tokensIn: number,
-        tokensOut: number
-    ): void {
-        Logger.debug(
-            `Emitting experimental usage data part | promptTokens: ${tokensIn} | completionTokens: ${tokensOut}`
-        );
-        const detailsString = `Context: ${tokensIn} tokens | Output: ${tokensOut} tokens`;
-
-        // 1. Try direct DTO injection (bypassing type system) when VS Code supports it.
-        // VS Code does not yet expose a typed usage part, so guard with runtime checks.
-        try {
-            const report = (progress as unknown as { report?: (value: unknown) => void }).report;
-            if (typeof report === "function") {
-                report({
-                    kind: "usage",
-                    promptTokens: tokensIn,
-                    completionTokens: tokensOut,
-                    details: detailsString,
-                    metadata: {
-                        details: detailsString,
-                    },
-                });
-            }
-        } catch (e) {
-            Logger.trace("Direct usage DTO injection failed", e);
+    /************************************************
+     * TODO: REMOVE IF UNUSED IN VERSION 2.3
+     * REASON: Saving in the event this code is
+     *       actually necessary.
+     *  REMOVE BY: V2.3
+     *  CONDITION: IF UNUSED/COMMENTED
+     */
+    /*
+    private mergeUsagePayloadWithLastKnown(current: OpenAIUsagePayload): OpenAIUsagePayload {
+        const previous = this._tokenCapture?.getSnapshot();
+        if (!previous) {
+            return current;
         }
 
-        // 2. Keep the DataPart probe as fallback
-        progress.report(
-            vscode.LanguageModelDataPart.json(
-                {
-                    kind: "usage",
-                    promptTokens: tokensIn,
-                    completionTokens: tokensOut,
-                    details: detailsString,
-                    metadata: {
-                        details: detailsString,
-                    },
-                },
-                "application/vnd.litellm.usage+json"
-            )
+        const pickMonotonicTokenCount = (currentValue?: number, previousValue?: number): number | undefined => {
+            if (typeof currentValue === "number" && typeof previousValue === "number") {
+                return Math.max(currentValue, previousValue);
+            }
+            if (typeof currentValue === "number") {
+                return currentValue;
+            }
+            return previousValue;
+        };
+
+        const normalizedCurrentPromptDetails: OpenAIUsagePromptTokenDetails = {
+            ...(current.prompt_tokens_details ?? {}),
+        };
+        const normalizedCurrentCompletionDetails: OpenAIUsageCompletionTokenDetails = {
+            ...(current.completion_tokens_details ?? {}),
+        };
+
+        const mergedPromptTokens = Math.max(current.prompt_tokens, previous.promptTokens ?? 0);
+        const mergedCompletionTokens = Math.max(current.completion_tokens, previous.completionTokens ?? 0);
+
+        const mergedPromptDetails: OpenAIUsagePromptTokenDetails = {
+            cached_tokens: pickMonotonicTokenCount(
+                normalizedCurrentPromptDetails.cached_tokens ?? (current.prompt_tokens_details ? 0 : undefined),
+                previous.cachedTokens
+            ),
+            cache_creation_input_tokens: pickMonotonicTokenCount(
+                normalizedCurrentPromptDetails.cache_creation_input_tokens,
+                previous.cacheCreationInputTokens
+            ),
+        };
+
+        const mergedCompletionDetails: OpenAIUsageCompletionTokenDetails = {
+            reasoning_tokens: pickMonotonicTokenCount(
+                normalizedCurrentCompletionDetails.reasoning_tokens ??
+                    (current.completion_tokens_details ? 0 : undefined),
+                previous.reasoningTokens
+            ),
+            tool_tokens: pickMonotonicTokenCount(normalizedCurrentCompletionDetails.tool_tokens, previous.toolTokens),
+            accepted_prediction_tokens: pickMonotonicTokenCount(
+                normalizedCurrentCompletionDetails.accepted_prediction_tokens,
+                previous.acceptedPredictionTokens
+            ),
+            rejected_prediction_tokens: pickMonotonicTokenCount(
+                normalizedCurrentCompletionDetails.rejected_prediction_tokens,
+                previous.rejectedPredictionTokens
+            ),
+        };
+
+        const merged: OpenAIUsagePayload = {
+            ...current,
+            prompt_tokens: mergedPromptTokens,
+            completion_tokens: mergedCompletionTokens,
+            total_tokens: mergedPromptTokens + mergedCompletionTokens,
+            system_prompt_tokens: pickMonotonicTokenCount(current.system_prompt_tokens, previous.systemPromptTokens),
+            prompt_tokens_details: Object.values(mergedPromptDetails).some((value) => typeof value === "number")
+                ? mergedPromptDetails
+                : undefined,
+            completion_tokens_details: Object.values(mergedCompletionDetails).some((value) => typeof value === "number")
+                ? mergedCompletionDetails
+                : undefined,
+            reserved_output_tokens: current.reserved_output_tokens,
+            total_token_max: current.total_token_max,
+        };
+
+        return merged;
+    }
+*/
+    /************************************************
+     * End of code block
+     ***********************************************/
+
+    private logFinalUsageEnvelope(
+        requestId: string,
+        modelId: string,
+        caller: string,
+        usage: {
+            tokensIn?: number;
+            tokensOut?: number;
+            cachedTokens?: number;
+            cacheCreationInputTokens?: number;
+            reasoningTokens?: number;
+            toolTokens?: number;
+            acceptedPredictionTokens?: number;
+            rejectedPredictionTokens?: number;
+            systemPromptTokens?: number;
+            reservedOutputTokens?: number;
+            totalTokenMax?: number;
+            sawUsageDataPart: boolean;
+        }
+    ): void {
+        Logger.debug(
+            `[TokenUsage][Final] request_id=${requestId} model=${modelId} caller=${caller} ` +
+                `tokens_in=${usage.tokensIn ?? "n/a"} tokens_out=${usage.tokensOut ?? "n/a"} ` +
+                `cached_tokens=${usage.cachedTokens ?? "n/a"} cache_creation_input_tokens=${
+                    usage.cacheCreationInputTokens ?? "n/a"
+                } ` +
+                `reasoning_tokens=${usage.reasoningTokens ?? "n/a"} tool_tokens=${usage.toolTokens ?? "n/a"} ` +
+                `accepted_prediction_tokens=${usage.acceptedPredictionTokens ?? "n/a"} rejected_prediction_tokens=${
+                    usage.rejectedPredictionTokens ?? "n/a"
+                } ` +
+                `system_prompt_tokens=${usage.systemPromptTokens ?? "n/a"} reserved_output_tokens=${
+                    usage.reservedOutputTokens ?? "n/a"
+                } ` +
+                `total_token_max=${usage.totalTokenMax ?? "n/a"} streamed_usage=${usage.sawUsageDataPart}`
         );
     }
 
@@ -107,9 +189,10 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
     async provideTokenCount(
         model: LanguageModelChatInformation,
         text: string | LanguageModelChatRequestMessage,
-        token: CancellationToken
+        token: CancellationToken,
+        configuration?: Record<string, unknown>
     ): Promise<number> {
-        return super.provideTokenCount(model, text, token);
+        return super.provideTokenCount(model, text, token, configuration);
     }
 
     async provideLanguageModelChatResponse(
@@ -125,6 +208,14 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
 
         // Check if vscode has thinking part API available.
         // Even if we are not the V2 provider, we can safely report thinking parts if the type exists.
+        /************************************************
+         * TODO: REMOVE IF UNUSED IN VERSION 2.3
+         * REASON: Saving in the event this code is
+         *       actually necessary.
+         *  REMOVE BY: V2.3
+         *  CONDITION: IF UNUSED/COMMENTED
+         */
+        /*
         const ThinkingPart = (vscode as unknown as Record<string, unknown>).LanguageModelThinkingPart as
             | (new (
                   value: string | string[],
@@ -132,7 +223,10 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                   metadata?: Record<string, unknown>
               ) => vscode.LanguageModelResponsePart)
             | undefined;
-
+*/
+        /************************************************
+         * End of code block
+         ***********************************************/
         // Extract caller/justification from options or model tags
         const telemetry = this.getTelemetryOptions(options);
         const modelWithTags = model as vscode.LanguageModelChatInformation & { tags?: string[] };
@@ -152,38 +246,60 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 justification || "none"
             }`
         );
+        Logger.trace(
+            `Chat request: received model id="${model.id}" name="${model.name}" hasOptionsConfig=${(options as { configuration?: unknown }).configuration !== undefined}`
+        );
 
-        const trackingProgress: Progress<LanguageModelResponsePart> = {
-            report: (part) => {
-                if (part instanceof vscode.LanguageModelTextPart) {
-                    this._partialAssistantText += part.value;
-                } else if (ThinkingPart && part instanceof ThinkingPart) {
-                    // Accumulate thinking tokens as well to count total output tokens accurately
-                    const tp = part as unknown as { value: string | string[] };
-                    this._partialAssistantText += Array.isArray(tp.value) ? tp.value.join("") : tp.value;
-                }
-                progress.report(part);
-            },
-        };
+        // <Line of Code>; // TODO: Remove by v2.3 if still commented
+        // let reservedOutputTokensForRequest: number | undefined;
+        // let totalTokenMaxForRequest: number | undefined;
+
+        // Capability lookups go directly to the BackendRegistry — the single
+        // source of truth. There is no per-provider mirror cache, so a stale
+        // entry from a previous backend cannot be served for a different
+        // backend's request.
+        const modelInfo = this._registry.getModelInfo(model.id);
+        // `StreamTokenCapture` uses the model id for `countTokens` heuristics
+        // (tokenizer family lookup). The namespaced id breaks those heuristics,
+        // so we hand it the raw model name instead.
+        this._tokenCapture = new StreamTokenCapture(this.getRawModelName(model.id), progress, modelInfo);
+        const tokenCapture = this._tokenCapture;
+        const trackingProgress = tokenCapture.progress;
 
         try {
             const config = await this._configManager.getConfig();
 
             // Optional model override (primarily for completions). If set, we try to use it.
-            // If the override isn't in cache yet, attempt a best-effort refresh.
+            // If the override isn't registered yet, attempt a best-effort refresh.
+            //
+            // The override is a RAW model name (e.g. `azure_ai/gpt-5.4-mini`),
+            // not the namespaced id. The registry is keyed by namespaced id, so
+            // we use `findBackendForRawName` to resolve the override back to a
+            // backend before adopting it.
             let modelToUse = model;
             if (config.modelIdOverride) {
                 const overrideId = config.modelIdOverride;
-                const cachedOverride = this._lastModelList.find((m) => m.id === overrideId);
-                if (cachedOverride) {
-                    modelToUse = cachedOverride;
+                if (this._registry.findBackendForRawName(overrideId)) {
+                    Logger.trace(
+                        `Chat request: applying modelIdOverride overrideId="${overrideId}" originalModelId="${model.id}"`
+                    );
+                    // The override is reachable; we know its baseUrl/apiKey from
+                    // the registry. Synthesize a minimal LanguageModelChatInformation
+                    // that VS Code will accept (it only needs the id and family
+                    // for downstream request building).
+                    modelToUse = {
+                        ...model,
+                        id: overrideId,
+                    };
                 } else {
                     try {
-                        Logger.info(`modelIdOverride set to '${overrideId}' but not in cache; refreshing model list`);
+                        Logger.info(`modelIdOverride set to '${overrideId}' but not registered; refreshing model list`);
                         await this.discoverModels({ silent: true }, token);
-                        const refreshed = this._lastModelList.find((m) => m.id === overrideId);
-                        if (refreshed) {
-                            modelToUse = refreshed;
+                        if (this._registry.findBackendForRawName(overrideId)) {
+                            Logger.trace(
+                                `Chat request: applying modelIdOverride after refresh overrideId="${overrideId}" originalModelId="${model.id}"`
+                            );
+                            modelToUse = { ...model, id: overrideId };
                         } else {
                             Logger.warn(
                                 `modelIdOverride '${overrideId}' not found after refresh; using selected model '${model.id}'`
@@ -194,12 +310,50 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                     }
                 }
             }
+            Logger.trace(
+                `Chat request: modelToUse.id="${modelToUse.id}" rawModelName="${this.getRawModelName(modelToUse.id)}"`
+            );
 
-            const modelInfo = this._modelInfoCache.get(modelToUse.id);
+            // Capability lookup goes directly to the BackendRegistry. The
+            // `modelToUse.id` is either the namespaced id VS Code handed us
+            // or, when `modelIdOverride` rewrote it, the raw model name; the
+            // registry's `lookup` will return `undefined` for the raw-name
+            // case and `getModelInfo` will also return `undefined` for it
+            // (capabilities are stored under the namespaced key), so the
+            // request builder will use the override path's defaults. This
+            // is the same single-source-of-truth read as above.
+            const modelInfo = this._registry.getModelInfo(modelToUse.id);
             const requestBody = await this.buildOpenAIChatRequest(messages, modelToUse, options, modelInfo, caller);
+            // The model id in `modelToUse` is the namespaced `<routing>/<raw>`
+            // form VS Code hands us. The tokenizer heuristics (and the
+            // `isParameterSupported` / `usageOptOutModels` lookups inside the
+            // request builder) key off the raw model family, not the routing
+            // prefix. The request builder extracts the raw name internally
+            // before populating `request.model`.
+            const rawModelIdForTokenizers = this.getRawModelName(modelToUse.id);
+            const estimatedTransportInputTokens =
+                countOpenAIChatMessagesTokens(requestBody.messages, rawModelIdForTokenizers, modelInfo) +
+                estimateToolTokens(requestBody.tools);
+            const reservedOutputTokens = getReservedOutputTokens(modelToUse, requestBody.max_tokens, {
+                estimatedInputTokens: estimatedTransportInputTokens,
+                modelInfo,
+            });
+            const totalTokenMax = getTotalTokenLimit(modelToUse, modelInfo);
+            // <Line of Code>; // TODO: Remove by v2.3 if still commented
+            // reservedOutputTokensForRequest = reservedOutputTokens;
+            // totalTokenMaxForRequest = totalTokenMax;
+            tokenCapture.setEstimatedPromptTokens(estimatedTransportInputTokens);
+            const systemPromptContent = requestBody.messages.find((m) => m.role === "system")?.content;
+            if (typeof systemPromptContent === "string") {
+                tokenCapture.setEstimatedSystemPromptTokens(
+                    countTokens(systemPromptContent, rawModelIdForTokenizers, modelInfo)
+                );
+            }
+            tokenCapture.setReservedOutputTokens(reservedOutputTokens);
+            tokenCapture.setTotalTokenMax(totalTokenMax);
 
-            // Calculate tokensIn for telemetry
-            tokensIn = countTokens(messages, modelToUse.id, modelInfo);
+            // Count the actual transport request after trimming/conversion.
+            tokensIn = estimatedTransportInputTokens;
 
             let stream: ReadableStream<Uint8Array>;
             try {
@@ -216,6 +370,13 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                     modelInfo
                 );
             } catch (err: unknown) {
+                this.logRequestPayloadOnFailure(requestBody, err, {
+                    stage: "provideLanguageModelChatResponse",
+                    modelId: modelToUse.id,
+                    caller,
+                    modelInfoMode: modelInfo?.mode,
+                });
+
                 if (token.isCancellationRequested) {
                     throw new Error("Operation cancelled by user", { cause: err });
                 }
@@ -234,6 +395,14 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                         delete requestBody.presence_penalty;
                         delete requestBody.stop;
 
+                        if (
+                            parsedMessage.toLowerCase().includes("stream_options") ||
+                            parsedMessage.toLowerCase().includes("include_usage")
+                        ) {
+                            (this as unknown as { _usageOptOutModels: Set<string> })._usageOptOutModels.add(model.id);
+                            delete (requestBody as { stream_options?: { include_usage?: boolean } }).stream_options;
+                        }
+
                         if (token.isCancellationRequested) {
                             throw new Error("Operation cancelled by user", { cause: err });
                         }
@@ -250,8 +419,12 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                             );
                             await this.processStreamingResponse(stream, trackingProgress, token);
 
-                            // Estimate tokensOut from the accumulated assistant text
-                            const tokensOut = countTokens(this._partialAssistantText, modelToUse.id, modelInfo);
+                            // Flush usage after processing the retried stream
+
+                            tokenCapture.flushUsage();
+
+                            const snapshot = tokenCapture.getSnapshot();
+                            const tokensOut = snapshot.completionTokens;
 
                             const metric = {
                                 requestId,
@@ -263,6 +436,15 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                                 caller,
                             };
                             LiteLLMTelemetry.reportMetric(metric);
+                            this.logFinalUsageEnvelope(requestId, modelToUse.id, caller, {
+                                tokensIn,
+                                tokensOut,
+                                sawUsageDataPart: snapshot.sawUpstreamUsage,
+                            });
+
+                            // Return early - all processing complete, prevent fall-through
+                            // to avoid double-processing the already-consumed stream
+                            return;
 
                             // Disabling this to reduce noise / unecessary logging
                             // TODO: look into potentially removing this in the future if don't need it.
@@ -301,19 +483,75 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
 
             await this.processStreamingResponse(stream, trackingProgress, token);
 
-            // Estimate tokensOut from the accumulated assistant text
-            const tokensOut = countTokens(this._partialAssistantText, modelToUse.id, modelInfo);
+            // Flush usage data if no upstream usage was seen during streaming
+            // This ensures usage is always reported to VS Code
+            const capture = this._tokenCapture;
+            if (capture) {
+                capture.flushUsage();
+            }
+
+            const snapshot = capture?.getSnapshot() ?? {
+                promptTokens: tokensIn ?? 0,
+                cachedTokens: 0,
+                cacheCreationInputTokens: 0,
+                systemPromptTokens: 0,
+                completionTokens: 0,
+                reasoningTokens: 0,
+                toolTokens: 0,
+                acceptedPredictionTokens: 0,
+                rejectedPredictionTokens: 0,
+                sawUpstreamUsage: false,
+            };
+            const tokensOut = Math.max(snapshot.completionTokens, snapshot.toolTokens);
+            const tokensInForTelemetry = snapshot.promptTokens ?? tokensIn;
+            const reasoningTokens = snapshot.reasoningTokens || undefined;
+            const cachedTokens = snapshot.cachedTokens || undefined;
+            const systemPromptTokens = snapshot.systemPromptTokens || undefined;
+            const toolTokens = snapshot.toolTokens || undefined;
+            const acceptedPredictionTokens = snapshot.acceptedPredictionTokens || undefined;
+            const rejectedPredictionTokens = snapshot.rejectedPredictionTokens || undefined;
+            const cacheCreationInputTokens = snapshot.cacheCreationInputTokens || undefined;
 
             const metric = {
                 requestId,
                 model: modelToUse.id,
                 durationMs: LiteLLMTelemetry.endTimer(startTime),
-                tokensIn,
+                tokensIn: tokensInForTelemetry,
                 tokensOut,
+                promptCacheTokens: cachedTokens,
+                cacheCreationInputTokens,
+                reasoningTokens,
+                toolTokens,
+                acceptedPredictionTokens,
+                rejectedPredictionTokens,
+                reservedOutputTokens,
+                totalTokenMax,
                 status: "success" as const,
                 caller,
+                cacheReadRatio:
+                    cachedTokens !== undefined && tokensInForTelemetry
+                        ? cachedTokens / tokensInForTelemetry
+                        : undefined,
             };
             LiteLLMTelemetry.reportMetric(metric);
+            this.logFinalUsageEnvelope(requestId, modelToUse.id, caller, {
+                tokensIn: tokensInForTelemetry,
+                tokensOut,
+                cachedTokens,
+                cacheCreationInputTokens,
+                reasoningTokens,
+                toolTokens,
+                acceptedPredictionTokens,
+                rejectedPredictionTokens,
+                systemPromptTokens,
+                reservedOutputTokens,
+                totalTokenMax,
+                sawUsageDataPart: snapshot.sawUpstreamUsage,
+            });
+
+            // Usage data is now handled exclusively by StreamTokenCapture
+            // which intercepts usage DataParts during streaming and enriches them
+            // No need for separate emitExperimentalUsageData call
 
             // Disabling this to reduce noise / unecessary logging
             // TODO: look into potentially removing this in the future if don't need it.
@@ -331,10 +569,6 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 });
             }
             */
-
-            if (config.experimentalEmitUsageData && typeof tokensIn === "number") {
-                this.emitExperimentalUsageData(trackingProgress, tokensIn, tokensOut);
-            }
         } catch (err: unknown) {
             let errorMessage = err instanceof Error ? err.message : String(err);
             if (errorMessage.includes("LiteLLM API error")) {
@@ -385,7 +619,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
 
     protected resetStreamingState(): void {
         this._streamingState = createInitialStreamingState();
-        this._partialAssistantText = "";
+        this._tokenCapture = undefined;
     }
 
     /**
@@ -403,14 +637,16 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         const timeoutMs = (config.inactivityTimeout ?? 60) * 1000;
         let watchdog: NodeJS.Timeout | undefined;
 
+        // Create an AbortController to actually cancel the stream on timeout
+        const controller = new AbortController();
+
         const resetWatchdog = () => {
             if (watchdog) {
                 clearTimeout(watchdog);
             }
             watchdog = setTimeout(() => {
                 Logger.warn(`Inactivity timeout after ${timeoutMs}ms`);
-                // Note: We can't easily cancel the reader from here without a reference,
-                // but decodeSSE handles cancellation via the token.
+                controller.abort();
             }, timeoutMs);
         };
 
@@ -418,17 +654,13 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             if (watchdog) {
                 clearTimeout(watchdog);
             }
+            controller.abort();
         });
 
         try {
             resetWatchdog();
-            for await (const payload of decodeSSE(responseBody, token)) {
-                console.log("DEBUG: LiteLLMChatProvider payload:", payload);
+            for await (const payload of decodeSSE(responseBody, token, controller.signal)) {
                 resetWatchdog();
-                if (token.isCancellationRequested) {
-                    console.log("DEBUG: LiteLLMChatProvider cancellation requested");
-                    break;
-                }
 
                 const jsonResult = tryParseJSONObject(payload);
                 if (!jsonResult.ok) {
@@ -442,7 +674,6 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 }
 
                 const parts = interpretStreamEvent(json, this._streamingState);
-                console.log("DEBUG: LiteLLMChatProvider interpreted parts:", JSON.stringify(parts));
                 emitPartsToVSCode(parts, progress);
             }
         } finally {

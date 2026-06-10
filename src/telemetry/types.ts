@@ -38,3 +38,9 @@ export interface IPostHogAdapter {
     shutdown(): Promise<void>;
     setEnabled(enabled: boolean): void;
 }
+
+export interface LegacyConfigMigrationEvent {
+    backend_count: number;
+    group_name: string;
+    source: "multi-backend" | "single-backend";
+}

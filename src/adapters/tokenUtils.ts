@@ -1,13 +1,62 @@
 import * as vscode from "vscode";
-import type { LiteLLMModelInfo } from "../types";
+import type { LiteLLMModelInfo, OpenAIChatMessage } from "../types";
 import { isAnthropicModel } from "../utils/modelUtils";
 import { selectTokenizer } from "./tokenizers/selectTokenizer";
 import type { V2ChatMessage } from "../providers/v2Types";
 import type { TelemetryService } from "../telemetry/telemetryService";
 import { isCacheControlMimeType } from "../utils";
 
+// Token estimation constants for binary media types
+// These are conservative estimates to avoid context window overflow
+
+/** Base token cost for any image (OpenAI low-detail equivalent) */
+const IMAGE_TOKEN_BASE = 85;
+
+/** Approximate bytes per token for base64-encoded image data */
+const IMAGE_BYTES_PER_TOKEN = 750;
+
+/** Conservative bytes-per-token for PDF content (text-equivalent) */
+const PDF_BYTES_PER_TOKEN = 4;
+
+/** Minimum token cost for any non-empty PDF (processing overhead) */
+const PDF_MINIMUM_TOKENS = 100;
+
+/**
+ * Estimates token cost for binary media data (images, PDFs).
+ * Uses conservative heuristics to avoid underestimating context usage.
+ *
+ * @param mimeType - The MIME type of the data
+ * @param dataLength - The length of the binary data in bytes
+ * @returns Estimated token count for the media content
+ */
+export function estimateMediaTokenCost(mimeType: string, dataLength: number): number {
+    if (dataLength <= 0) {
+        return 0;
+    }
+
+    // Image types: base cost + scaling by data size
+    if (mimeType.startsWith("image/")) {
+        return IMAGE_TOKEN_BASE + Math.ceil(dataLength / IMAGE_BYTES_PER_TOKEN);
+    }
+
+    // PDF: treat as text-equivalent with minimum overhead
+    if (mimeType === "application/pdf") {
+        return Math.max(PDF_MINIMUM_TOKENS, Math.ceil(dataLength / PDF_BYTES_PER_TOKEN));
+    }
+
+    // Unsupported binary type: return 0 (caller may handle differently)
+    return 0;
+}
+
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16000;
 export const DEFAULT_CONTEXT_LENGTH = 128000;
+const SMART_OUTPUT_RESERVATION_MIN = 16000;
+const SMART_OUTPUT_RESERVATION_MAX = 64000;
+
+interface OutputReservationOptions {
+    estimatedInputTokens?: number;
+    modelInfo?: LiteLLMModelInfo;
+}
 
 let telemetryServiceInstance: TelemetryService | undefined;
 
@@ -76,6 +125,92 @@ export function countTokens(
     return tokenizer.countMessageTokens(input as vscode.LanguageModelChatRequestMessage).tokens;
 }
 
+/**
+ * Counts tokens for the OpenAI-style transport messages that are actually sent
+ * to LiteLLM after trimming and tool conversion.
+ */
+export function countOpenAIChatMessagesTokens(
+    messages: readonly OpenAIChatMessage[],
+    modelId?: string,
+    modelInfo?: LiteLLMModelInfo
+): number {
+    const tokenizer = selectTokenizer(modelId || "default", modelInfo);
+    let total = 0;
+
+    for (const message of messages) {
+        if (typeof message.content === "string") {
+            total += tokenizer.countTokens(message.content).tokens;
+        } else if (Array.isArray(message.content)) {
+            for (const part of message.content) {
+                if (part.type === "text" && typeof part.text === "string") {
+                    total += tokenizer.countTokens(part.text).tokens;
+                }
+            }
+        }
+
+        if (typeof message.name === "string" && message.name.length > 0) {
+            total += tokenizer.countTokens(message.name).tokens;
+        }
+
+        if (typeof message.tool_call_id === "string" && message.tool_call_id.length > 0) {
+            total += tokenizer.countTokens(message.tool_call_id).tokens;
+        }
+
+        if (Array.isArray(message.tool_calls)) {
+            for (const toolCall of message.tool_calls) {
+                total += tokenizer.countTokens(toolCall.function.name).tokens;
+                total += tokenizer.countTokens(toolCall.function.arguments).tokens;
+            }
+        }
+    }
+
+    return total;
+}
+
+/**
+ * Resolves the number of tokens reserved for model output in a request.
+ */
+export function getReservedOutputTokens(
+    model: vscode.LanguageModelChatInformation,
+    requestedMaxTokens?: number,
+    options?: OutputReservationOptions
+): number {
+    if (typeof requestedMaxTokens === "number") {
+        return Math.max(1, Math.min(requestedMaxTokens, model.maxOutputTokens));
+    }
+
+    const estimatedInputTokens =
+        typeof options?.estimatedInputTokens === "number" && options.estimatedInputTokens > 0
+            ? options.estimatedInputTokens
+            : 0;
+    const totalTokenLimit = getTotalTokenLimit(model, options?.modelInfo);
+
+    // A "smart reservation" target in the requested 16k..64k range.
+    // Larger requests reserve a larger output window, but we always clamp to model limits.
+    const ratio = Math.min(1, estimatedInputTokens / 48000);
+    const smartTarget = Math.round(
+        SMART_OUTPUT_RESERVATION_MIN + (SMART_OUTPUT_RESERVATION_MAX - SMART_OUTPUT_RESERVATION_MIN) * ratio
+    );
+
+    // Keep a small structural headroom so output reservation does not completely consume the
+    // context window when input is already large.
+    const structuralHeadroom = 256;
+    const remainingContextWindow = Math.max(1, totalTokenLimit - estimatedInputTokens - structuralHeadroom);
+
+    return Math.max(1, Math.min(model.maxOutputTokens, smartTarget, remainingContextWindow));
+}
+
+/**
+ * Resolves the total token window for the model.
+ */
+export function getTotalTokenLimit(model: vscode.LanguageModelChatInformation, modelInfo?: LiteLLMModelInfo): number {
+    const rawLimit = modelInfo?.max_input_tokens ?? modelInfo?.context_window_tokens ?? modelInfo?.max_tokens;
+    if (typeof rawLimit === "number" && rawLimit > 0) {
+        return rawLimit;
+    }
+    return Math.max(1, model.maxInputTokens + model.maxOutputTokens);
+}
+
 export function countTokensForV2Messages(
     input: string | V2ChatMessage | readonly V2ChatMessage[],
     modelId?: string,
@@ -101,16 +236,36 @@ export function countTokensForV2Messages(
         }
 
         for (const part of msgContent) {
-            switch (part.type) {
+            // Cast to V2ChatMessagePart type for existing types, allow extensions for image/pdf
+            const castedPart = part as unknown as
+                | { type: "text"; text: string }
+                | { type: "thinking"; value: string | string[] }
+                | { type: "data"; mimeType: string; data: Uint8Array<ArrayBufferLike> }
+                | { type: "tool_call"; name: string; input?: object }
+                | { type: "tool_result"; content?: object }
+                | { type: "image" | "pdf"; mimeType: string; data: Uint8Array<ArrayBufferLike> };
+            switch (castedPart.type) {
                 case "text":
-                    total += countTokens(part.text, modelId, modelInfo);
+                    total += countTokens(castedPart.text, modelId, modelInfo);
                     break;
                 case "thinking":
                     total += countTokens(
-                        Array.isArray(part.value) ? part.value.join("") : part.value,
+                        Array.isArray(castedPart.value) ? castedPart.value.join("") : castedPart.value,
                         modelId,
                         modelInfo
                     );
+                    break;
+                case "image":
+                    if (typeof castedPart.mimeType === "string" && castedPart.data instanceof Uint8Array) {
+                        const dataLength = castedPart.data.length;
+                        total += estimateMediaTokenCost(castedPart.mimeType, dataLength);
+                    }
+                    break;
+                case "pdf":
+                    if (typeof castedPart.mimeType === "string" && castedPart.data instanceof Uint8Array) {
+                        const dataLength = castedPart.data.length;
+                        total += estimateMediaTokenCost(castedPart.mimeType, dataLength);
+                    }
                     break;
                 case "data":
                     // Skip cache_control parts — they are dropped at the
@@ -118,18 +273,37 @@ export function countTokensForV2Messages(
                     // and must not inflate the token budget. Checked BEFORE the
                     // JSON branch so that "application/vnd.cache-control+json"
                     // variants are also skipped.
-                    if (isCacheControlMimeType(part.mimeType)) {
+                    if (isCacheControlMimeType(castedPart.mimeType)) {
                         break;
                     }
-                    if (part.mimeType.startsWith("text/") || part.mimeType.includes("json")) {
-                        total += countTokens(Buffer.from(part.data).toString("utf-8"), modelId, modelInfo);
+                    // Count media types (images, PDFs) with conservative token estimates
+                    if (
+                        typeof castedPart.mimeType === "string" &&
+                        (castedPart.mimeType.startsWith("image/") || castedPart.mimeType === "application/pdf")
+                    ) {
+                        const dataLength =
+                            castedPart.data instanceof Uint8Array
+                                ? castedPart.data.length
+                                : Buffer.from(castedPart.data).length;
+                        total += estimateMediaTokenCost(castedPart.mimeType, dataLength);
+                    }
+                    // Count text and JSON data
+                    else if (
+                        (typeof castedPart.mimeType === "string" && castedPart.mimeType.startsWith("text/")) ||
+                        castedPart.mimeType.includes("json")
+                    ) {
+                        total += countTokens(Buffer.from(castedPart.data).toString("utf-8"), modelId, modelInfo);
                     }
                     break;
                 case "tool_call":
-                    total += countTokens(`${part.name}${JSON.stringify(part.input ?? {})}`, modelId, modelInfo);
+                    total += countTokens(
+                        `${castedPart.name}${JSON.stringify(castedPart.input ?? {})}`,
+                        modelId,
+                        modelInfo
+                    );
                     break;
                 case "tool_result":
-                    total += countTokens(JSON.stringify(part.content ?? []), modelId, modelInfo);
+                    total += countTokens(JSON.stringify(castedPart.content ?? []), modelId, modelInfo);
                     break;
             }
         }

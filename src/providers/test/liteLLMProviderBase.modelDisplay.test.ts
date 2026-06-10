@@ -5,6 +5,15 @@ import * as sinon from "sinon";
 import { LiteLLMChatProvider } from "../";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 
+/**
+ * Tests for the user-facing model display properties in the single-provider
+ * architecture. The model id returned to VS Code is namespaced
+ * `<routingIdentity>/<rawModelName>` so the response path can route
+ * unambiguously. The `name` field shown to the user is the raw model
+ * name only (no namespace leak). The picker groups models via
+ * `category.label` which is the user-entered group name (or URL hostname
+ * fallback).
+ */
 suite("LiteLLM model display", () => {
     let sandbox: sinon.SinonSandbox;
 
@@ -16,7 +25,7 @@ suite("LiteLLM model display", () => {
         sandbox.restore();
     });
 
-    test("uses backend:model as the user-facing `name` when models are namespaced", async () => {
+    test("uses namespaced id, raw model_name as the user-facing name, URL hostname for category label", async () => {
         const mockSecrets: vscode.SecretStorage = {
             get: async () => undefined,
             store: async () => {},
@@ -27,13 +36,12 @@ suite("LiteLLM model display", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, "test-agent");
         const token = new vscode.CancellationTokenSource().token;
 
-        // Stub MultiBackendClient.prototype.getModelInfoAll to return test data
         sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({
             data: [
                 {
                     model_name: "gpt-4o",
                     model_info: {
-                        key: "cloud/gpt-4o",
+                        key: "example/gpt-4o",
                         litellm_provider: "openai",
                         mode: "responses",
                         rawContextWindow: 8192,
@@ -43,39 +51,26 @@ suite("LiteLLM model display", () => {
             ],
         });
 
-        // Stub config manager to return a backend
-        const configManager = (provider as unknown as { _configManager: { resolveBackends: () => Promise<unknown> } })
-            ._configManager;
-        sandbox
-            .stub(configManager, "resolveBackends")
-            .resolves([{ name: "cloud", url: "http://example", enabled: true }]);
-
-        const models = await (
-            provider as unknown as {
-                _doDiscoverModels: (
-                    options: { silent: boolean; configuration?: Record<string, unknown> },
-                    t: vscode.CancellationToken
-                ) => Promise<vscode.LanguageModelChatInformation[]>;
-            }
-        )._doDiscoverModels(
+        const models = await provider.discoverModels(
             {
                 silent: true,
-                configuration: { providerName: "cloud", baseUrl: "http://example", apiKey: "test-key" },
+                configuration: { baseUrl: "http://example", apiKey: "test-key" },
             },
             token
         );
 
         assert.strictEqual(models.length, 1);
-        assert.strictEqual(models[0].id, "cloud/gpt-4o");
+        // The model id VS Code receives is namespaced
+        // (`<routingIdentity>/<rawModelName>`) so the response path can
+        // route unambiguously. The `name` is the raw model name only —
+        // the user does not see the routing prefix in the picker.
+        assert.strictEqual(models[0].id, "example/gpt-4o");
         assert.strictEqual(models[0].name, "gpt-4o");
         assert.strictEqual((models[0] as unknown as { vendor: string }).vendor, "openai");
-        // Models must be flagged as user-selectable so they appear in the VS Code 1.120 model
-        // picker dropdown. Without this, models only show in the "Manage Language Models" view.
         assert.strictEqual((models[0] as unknown as { isUserSelectable?: boolean }).isUserSelectable, true);
-        // Each backend gets its own category heading in the picker so models from different
-        // proxies are visually grouped. The label uses the user's backend name.
+        // category.label is the URL hostname so the picker groups by backend.
         assert.deepStrictEqual((models[0] as unknown as { category?: { label: string; order: number } }).category, {
-            label: "cloud",
+            label: "example",
             order: 0,
         });
     });
@@ -91,13 +86,12 @@ suite("LiteLLM model display", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, "test-agent");
         const token = new vscode.CancellationTokenSource().token;
 
-        // Stub MultiBackendClient.prototype.getModelInfoAll to return test data with cache support
         sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({
             data: [
                 {
                     model_name: "gpt-4",
                     model_info: {
-                        key: "cloud/gpt-4",
+                        key: "example/gpt-4",
                         litellm_provider: "openai",
                         supports_prompt_caching: true,
                         mode: "chat",
@@ -109,34 +103,21 @@ suite("LiteLLM model display", () => {
             ],
         });
 
-        // Stub config manager to return a backend
-        const configManager = (provider as unknown as { _configManager: { resolveBackends: () => Promise<unknown> } })
-            ._configManager;
-        sandbox
-            .stub(configManager, "resolveBackends")
-            .resolves([{ name: "cloud", url: "http://example", enabled: true }]);
-
-        const models = await (
-            provider as unknown as {
-                _doDiscoverModels: (
-                    options: { silent: boolean; configuration?: Record<string, unknown> },
-                    t: vscode.CancellationToken
-                ) => Promise<vscode.LanguageModelChatInformation[]>;
-            }
-        )._doDiscoverModels(
+        const models = await provider.discoverModels(
             {
                 silent: true,
-                configuration: { providerName: "cloud", baseUrl: "http://example", apiKey: "test-key" },
+                configuration: { baseUrl: "http://example", apiKey: "test-key" },
             },
             token
         );
 
         assert.strictEqual(models.length, 1);
         const model = models[0];
-        assert.strictEqual((model as unknown as { detail: string }).detail, "⚡ cloud");
+        // detail = cacheIndicator + backendName
+        assert.strictEqual((model as unknown as { detail: string }).detail, "⚡ example");
         assert.strictEqual(
             (model as unknown as { tooltip?: string }).tooltip,
-            "Provider: openai, Model: gpt-4 contributed by LiteLLM: cloud via LiteLLM Connector for Copilot"
+            "Provider: openai, Model: gpt-4 via example"
         );
     });
 
@@ -151,13 +132,12 @@ suite("LiteLLM model display", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, "test-agent");
         const token = new vscode.CancellationTokenSource().token;
 
-        // Stub MultiBackendClient.prototype.getModelInfoAll to return test data without cache support
         sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({
             data: [
                 {
                     model_name: "gpt-3.5-turbo",
                     model_info: {
-                        key: "local/gpt-3.5-turbo",
+                        key: "localhost:4000/gpt-3.5-turbo",
                         litellm_provider: "openai",
                         supports_prompt_caching: false,
                         mode: "chat",
@@ -169,34 +149,20 @@ suite("LiteLLM model display", () => {
             ],
         });
 
-        // Stub config manager to return a backend
-        const configManager = (provider as unknown as { _configManager: { resolveBackends: () => Promise<unknown> } })
-            ._configManager;
-        sandbox
-            .stub(configManager, "resolveBackends")
-            .resolves([{ name: "local", url: "http://localhost:4000", enabled: true }]);
-
-        const models = await (
-            provider as unknown as {
-                _doDiscoverModels: (
-                    options: { silent: boolean; configuration?: Record<string, unknown> },
-                    t: vscode.CancellationToken
-                ) => Promise<vscode.LanguageModelChatInformation[]>;
-            }
-        )._doDiscoverModels(
+        const models = await provider.discoverModels(
             {
                 silent: true,
-                configuration: { providerName: "local", baseUrl: "http://localhost:4000", apiKey: "test-key" },
+                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-key" },
             },
             token
         );
 
         assert.strictEqual(models.length, 1);
         const model = models[0];
-        assert.strictEqual((model as unknown as { detail: string }).detail, "local");
+        assert.strictEqual((model as unknown as { detail: string }).detail, "localhost:4000");
         assert.strictEqual(
             (model as unknown as { tooltip?: string }).tooltip,
-            "Provider: openai, Model: gpt-3.5-turbo contributed by LiteLLM: local via LiteLLM Connector for Copilot"
+            "Provider: openai, Model: gpt-3.5-turbo via localhost:4000"
         );
     });
 });

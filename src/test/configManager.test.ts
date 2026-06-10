@@ -26,7 +26,7 @@ suite("ConfigManager", () => {
         assert.strictEqual(session?.apiKey, "secret");
     });
 
-    test("convertProviderConfiguration falls back to groupName when providerName is omitted", async () => {
+    test("uses groupName directly as backendName (ignores providerName in config)", async () => {
         const secrets = {
             get: async () => undefined,
             store: async () => {},
@@ -36,13 +36,77 @@ suite("ConfigManager", () => {
         } as unknown as vscode.SecretStorage;
 
         const manager = new ConfigManager(secrets);
-        const session = manager.convertProviderConfiguration("multi-cloud", {
+        const session = manager.convertProviderConfiguration("llmapi.wolfram.com", {
+            baseUrl: "https://llmapi.wolfram.com",
+            apiKey: "sk-test",
+            providerName: "should-be-ignored",
+        });
+
+        assert.ok(session);
+        assert.strictEqual(session?.backendName, "llmapi.wolfram.com");
+    });
+
+    test("getConfig no longer exposes legacy url/key/backends", async () => {
+        const secrets = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            keys: async () => [],
+            onDidChange: () => ({ dispose() {} }),
+        } as unknown as vscode.SecretStorage;
+
+        const manager = new ConfigManager(secrets);
+        const config = await manager.getConfig();
+
+        // url, key, and backends are no longer part of LiteLLMConfig (VS Code 1.120+ per-group configuration)
+        assert.strictEqual(config.modelIdOverride, undefined);
+    });
+
+    // resolveBackends test removed - method no longer exists (VS Code 1.120+ per-group configuration)
+
+    test("convertProviderConfiguration accepts an empty groupName when baseUrl is set", async () => {
+        const secrets = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            keys: async () => [],
+            onDidChange: () => ({ dispose() {} }),
+        } as unknown as vscode.SecretStorage;
+
+        const manager = new ConfigManager(secrets);
+        // VS Code 1.120 supplies options.groupName separately; convertProviderConfiguration
+        // must not require it. The session's backendName may be empty in this case and the
+        // picker will fall back to a URL-derived display label.
+        const session = manager.convertProviderConfiguration("", {
             baseUrl: "http://localhost:4000",
             apiKey: "secret",
         });
 
         assert.ok(session);
-        assert.strictEqual(session?.backendName, "multi-cloud");
+        assert.strictEqual(session?.baseUrl, "http://localhost:4000");
+        assert.strictEqual(session?.apiKey, "secret");
+    });
+
+    test("convertProviderConfiguration ignores stale providerName in the configuration payload", async () => {
+        const secrets = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            keys: async () => [],
+            onDidChange: () => ({ dispose() {} }),
+        } as unknown as vscode.SecretStorage;
+
+        const manager = new ConfigManager(secrets);
+        // providerName is no longer part of the schema; if VS Code ever passes one, the
+        // canonical groupName argument still wins.
+        const session = manager.convertProviderConfiguration("canonical-group", {
+            baseUrl: "http://localhost:4000",
+            apiKey: "secret",
+            providerName: "stale-payload-value",
+        });
+
+        assert.ok(session);
+        assert.strictEqual(session?.backendName, "canonical-group");
     });
 
     test("convertProviderConfiguration returns undefined without a baseUrl", async () => {

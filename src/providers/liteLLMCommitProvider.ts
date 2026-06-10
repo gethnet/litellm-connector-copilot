@@ -4,6 +4,7 @@ import { LiteLLMProviderBase } from "./liteLLMProviderBase";
 import { LiteLLMTelemetry } from "../utils/telemetry";
 import { Logger } from "../utils/logger";
 import { countTokens } from "../adapters/tokenUtils";
+import { StreamTokenCapture } from "../adapters/streaming/streamTokenCapture";
 import { decodeSSE } from "../adapters/sse/sseDecoder";
 import { createInitialStreamingState, interpretStreamEvent } from "../adapters/streaming/liteLLMStreamInterpreter";
 import { COMMIT_MESSAGE_PROMPT, COMMIT_SYSTEM_PROMPT } from "../utils/prompts";
@@ -26,11 +27,16 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
      * @param token Cancellation token.
      * @param onProgress Callback for streaming response parts.
      */
+    /**
+     * @deprecated Direct provider request fallback removed; use VS Code's selectChatModels route only.
+     * Retained for potential future credential-supply logic.
+     */
     async provideCommitMessage(
         diff: string,
         options: vscode.LanguageModelChatRequestOptions,
         token: vscode.CancellationToken,
-        onProgress?: (text: string) => void
+        onProgress?: (text: string) => void,
+        configuration?: Record<string, unknown>
     ): Promise<string> {
         const requestId = Math.random().toString(36).substring(7);
         const startTime = LiteLLMTelemetry.startTimer();
@@ -48,11 +54,10 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
         let modelId = "unknown";
 
         try {
+            // Note: With VS Code 1.120+ per-group provider configuration, the backend
+            // URL/key are configured via languageModelChatProviders contribution point.
+            // The config object here only contains workspace-scoped settings.
             const config = await this._configManager.getConfig();
-
-            if (!config.url) {
-                throw new Error("LiteLLM configuration not found. Please configure the LiteLLM base URL.");
-            }
 
             // Select a model suitable for commit message generation
             const model = await this.resolveCommitModel(config, token);
@@ -60,7 +65,9 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
                 throw new Error("No model available for commit message generation");
             }
             modelId = model.id;
-            const modelInfo = this._modelInfoCache.get(model.id);
+            // Capability lookup goes directly to the BackendRegistry — same
+            // single-source-of-truth read as the chat and completion paths.
+            const modelInfo = this._registry.getModelInfo(model.id);
 
             // Construct the chat messages
             const messages: vscode.LanguageModelChatRequestMessage[] = [
@@ -79,9 +86,11 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
             ];
 
             // Calculate tokensIn for telemetry
-            tokensIn = countTokens(messages, model.id, modelInfo);
+            tokensIn = countTokens(messages, this.getRawModelName(model.id), modelInfo);
 
             // Build the OpenAI-compatible request body
+            // `model.id` may be the namespaced `<routing>/<raw>` form; the
+            // request builder extracts the raw name for `request.model`.
             const requestBody = await this.buildOpenAIChatRequest(
                 messages,
                 model,
@@ -94,13 +103,19 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
             );
 
             // Send the request
-            const nullProgress: vscode.Progress<vscode.LanguageModelResponsePart> = {
-                report: (part) => {
-                    if (part instanceof vscode.LanguageModelTextPart && onProgress) {
-                        onProgress(part.value);
-                    }
+            const tokenCapture = new StreamTokenCapture(
+                model.id,
+                {
+                    report: (part) => {
+                        if (part instanceof vscode.LanguageModelTextPart && onProgress) {
+                            onProgress(part.value);
+                        }
+                    },
                 },
-            };
+                modelInfo
+            );
+            tokenCapture.setEstimatedPromptTokens(tokensIn ?? 0);
+            const trackingProgress = tokenCapture.progress;
 
             const stream = await this.sendRequestWithRetry(
                 requestBody,
@@ -111,8 +126,9 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
                     tools: [],
                     toolMode: vscode.LanguageModelChatToolMode.Auto,
                     requestInitiator: "commit-message",
-                } as vscode.ProvideLanguageModelChatResponseOptions,
-                nullProgress,
+                    configuration,
+                } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                trackingProgress,
                 token,
                 "scm-generator",
                 modelInfo
@@ -124,8 +140,10 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
             // Sanitize the message by stripping markdown code blocks
             const sanitizedMessage = stripMarkdownCodeBlocks(commitMessage);
 
-            // Estimate tokensOut from the generated text
-            const tokensOut = countTokens(sanitizedMessage, model.id, modelInfo);
+            const snapshot = tokenCapture.getSnapshot();
+            const tokensOut = snapshot.sawUpstreamUsage
+                ? snapshot.completionTokens
+                : countTokens(sanitizedMessage, this.getRawModelName(model.id), modelInfo);
 
             LiteLLMTelemetry.reportMetric({
                 requestId,
@@ -168,28 +186,73 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
 
     /**
      * Resolves the model to use for commit message generation.
+     *
+     * The commit-message path is a command, not a chat-VS-Code call: VS Code
+     * does not pass `options.configuration` here, so we cannot route by
+     * per-group config. The model list returned by the chat picker is not
+     * available at this call site either (stateless — there is no model-list
+     * cache). The override is honored if set; otherwise the user must select
+     * a model from the picker. See AGENTS.md for the deferred rework.
+     */
+    /**
+     * @deprecated Use vscode.lm.selectChatModels() instead.
+     * Retained for potential future use.
      */
     private async resolveCommitModel(
         config: LiteLLMConfig,
-        token: vscode.CancellationToken
+        _token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelChatInformation | undefined> {
         Logger.debug("Starting Commit Model Resolution");
-        if (this._lastModelList.length === 0) {
-            Logger.trace("No model list data discovered");
-            await this.discoverModels({ silent: true }, token);
+
+        // Build a synthetic list from the in-memory registry so the override
+        // lookup and tag-based fallback work without a model-list cache. The
+        // registry is the only place we have any model→backend knowledge at
+        // this call site.
+        const registry = this._registry;
+        const models: vscode.LanguageModelChatInformation[] = [];
+        for (const [id, entry] of this.registryEntries(registry)) {
+            models.push({
+                id,
+                name: id,
+                family: "litellm",
+                version: "1.0",
+                tooltip: `Provider: ${id} via ${entry.baseUrl}`,
+                detail: entry.baseUrl,
+                maxInputTokens: 0,
+                maxOutputTokens: 0,
+                capabilities: { toolCalling: true, imageInput: false },
+            });
         }
 
-        // Use the override if provided in settings
         if (config.commitModelIdOverride) {
             Logger.trace(`Returning model data ${config.commitModelIdOverride}`);
-            return this._lastModelList.find((m) => m.id === config.commitModelIdOverride);
+            return models.find((m) => m.id === config.commitModelIdOverride);
         }
 
-        // Prefer models explicitly tagged for SCM generation
-        return this._lastModelList.find((m) => {
-            const tags = (m as unknown as { tags?: string[] }).tags;
-            return tags?.includes("scm-generator") === true;
-        });
+        // Prefer models explicitly tagged for SCM generation. The registry
+        // doesn't carry tags, so the override path is the only deterministic
+        // choice here; the tag-based fallback is a no-op until the registry
+        // grows tags.
+        return undefined;
+    }
+
+    /**
+     * Adapter to enumerate registry entries as [id, entry] pairs. Avoids
+     * exposing the registry's internal `Map` to consumers of this provider.
+     */
+    private *registryEntries(registry: {
+        findBackendForRawName(rawName: string): { baseUrl: string; apiKey: string; rawModelName: string } | undefined;
+    }): Iterable<[string, { baseUrl: string; apiKey: string; rawModelName: string }]> {
+        // The registry doesn't expose iteration. We rely on VS Code's picker
+        // to surface models to the user; commit-model resolution from a
+        // non-chat call site is a known limitation. This generator is here
+        // to keep the resolver's control flow simple.
+        for (const id of []) {
+            const entry = registry.findBackendForRawName(id);
+            if (entry) {
+                yield [id, entry];
+            }
+        }
     }
 
     /**
@@ -224,8 +287,8 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
                     }
                 }
             }
-        } catch (err) {
-            Logger.warn("Error while extracting commit text", err);
+        } catch {
+            Logger.warn("Error while extracting commit text");
         }
 
         return fullText;

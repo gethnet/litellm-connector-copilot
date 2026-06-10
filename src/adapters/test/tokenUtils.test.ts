@@ -7,8 +7,10 @@ import {
     estimateToolTokens,
     trimMessagesToFitBudget,
     countTokens,
+    countOpenAIChatMessagesTokens,
     calculateAvailableContext,
     getStaticPromptTokenCount,
+    getReservedOutputTokens,
     countTokensForV2Messages,
     trimV2MessagesForBudget,
     isContextOverflowError,
@@ -74,6 +76,37 @@ suite("TokenUtils Unit Tests", () => {
         (cyclic as unknown[]).push(cyclic);
 
         assert.strictEqual(estimateToolTokens(cyclic as never), 0);
+    });
+
+    test("getReservedOutputTokens uses smart defaults between 16k and 64k when max_tokens is omitted", () => {
+        const model = {
+            id: "test-model",
+            maxInputTokens: 200000,
+            maxOutputTokens: 128000,
+        } as vscode.LanguageModelChatInformation;
+
+        const lowInputReservation = getReservedOutputTokens(model, undefined, { estimatedInputTokens: 2000 });
+        const highInputReservation = getReservedOutputTokens(model, undefined, { estimatedInputTokens: 60000 });
+
+        assert.ok(lowInputReservation >= 16000);
+        assert.ok(highInputReservation <= 64000);
+        assert.ok(highInputReservation > lowInputReservation);
+    });
+
+    test("getReservedOutputTokens never exceeds remaining context window", () => {
+        const model = {
+            id: "small-model",
+            maxInputTokens: 0,
+            maxOutputTokens: 64000,
+        } as vscode.LanguageModelChatInformation;
+
+        const reserved = getReservedOutputTokens(model, undefined, {
+            estimatedInputTokens: 31900,
+            modelInfo: { max_input_tokens: 32000 } as LiteLLMModelInfo,
+        });
+
+        // total 32000 - input 31900 - structural headroom 256 => clamped to minimum 1
+        assert.strictEqual(reserved, 1);
     });
 
     test("isAnthropicModel identifies models correctly", () => {
@@ -297,6 +330,129 @@ suite("TokenUtils Unit Tests", () => {
         assert.ok(count > 0);
 
         assert.strictEqual(countTokensForV2Messages("string"), 2);
+    });
+
+    test("countTokensForV2Messages estimates tokens for image data parts", () => {
+        // PNG image data (small)
+        const pngHeader = Buffer.from([
+            /* Lines 83-85 omitted */
+            0x49,
+            0x48,
+            0x44,
+            0x52, // IHDR
+        ]);
+        const messages = [
+            {
+                role: "user",
+                content: [
+                    { type: "text", text: "What is in this image?" },
+                    { type: "image", data: pngHeader.slice(0, 16), mimeType: "image/png" },
+                ],
+            } as unknown as V2ChatMessage,
+        ] as V2ChatMessage[];
+
+        const count = countTokensForV2Messages(messages, "gpt-4o");
+        // Text: "What is in this image?" ≈ 5 tokens
+        // Image: 85 base + ceil(16/750) = 86 tokens
+        // Total should be > 0 (not skipped)
+        assert.ok(count > 5, `Expected image to add tokens, got ${count}`);
+    });
+
+    test("countTokensForV2Messages estimates tokens for jpeg and webp images", () => {
+        const jpegData = new Uint8Array(1000); // 1KB of data
+        const messages = [
+            {
+                role: "user",
+                content: [
+                    { type: "text", text: "Describe this image" },
+                    { type: "image", data: jpegData, mimeType: "image/jpeg" },
+                ],
+            } as unknown as V2ChatMessage,
+        ] as V2ChatMessage[];
+
+        const count = countTokensForV2Messages(messages, "gpt-4o");
+        // Should account for image: 85 + ceil(1000/750) = 87 tokens
+        assert.ok(count >= 85, `Expected at least 85 tokens for JPEG, got ${count}`);
+    });
+
+    test("countTokensForV2Messages estimates tokens for PDF data parts", () => {
+        const pdfData = new Uint8Array(4000); // 4KB PDF
+        const messages = [
+            {
+                role: "user",
+                content: [
+                    { type: "text", text: "Analyze this PDF" },
+                    { type: "image", data: pdfData, mimeType: "application/pdf" },
+                ],
+            } as unknown as V2ChatMessage,
+        ] as V2ChatMessage[];
+
+        const count = countTokensForV2Messages(messages, "gpt-4o");
+        // PDF: ceil(4000/4) = 1000 tokens (or minimum 100)
+        assert.ok(count >= 100, `Expected at least 100 tokens for PDF, got ${count}`);
+    });
+
+    test("countTokensForV2Messages still skips cache_control mime types", () => {
+        const messages = [
+            {
+                role: "user",
+                content: [
+                    { type: "text", text: "test" },
+                    { type: "data", data: new Uint8Array([1, 2, 3]), mimeType: "cache_control" },
+                ],
+            } as unknown as V2ChatMessage,
+        ] as V2ChatMessage[];
+
+        const count = countTokensForV2Messages(messages, "gpt-4o");
+        // "test" text ≈ ceil(4/3.5) = 2 tokens; cache_control data part is skipped (0 tokens)
+        assert.strictEqual(count, 2, "Cache control parts should be skipped while text is still counted");
+    });
+
+    test("countTokensForV2Messages handles mixed content with images and text", () => {
+        const imageData = new Uint8Array(5000); // 5KB image
+        const messages = [
+            {
+                role: "user",
+                content: [
+                    { type: "text", text: "Hello" },
+                    { type: "data", data: JSON.stringify({ key: "value" }), mimeType: "application/json" },
+                    { type: "image", data: imageData, mimeType: "image/png" },
+                ],
+            } as unknown as V2ChatMessage,
+        ] as V2ChatMessage[];
+
+        const count = countTokensForV2Messages(messages, "gpt-4o");
+        // Text + JSON + Image all counted
+        assert.ok(count > 20, `Expected tokens for mixed content, got ${count}`);
+    });
+
+    test("countOpenAIChatMessagesTokens counts transport tool calls and tool results", () => {
+        const count = countOpenAIChatMessagesTokens(
+            [
+                {
+                    role: "assistant",
+                    content: "",
+                    tool_calls: [
+                        {
+                            id: "call_1",
+                            type: "function",
+                            function: {
+                                name: "read_file",
+                                arguments: '{"path":"a.txt"}',
+                            },
+                        },
+                    ],
+                },
+                {
+                    role: "tool",
+                    tool_call_id: "call_1",
+                    content: "file contents",
+                },
+            ],
+            "m"
+        );
+
+        assert.ok(count > 0);
     });
 
     test("trimV2MessagesForBudget protects assistant message on 'continue'", () => {

@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { StructuredLogger } from "../observability/structuredLogger";
+import { sanitizeToolName } from "../utils/toolNameUtils";
 import type { V2ChatMessage, V2MessagePart } from "../providers/v2Types";
 import type { OpenAIChatMessage, OpenAIChatMessageContentItem, OpenAIChatRole, OpenAIToolCall } from "../types";
 
@@ -170,7 +171,9 @@ function toOpenAIToolCall(
         });
     }
 
-    return { id, type: "function", function: { name: part.name, arguments: args } };
+    // Apply tool name sanitization for AWS Bedrock Converse API compliance (64-char limit)
+    const { name } = sanitizeToolName(part.name);
+    return { id, type: "function", function: { name, arguments: args } };
 }
 
 function appendDataPart(
