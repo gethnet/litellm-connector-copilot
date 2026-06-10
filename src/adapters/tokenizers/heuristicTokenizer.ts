@@ -1,6 +1,7 @@
 import type { LanguageModelChatRequestMessage } from "vscode";
 import type { Tokenizer, TokenizationResult } from "./types";
 import { StructuredLogger } from "../../observability/structuredLogger";
+import { estimateMediaTokenCost } from "../tokenUtils";
 
 export class HeuristicTokenizer implements Tokenizer {
     static STRUCTURED_LOGGER_ENABLED = true;
@@ -92,22 +93,31 @@ export class HeuristicTokenizer implements Tokenizer {
         if ("mimeType" in part && "data" in part) {
             keysPresent.add("mimeType").add("data");
             const dataPart = part as { mimeType?: string; data?: Uint8Array };
-            if (
-                typeof dataPart.mimeType === "string" &&
-                dataPart.data instanceof Uint8Array &&
-                (dataPart.mimeType.startsWith("text/") ||
-                    dataPart.mimeType.includes("json") ||
-                    dataPart.mimeType === "usage")
-            ) {
-                const textContent = Buffer.from(dataPart.data).toString("utf-8");
-                const tokens = this.countTokens(textContent).tokens;
-                StructuredLogger.debug("Counting text/json data part tokens", {
-                    mimeType: dataPart.mimeType,
-                    dataLength: dataPart.data.length,
-                    textLength: textContent.length,
-                    resultTokens: tokens,
-                });
-                return tokens;
+            const mimeType = "string" === typeof dataPart.mimeType ? dataPart.mimeType : undefined;
+            const data = dataPart.data instanceof Uint8Array ? dataPart.data : undefined;
+            if (typeof mimeType === "string" && data instanceof Uint8Array) {
+                // Count media types (images, PDFs) with conservative token estimates
+                if (mimeType.startsWith("image/") || mimeType === "application/pdf") {
+                    const tokens = estimateMediaTokenCost(mimeType, data.length);
+                    StructuredLogger.debug("Counting image/PDF data part tokens", {
+                        mimeType,
+                        dataLength: data.length,
+                        resultTokens: tokens,
+                    });
+                    return tokens;
+                }
+                // Count text and JSON data
+                if (mimeType.startsWith("text/") || mimeType.includes("json") || mimeType === "usage") {
+                    const textContent = Buffer.from(data).toString("utf-8");
+                    const tokens = this.countTokens(textContent).tokens;
+                    StructuredLogger.debug("Counting text/json data part tokens", {
+                        mimeType,
+                        dataLength: data.length,
+                        textLength: textContent.length,
+                        resultTokens: tokens,
+                    });
+                    return tokens;
+                }
             }
         }
 

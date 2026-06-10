@@ -1,7 +1,6 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import { HeuristicTokenizer } from "../heuristicTokenizer";
-import type { Tokenizer } from "../types";
 
 suite("HeuristicTokenizer Unit Tests", () => {
     suite("countPartTokens", () => {
@@ -64,13 +63,12 @@ suite("HeuristicTokenizer Unit Tests", () => {
             assert.strictEqual(result, expected);
         });
 
-        test("skips image data parts with mime type image/png", () => {
-            const imageText = "data:image/png;base64,ABC123";
-            const data = Buffer.from(imageText).toString("utf-8");
-            const part = { mimeType: "image/png", data: Buffer.from(data) };
+        test("estimates tokens for image data parts with mime type image/png", () => {
+            const imageData = new Uint8Array(1000); // 1KB image data
+            const part = { mimeType: "image/png", data: imageData };
             const result = tokenizer["countPartTokens"](part);
-            // Image PNG is not in the supported mime types list
-            assert.strictEqual(result, 0);
+            // Should estimate image tokens: 85 base + ceil(1000/750) ≈ 87
+            assert.ok(result >= 85, `Expected at least 85 tokens for image, got ${result}`);
         });
 
         test("handles json mime type in data part", () => {
@@ -80,10 +78,30 @@ suite("HeuristicTokenizer Unit Tests", () => {
             assert.strictEqual(result, tokenizer.countTokens(jsonText).tokens);
         });
 
-        test("skips image data parts with non-text mime types", () => {
-            const part = { mimeType: "image/jpeg", data: Buffer.from([0xff, 0xd8, 0xff]) };
+        test("estimates tokens for jpeg image data parts", () => {
+            const part = { mimeType: "image/jpeg", data: new Uint8Array(500) };
             const result = tokenizer["countPartTokens"](part);
-            assert.strictEqual(result, 0);
+            // Should estimate image tokens
+            assert.ok(result >= 85, `Expected at least 85 tokens for JPEG, got ${result}`);
+        });
+
+        test("estimates tokens for pdf data parts", () => {
+            const part = { mimeType: "application/pdf", data: new Uint8Array(2000) };
+            const result = tokenizer["countPartTokens"](part);
+            // PDF: ceil(2000/4) = 500 tokens
+            assert.ok(result >= 100, `Expected at least 100 tokens for PDF, got ${result}`);
+        });
+
+        test("estimates tokens for webp image data parts", () => {
+            const part = { mimeType: "image/webp", data: new Uint8Array(800) };
+            const result = tokenizer["countPartTokens"](part);
+            assert.ok(result >= 85, `Expected at least 85 tokens for WebP, got ${result}`);
+        });
+
+        test("estimates tokens for gif image data parts", () => {
+            const part = { mimeType: "image/gif", data: new Uint8Array(600) };
+            const result = tokenizer["countPartTokens"](part);
+            assert.ok(result >= 85, `Expected at least 85 tokens for GIF, got ${result}`);
         });
 
         test("skips data parts without valid text mime types", () => {
