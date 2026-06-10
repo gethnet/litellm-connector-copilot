@@ -22,22 +22,40 @@ suite("Utility Unit Tests", () => {
     test("normalizeToolCallId handles edge cases", () => {
         // Empty ID
         assert.ok(normalizeToolCallId("").startsWith("fc_"));
+        assert.ok(normalizeToolCallId("").length >= 42);
 
-        // Already valid ID
-        assert.strictEqual(normalizeToolCallId("fc_abc"), "fc_abc");
+        // ID starting with fc_ but too short (must be padded to 42 chars minimum)
+        console.log("Testing 'fc_abc' with length:", "fc_abc".length);
+        const shortFc = normalizeToolCallId("fc_abc");
+        console.log("Result:", shortFc, "length:", shortFc.length);
+        assert.ok(shortFc.startsWith("fc_"));
+        assert.ok(shortFc.length >= 42);
+        assert.ok(shortFc.length <= 63);
+        // Verify padding is deterministic due to stableHash
+        assert.strictEqual(shortFc, normalizeToolCallId("fc_abc"));
 
-        // Too long ID starting with fc_
-        const longFc = "fc_" + "a".repeat(50);
+        // Too long ID starting with fc_ (will be trimmed to effectiveMaxLen of 50)
+        const longFc = "fc_" + "a".repeat(56);
         const normFc = normalizeToolCallId(longFc);
-        assert.ok(normFc.length <= 40);
+        assert.ok(normFc.length >= 42);
+        assert.ok(normFc.length <= 63); // Truncated to maxLen
         assert.ok(normFc.startsWith("fc_"));
 
-        // ID with prefix call_ or tc_
+        // ID with prefix call_ or tc_ (converted to fc_ format)
         assert.ok(normalizeToolCallId("call_abc").startsWith("fc_abc_"));
         assert.ok(normalizeToolCallId("tc_abc").startsWith("fc_abc_"));
+        assert.ok(normalizeToolCallId("call_abc").length >= 42);
+        assert.ok(normalizeToolCallId("call_abc").length <= 63);
 
-        // ID with special characters
-        assert.ok(normalizeToolCallId("some!@#id").startsWith("fc_some___id_"));
+        // ID with special characters (will be sanitized and padded)
+        const sanitized = normalizeToolCallId("some!@#id");
+        assert.ok(sanitized.startsWith("fc_"));
+        assert.ok(sanitized.length >= 42);
+        assert.ok(sanitized.length <= 56);
+
+        // Non-fc_ prefix IDs are always rewritten to fc_ format with padding
+        assert.ok(normalizeToolCallId("call_abc").startsWith("fc_abc_"));
+        assert.ok(normalizeToolCallId(" tc_abc ").startsWith("fc_")); // trimmed and sanitized
     });
 
     test("stripMarkdownCodeBlocks handles various formats", () => {

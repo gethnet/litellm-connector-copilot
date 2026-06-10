@@ -233,9 +233,9 @@
 	"main": "./dist/extension.js",
 	"browser": "./dist/web/extension.js",
 	"scripts": {
-		"clean": "rm -rf ./dist/* ./out/* ./coverage/* ./test-results/*",
-		"clean:build": "rm -rf ./dist/* ./out/*",
-		"clean:tests": "rm -rf ./coverage/* ./test-results/*",
+		"clean": "find ./dist ./out ./coverage ./test-results -delete || true",
+		"clean:build": "find ./dist ./out -delete || true",
+		"clean:tests": "find ./coverage ./test-results -delete || true",
 		"precompile": "npm run clean",
 		"compile": "tsc -p ./",
 		"vscode:pack:dev": "npm run clean:build && tsc --noEmit && node esbuild.js && npx vsce package",
