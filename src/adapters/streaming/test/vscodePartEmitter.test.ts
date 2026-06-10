@@ -111,4 +111,62 @@ suite("vscodePartEmitter", () => {
             },
         });
     });
+
+    test("handles text part with non-string value", () => {
+        const reported: unknown[] = [];
+        const progress = {
+            report: (p: unknown) => reported.push(p),
+        } as vscode.Progress<vscode.LanguageModelResponsePart>;
+
+        emitV2PartsToVSCode([{ type: "text", value: 12345 } as unknown as { type: "text"; value: string }], progress);
+
+        assert.strictEqual(reported.length, 1);
+        assert.ok(reported[0] instanceof vscode.LanguageModelTextPart);
+        assert.strictEqual((reported[0] as vscode.LanguageModelTextPart).value, "12345");
+    });
+
+    test("emits data parts with non-text mimeType as opaque binary", () => {
+        const reported: unknown[] = [];
+        const progress = {
+            report: (p: unknown) => reported.push(p),
+        } as vscode.Progress<vscode.LanguageModelResponsePart>;
+
+        emitV2PartsToVSCode([{ type: "data", mimeType: "application/octet-stream", value: { raw: "data" } }], progress);
+
+        assert.strictEqual(reported.length, 1);
+        assert.ok(reported[0] instanceof vscode.LanguageModelDataPart);
+    });
+
+    test("ignores response and finish parts", () => {
+        const reported: unknown[] = [];
+        const progress = {
+            report: (p: unknown) => reported.push(p),
+        } as vscode.Progress<vscode.LanguageModelResponsePart>;
+
+        emitV2PartsToVSCode(
+            [
+                { type: "response" } as unknown as { type: "text"; value: string },
+                { type: "finish" } as unknown as { type: "text"; value: string },
+                { type: "text", value: "after" },
+            ],
+            progress
+        );
+
+        assert.strictEqual(reported.length, 1);
+        assert.ok(reported[0] instanceof vscode.LanguageModelTextPart);
+        assert.strictEqual((reported[0] as vscode.LanguageModelTextPart).value, "after");
+    });
+
+    test("emits usage data parts with string value", () => {
+        const reported: unknown[] = [];
+        const progress = {
+            report: (p: unknown) => reported.push(p),
+        } as vscode.Progress<vscode.LanguageModelResponsePart>;
+
+        emitV2PartsToVSCode([{ type: "data", mimeType: "usage", value: '{"tokens": 10}' }], progress);
+
+        assert.strictEqual(reported.length, 1);
+        assert.ok(reported[0] instanceof vscode.LanguageModelDataPart);
+        assert.strictEqual((reported[0] as vscode.LanguageModelDataPart).mimeType, "usage");
+    });
 });

@@ -118,6 +118,28 @@ suite("StructuredLogger", () => {
         assert.ok(logObj.timestamp);
     });
 
+    test("log calls warn and error channel methods for respective levels", () => {
+        const mockChannel = {
+            warn: sandbox.stub(),
+            error: sandbox.stub(),
+        } as unknown as vscode.LogOutputChannel;
+        (StructuredLogger as unknown as { channel: vscode.LogOutputChannel | undefined }).channel = mockChannel;
+
+        StructuredLogger.warn("test.warn", { data: "test" });
+        assert.ok((mockChannel.warn as sinon.SinonStub).calledOnce);
+        const warnLogStr = (mockChannel.warn as sinon.SinonStub).firstCall.args[0] as string;
+        const warnParsed = JSON.parse(warnLogStr) as { event: string; level: string };
+        assert.strictEqual(warnParsed.event, "test.warn");
+        assert.strictEqual(warnParsed.level, "warn");
+
+        StructuredLogger.error("test.error", { data: "test" });
+        assert.ok((mockChannel.error as sinon.SinonStub).calledOnce);
+        const errorLogStr = (mockChannel.error as sinon.SinonStub).firstCall.args[0] as string;
+        const errorParsed = JSON.parse(errorLogStr) as { event: string; level: string };
+        assert.strictEqual(errorParsed.event, "test.error");
+        assert.strictEqual(errorParsed.level, "error");
+    });
+
     test("log uses no-request default when requestId not provided", () => {
         const mockChannel = {
             info: sandbox.stub(),

@@ -17,7 +17,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "2.1.0-dev67",
+	"version": "2.1.0-dev68",
 	"preview": true,
 	"engines": {
 		"vscode": "^1.120.0"
@@ -253,6 +253,7 @@
 		"test:report": "npm run pretest && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && npm run test",
 		"pretest:coverage": "npm run compile",
 		"test:coverage": "node scripts/test-coverage.mjs",
+		"coverage:serve": "npx serve coverage -p 8080",
 		"bump-version": "node scripts/bump-version.js"
 	},
 	"devDependencies": {
@@ -275,6 +276,7 @@
 		"posthog-node": "^5.36.7",
 		"prettier": "^3.8.4",
 		"rimraf": "^6.0.1",
+		"serve": "^14.2.6",
 		"sinon": "^21.0.1",
 		"typescript": "^6.0.3",
 		"typescript-eslint": "^8.61.0",
