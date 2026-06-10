@@ -59,8 +59,7 @@ Your support keeps this project alive and improving! ❤️
 
 > **Provider grouping remains intact**: each backend name is preserved as its provider/group label, so models stay clearly identifiable in the Language Models view and picker.
 
-> **⚠️ 2.0.0 temporary limitation**: Unless manually configured, **Git Commit Message Generation** and **Inline Completions** are currently inoperative in this release. We are actively fixing modern-config parity for both paths.
-> Manual setup: use **LiteLLM: Select Commit Message Model** and **LiteLLM: Select Inline Completion Model** (plus inline completion settings) if you need these features immediately.
+> **⚠️ Upgrading from 2.0.x or earlier?** See the [Upgrade Guide](#-upgrading-from-20x-or-earlier) below — configuration has fundamentally changed.
 
 That's it! Your models from the LiteLLM proxy will automatically appear in the model picker.
 
@@ -99,14 +98,10 @@ The extension automatically handles provider-specific quirks:
 See real-time token usage with context window indicators (e.g., "↑128K in / ↓16K out"). Helps you stay within limits and understand costs.
 
 ### ✍️ **Git Commit Generation**
-Generate structured, conventional commit messages from your staged changes.
-⚠️ In `2.0.0`, this currently requires manual model configuration to operate reliably.
+Generate structured, conventional commit messages from your staged changes. Set `litellm-connector.commitModelIdOverride` to the model ID you want to use — the SCM toolbar sparkle icon will appear automatically once it's configured.
 
 ### 🧼 **Smart Sanitization**
 Automatically strips Markdown code blocks from generated commit messages for a clean SCM experience.
-
-### 🔍 **Built-in Diagnostics**
-Run `LiteLLM: Check Connection` anytime to verify your proxy configuration. Troubleshooting made easy.
 
 ### ⏱️ **Reliable Timeout Handling**
 Optional inactivity watchdog prevents stuck streams. Configurable timeout keeps your workflow smooth.
@@ -126,8 +121,7 @@ Fine-grained control over reasoning capabilities for specific models. The overri
 When enabled, user-defined overrides take precedence over bundled defaults. Both are merged with auto-discovered capabilities from the LiteLLM proxy.
 
 ### ⌨️ **Optional Inline Completions**
-Enable LiteLLM-powered inline completions as an alternative to Copilot's default.
-⚠️ In `2.0.0`, this currently requires manual configuration to operate reliably.
+Enable LiteLLM-powered inline completions as an alternative to Copilot's default. Requires `litellm-connector.inlineCompletions.enabled` to be set to `true` and a model configured.
 
 ---
 
@@ -142,40 +136,48 @@ Enable LiteLLM-powered inline completions as an alternative to Copilot's default
 
 ---
 
-## 🆕 What's New?
+## 🆕 What's New in 2.1.0?
 
-- � **Multi-Repo Commit Generation** – Commit message generation now correctly identifies the active repository in multi-repo workspaces. Generates the right diff from the right repo every time.
-- 🧪 **Telemetry & Observability** – PostHog-backed telemetry for feature-usage tracking, request metrics, and structured JSONL logging. All non-identifiable and opt-in.
-- 🔧 **Model Capability Overrides** – Manually override VS Code's capability detection (`toolCalling`, `imageInput`) when auto-detection is incorrect. Configure via `litellm-connector.modelCapabilitiesOverrides`.
-- 🧩 **Model Override Gate** – New `litellm-connector.enableModelOverrides` setting lets you disable the entire override system. When off, all capabilities come directly from your LiteLLM proxy's `/model/info` responses. Bundled overrides are now empty by default.
-- 🧠 **Rich Chat Response Parts** – Unified chat provider built on the VS Code 1.120 Language Model APIs. Emits structured text, thinking, data, and tool-call parts so reasoning models render correctly in chat.
-- ⚠️ **Temporary Feature Gap (2.0.0)** – Commit-message generation and inline completions currently require manual configuration; modern-config parity fix is in progress.
-- �📊 **Advanced Token Counting** – Smarter budgeting with local estimation, background refinement, and short-lived caching for faster, more accurate context management.
-- 🏎️ **Stateless Model Discovery** – Every picker refresh issues a fresh `/model/info` request against the configured backend. The BackendRegistry is the single source of truth for backends and their associated models (public read, internal write).
-- 🧼 **SCM Message Sanitization** – Clean commit messages by automatically stripping triple backticks and Markdown artifacts.
-- ✍️ **Git Commit Generation** – Generate structured, conventional commits directly from the SCM view using any LiteLLM-supported model.
-- 🔍 **Connection Diagnostics** – Use the `LiteLLM: Check Connection` command to instantly validate your proxy and authentication setup.
-- 🧱 **Tool-call Hardening** – Improved compatibility for strict providers (like GPT-5/o1) with normalized tool call IDs.
+> **This is a significant release.** The entire configuration system has been rebuilt around VS Code's native Language Models provider-group UI. See [Upgrading from 2.0.x](#-upgrading-from-20x-or-earlier) if you're coming from a previous release.
+
+- 🔄 **Automatic Legacy Config Migration** – On first launch after upgrading, the extension detects old `litellm-connector.baseUrl` / `backends` workspace settings and guides you through migrating to the new provider-group format via an in-editor notification.
+- 🏗️ **VS Code-Native Configuration** – All backend connection details (Base URL, API key) are now managed exclusively through VS Code's **Language Models** provider-group UI. No workspace settings needed.
+- 🔒 **Per-Group Isolation** – Each configured provider group has fully isolated model discovery state. Multiple backends no longer share or bleed state.
+- 🧩 **Model Override Master Toggle** – `litellm-connector.enableModelOverrides` lets you disable all override rules and rely purely on your LiteLLM proxy's `/model/info` responses.
+- 🧼 **Tool Name Sanitization for Bedrock** – Tool names are automatically sanitized for Bedrock-compatible providers.
+- 🔧 **Tool Call ID Normalization** – Tool call IDs normalized to ≤40 characters for strict providers (GPT-5 / o-series).
+- 🖼️ **Image & PDF Token Estimation** – Token budget now accounts for image and PDF data parts (fixes #76).
+- 🛡️ **Discovery Backoff** – Repeated discovery failures trigger exponential backoff so a down proxy doesn't hammer VS Code.
+- 📊 **Enriched Token Reporting** – Input, output, and reserved output budgets all reported in telemetry and usage tooltips.
+- 🧱 **Unified Stream Interpreter** – `/responses` endpoint stream handling consolidated into the shared interpreter used by all providers.
 
 ---
 
 ## ⚙️ Configuration Options
 
-Fine-tune your experience with these settings (accessible via VS Code Settings):
+### Provider Connection (via VS Code Language Models UI)
+
+Base URL and API key are configured through **VS Code's Language Models provider-group UI** — not workspace settings. Open VS Code Settings → Language Models, or run **LiteLLM: Manage Configuration** to add/edit provider groups.
+
+> ❌ `litellm-connector.baseUrl`, `litellm-connector.backends`, and `litellm-connector.apiKey` are **removed** in 2.1.0. See [Upgrading from 2.0.x](#-upgrading-from-20x-or-earlier).
+
+### Workspace Settings
+
+Fine-tune behavior with these settings (accessible via VS Code Settings):
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `litellm-connector.commitModelIdOverride` | string | `""` | Override the model used for git commit message generation. Leave empty to disable. |
+| `litellm-connector.commitModelIdOverride` | string | `""` | Model ID for git commit message generation. **Required** to enable the SCM toolbar button. Leave empty to disable. |
 | `litellm-connector.inactivityTimeout` | number | `60` | Seconds of inactivity before the connection is considered idle. |
 | `litellm-connector.disableCaching` | boolean | `true` | Send `no-cache` headers to bypass LiteLLM caching. |
-| `litellm-connector.enableResponsesApi` | boolean | `false` | **(Experimental)** Enable the VSCode Responses API integration. |
+| `litellm-connector.enableResponsesApi` | boolean | `false` | **(Experimental)** Enable the `/responses` endpoint integration. |
 | `litellm-connector.disableQuotaToolRedaction` | boolean | `false` | Disable automatic tool removal when a quota error is detected in chat history. |
-| `litellm-connector.modelOverrides` | object | `{}` | Override or add tags for specific models (e.g., `inline-completions,chat,tools`). |
-| `litellm-connector.enableModelOverrides` | boolean | `true` | Enable/disable the model override system. When enabled, merged user and bundled model override rules are applied. When disabled, only LiteLLM `/model/info` derived capabilities are used. |
-| `litellm-connector.modelCapabilitiesOverrides` | object | `{}` | Override model capabilities (`toolCalling`, `imageInput`) reported to VS Code (e.g., `toolCalling,imageInput`). |
-| `litellm-connector.inlineCompletions.enabled` | boolean | `false` | Enable LiteLLM inline completions via VS Code's stable inline completion provider API. **(Deprecated: will be removed)** |
+| `litellm-connector.enableModelOverrides` | boolean | `true` | Master toggle for the model override system. Set `false` to rely solely on LiteLLM `/model/info` capabilities. |
+| `litellm-connector.modelOverrides` | array | `[]` | User-supplied regex-based override rules for model reasoning capabilities. Merged on top of bundled overrides. |
+| `litellm-connector.modelCapabilitiesOverrides` | object | `{}` | Override model capabilities (`toolCalling`, `imageInput`) reported to VS Code. |
+| `litellm-connector.inlineCompletions.enabled` | boolean | `false` | Enable LiteLLM inline completions. **(Deprecated: will be removed)** |
 | `litellm-connector.inlineCompletions.modelId` | string | `""` | **(Deprecated)** Use VS Code's [`inlineChat.defaultModel`](vscode://settings/inlineChat.defaultModel) setting instead. |
-| `litellm-connector.sendDefaultParameters` | boolean | `false` | **(Temporary, will be removed)** Send default temperature, frequency_penalty, and presence_penalty if not provided. Recommended: false. |
+| `litellm-connector.sendDefaultParameters` | boolean | `false` | **(Temporary, will be removed)** Send default temperature/penalty parameters if not provided. Recommended: `false`. |
 
 > **Tip**: Most users won't need to touch these—the defaults work great out of the box!
 
@@ -187,13 +189,26 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and try these:
 
 | Command | What It Does |
 |---------|--------------|
-| **LiteLLM: Manage Configuration** | Opens LiteLLM backend management (multi-backend flow). |
-| **LiteLLM: Check Connection** | Test if your proxy is reachable and credentials are valid. |
-| **LiteLLM: Reload Models** | Manually refresh the model list from your proxy. |
-| **LiteLLM: Reset All Configuration** | ⚠️ Nuke option—clears all stored URLs and API keys. |
-| **LiteLLM: Select Commit Message Model** | Choose which model generates your commit messages. |
-| **LiteLLM: Show Available Models** | See all models currently discovered from your proxy. |
-| **LiteLLM: Select Inline Completion Model** | Choose which model powers inline completions. |
+| **LiteLLM: Manage Configuration** | Opens the VS Code Language Models provider-group management UI to add/edit backends. |
+| **LiteLLM: Reload Models** | Manually refresh the model list from your configured backends. |
+| **LiteLLM: Reset All Configuration** | ⚠️ Nuke option—clears all stored provider groups, URLs, and API keys. |
+| **LiteLLM: Select Commit Message Model** | Set the `commitModelIdOverride` to choose which model generates commit messages. |
+| **LiteLLM: Show Available Models** | See all models currently discovered from your backends. |
+
+---
+
+## ⬆️ Upgrading from 2.0.x or Earlier
+
+> **Configuration has fundamentally changed in 2.1.0.** The old `litellm-connector.baseUrl`, `litellm-connector.backends`, and `litellm-connector.apiKey` workspace settings have been **removed**.
+
+**Automatic migration**: On first launch after upgrading, the extension detects your old settings and shows a notification to guide you through migrating them to the new provider-group format.
+
+**Manual migration** (if the notification was dismissed or migration failed):
+1. Open the Command Palette → **`LiteLLM: Manage Configuration`**
+2. Add a provider group for each of your old backends (name, Base URL, API key)
+3. Run **`LiteLLM: Reload Models`** to verify discovery
+
+**If things are broken**: Run **`LiteLLM: Reset All Configuration`** to clear all state, then re-add your backends from scratch.
 
 ---
 
@@ -201,11 +216,11 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and try these:
 
 ### "Models aren't showing up after configuration"
 
-1. Run **`LiteLLM: Check Connection`** to verify your Base URL and API key
-2. Ensure your LiteLLM proxy is running and accessible
+1. Verify your provider group is configured in VS Code's Language Models settings (run **`LiteLLM: Manage Configuration`**)
+2. Ensure your LiteLLM proxy is running and accessible at the Base URL you entered
 3. Wait briefly after config edits; model discovery auto-refreshes after configuration changes
 4. Try **`LiteLLM: Reload Models`** to force a refresh
-5. If still stuck, use **`LiteLLM: Reset All Configuration`** and start fresh
+5. If still stuck, use **`LiteLLM: Reset All Configuration`** and re-add your backends
 
 ### "Connection fails / timeout errors"
 
@@ -216,7 +231,7 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and try these:
 
 ### "Reinstalling didn't fix the problem"
 
-VS Code stores credentials in encrypted `SecretStorage`. Reinstalling doesn't clear this. Use **`LiteLLM: Reset All Configuration`** instead.
+VS Code stores credentials and provider group configuration in encrypted storage that survives reinstalls. Use **`LiteLLM: Reset All Configuration`** to clear everything, then re-add your backends.
 
 ### "I get 'Quota Exceeded' errors"
 

@@ -184,7 +184,11 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
   - Handles per-group provider configuration from `options.configuration` (Base URL, API Key, and any group-scoped settings supplied by VS Code 1.120)
   - Also manages workspace settings via `vscode.workspace.getConfiguration()` (model overrides, caching, etc.)
   - `convertProviderConfiguration()` converts the per-group VS Code provider config into the internal `LiteLLMConfig` format
-  - Legacy migration support from `vscode.SecretStorage` for users upgrading from pre-1.109 versions
+
+- **Legacy Config Migration**: `src/config/legacyConfigMigration.ts`
+  - Detects leftover `litellm-connector.baseUrl` / `backends` workspace settings and `SecretStorage` keys from pre-2.1.0 installs
+  - Runs once on activation and presents a guided notification to migrate old config into the VS Code provider-group format
+  - Migration state is persisted in `globalState` so the prompt only fires once per install
 
 **Key Design Principle**: There is exactly one chat provider and one completions provider. Both reuse the same message ingress pipeline in the base orchestrator. This eliminates code duplication, ensures consistent behavior, and avoids the version-suffixed provider sprawl that previously existed.
 
