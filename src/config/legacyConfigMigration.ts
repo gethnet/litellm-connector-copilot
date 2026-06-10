@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { ConfigManager } from "./configManager";
+import type { ConfigManager } from "./configManager";
 import { StructuredLogger } from "../observability/structuredLogger";
 import type { TelemetryService } from "../telemetry/telemetryService";
 

@@ -113,7 +113,7 @@ suite("MockLiteLLMServer", () => {
             await server.start();
 
             const response = await makeHttpRequest(`http://localhost:${testPort}/v1/models`, "GET");
-            const data = JSON.parse(response) as { data: Array<{ id: string }> };
+            const data = JSON.parse(response) as { data: { id: string }[] };
             assert.ok(Array.isArray(data.data));
             assert.ok(data.data.length > 0);
         });
@@ -129,7 +129,7 @@ suite("MockLiteLLMServer", () => {
             await server.start();
 
             const response = await makeHttpRequest(`http://localhost:${testPort}/v1/models`, "GET");
-            const data = JSON.parse(response) as { data: Array<{ id: string }> };
+            const data = JSON.parse(response) as { data: { id: string }[] };
             assert.strictEqual(data.data.length, 1);
             assert.strictEqual(data.data[0].id, "custom-model");
         });
@@ -141,7 +141,7 @@ suite("MockLiteLLMServer", () => {
 
             const body = JSON.stringify({ model: "gpt-4o", messages: [{ role: "user", content: "test" }] });
             const response = await makeHttpRequest(`http://localhost:${testPort}/v1/chat/completions`, "POST", body);
-            const data = JSON.parse(response) as { choices: Array<{ message: { content: string } }> };
+            const data = JSON.parse(response) as { choices: { message: { content: string } }[] };
             assert.ok(data.choices);
             assert.ok(data.choices[0].message.content);
         });

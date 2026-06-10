@@ -21,12 +21,12 @@ export interface MockServerConfig {
         };
     };
     modelList?: {
-        data: Array<{
+        data: {
             id: string;
             object: string;
             created: number;
             model: string;
-        }>;
+        }[];
     };
 }
 

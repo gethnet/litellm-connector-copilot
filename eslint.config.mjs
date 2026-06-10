@@ -37,7 +37,8 @@ export default defineConfig(
 			'@typescript-eslint/no-unsafe-call': 'warn',
 			'@typescript-eslint/no-unsafe-member-access': 'warn',
 			'@typescript-eslint/no-unsafe-return': 'warn',
-			'@typescript-eslint/no-explicit-any': 'error'
+			'@typescript-eslint/no-explicit-any': 'error',
+			'@typescript-eslint/no-unused-vars': 'warn'
 		}
 	},
 	{
@@ -99,7 +100,17 @@ export default defineConfig(
 	{
 		files: ['./src/**/*.test.{ts,tsx}', './src/test/**/*.{ts,tsx}'],
 		rules: {
-			'@typescript-eslint/no-empty-function': 'off'
+			'@typescript-eslint/no-empty-function': 'off',
+			'@typescript-eslint/no-floating-promises': 'error',
+			'@typescript-eslint/no-deprecated': 'off',
+			'@typescript-eslint/ban-tslint-comment': 'warn',
+			'@typescript-eslint/explicit-module-boundary-types': 'off',
+			'@typescript-eslint/no-unsafe-assignment': 'warn',
+			'@typescript-eslint/no-unsafe-call': 'warn',
+			'@typescript-eslint/no-unsafe-member-access': 'warn',
+			'@typescript-eslint/no-unsafe-return': 'warn',
+			'@typescript-eslint/no-explicit-any': 'error',
+			'@typescript-eslint/no-unused-vars': 'warn'
 		}
 	}
 );

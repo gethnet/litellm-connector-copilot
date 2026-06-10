@@ -2,7 +2,7 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import * as sinon from "sinon";
 import { ConfigManager } from "../configManager";
-import { LegacyBackendConfig, LegacyConfigMigration } from "../legacyConfigMigration";
+import { type LegacyBackendConfig, LegacyConfigMigration } from "../legacyConfigMigration";
 
 type WorkspaceConfigurationStub = Pick<vscode.WorkspaceConfiguration, "get" | "has" | "update"> & {
     keys: () => string[];
@@ -11,6 +11,7 @@ type WorkspaceConfigurationStub = Pick<vscode.WorkspaceConfiguration, "get" | "h
 suite("LegacyConfigMigration", () => {
     const LEGACY_BASE_URL_KEY = "litellm-connector.baseUrl";
     const LEGACY_BACKENDS_KEY = "litellm-connector.backends";
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- legacy to go away later on.
     const LEGACY_API_KEY_PREFIX = "litellm-connector.apiKey.";
 
     let sandbox: sinon.SinonSandbox;
@@ -18,7 +19,9 @@ suite("LegacyConfigMigration", () => {
     let workspaceSettings: Map<string, unknown>;
     let globalStateMap: Map<string, unknown>;
     let configManager: ConfigManager;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- legacy to go away later on.
     let configurationStub: sinon.SinonStub;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- legacy to go away later on.
     let hasStub: sinon.SinonStub;
     let context: vscode.ExtensionContext;
 
