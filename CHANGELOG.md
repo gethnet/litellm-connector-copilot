@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.1] - 2026-06-12
+
+### 🐛 Fixes
+
+* **Reasoning effort parameter gating**: Models that advertise `supports_reasoning: true` but don't include `reasoning_effort` in their `supported_openai_params` no longer show the effort picker (previously caused rejected requests and retry loops). The `reasoning_effort` parameter is now properly gated behind `isParameterSupported` checks in request builders.
+* **"none" effort handling fixed**: When reasoning effort falls through to `"none"` as a fallback value, the field is now omitted from the request entirely rather than setting it to `"none"` (which was also rejected by some backends).
+* **Reasoning content support**: Stream interpreter now correctly handles `delta.reasoning_content` from chat-completions responses (used by Qwen3, llama.cpp, and other models that emit reasoning via this field).
+* **Merge reasoning content flag**: Added `merge_reasoning_content_in_choices` flag to control whether `reasoning_content` is emitted as separate thinking parts or merged into content for compatibility.
+
 ## [2.1.0] - 2026-06-10
 
 ### 💥 Breaking / Behavior Changes — READ BEFORE UPGRADING

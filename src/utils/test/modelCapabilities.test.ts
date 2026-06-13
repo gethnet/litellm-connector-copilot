@@ -364,6 +364,42 @@ suite("modelCapabilities", () => {
         const claudeEfforts: SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
         const canonicalCatchAllEfforts: SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
 
+        test("returns empty array when supports_reasoning is true but reasoning_effort not in supported_openai_params", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                supports_reasoning: true,
+                supported_openai_params: ["temperature", "stream", "tools"],
+            };
+
+            const result = getSupportedReasoningEfforts(modelInfo, "test-model");
+
+            assert.deepStrictEqual(result, []);
+        });
+
+        test("returns effort array when reasoning_effort is in supported_openai_params", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                supports_reasoning: true,
+                supported_openai_params: ["temperature", "reasoning_effort", "stream"],
+            };
+
+            const result = getSupportedReasoningEfforts(modelInfo, "test-model");
+
+            assert.ok(result.length > 0, "should have at least one effort");
+            assert.ok(result.includes("medium"), "should include medium");
+        });
+
+        test("returns effort array when explicit effort fields are present even without reasoning_effort in params", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                supports_reasoning: true,
+                supports_high_reasoning_effort: true,
+                supported_openai_params: ["temperature", "stream"],
+            };
+
+            const result = getSupportedReasoningEfforts(modelInfo, "test-model");
+
+            assert.ok(result.length > 0, "should have efforts from explicit fields");
+            assert.ok(result.includes("high"), "should include high");
+        });
+
         test("returns the canonical GPT-5 effort ladder for gpt-5-mini", () => {
             const modelInfo: LiteLLMModelInfo = {
                 id: "gpt-5-mini",
@@ -420,15 +456,32 @@ suite("modelCapabilities", () => {
         });
 
         test("returns empty array when reasoning support is disabled even for catch-all ids", () => {
-            const modelInfo: LiteLLMModelInfo = {
-                id: "gpt-5-mini",
-                name: "GPT-5 Mini",
-                supports_reasoning: false,
-            };
+            test("returns empty array when model has supports_reasoning=true but no reasoning_effort parameter specified in supported_openai_params", () => {
+                const modelInfo: LiteLLMModelInfo = {
+                    id: "minimax-large",
+                    name: "MiniMax Large",
+                    supports_reasoning: true,
+                    supports_openai_params: ["temperature", "top_p", "stream"],
+                };
 
-            const result = getSupportedReasoningEfforts(modelInfo, "gpt-5-mini");
+                const result = getSupportedReasoningEfforts(modelInfo, "minimax-large");
 
-            assert.deepStrictEqual(result, []);
+                // Model supports reasoning capability but does not explicitly support the reasoning_effort parameter
+                // Therefore it should get an empty array instead of defaulting to all efforts
+                assert.deepStrictEqual(result, []);
+            });
+
+            test("returns empty array when reasoning support is disabled even for catch-all ids", () => {
+                const modelInfo: LiteLLMModelInfo = {
+                    id: "gpt-5-mini",
+                    name: "GPT-5 Mini",
+                    supports_reasoning: false,
+                };
+
+                const result = getSupportedReasoningEfforts(modelInfo, "gpt-5-mini");
+
+                assert.deepStrictEqual(result, []);
+            });
         });
     });
 

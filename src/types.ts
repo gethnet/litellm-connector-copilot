@@ -116,6 +116,11 @@ export interface LiteLLMParams {
     litellm_credential_name?: string;
     use_in_pass_through?: boolean;
     use_litellm_proxy?: boolean;
+    /**
+     * When true, merge OpenAI chat `delta.reasoning_content` into `delta.content` so the
+     * reasoning text is surfaced inline with the assistant response instead of as a
+     * separate thinking part. Defaults to `false` (emit as thinking).
+     */
     merge_reasoning_content_in_choices?: boolean;
     model?: string;
     tags?: string[];

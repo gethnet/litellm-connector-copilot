@@ -12,6 +12,7 @@ export interface StreamingState {
     textToolParserBuffer: string;
     responseToolCallBuffers: Map<string, { id: string; name?: string; args: string }>;
     responseToolCallOrder: string[];
+    mergeReasoningContentInChoices: boolean;
     /**
      * Anonymous tool buffering — used when upstream streams tool args before emitting a stable
      * call_id (preserved from ResponsesClient robustness).
@@ -29,6 +30,7 @@ export function createInitialStreamingState(): StreamingState {
         textToolParserBuffer: "",
         responseToolCallBuffers: new Map(),
         responseToolCallOrder: [],
+        mergeReasoningContentInChoices: false,
         anonymousResponseToolName: undefined,
         anonymousResponseToolArgs: "",
     };
@@ -271,6 +273,10 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
     const finishParts: EmittedPart[] = [];
     const data = json as Record<string, unknown>;
 
+    if (typeof data.merge_reasoning_content_in_choices === "boolean") {
+        state.mergeReasoningContentInChoices = data.merge_reasoning_content_in_choices;
+    }
+
     // 0. Handle VS Code DataPart carrier objects. Cache-control carrier parts
     // are opaque prompt-cache metadata; if re-emitted, VS Code can preserve
     // them into the next request and the LLM sees the carrier instead of the
@@ -300,12 +306,27 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
         const choice = data.choices[0] as Record<string, unknown>;
         const delta = choice.delta as Record<string, unknown> | undefined;
 
-        if (delta && typeof delta.content === "string" && delta.content) {
+        const reasoningContent =
+            typeof delta?.reasoning_content === "string" && delta.reasoning_content
+                ? delta.reasoning_content
+                : undefined;
+        const mergeReasoningIntoContent = state.mergeReasoningContentInChoices && !!reasoningContent;
+
+        if (reasoningContent && !mergeReasoningIntoContent) {
+            thinkingParts.push({ type: "thinking", value: reasoningContent });
+        }
+
+        const deltaContent = typeof delta?.content === "string" && delta.content ? delta.content : undefined;
+        const contentForParsing = mergeReasoningIntoContent
+            ? `${reasoningContent ?? ""}${deltaContent ?? ""}`
+            : deltaContent;
+
+        if (contentForParsing) {
             // Some LiteLLM backends emit tool calls as tagged text payloads
             // (for example <tool_call>{...}</tool_call>) instead of structured
             // delta.tool_calls arrays. Parse those tags here so VS Code receives
             // LanguageModelToolCallPart instead of raw JSON text.
-            const combinedText = `${state.textToolParserBuffer}${delta.content}`;
+            const combinedText = `${state.textToolParserBuffer}${contentForParsing}`;
             const { stableText, pendingText } = splitStableTextAndPendingTaggedContent(combinedText);
             const { textWithoutParsedCalls, toolCalls } = parseTaggedToolCalls(stableText);
             state.textToolParserBuffer = pendingText;
