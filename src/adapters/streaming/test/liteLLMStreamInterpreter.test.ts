@@ -145,6 +145,61 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
         }
     });
 
+    test("should emit reasoning_content as thinking and optionally merge into content", () => {
+        const state = createInitialStreamingState();
+
+        // Default: emit separate thinking part
+        let parts = interpretStreamEvent(
+            {
+                choices: [
+                    {
+                        delta: {
+                            reasoning_content: "reasoning...",
+                            content: "answer",
+                        },
+                    },
+                ],
+            },
+            state
+        );
+
+        const thinking = parts.find((p) => p.type === "thinking");
+        const text = parts.find((p) => p.type === "text");
+        assert.ok(thinking, "expected thinking part");
+        assert.ok(text, "expected text part");
+        if (thinking && thinking.type === "thinking") {
+            assert.strictEqual(thinking.value, "reasoning...");
+        }
+        if (text && text.type === "text") {
+            assert.strictEqual(text.value, "answer");
+        }
+
+        // With merge flag: reasoning_content is prepended into content and not emitted separately
+        const mergeState = createInitialStreamingState();
+        parts = interpretStreamEvent(
+            {
+                merge_reasoning_content_in_choices: true,
+                choices: [
+                    {
+                        delta: {
+                            reasoning_content: "thought ",
+                            content: "response",
+                        },
+                    },
+                ],
+            },
+            mergeState
+        );
+
+        const thinkingMerged = parts.find((p) => p.type === "thinking");
+        const textMerged = parts.find((p) => p.type === "text");
+        assert.strictEqual(thinkingMerged, undefined, "should not emit thinking when merged");
+        assert.ok(textMerged, "expected merged text part");
+        if (textMerged && textMerged.type === "text") {
+            assert.strictEqual(textMerged.value, "thought response");
+        }
+    });
+
     test("should flush /responses tool calls on output_item.done when no completed frame", () => {
         const state = createInitialStreamingState();
 

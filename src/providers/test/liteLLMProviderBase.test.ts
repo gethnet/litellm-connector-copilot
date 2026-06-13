@@ -115,6 +115,10 @@ interface BaseTestAccess {
         options: vscode.ProvideLanguageModelChatResponseOptions,
         model: vscode.LanguageModelChatInformation
     ) => Record<string, unknown> | undefined;
+    applyReasoningEffort: (
+        request: OpenAIChatCompletionRequest,
+        effort: OpenAIChatCompletionRequest["reasoning_effort"] | undefined
+    ) => void;
 }
 
 function access(provider: LiteLLMChatProvider): BaseTestAccess {
@@ -284,6 +288,29 @@ suite("LiteLLMProviderBase", () => {
             maxOutputTokens: 1000,
             capabilities: { toolCalling: true, imageInput: false },
         };
+
+        suite("applyReasoningEffort", () => {
+            test("omits reasoning_effort field when effort is 'none'", () => {
+                const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+                const request = { model: "test-model", messages: [] } as OpenAIChatCompletionRequest;
+
+                access(provider).applyReasoningEffort(request, "none");
+
+                const recordRequest = request as unknown as Record<string, unknown>;
+                assert.strictEqual(recordRequest.reasoning_effort, undefined);
+                assert.ok(!("reasoning_effort" in request));
+            });
+
+            test("sets reasoning_effort field for non-none values", () => {
+                const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+                const request = { model: "test-model", messages: [] } as OpenAIChatCompletionRequest;
+
+                access(provider).applyReasoningEffort(request, "high");
+
+                const recordRequest = request as unknown as Record<string, unknown>;
+                assert.strictEqual(recordRequest.reasoning_effort, "high");
+            });
+        });
 
         test("applies reasoning effort from modelConfiguration", async () => {
             const provider = new LiteLLMChatProvider(mockSecrets, userAgent);

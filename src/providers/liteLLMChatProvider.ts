@@ -13,6 +13,7 @@ import { tryParseJSONObject } from "../utils";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
 import { LiteLLMProviderBase } from "./liteLLMProviderBase";
+import { StructuredLogger } from "../observability/structuredLogger";
 import {
     countOpenAIChatMessagesTokens,
     countTokens,
@@ -586,7 +587,19 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                         ". This model may not support certain parameters like temperature. Please check your model settings.";
                 }
             }
+            // Node.js wraps network failures (ECONNREFUSED, DNS errors) as
+            // "TypeError: fetch failed" without surfacing the root cause in
+            // the error message. Extract the chained `.cause` so operators
+            // see the real reason (e.g. ECONNREFUSED) rather than a generic label.
+            const rootCause = err instanceof Error && err.cause instanceof Error ? err.cause.message : undefined;
             Logger.error("Chat request failed", err);
+            if (rootCause) {
+                StructuredLogger.error("request.fetch_failed", {
+                    model: model.id,
+                    cause: rootCause,
+                    requestId,
+                });
+            }
 
             const metric = {
                 requestId,
@@ -676,6 +689,11 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 const parts = interpretStreamEvent(json, this._streamingState);
                 emitPartsToVSCode(parts, progress);
             }
+        } catch (error: unknown) {
+            StructuredLogger.error("stream.process_failed", {
+                error: error instanceof Error ? error.message : String(error),
+            });
+            throw error;
         } finally {
             if (watchdog) {
                 clearTimeout(watchdog);

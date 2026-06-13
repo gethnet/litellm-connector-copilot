@@ -71,7 +71,11 @@ export class RequestBuilder {
                 typeof mo.max_tokens === "number"
                     ? Math.min(mo.max_tokens, model.maxOutputTokens)
                     : model.maxOutputTokens,
-            ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+            ...(this.isParameterSupported("reasoning_effort", modelInfo, rawModelId) &&
+            reasoningEffort &&
+            reasoningEffort !== "none"
+                ? { reasoning_effort: reasoningEffort }
+                : {}),
         };
 
         if (!this.usageOptOutModels.has(rawModelId)) {
@@ -140,7 +144,11 @@ export class RequestBuilder {
                 typeof options.modelOptions?.max_tokens === "number"
                     ? Math.min(options.modelOptions.max_tokens, model.maxOutputTokens)
                     : model.maxOutputTokens,
-            ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+            ...(this.isParameterSupported("reasoning_effort", modelInfo, rawModelId) &&
+            reasoningEffort &&
+            reasoningEffort !== "none"
+                ? { reasoning_effort: reasoningEffort }
+                : {}),
         };
 
         if (this.isParameterSupported("temperature", modelInfo, rawModelId)) {

@@ -1,295 +1,295 @@
 {
-  "name": "litellm-connector-copilot",
-  "publisher": "GethNet",
-  "contributors": [
-    "amwdrizz"
-  ],
-  "maintainers": [
-    "amwdrizz"
-  ],
-  "sponsor": {
-    "url": "https://buymeacoffee.com/amwdrizz"
-  },
-  "displayName": "LiteLLM Connector for Copilot",
-  "description": "An extension that integrates LiteLLM proxy into Copilot",
-  "icon": "assets/logo.png",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/gethnet/litellm-connector-copilot"
-  },
-  "version": "2.1.0",
-  "preview": false,
-  "engines": {
-    "vscode": "^1.120.0"
-  },
-  "categories": [
-    "AI",
-    "Chat",
-    "Machine Learning",
-    "Other"
-  ],
-  "keywords": [
-    "litellm",
-    "llm",
-    "copilot",
-    "ai-connector",
-    "openai",
-    "anthropic",
-    "local-llm"
-  ],
-  "galleryBanner": {
-    "color": "#100f11",
-    "theme": "dark"
-  },
-  "badges": [
-    {
-      "url": "https://img.shields.io/github/stars/gethnet/litellm-connector-copilot?style=social",
-      "description": "Star litellm-connector-copilot on Github",
-      "href": "https://github.com/gethnet/litellm-connector-copilot"
-    }
-  ],
-  "homepage": "https://github.com/gethnet/litellm-connector-copilot",
-  "bugs": {
-    "url": "https://github.com/gethnet/litellm-connector-copilot/issues"
-  },
-  "license": "Apache-2.0",
-  "activationEvents": [
-    "onLanguageModelChatProvider:litellm-connector",
-    "onStartupFinished"
-  ],
-  "contributes": {
-    "languageModelChatProviders": [
-      {
-        "vendor": "litellm-connector",
-        "displayName": "LiteLLM",
-        "configuration": {
-          "type": "object",
-          "properties": {
-            "baseUrl": {
-              "type": "string",
-              "title": "Server URL",
-              "description": "Base URL for the LiteLLM proxy server (must start with http:// or https://).",
-              "pattern": "^https?:\\/\\/.+",
-              "group": "navigation"
-            },
-            "apiKey": {
-              "type": "string",
-              "title": "API Key",
-              "description": "API key used to authenticate with the LiteLLM proxy.",
-              "secret": true,
-              "minLength": 1
-            }
-          },
-          "required": [
-            "baseUrl",
-            "apiKey"
-          ]
-        }
-      }
-    ],
-    "commands": [
-      {
-        "command": "litellm-connector.showModels",
-        "title": "LiteLLM: Show Available Models"
-      },
-      {
-        "command": "litellm-connector.reloadModels",
-        "title": "LiteLLM: Reload Models"
-      },
-      {
-        "command": "litellm-connector.manage",
-        "title": "LiteLLM: Manage Configuration"
-      },
-      {
-        "command": "litellm-connector.generateCommitMessage",
-        "title": "Generate Commit Message",
-        "icon": "$(sparkle)"
-      }
-    ],
-    "menus": {
-      "scm/title": [
-        {
-          "command": "litellm-connector.generateCommitMessage",
-          "group": "navigation",
-          "when": "config.litellm-connector.commitModelIdOverride != ''"
-        }
-      ]
-    },
-    "configuration": {
-      "title": "LiteLLM Connector",
-      "properties": {
-        "litellm-connector.modelIdOverride": {
-          "type": "string",
-          "default": "",
-          "description": "(Deprecated) Optional: force a specific LiteLLM model id for legacy workflows."
-        },
-        "litellm-connector.commitModelIdOverride": {
-          "type": "string",
-          "default": "",
-          "description": "Override the model ID for git commit message generation. If empty, the feature is disabled.",
-          "markdownDescription": "Override the model ID for git commit message generation. If empty, the feature is disabled."
-        },
-        "litellm-connector.enableResponsesApi": {
-          "type": "boolean",
-          "default": false,
-          "description": "Enables support for VSCode Response API <-> LiteLLM Responses",
-          "tags": [
-            "experimental"
-          ]
-        },
-        "litellm-connector.disableQuotaToolRedaction": {
-          "type": "boolean",
-          "default": false,
-          "description": "Disable per-turn tool redaction when a quota error is detected in chat history. Leave off to keep redaction enabled."
-        },
-        "litellm-connector.modelOverrides": {
-          "type": "array",
-          "default": [],
-          "description": "User-supplied model overrides for reasoning capabilities. Merged on top of bundled overrides (user entries take precedence on regex match). Each entry: { match: string (regex), supportsReasoning?: boolean|null, reasoningEfforts?: string[], defaultEffort?: string, notes?: string }.",
-          "items": {
-            "type": "object",
-            "properties": {
-              "match": {
-                "type": "string",
-                "description": "Regex pattern matched against the model id."
-              },
-              "supportsReasoning": {
-                "type": [
-                  "boolean",
-                  "null"
-                ],
-                "description": "Override reasoning support. null = inherit from proxy."
-              },
-              "reasoningEfforts": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "none",
-                    "minimal",
-                    "low",
-                    "medium",
-                    "high",
-                    "xhigh"
-                  ]
-                }
-              },
-              "defaultEffort": {
-                "type": "string",
-                "enum": [
-                  "none",
-                  "minimal",
-                  "low",
-                  "medium",
-                  "high",
-                  "xhigh"
-                ]
-              },
-              "notes": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "match"
-            ]
-          }
-        },
-        "litellm-connector.modelCapabilitiesOverrides": {
-          "type": "object",
-          "default": {},
-          "description": "Override model capabilities (toolCalling, imageInput) reported to VS Code. Key is the Model ID (e.g. 'gpt-4o'), value is a comma-separated list of capabilities to ENABLE (e.g. 'toolCalling,imageInput').",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "litellm-connector.inactivityTimeout": {
-          "type": "number",
-          "default": 60,
-          "description": "Timeout in seconds of inactivity before the LiteLLM proxy connection is considered idle."
-        },
-        "litellm-connector.disableCaching": {
-          "type": "boolean",
-          "default": true,
-          "description": "When enabled, LiteLLM caching will be bypassed by sending 'no-cache: true' and 'Cache-Control: no-cache' headers.",
-          "tags": [
-            "experimental"
-          ]
-        },
-        "litellm-connector.enableModelOverrides": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Enable/disable the model override system. When enabled, merged user and bundled model override rules are applied. When disabled, only LiteLLM `/model/info` derived capabilities are used."
-        },
-        "litellm-connector.sendDefaultParameters": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "When enabled, LiteLLM Connector will send default values for temperature (0.7), frequency_penalty (0.2), and presence_penalty (0.1) if not explicitly provided by VS Code. Recommended: false.",
-          "deprecationMessage": "This setting is temporary and will be removed in a future version. Defaults will be omitted by default."
-        }
-      }
-    },
-    "keybindings": []
-  },
-  "main": "./dist/extension.js",
-  "browser": "./dist/web/extension.js",
-  "scripts": {
-    "clean": "find ./dist ./out ./coverage ./test-results -delete || true",
-    "clean:build": "find ./dist ./out -delete || true",
-    "clean:tests": "find ./coverage ./test-results -delete || true",
-    "precompile": "npm run clean",
-    "compile": "tsc -p ./",
-    "vscode:pack:dev": "npm run clean:build && tsc --noEmit && node esbuild.js && npx vsce package",
-    "vscode:pack": "npm run clean:build && tsc --noEmit && node esbuild.js --production && npx vsce package",
-    "package:marketplace": "node scripts/package-marketplace.mjs",
-    "download-api": "yes | dts main && mv vscode.d.ts src/ && yes | dts dev && mv vscode.proposed.*.d.ts src/",
-    "postinstall": "npm run download-api",
-    "lint": "eslint",
-    "lint:fix": "eslint --fix",
-    "format": "prettier --check .",
-    "format:fix": "prettier --write .",
-    "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile",
-    "test": "xvfb-run vscode-test --args=\"--no-sandbox\"",
-    "test:report": "npm run pretest && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && npm run test",
-    "pretest:coverage": "npm run compile",
-    "test:coverage": "node scripts/test-coverage.mjs",
-    "coverage:serve": "npx serve coverage -p 8080",
-    "bump-version": "node scripts/bump-version.js"
-  },
-  "devDependencies": {
-    "@eslint/js": "^10.0.0",
-    "@stylistic/eslint-plugin": "^5.7.1",
-    "@types/mocha": "^10.0.10",
-    "@types/node": "^22.19.20",
-    "@types/sinon": "^21.0.0",
-    "@types/vscode": "^1.120.0",
-    "@vscode/dts": "^0.4.1",
-    "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^3.0.0",
-    "@vscode/vsce": "^3.7.0",
-    "esbuild": "^0.28.0",
-    "eslint": "^10.0.0",
-    "mocha-junit-reporter": "^2.2.1",
-    "mocha-multi-reporters": "^1.5.0",
-    "ovsx": "^1.0.0",
-    "posthog-js": "^1.386.1",
-    "posthog-node": "^5.36.15",
-    "prettier": "^3.8.4",
-    "rimraf": "^6.0.1",
-    "serve": "^14.2.6",
-    "sinon": "^22.0.0",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.61.0",
-    "vscode": "^1.1.37",
-    "zx": "^8.8.5"
-  },
-  "enabledApiProposals": [
-    "chatProvider",
-    "languageModelCapabilities",
-    "languageModelProxy",
-    "languageModelSystem",
-    "languageModelThinkingPart",
-    "languageModelToolResultAudience",
-    "languageModelToolSupportsModel"
-  ]
+	"name": "litellm-connector-copilot",
+	"publisher": "GethNet",
+	"contributors": [
+		"amwdrizz"
+	],
+	"maintainers": [
+		"amwdrizz"
+	],
+	"sponsor": {
+		"url": "https://buymeacoffee.com/amwdrizz"
+	},
+	"displayName": "LiteLLM Connector for Copilot",
+	"description": "An extension that integrates LiteLLM proxy into Copilot",
+	"icon": "assets/logo.png",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/gethnet/litellm-connector-copilot"
+	},
+	"version": "2.1.1",
+	"preview": true,
+	"engines": {
+		"vscode": "^1.120.0"
+	},
+	"categories": [
+		"AI",
+		"Chat",
+		"Machine Learning",
+		"Other"
+	],
+	"keywords": [
+		"litellm",
+		"llm",
+		"copilot",
+		"ai-connector",
+		"openai",
+		"anthropic",
+		"local-llm"
+	],
+	"galleryBanner": {
+		"color": "#100f11",
+		"theme": "dark"
+	},
+	"badges": [
+		{
+			"url": "https://img.shields.io/github/stars/gethnet/litellm-connector-copilot?style=social",
+			"description": "Star litellm-connector-copilot on Github",
+			"href": "https://github.com/gethnet/litellm-connector-copilot"
+		}
+	],
+	"homepage": "https://github.com/gethnet/litellm-connector-copilot",
+	"bugs": {
+		"url": "https://github.com/gethnet/litellm-connector-copilot/issues"
+	},
+	"license": "Apache-2.0",
+	"activationEvents": [
+		"onLanguageModelChatProvider:litellm-connector",
+		"onStartupFinished"
+	],
+	"contributes": {
+		"languageModelChatProviders": [
+			{
+				"vendor": "litellm-connector",
+				"displayName": "LiteLLM",
+				"configuration": {
+					"type": "object",
+					"properties": {
+						"baseUrl": {
+							"type": "string",
+							"title": "Server URL",
+							"description": "Base URL for the LiteLLM proxy server (must start with http:// or https://).",
+							"pattern": "^https?:\\/\\/.+",
+							"group": "navigation"
+						},
+						"apiKey": {
+							"type": "string",
+							"title": "API Key",
+							"description": "API key used to authenticate with the LiteLLM proxy.",
+							"secret": true,
+							"minLength": 1
+						}
+					},
+					"required": [
+						"baseUrl",
+						"apiKey"
+					]
+				}
+			}
+		],
+		"commands": [
+			{
+				"command": "litellm-connector.showModels",
+				"title": "LiteLLM: Show Available Models"
+			},
+			{
+				"command": "litellm-connector.reloadModels",
+				"title": "LiteLLM: Reload Models"
+			},
+			{
+				"command": "litellm-connector.manage",
+				"title": "LiteLLM: Manage Configuration"
+			},
+			{
+				"command": "litellm-connector.generateCommitMessage",
+				"title": "Generate Commit Message",
+				"icon": "$(sparkle)"
+			}
+		],
+		"menus": {
+			"scm/title": [
+				{
+					"command": "litellm-connector.generateCommitMessage",
+					"group": "navigation",
+					"when": "config.litellm-connector.commitModelIdOverride != ''"
+				}
+			]
+		},
+		"configuration": {
+			"title": "LiteLLM Connector",
+			"properties": {
+				"litellm-connector.modelIdOverride": {
+					"type": "string",
+					"default": "",
+					"description": "(Deprecated) Optional: force a specific LiteLLM model id for legacy workflows."
+				},
+				"litellm-connector.commitModelIdOverride": {
+					"type": "string",
+					"default": "",
+					"description": "Override the model ID for git commit message generation. If empty, the feature is disabled.",
+					"markdownDescription": "Override the model ID for git commit message generation. If empty, the feature is disabled."
+				},
+				"litellm-connector.enableResponsesApi": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enables support for VSCode Response API <-> LiteLLM Responses",
+					"tags": [
+						"experimental"
+					]
+				},
+				"litellm-connector.disableQuotaToolRedaction": {
+					"type": "boolean",
+					"default": false,
+					"description": "Disable per-turn tool redaction when a quota error is detected in chat history. Leave off to keep redaction enabled."
+				},
+				"litellm-connector.modelOverrides": {
+					"type": "array",
+					"default": [],
+					"description": "User-supplied model overrides for reasoning capabilities. Merged on top of bundled overrides (user entries take precedence on regex match). Each entry: { match: string (regex), supportsReasoning?: boolean|null, reasoningEfforts?: string[], defaultEffort?: string, notes?: string }.",
+					"items": {
+						"type": "object",
+						"properties": {
+							"match": {
+								"type": "string",
+								"description": "Regex pattern matched against the model id."
+							},
+							"supportsReasoning": {
+								"type": [
+									"boolean",
+									"null"
+								],
+								"description": "Override reasoning support. null = inherit from proxy."
+							},
+							"reasoningEfforts": {
+								"type": "array",
+								"items": {
+									"type": "string",
+									"enum": [
+										"none",
+										"minimal",
+										"low",
+										"medium",
+										"high",
+										"xhigh"
+									]
+								}
+							},
+							"defaultEffort": {
+								"type": "string",
+								"enum": [
+									"none",
+									"minimal",
+									"low",
+									"medium",
+									"high",
+									"xhigh"
+								]
+							},
+							"notes": {
+								"type": "string"
+							}
+						},
+						"required": [
+							"match"
+						]
+					}
+				},
+				"litellm-connector.modelCapabilitiesOverrides": {
+					"type": "object",
+					"default": {},
+					"description": "Override model capabilities (toolCalling, imageInput) reported to VS Code. Key is the Model ID (e.g. 'gpt-4o'), value is a comma-separated list of capabilities to ENABLE (e.g. 'toolCalling,imageInput').",
+					"additionalProperties": {
+						"type": "string"
+					}
+				},
+				"litellm-connector.inactivityTimeout": {
+					"type": "number",
+					"default": 60,
+					"description": "Timeout in seconds of inactivity before the LiteLLM proxy connection is considered idle."
+				},
+				"litellm-connector.disableCaching": {
+					"type": "boolean",
+					"default": true,
+					"description": "When enabled, LiteLLM caching will be bypassed by sending 'no-cache: true' and 'Cache-Control: no-cache' headers.",
+					"tags": [
+						"experimental"
+					]
+				},
+				"litellm-connector.enableModelOverrides": {
+					"type": "boolean",
+					"default": false,
+					"markdownDescription": "Enable/disable the model override system. When enabled, merged user and bundled model override rules are applied. When disabled, only LiteLLM `/model/info` derived capabilities are used."
+				},
+				"litellm-connector.sendDefaultParameters": {
+					"type": "boolean",
+					"default": false,
+					"markdownDescription": "When enabled, LiteLLM Connector will send default values for temperature (0.7), frequency_penalty (0.2), and presence_penalty (0.1) if not explicitly provided by VS Code. Recommended: false.",
+					"deprecationMessage": "This setting is temporary and will be removed in a future version. Defaults will be omitted by default."
+				}
+			}
+		},
+		"keybindings": []
+	},
+	"main": "./dist/extension.js",
+	"browser": "./dist/web/extension.js",
+	"scripts": {
+		"clean": "find ./dist ./out ./coverage ./test-results -delete || true",
+		"clean:build": "find ./dist ./out -delete || true",
+		"clean:tests": "find ./coverage ./test-results -delete || true",
+		"precompile": "npm run clean",
+		"compile": "tsc -p ./",
+		"vscode:pack:dev": "npm run clean:build && tsc --noEmit && node esbuild.js && npx vsce package",
+		"vscode:pack": "npm run clean:build && tsc --noEmit && node esbuild.js --production && npx vsce package",
+		"package:marketplace": "node scripts/package-marketplace.mjs",
+		"download-api": "yes | dts main && mv vscode.d.ts src/ && yes | dts dev && mv vscode.proposed.*.d.ts src/",
+		"postinstall": "npm run download-api",
+		"lint": "eslint",
+		"lint:fix": "eslint --fix",
+		"format": "prettier --check .",
+		"format:fix": "prettier --write .",
+		"watch": "tsc -watch -p ./",
+		"pretest": "npm run compile",
+		"test": "xvfb-run vscode-test --args=\"--no-sandbox\"",
+		"test:report": "npm run pretest && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && npm run test",
+		"pretest:coverage": "npm run compile",
+		"test:coverage": "node scripts/test-coverage.mjs",
+		"coverage:serve": "npx serve coverage -p 8080",
+		"bump-version": "node scripts/bump-version.js"
+	},
+	"devDependencies": {
+		"@eslint/js": "^10.0.0",
+		"@stylistic/eslint-plugin": "^5.7.1",
+		"@types/mocha": "^10.0.10",
+		"@types/node": "^22.19.20",
+		"@types/sinon": "^21.0.0",
+		"@types/vscode": "^1.120.0",
+		"@vscode/dts": "^0.4.1",
+		"@vscode/test-cli": "^0.0.12",
+		"@vscode/test-electron": "^3.0.0",
+		"@vscode/vsce": "^3.7.0",
+		"esbuild": "^0.28.0",
+		"eslint": "^10.0.0",
+		"mocha-junit-reporter": "^2.2.1",
+		"mocha-multi-reporters": "^1.5.0",
+		"ovsx": "^1.0.0",
+		"posthog-js": "^1.386.1",
+		"posthog-node": "^5.36.15",
+		"prettier": "^3.8.4",
+		"rimraf": "^6.0.1",
+		"serve": "^14.2.6",
+		"sinon": "^22.0.0",
+		"typescript": "^6.0.3",
+		"typescript-eslint": "^8.61.0",
+		"vscode": "^1.1.37",
+		"zx": "^8.8.5"
+	},
+	"enabledApiProposals": [
+		"chatProvider",
+		"languageModelCapabilities",
+		"languageModelProxy",
+		"languageModelSystem",
+		"languageModelThinkingPart",
+		"languageModelToolResultAudience",
+		"languageModelToolSupportsModel"
+	]
 }

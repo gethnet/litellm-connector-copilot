@@ -215,9 +215,8 @@ export function getEffectiveEfforts(
         }
 
         // Non-mandatory overrides do not apply when LiteLLM has valid capability data.
-        // This allows the proxy's explicit effort flags to control which efforts are offered.
         // Models with supports_reasoning: true but no explicit effort flags fall back to
-        // canonical efforts here, allowing the caller to use DEFAULT_REASONING_EFFORTS or
+        // canonical efforts, allowing the caller to use DEFAULT_REASONING_EFFORTS or
         // enforce explicit flags based on their own logic.
 
         // Next priority: Generic reasoning support flag.

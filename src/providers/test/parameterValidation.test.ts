@@ -70,4 +70,28 @@ suite("Parameter Validation from supported_openai_params", () => {
         // tools not in empty array, should return false for restrictable tools param equivalent
         assert.strictEqual(result, false);
     });
+
+    test("reasoning_effort is restrictable and requires explicit support", () => {
+        const modelInfo: LiteLLMModelInfo = {
+            supported_openai_params: ["temperature", "top_p", "stream"],
+        };
+        const result = provider.testIsParameterSupported("reasoning_effort", modelInfo, "test-model");
+        // reasoning_effort is restrictable, should return false when not in supported_openai_params
+        assert.strictEqual(result, false);
+    });
+
+    test("reasoning_effort is supported when listed in supported_openai_params", () => {
+        const modelInfo: LiteLLMModelInfo = {
+            supported_openai_params: ["temperature", "reasoning_effort", "stream"],
+        };
+        const result = provider.testIsParameterSupported("reasoning_effort", modelInfo, "test-model");
+        // reasoning_effort is listed, should return true
+        assert.strictEqual(result, true);
+    });
+
+    test("reasoning_effort defaults to true when supported_openai_params is undefined", () => {
+        const result = provider.testIsParameterSupported("reasoning_effort", undefined, "test-model");
+        // Without supported_openai_params the parameter is allowed
+        assert.strictEqual(result, true);
+    });
 });

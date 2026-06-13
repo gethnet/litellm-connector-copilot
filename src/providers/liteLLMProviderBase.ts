@@ -636,11 +636,12 @@ export abstract class LiteLLMProviderBase {
         request: OpenAIChatCompletionRequest,
         effort: SupportedReasoningEffort | undefined
     ): void {
-        if (effort) {
-            request.reasoning_effort = effort;
-        } else {
-            delete (request as { reasoning_effort?: SupportedReasoningEffort }).reasoning_effort;
+        if (!effort || effort === "none") {
+            const requestRecord = request as unknown as Record<string, unknown>;
+            delete requestRecord.reasoning_effort;
+            return;
         }
+        request.reasoning_effort = effort;
     }
 
     private notifyReasoningFallback(
@@ -856,7 +857,14 @@ export abstract class LiteLLMProviderBase {
     }
 
     private isRestrictableParam(param: string): boolean {
-        const restrictableParams = new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty", "stop"]);
+        const restrictableParams = new Set([
+            "temperature",
+            "top_p",
+            "presence_penalty",
+            "frequency_penalty",
+            "stop",
+            "reasoning_effort",
+        ]);
         return restrictableParams.has(param.toLowerCase());
     }
 
