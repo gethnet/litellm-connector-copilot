@@ -253,6 +253,7 @@
 		"test:report": "npm run pretest && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && npm run test",
 		"pretest:coverage": "npm run compile",
 		"test:coverage": "node scripts/test-coverage.mjs",
+		"memory-profile": "npm run compile && node scripts/run-memory-profile.mjs",
 		"coverage:serve": "npx serve coverage -p 8080",
 		"bump-version": "node scripts/bump-version.js"
 	},

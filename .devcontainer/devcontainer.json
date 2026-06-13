@@ -50,7 +50,8 @@
 				"ms-azuretools.vscode-containers",
 				"ms-vscode.vscode-chat-customizations-evaluations",
 				"reespozzi.github-issue-template-preview",
-				"vstirbu.vscode-mermaid-preview"
+				"vstirbu.vscode-mermaid-preview",
+				"eamodio.gitlens"
 			],
 			"settings": {
 				"editor.formatOnSave": true,

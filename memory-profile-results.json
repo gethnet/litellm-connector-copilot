@@ -1,0 +1,57 @@
+{
+  "timestamp": "2026-06-13T21:03:20.217Z",
+  "testDuration": 6186,
+  "completed": true,
+  "hangs": [],
+  "crashes": [],
+  "memorySnapshots": [
+    {
+      "turn": 10,
+      "timestamp": 1781384600410,
+      "heapUsedMB": 8.916473388671875,
+      "externalMB": 3.5480175018310547,
+      "rssMemoryMB": 84.953125
+    },
+    {
+      "turn": 50,
+      "timestamp": 1781384600887,
+      "heapUsedMB": 9.488334655761719,
+      "externalMB": 3.5666332244873047,
+      "rssMemoryMB": 86.703125
+    },
+    {
+      "turn": 100,
+      "timestamp": 1781384601498,
+      "heapUsedMB": 10.361648559570312,
+      "externalMB": 3.589902877807617,
+      "rssMemoryMB": 87.578125
+    },
+    {
+      "turn": 200,
+      "timestamp": 1781384602728,
+      "heapUsedMB": 11.691009521484375,
+      "externalMB": 3.636442184448242,
+      "rssMemoryMB": 93.078125
+    },
+    {
+      "turn": 300,
+      "timestamp": 1781384603941,
+      "heapUsedMB": 8.597496032714844,
+      "externalMB": 3.5484485626220703,
+      "rssMemoryMB": 95.203125
+    },
+    {
+      "turn": 500,
+      "timestamp": 1781384606403,
+      "heapUsedMB": 13.3465576171875,
+      "externalMB": 3.6415271759033203,
+      "rssMemoryMB": 101.328125
+    }
+  ],
+  "requestStats": {
+    "total": 500,
+    "succeeded": 500,
+    "failed": 0,
+    "httpCalls": 500
+  }
+}
