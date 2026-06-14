@@ -63,6 +63,8 @@ suite("StructuredLogger", () => {
 
         const context: Partial<vscode.ExtensionContext> = { subscriptions: [] };
 
+        (StructuredLogger as unknown as { channel: vscode.LogOutputChannel | undefined }).channel = undefined;
+
         StructuredLogger.initialize(context as vscode.ExtensionContext);
 
         assert.ok(createOutputChannelStub.calledOnce);
@@ -167,9 +169,27 @@ suite("StructuredLogger", () => {
         assert.ok((mockChannel.show as sinon.SinonStub).calledOnce);
     });
 
-    test("log handles undefined channel gracefully", () => {
+    test("log lazily creates channel when called before initialize", () => {
+        const mockChannel = {
+            trace: sandbox.stub(),
+            debug: sandbox.stub(),
+            info: sandbox.stub(),
+            warn: sandbox.stub(),
+            error: sandbox.stub(),
+            show: sandbox.stub(),
+            dispose: sandbox.stub(),
+        } as unknown as vscode.LogOutputChannel;
+
+        const createOutputChannelStub = sandbox.stub(vscode.window, "createOutputChannel").returns(mockChannel);
+
         (StructuredLogger as unknown as { channel: vscode.LogOutputChannel | undefined }).channel = undefined;
-        // Should not throw
-        StructuredLogger.info("test", {});
+
+        assert.doesNotThrow(() => {
+            StructuredLogger.info("test", {});
+        });
+
+        assert.ok(createOutputChannelStub.calledOnce);
+        assert.strictEqual(createOutputChannelStub.firstCall.args[0], "LiteLLM Structured");
+        assert.ok((mockChannel.info as sinon.SinonStub).calledOnce);
     });
 });

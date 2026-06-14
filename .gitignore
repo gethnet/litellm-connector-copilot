@@ -30,6 +30,15 @@ lerna-debug.log*
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+memory-profile-results.json
+
+# Block rogue markdowns in root
+*.md
+!README.md
+!CHANGELOG.md
+!CONTRIBUTORS.md
+!README.marketplace.md
+!README.md
 
 # Runtime data
 pids

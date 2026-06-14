@@ -20,6 +20,21 @@ export class StructuredLogger {
     private static channel: vscode.LogOutputChannel | undefined;
 
     /**
+     * Ensures the structured output channel exists.
+     *
+     * This allows logging from unit tests and helper modules that execute before
+     * extension activation calls {@link initialize}. When context is available,
+     * the channel is registered for disposal on deactivation.
+     */
+    private static ensureChannel(context?: vscode.ExtensionContext): vscode.LogOutputChannel {
+        if (!this.channel) {
+            this.channel = vscode.window.createOutputChannel("LiteLLM Structured", { log: true });
+            context?.subscriptions.push(this.channel);
+        }
+        return this.channel;
+    }
+
+    /**
      * Initializes the structured logger with a VS Code output channel.
      *
      * @param context - VS Code extension context for subscription management
@@ -27,8 +42,7 @@ export class StructuredLogger {
     public static initialize(context: vscode.ExtensionContext): void {
         // Structured logger gets a dedicated channel to avoid mixing with
         // the legacy top-level Logger output at "LiteLLM".
-        this.channel = vscode.window.createOutputChannel("LiteLLM Structured", { log: true });
-        context.subscriptions.push(this.channel);
+        this.ensureChannel(context);
         this.info("logger.initialized", {
             note: "Use the log level dropdown in the output panel to change verbosity",
         });
@@ -84,6 +98,8 @@ export class StructuredLogger {
             caller?: string;
         }
     ): void {
+        const channel = this.ensureChannel();
+
         const logEvent: LogEvent = {
             timestamp: new Date().toISOString(),
             requestId: options?.requestId ?? "no-request",
@@ -99,19 +115,19 @@ export class StructuredLogger {
 
         switch (level) {
             case "trace":
-                this.channel?.trace(jsonLine);
+                channel.trace(jsonLine);
                 break;
             case "debug":
-                this.channel?.debug(jsonLine);
+                channel.debug(jsonLine);
                 break;
             case "info":
-                this.channel?.info(jsonLine);
+                channel.info(jsonLine);
                 break;
             case "warn":
-                this.channel?.warn(jsonLine);
+                channel.warn(jsonLine);
                 break;
             case "error":
-                this.channel?.error(jsonLine);
+                channel.error(jsonLine);
                 break;
         }
     }
