@@ -572,6 +572,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             */
         } catch (err: unknown) {
             let errorMessage = err instanceof Error ? err.message : String(err);
+            const errorStack = err instanceof Error ? err.stack : undefined;
+            const errorName = err instanceof Error ? err.constructor.name : typeof err;
+
             if (errorMessage.includes("LiteLLM API error")) {
                 const statusMatch = errorMessage.match(/error: (\d+)/);
                 const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : 400;
@@ -592,14 +595,19 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             // the error message. Extract the chained `.cause` so operators
             // see the real reason (e.g. ECONNREFUSED) rather than a generic label.
             const rootCause = err instanceof Error && err.cause instanceof Error ? err.cause.message : undefined;
+
+            // Log full error details to both Logger and StructuredLogger
             Logger.error("Chat request failed", err);
-            if (rootCause) {
-                StructuredLogger.error("request.fetch_failed", {
-                    model: model.id,
-                    cause: rootCause,
-                    requestId,
-                });
-            }
+            StructuredLogger.error("request.failed", {
+                requestId,
+                model: model.id,
+                caller,
+                errorName,
+                errorMessage,
+                errorStack,
+                rootCause,
+                stage: "provideLanguageModelChatResponse",
+            });
 
             const metric = {
                 requestId,
