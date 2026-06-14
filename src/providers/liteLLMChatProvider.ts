@@ -653,9 +653,15 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         progress: vscode.Progress<vscode.LanguageModelResponsePart>,
         token: vscode.CancellationToken
     ): Promise<void> {
+        Logger.info(`[processStreamingResponse] Starting stream processing`);
+        StructuredLogger.info("stream.processing_start", {
+            timestamp: new Date().toISOString(),
+        });
+
         const config = await this._configManager.getConfig();
         const timeoutMs = (config.inactivityTimeout ?? 60) * 1000;
         let watchdog: NodeJS.Timeout | undefined;
+        let eventCount = 0;
 
         // Create an AbortController to actually cancel the stream on timeout
         const controller = new AbortController();
@@ -665,12 +671,22 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 clearTimeout(watchdog);
             }
             watchdog = setTimeout(() => {
-                Logger.warn(`Inactivity timeout after ${timeoutMs}ms`);
+                Logger.warn(
+                    `[processStreamingResponse] Inactivity timeout after ${timeoutMs}ms (after ${eventCount} events)`
+                );
+                StructuredLogger.warn("stream.inactivity_timeout", {
+                    timeoutMs,
+                    eventCount,
+                });
                 controller.abort();
             }, timeoutMs);
         };
 
         token.onCancellationRequested(() => {
+            Logger.debug(`[processStreamingResponse] Cancellation requested from VS Code`);
+            StructuredLogger.debug("stream.cancellation_requested", {
+                eventCount,
+            });
             if (watchdog) {
                 clearTimeout(watchdog);
             }
@@ -679,32 +695,67 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
 
         try {
             resetWatchdog();
+            Logger.debug(`[processStreamingResponse] Starting SSE decoder loop`);
+
             for await (const payload of decodeSSE(responseBody, token, controller.signal)) {
                 resetWatchdog();
+                eventCount++;
+
+                Logger.trace(`[processStreamingResponse] Event #${eventCount} payload: ${payload.slice(0, 150)}`);
 
                 const jsonResult = tryParseJSONObject(payload);
                 if (!jsonResult.ok) {
+                    Logger.trace(`[processStreamingResponse] Event #${eventCount}: Skipped (JSON parse failed)`);
+                    StructuredLogger.trace("stream.event_parse_skipped", {
+                        eventNumber: eventCount,
+                        payloadPreview: payload.slice(0, 150),
+                    });
                     continue;
                 }
                 const json = jsonResult.value;
 
                 // Ensure streaming state is initialized (e.g. if processStreamingResponse is called directly in tests)
                 if (!this._streamingState) {
+                    Logger.trace(`[processStreamingResponse] Initializing streaming state on first event`);
                     this.resetStreamingState();
                 }
 
+                Logger.trace(`[processStreamingResponse] Event #${eventCount}: Interpreting event`);
                 const parts = interpretStreamEvent(json, this._streamingState);
+                Logger.trace(
+                    `[processStreamingResponse] Event #${eventCount}: Got ${parts.length} parts, emitting to VS Code`
+                );
+                StructuredLogger.trace("stream.event_processed", {
+                    eventNumber: eventCount,
+                    partCount: parts.length,
+                });
                 emitPartsToVSCode(parts, progress);
             }
+
+            Logger.info(`[processStreamingResponse] Stream loop completed after ${eventCount} events`);
+            StructuredLogger.info("stream.processing_complete", {
+                eventCount,
+                reason: "stream_ended",
+            });
         } catch (error: unknown) {
+            Logger.error(`[processStreamingResponse] Stream processing failed after ${eventCount} events`, {
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+            });
             StructuredLogger.error("stream.process_failed", {
                 error: error instanceof Error ? error.message : String(error),
+                eventCount,
+                stack: error instanceof Error ? error.stack : undefined,
             });
             throw error;
         } finally {
             if (watchdog) {
                 clearTimeout(watchdog);
             }
+            Logger.debug(`[processStreamingResponse] Clearing streaming state (eventCount=${eventCount})`);
+            StructuredLogger.debug("stream.state_cleared", {
+                eventCount,
+            });
             // Always reset streaming state on stream completion (success or error)
             // to prevent stale buffers from corrupting subsequent requests
             this.resetStreamingState();
