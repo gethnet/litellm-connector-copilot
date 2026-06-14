@@ -24,6 +24,10 @@ All notable changes to this project will be documented in this file.
 * Full test coverage maintained at **87.75% statements**, **79.9% branches**, **84.86% functions**.
 * All 712 tests passing; no regressions.
 
+### 🐛 Fixes
+
+* **SSE stream incomplete-response handling**: SSE streams that close without a `[DONE]` marker now throw an explicit error instead of silently completing with zero response parts. This prevents the retry loop and surfaces incomplete responses clearly to VS Code. Affects `/chat/completions` and `/responses` endpoints. (`src/adapters/sse/sseDecoder.ts`, `src/providers/liteLLMChatProvider.ts`)
+
 ## [2.1.1] - 2026-06-12
 
 ### 🐛 Fixes
