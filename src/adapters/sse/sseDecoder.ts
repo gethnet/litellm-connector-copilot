@@ -17,6 +17,7 @@ export async function* decodeSSE(
     let chunkCount = 0;
     let payloadCount = 0;
     let sawDone = false;
+    let endError: Error | undefined;
 
     // If an AbortSignal is provided, abort the reader when signal fires
     let aborted = false;
@@ -167,13 +168,20 @@ export async function* decodeSSE(
 
         // Check if stream ended without [DONE] marker
         if (!sawDone) {
-            Logger.warn("[decodeSSE] Stream ended without [DONE] marker");
-            StructuredLogger.warn("stream.ended_without_done", {
+            Logger.error("[decodeSSE] Stream ended without [DONE] marker - response incomplete");
+            StructuredLogger.error("stream.ended_without_done", {
                 chunkCount,
                 payloadCount,
                 bufferLength: buffer.length,
-                note: "Stream may be incomplete - no [DONE] marker received",
+                note: "Stream ended prematurely - no [DONE] marker received",
             });
+
+            // Prepare error to throw after finally block (unless aborted or cancelled)
+            if (!aborted && !token?.isCancellationRequested) {
+                endError = new Error(
+                    `Stream ended before [DONE] marker - response may be incomplete (${payloadCount} payloads received, stream closed unexpectedly)`
+                );
+            }
         }
     } finally {
         Logger.trace("[decodeSSE] Stream decode completed, total chunks=", chunkCount, "total payloads=", payloadCount);
@@ -188,5 +196,10 @@ export async function* decodeSSE(
             signal.removeEventListener("abort", onAbort);
         }
         reader.releaseLock();
+    }
+
+    // Throw error after finally block cleanup completes
+    if (endError) {
+        throw endError;
     }
 }
