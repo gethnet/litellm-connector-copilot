@@ -322,7 +322,7 @@ export class MockLiteLLMBackend {
     }
 
     private sendToolCallResponse(res: http.ServerResponse, request: Record<string, unknown>): void {
-        const model = String(request.model ?? "gpt-4o");
+        // Note: request.model is available for future use but not currently needed for tool call responses
 
         if (request.stream === true) {
             res.writeHead(200, {

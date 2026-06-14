@@ -11,10 +11,20 @@ import { StructuredLogger } from "./structuredLogger";
  * - Full request tracking from ingress to completion
  * - Reconstruction of what happened for debugging
  * - Summary statistics (tokens, messages, tool calls, duration, errors)
+ *
+ * Bounded by design: Only the 50 most recent requests are retained to prevent
+ * unbounded memory growth in long-running agentic sessions.
  */
 export class AuditTrail {
+    /**
+     * Maximum number of request entries to retain in memory.
+     * When exceeded, the oldest request audit entry is removed.
+     */
+    private static readonly MAX_AUDIT_ENTRIES = 50;
+
     private static events = new Map<string, LogEvent[]>();
     private static startTimes = new Map<string, number>();
+    private static requestOrder: string[] = []; // Tracks order of requests for FIFO eviction
 
     /**
      * Records the start of a request.
@@ -24,6 +34,16 @@ export class AuditTrail {
     public static startRequest(requestId: string): void {
         this.startTimes.set(requestId, Date.now());
         this.events.set(requestId, []);
+        this.requestOrder.push(requestId);
+
+        // Enforce max entries: evict oldest request if we exceed capacity
+        while (this.requestOrder.length > this.MAX_AUDIT_ENTRIES && this.requestOrder.length > 0) {
+            const oldestId = this.requestOrder.shift();
+            if (oldestId !== undefined) {
+                this.startTimes.delete(oldestId);
+                this.events.delete(oldestId);
+            }
+        }
     }
 
     /**
@@ -108,6 +128,10 @@ export class AuditTrail {
         // Clean up
         this.startTimes.delete(requestId);
         this.events.delete(requestId);
+        const index = this.requestOrder.indexOf(requestId);
+        if (index !== -1) {
+            this.requestOrder.splice(index, 1);
+        }
 
         return summary;
     }
@@ -143,9 +167,11 @@ export class AuditTrail {
 
     /**
      * Clears all tracked requests. Use with caution.
+     * This is typically called on extension deactivation to free memory.
      */
     public static clear(): void {
         this.events.clear();
         this.startTimes.clear();
+        this.requestOrder = [];
     }
 }

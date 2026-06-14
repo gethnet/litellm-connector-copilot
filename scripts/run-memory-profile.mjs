@@ -14,17 +14,19 @@
  *   npm run compile && node dist/test/integration/memoryProfile.test.js
  */
 
-import * as fs from "fs";
-import * as path from "path";
-import { fileURLToPath } from "url";
+import { existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import process from "node:process";
+import console from "node:console";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(__dirname, "..");
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const projectRoot = join(__dirname, "..");
 
 // Check if compiled test exists (tsconfig outputs to 'out/' with preserved src/ structure)
-const testPath = path.join(projectRoot, "out", "src", "test", "integration", "memoryProfile.test.js");
+const testPath = join(projectRoot, "out", "src", "test", "integration", "memoryProfile.test.js");
 
-if (!fs.existsSync(testPath)) {
+if (!existsSync(testPath)) {
     console.error("❌ Compiled test not found. Please run: npm run compile");
     console.error(`Expected: ${testPath}`);
     process.exit(1);
@@ -41,6 +43,7 @@ console.log(
 try {
     const { default: testModule } = await import(`file://${testPath}`);
     // Test is self-executing, no need to call anything
+    void testModule;
 } catch (err) {
     console.error("❌ Failed to run memory profile test:", err);
     process.exit(1);

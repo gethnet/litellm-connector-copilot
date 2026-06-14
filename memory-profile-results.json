@@ -1,57 +1,57 @@
 {
-  "timestamp": "2026-06-13T21:03:20.217Z",
-  "testDuration": 6186,
+  "timestamp": "2026-06-14T13:06:00.290Z",
+  "testDuration": 2858,
   "completed": true,
   "hangs": [],
   "crashes": [],
   "memorySnapshots": [
     {
       "turn": 10,
-      "timestamp": 1781384600410,
-      "heapUsedMB": 8.916473388671875,
-      "externalMB": 3.5480175018310547,
-      "rssMemoryMB": 84.953125
+      "timestamp": 1781442360826,
+      "heapUsedMB": 55.92155838012695,
+      "externalMB": 7.308976173400879,
+      "rssMemoryMB": 193.203125
     },
     {
       "turn": 50,
-      "timestamp": 1781384600887,
-      "heapUsedMB": 9.488334655761719,
-      "externalMB": 3.5666332244873047,
-      "rssMemoryMB": 86.703125
+      "timestamp": 1781442361364,
+      "heapUsedMB": 56.06505584716797,
+      "externalMB": 7.202939987182617,
+      "rssMemoryMB": 206.29296875
     },
     {
       "turn": 100,
-      "timestamp": 1781384601498,
-      "heapUsedMB": 10.361648559570312,
-      "externalMB": 3.589902877807617,
-      "rssMemoryMB": 87.578125
+      "timestamp": 1781442362047,
+      "heapUsedMB": 53.35579299926758,
+      "externalMB": 7.004706382751465,
+      "rssMemoryMB": 226.9921875
     },
     {
       "turn": 200,
-      "timestamp": 1781384602728,
-      "heapUsedMB": 11.691009521484375,
-      "externalMB": 3.636442184448242,
-      "rssMemoryMB": 93.078125
+      "timestamp": 1781442363106,
+      "heapUsedMB": 69.2959213256836,
+      "externalMB": 7.070535659790039,
+      "rssMemoryMB": 230.75390625
     },
     {
       "turn": 300,
-      "timestamp": 1781384603941,
-      "heapUsedMB": 8.597496032714844,
-      "externalMB": 3.5484485626220703,
-      "rssMemoryMB": 95.203125
+      "timestamp": 1781442363115,
+      "heapUsedMB": 81.39824295043945,
+      "externalMB": 7.071012496948242,
+      "rssMemoryMB": 233.44140625
     },
     {
       "turn": 500,
-      "timestamp": 1781384606403,
-      "heapUsedMB": 13.3465576171875,
-      "externalMB": 3.6415271759033203,
-      "rssMemoryMB": 101.328125
+      "timestamp": 1781442363147,
+      "heapUsedMB": 55.23011779785156,
+      "externalMB": 7.054752349853516,
+      "rssMemoryMB": 245.28515625
     }
   ],
   "requestStats": {
     "total": 500,
-    "succeeded": 500,
-    "failed": 0,
-    "httpCalls": 500
+    "succeeded": 180,
+    "failed": 320,
+    "httpCalls": 180
   }
 }

@@ -631,6 +631,13 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
     }
 
     protected resetStreamingState(): void {
+        // Reset the streaming buffers (tool call state)
+        // but NOT _tokenCapture, which is needed for usage reporting after the stream ends
+        this._streamingState = createInitialStreamingState();
+    }
+
+    protected clearAllStreamingState(): void {
+        // Complete reset including token capture (used only when aborting/cancelling)
         this._streamingState = createInitialStreamingState();
         this._tokenCapture = undefined;
     }
@@ -698,6 +705,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             if (watchdog) {
                 clearTimeout(watchdog);
             }
+            // Always reset streaming state on stream completion (success or error)
+            // to prevent stale buffers from corrupting subsequent requests
+            this.resetStreamingState();
         }
     }
 

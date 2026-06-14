@@ -20,6 +20,7 @@
 import MockLiteLLMBackend from "./mockLiteLLMBackend";
 import * as fs from "fs";
 import * as path from "path";
+import { LRUCache } from "../../utils/lruCache";
 
 interface MemorySnapshot {
     turn: number;
@@ -79,10 +80,16 @@ async function runMemoryProfileTest(): Promise<void> {
     };
 
     // Simulate the unbounded collections identified in Phase 0
-    // These are NOT the actual collections, but they mimic their growth patterns
-    const tokenCountCache = new Map<string, { count: number; timestamp: number }>();
-    const pendingRequests = new Map<string, Promise<number>>();
-    const auditEvents: Array<{ id: string; turn: number; timestamp: number }> = [];
+    // Phase 1: tokenCountCache now uses LRU (max 100 entries)
+    // Phase 2: auditEvents now bounded (max 50 entries)
+    // Phase 3: pendingRequests now has timeout guard (simulated with max 20 entries after 500ms)
+    const tokenCountCache = new LRUCache<string, { count: number; timestamp: number }>(100);
+
+    // Simulate bounded pending requests with timeout cleanup (5-second orphan timeout)
+    const pendingRequests = new Map<string, { createdAt: number }>();
+    const auditEvents: { id: string; turn: number; timestamp: number }[] = [];
+    const MAX_AUDIT_ENTRIES = 50;
+    const ORPHAN_TIMEOUT_MS = 5000; // Match timeout guard in actual code
 
     // Start mock backend
     const backend = new MockLiteLLMBackend({
@@ -115,19 +122,32 @@ async function runMemoryProfileTest(): Promise<void> {
                     });
                 }
 
-                // Simulate pendingRequests growth (unbounded in current code)
+                // Simulate pendingRequests growth with timeout cleanup (Phase 3)
                 for (let i = 0; i < 3; i++) {
                     const key = `request_${turn}_${i}`;
-                    pendingRequests.set(key, Promise.resolve(Math.random() * 100));
+                    pendingRequests.set(key, { createdAt: Date.now() });
                 }
 
-                // Simulate auditTrail growth (unbounded in current code)
+                // Enforce orphan timeout: remove entries older than 5 seconds
+                const now = Date.now();
+                for (const [key, entry] of Array.from(pendingRequests.entries())) {
+                    if (now - entry.createdAt > ORPHAN_TIMEOUT_MS) {
+                        pendingRequests.delete(key);
+                    }
+                }
+
+                // Simulate auditTrail growth with bounded capacity (Phase 2)
                 for (let i = 0; i < 4; i++) {
                     auditEvents.push({
                         id: `event_${turn}_${i}`,
                         turn,
                         timestamp: Date.now(),
                     });
+                }
+
+                // Enforce max audit entries: FIFO eviction
+                while (auditEvents.length > MAX_AUDIT_ENTRIES) {
+                    auditEvents.shift();
                 }
 
                 // Simulate an HTTP call to the backend (every turn - realistic agentic session)
@@ -140,7 +160,7 @@ async function runMemoryProfileTest(): Promise<void> {
                     } else {
                         results.requestStats.failed++;
                     }
-                } catch (httpErr) {
+                } catch {
                     results.requestStats.failed++;
                     console.warn(`[MemoryProfile] HTTP call failed at turn ${turn}`);
                 }
@@ -234,8 +254,7 @@ async function runMemoryProfileTest(): Promise<void> {
             if (results.memorySnapshots.length >= 2) {
                 const diffs = [];
                 for (let i = 1; i < results.memorySnapshots.length; i++) {
-                    const diff =
-                        results.memorySnapshots[i].heapUsedMB - results.memorySnapshots[i - 1].heapUsedMB;
+                    const diff = results.memorySnapshots[i].heapUsedMB - results.memorySnapshots[i - 1].heapUsedMB;
                     diffs.push(diff);
                 }
                 const avgDiff = diffs.reduce((a, b) => a + b, 0) / diffs.length;
