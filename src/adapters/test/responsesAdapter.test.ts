@@ -250,6 +250,74 @@ suite("Responses Adapter Unit Tests", () => {
         assert.strictEqual((body.input[0] as Record<string, unknown>).content, "hello");
     });
 
+    test("transformToResponsesFormat preserves image_url content in user messages", () => {
+        const body = transformToResponsesFormat({
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "What's in this image?" },
+                        { type: "image_url", image_url: { url: "https://example.com/image.png" } },
+                    ],
+                },
+            ],
+        });
+
+        const input = body.input as Record<string, unknown>[];
+        // Should have both text message and image message
+        assert.ok(input.length >= 2, `Expected at least 2 input items, got ${input.length}`);
+
+        const textMessage = input.find(
+            (i) => i.type === "message" && (i as Record<string, unknown>).content === "What's in this image?"
+        );
+        const imageMessage = input.find(
+            (i) =>
+                i.type === "message" &&
+                (i as Record<string, unknown>).role === "user" &&
+                typeof (i as Record<string, unknown>).content === "object"
+        );
+
+        assert.ok(textMessage, "Text message should be preserved");
+        assert.ok(imageMessage, "Image message should be preserved");
+    });
+
+    test("transformToResponsesFormat preserves image_url content in assistant messages", () => {
+        const body = transformToResponsesFormat({
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "describe this image" }],
+                },
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "text", text: "This image shows a sunset." },
+                        { type: "image_url", image_url: { url: "https://example.com/image.png" } },
+                    ],
+                },
+            ],
+        });
+
+        const input = body.input as Record<string, unknown>[];
+        // Should have both text message and image message
+        assert.ok(input.length >= 2, `Expected at least 2 input items, got ${input.length}`);
+
+        const textMessage = input.find(
+            (i) => i.type === "message" && (i as Record<string, unknown>).role === "assistant"
+        );
+        const imageMessage = input.find(
+            (i) =>
+                i.type === "message" &&
+                (i as Record<string, unknown>).role === "assistant" &&
+                typeof (i as Record<string, unknown>).content === "object"
+        );
+
+        assert.ok(textMessage, "Assistant text message should be preserved");
+        assert.ok(imageMessage, "Assistant image message should be preserved");
+    });
+
     test("transformToResponsesFormat handles tool message with missing id", () => {
         const body = transformToResponsesFormat({
             model: "m",
