@@ -572,6 +572,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             */
         } catch (err: unknown) {
             let errorMessage = err instanceof Error ? err.message : String(err);
+            const errorStack = err instanceof Error ? err.stack : undefined;
+            const errorName = err instanceof Error ? err.constructor.name : typeof err;
+
             if (errorMessage.includes("LiteLLM API error")) {
                 const statusMatch = errorMessage.match(/error: (\d+)/);
                 const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : 400;
@@ -592,14 +595,19 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             // the error message. Extract the chained `.cause` so operators
             // see the real reason (e.g. ECONNREFUSED) rather than a generic label.
             const rootCause = err instanceof Error && err.cause instanceof Error ? err.cause.message : undefined;
+
+            // Log full error details to both Logger and StructuredLogger
             Logger.error("Chat request failed", err);
-            if (rootCause) {
-                StructuredLogger.error("request.fetch_failed", {
-                    model: model.id,
-                    cause: rootCause,
-                    requestId,
-                });
-            }
+            StructuredLogger.error("request.failed", {
+                requestId,
+                model: model.id,
+                caller,
+                errorName,
+                errorMessage,
+                errorStack,
+                rootCause,
+                stage: "provideLanguageModelChatResponse",
+            });
 
             const metric = {
                 requestId,
@@ -631,6 +639,13 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
     }
 
     protected resetStreamingState(): void {
+        // Reset the streaming buffers (tool call state)
+        // but NOT _tokenCapture, which is needed for usage reporting after the stream ends
+        this._streamingState = createInitialStreamingState();
+    }
+
+    protected clearAllStreamingState(): void {
+        // Complete reset including token capture (used only when aborting/cancelling)
         this._streamingState = createInitialStreamingState();
         this._tokenCapture = undefined;
     }
@@ -646,9 +661,15 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         progress: vscode.Progress<vscode.LanguageModelResponsePart>,
         token: vscode.CancellationToken
     ): Promise<void> {
+        Logger.info(`[processStreamingResponse] Starting stream processing`);
+        StructuredLogger.info("stream.processing_start", {
+            timestamp: new Date().toISOString(),
+        });
+
         const config = await this._configManager.getConfig();
         const timeoutMs = (config.inactivityTimeout ?? 60) * 1000;
         let watchdog: NodeJS.Timeout | undefined;
+        let eventCount = 0;
 
         // Create an AbortController to actually cancel the stream on timeout
         const controller = new AbortController();
@@ -658,12 +679,22 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 clearTimeout(watchdog);
             }
             watchdog = setTimeout(() => {
-                Logger.warn(`Inactivity timeout after ${timeoutMs}ms`);
+                Logger.warn(
+                    `[processStreamingResponse] Inactivity timeout after ${timeoutMs}ms (after ${eventCount} events)`
+                );
+                StructuredLogger.warn("stream.inactivity_timeout", {
+                    timeoutMs,
+                    eventCount,
+                });
                 controller.abort();
             }, timeoutMs);
         };
 
         token.onCancellationRequested(() => {
+            Logger.debug(`[processStreamingResponse] Cancellation requested from VS Code`);
+            StructuredLogger.debug("stream.cancellation_requested", {
+                eventCount,
+            });
             if (watchdog) {
                 clearTimeout(watchdog);
             }
@@ -672,32 +703,70 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
 
         try {
             resetWatchdog();
+            Logger.debug(`[processStreamingResponse] Starting SSE decoder loop`);
+
             for await (const payload of decodeSSE(responseBody, token, controller.signal)) {
                 resetWatchdog();
+                eventCount++;
+
+                Logger.trace(`[processStreamingResponse] Event #${eventCount} payload: ${payload.slice(0, 150)}`);
 
                 const jsonResult = tryParseJSONObject(payload);
                 if (!jsonResult.ok) {
+                    Logger.trace(`[processStreamingResponse] Event #${eventCount}: Skipped (JSON parse failed)`);
+                    StructuredLogger.trace("stream.event_parse_skipped", {
+                        eventNumber: eventCount,
+                        payloadPreview: payload.slice(0, 150),
+                    });
                     continue;
                 }
                 const json = jsonResult.value;
 
                 // Ensure streaming state is initialized (e.g. if processStreamingResponse is called directly in tests)
                 if (!this._streamingState) {
+                    Logger.trace(`[processStreamingResponse] Initializing streaming state on first event`);
                     this.resetStreamingState();
                 }
 
+                Logger.trace(`[processStreamingResponse] Event #${eventCount}: Interpreting event`);
                 const parts = interpretStreamEvent(json, this._streamingState);
+                Logger.trace(
+                    `[processStreamingResponse] Event #${eventCount}: Got ${parts.length} parts, emitting to VS Code`
+                );
+                StructuredLogger.trace("stream.event_processed", {
+                    eventNumber: eventCount,
+                    partCount: parts.length,
+                });
                 emitPartsToVSCode(parts, progress);
             }
+
+            Logger.info(`[processStreamingResponse] Stream loop completed after ${eventCount} events`);
+            StructuredLogger.info("stream.processing_complete", {
+                eventCount,
+                reason: "stream_ended",
+            });
         } catch (error: unknown) {
+            Logger.error(`[processStreamingResponse] Stream processing failed after ${eventCount} events`, {
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+            });
             StructuredLogger.error("stream.process_failed", {
                 error: error instanceof Error ? error.message : String(error),
+                eventCount,
+                stack: error instanceof Error ? error.stack : undefined,
             });
             throw error;
         } finally {
             if (watchdog) {
                 clearTimeout(watchdog);
             }
+            Logger.debug(`[processStreamingResponse] Clearing streaming state (eventCount=${eventCount})`);
+            StructuredLogger.debug("stream.state_cleared", {
+                eventCount,
+            });
+            // Always reset streaming state on stream completion (success or error)
+            // to prevent stale buffers from corrupting subsequent requests
+            this.resetStreamingState();
         }
     }
 

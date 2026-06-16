@@ -160,4 +160,32 @@ suite("AuditTrail", () => {
         assert.strictEqual(AuditTrail["startTimes"].size, 0);
         assert.strictEqual(AuditTrail["events"].size, 0);
     });
+
+    test("enforces max audit entries (FIFO eviction)", () => {
+        // This test verifies that only MAX_AUDIT_ENTRIES (50) requests are retained
+        const maxEntries = 50;
+
+        // Create more requests than the max
+        for (let i = 0; i < maxEntries + 10; i++) {
+            const requestId = `request-${i}`;
+            AuditTrail.startRequest(requestId);
+        }
+
+        // Verify only maxEntries requests are tracked
+        assert.strictEqual(AuditTrail["startTimes"].size, maxEntries);
+        assert.strictEqual(AuditTrail["events"].size, maxEntries);
+        assert.strictEqual(AuditTrail["requestOrder"].length, maxEntries);
+
+        // Verify oldest requests were evicted (FIFO)
+        for (let i = 0; i < 10; i++) {
+            const oldRequestId = `request-${i}`;
+            assert.strictEqual(AuditTrail.isTracking(oldRequestId), false, `Old request ${i} should be evicted`);
+        }
+
+        // Verify newest requests are retained
+        for (let i = 10; i < maxEntries + 10; i++) {
+            const newRequestId = `request-${i}`;
+            assert.strictEqual(AuditTrail.isTracking(newRequestId), true, `New request ${i} should be retained`);
+        }
+    });
 });

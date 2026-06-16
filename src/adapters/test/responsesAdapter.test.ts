@@ -1,7 +1,7 @@
 import * as assert from "assert";
 import { transformToResponsesFormat } from "../responsesAdapter";
 import { normalizeToolCallId } from "../../utils";
-import type { OpenAIFunctionToolDef, OpenAIChatMessage } from "../../types";
+import type { OpenAIFunctionToolDef, OpenAIChatMessage, LiteLLMResponseInputItem } from "../../types";
 
 suite("Responses Adapter Unit Tests", () => {
     test("transformToResponsesFormat normalizes tool call IDs", () => {
@@ -229,7 +229,8 @@ suite("Responses Adapter Unit Tests", () => {
             model: "m",
             messages: [{ role: "system", content: [{ type: "text", text: "sys" }] as unknown as string }],
         });
-        assert.strictEqual(body.instructions, undefined);
+        // System messages with content arrays should extract text from items
+        assert.strictEqual(body.instructions, "sys");
     });
 
     test("transformToResponsesFormat handles user message with mixed array content", () => {
@@ -241,13 +242,102 @@ suite("Responses Adapter Unit Tests", () => {
                     content: [
                         { type: "text", text: "  " }, // whitespace only
                         { type: "text", text: "hello" },
-                        { type: "image_url", image_url: { url: "..." } }, // not text
+                        { type: "image_url", image_url: { url: "https://example.com/image.png" } }, // not text
                     ] as unknown as string,
                 },
             ],
         });
-        assert.strictEqual(body.input.length, 1);
-        assert.strictEqual((body.input[0] as Record<string, unknown>).content, "hello");
+        // Each content item is unpacked into the input array as LiteLLMResponseInputItem
+        assert.strictEqual(body.input.length, 3);
+
+        // First item: text message (type="message" because it's wrapped in response format)
+        const whitespaceMessage = body.input[0];
+        assert.strictEqual(whitespaceMessage.type, "message");
+        assert.strictEqual(whitespaceMessage.role, "user");
+        assert.strictEqual(whitespaceMessage.content, "  "); // text content is unpacked string
+
+        // Second item: text message
+        const textMessage = body.input[1];
+        assert.strictEqual(textMessage.type, "message");
+        assert.strictEqual(textMessage.role, "user");
+        assert.strictEqual(textMessage.content, "hello");
+
+        // Third item: image_url message (content is full contentItem object with image_url)
+        const imageMessage = body.input[2] as LiteLLMResponseInputItem;
+        assert.strictEqual(imageMessage.type, "message");
+        assert.strictEqual(imageMessage.role, "user");
+        // For image_url, content is the full contentItem object
+        const content = imageMessage.content as unknown as { type: string; image_url?: { url: string } };
+        assert.strictEqual(content.type, "image_url");
+        assert.strictEqual(content.image_url?.url, "https://example.com/image.png");
+    });
+
+    test("transformToResponsesFormat preserves image_url content in user messages", () => {
+        const body = transformToResponsesFormat({
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "What's in this image?" },
+                        { type: "image_url", image_url: { url: "https://example.com/image.png" } },
+                    ],
+                },
+            ],
+        });
+
+        const input = body.input as Record<string, unknown>[];
+        // Should have both text message and image message
+        assert.ok(input.length >= 2, `Expected at least 2 input items, got ${input.length}`);
+
+        const textMessage = input.find(
+            (i) => i.type === "message" && (i as Record<string, unknown>).content === "What's in this image?"
+        );
+        const imageMessage = input.find(
+            (i) =>
+                i.type === "message" &&
+                (i as Record<string, unknown>).role === "user" &&
+                typeof (i as Record<string, unknown>).content === "object"
+        );
+
+        assert.ok(textMessage, "Text message should be preserved");
+        assert.ok(imageMessage, "Image message should be preserved");
+    });
+
+    test("transformToResponsesFormat preserves image_url content in assistant messages", () => {
+        const body = transformToResponsesFormat({
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "describe this image" }],
+                },
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "text", text: "This image shows a sunset." },
+                        { type: "image_url", image_url: { url: "https://example.com/image.png" } },
+                    ],
+                },
+            ],
+        });
+
+        const input = body.input as Record<string, unknown>[];
+        // Should have both text message and image message
+        assert.ok(input.length >= 2, `Expected at least 2 input items, got ${input.length}`);
+
+        const textMessage = input.find(
+            (i) => i.type === "message" && (i as Record<string, unknown>).role === "assistant"
+        );
+        const imageMessage = input.find(
+            (i) =>
+                i.type === "message" &&
+                (i as Record<string, unknown>).role === "assistant" &&
+                typeof (i as Record<string, unknown>).content === "object"
+        );
+
+        assert.ok(textMessage, "Assistant text message should be preserved");
+        assert.ok(imageMessage, "Assistant image message should be preserved");
     });
 
     test("transformToResponsesFormat handles tool message with missing id", () => {

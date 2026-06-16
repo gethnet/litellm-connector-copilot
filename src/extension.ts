@@ -20,6 +20,7 @@ import { LegacyConfigMigration } from "./config/legacyConfigMigration";
 // Store the config manager for cleanup on deactivation
 let configManagerInstance: ConfigManager | undefined;
 let telemetryServiceInstance: TelemetryService | undefined;
+let activeChatProviderInstance: LiteLLMChatProvider | undefined;
 
 const MODERN_CONFIG_SESSION_KEY = "litellm-connector.isOnModernConfig";
 const MIGRATION_NOTICE_KEY = "litellm-connector.migrationNotice.v1";
@@ -169,6 +170,7 @@ export function activate(context: vscode.ExtensionContext): void {
     void showMigrationNoticeOnce();
 
     const activeProvider = new LiteLLMChatProvider(context.secrets, ua, effortFallbackCache);
+    activeChatProviderInstance = activeProvider; // Store for cleanup on deactivation
     activeProvider.setTelemetryService(telemetryService);
 
     const isOnModernConfigAtStartup = getModernConfigSessionFlag();
@@ -314,6 +316,11 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export async function deactivate(): Promise<void> {
+    // Clean up session-scoped caches to free memory
+    if (activeChatProviderInstance) {
+        activeChatProviderInstance.clearSessionCaches();
+    }
+
     if (configManagerInstance) {
         await configManagerInstance.dispose();
     }

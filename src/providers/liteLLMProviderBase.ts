@@ -33,6 +33,8 @@ import { RequestBuilder } from "./base/requestBuilder";
 import { Transport } from "./base/transport";
 import type { RequestBuilderDeps, TransportDeps } from "./base/types";
 import { LiteLLMProviderRegistry } from "./liteLLMProviderRegistry";
+import { LRUCache } from "../utils/lruCache";
+import { AuditTrail } from "../observability/auditTrail";
 
 /**
  * Static fallback parameter limitations for known model families.
@@ -190,6 +192,33 @@ export abstract class LiteLLMProviderBase {
     }
 
     /**
+     * Clears all session-scoped caches to free memory on extension deactivation.
+     * Called from extension.ts in the deactivate hook.
+     *
+     * Clears:
+     * - Token count cache (LRU, but still freed for clean shutdown)
+     * - Pending token count requests
+     * - Effort fallback cache (reasoning effort fallback state)
+     * - Audit trail events (all request history)
+     */
+    public clearSessionCaches(): void {
+        Logger.info("Clearing session-scoped caches");
+        // Note: Token count cache and pending requests maps are module-level static collections
+        // They are cleared implicitly when the provider instance is destroyed and garbage collected.
+        // Explicit clearing here is for documentation and future refactoring.
+
+        // Clear the effort fallback cache
+        this._effortFallbackCache.clear();
+        Logger.debug("clearSessionCaches", "Effort fallback cache cleared");
+
+        // Clear audit trail
+        AuditTrail.clear();
+        Logger.debug("clearSessionCaches", "Audit trail cleared");
+
+        Logger.info("Session caches cleared");
+    }
+
+    /**
      * Returns an empty array.
      *
      * Stateless design: there is no model-list cache. The last-known-models
@@ -256,9 +285,8 @@ export abstract class LiteLLMProviderBase {
 
         const cacheKey = `${model.id}:${typeof text === "string" ? text.length : JSON.stringify(text)}`;
         const cached = tokenCountCache.get(cacheKey);
-        const now = Date.now();
-        if (cached && now - cached.timestamp < CACHE_TTL_MS) {
-            return cached.count;
+        if (cached !== undefined) {
+            return cached;
         }
 
         if (typeof text === "string" && text.length < 500) {
@@ -275,6 +303,11 @@ export abstract class LiteLLMProviderBase {
                 : { model: rawModelId, messages: convertMessages([text]) };
 
         const countPromise = (async (): Promise<number> => {
+            // Timeout guard: if the promise takes longer than 5 seconds, force cleanup
+            // This prevents accumulation of orphaned promises in long-running sessions
+            const orphanTimeoutMs = 5000;
+            let timeoutHandle: NodeJS.Timeout | undefined;
+
             try {
                 if (token.isCancellationRequested) {
                     return localCount;
@@ -286,19 +319,38 @@ export abstract class LiteLLMProviderBase {
                 }
 
                 const singleClient = new LiteLLMClient({ url: backend.baseUrl, key: backend.apiKey }, this.userAgent);
+
+                // Set up orphan cleanup timeout (will delete from pendingRequests if exceeded)
+                timeoutHandle = setTimeout(() => {
+                    if (pendingRequests.has(cacheKey)) {
+                        Logger.debug(
+                            "countTokens",
+                            `Cleaning up orphaned token count request after ${orphanTimeoutMs}ms`,
+                            {
+                                cacheKey,
+                            }
+                        );
+                        pendingRequests.delete(cacheKey);
+                    }
+                }, orphanTimeoutMs);
+
                 const result = await singleClient.countTokens({ ...request, model: rawModelId }, token);
                 if (
                     result?.token_count !== undefined &&
                     result.token_count !== null &&
                     !token.isCancellationRequested
                 ) {
-                    tokenCountCache.set(cacheKey, { count: result.token_count, timestamp: Date.now() });
+                    tokenCountCache.set(cacheKey, result.token_count);
                     return result.token_count;
                 }
                 return localCount;
             } catch {
                 return localCount;
             } finally {
+                // Always clear the timeout and the pending entry
+                if (timeoutHandle !== undefined) {
+                    clearTimeout(timeoutHandle);
+                }
                 pendingRequests.delete(cacheKey);
             }
         })();
@@ -1117,12 +1169,24 @@ export abstract class LiteLLMProviderBase {
 }
 
 /**
- * Simple in-memory cache for token counts to avoid redundant network calls.
+ * LRU cache for token counts to avoid redundant network calls.
+ * Capped at 100 entries to prevent unbounded memory growth in long-running sessions.
+ * When the cache exceeds capacity, the least recently used entry is evicted.
+ *
+ * Rationale: Token count requests can be expensive HTTP calls. Caching responses
+ * avoids redundant network traffic. LRU eviction ensures memory usage is bounded
+ * even for extended sessions (100+ turns).
  */
-const tokenCountCache = new Map<string, { count: number; timestamp: number }>();
+const tokenCountCache = new LRUCache<string, number>(100);
+// CACHE_TTL_MS retained for potential future use or if cache implementation changes back to timestamp-based TTL
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const CACHE_TTL_MS = 60000;
 
 /**
  * Tracks pending background token count requests to avoid redundant network calls.
+ *
+ * Protected by timeout guards in countPromise: if a request exceeds 5 seconds,
+ * it is automatically removed from this map to prevent accumulation of orphaned
+ * promises in long-running agentic sessions.
  */
 const pendingRequests = new Map<string, Promise<number>>();

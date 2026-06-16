@@ -379,7 +379,11 @@ export interface LiteLLMResponsesRequest {
  * Input item for LiteLLM /responses endpoint.
  */
 export type LiteLLMResponseInputItem =
-    | { type: "message"; role: string; content: string }
+    | {
+          type: "message";
+          role: string;
+          content: string | OpenAIChatMessageContentItem[];
+      }
     | { type: "function_call"; id: string; call_id?: string; name: string; arguments: string }
     | { type: "function_call_output"; id?: string; call_id: string; output: string };
 

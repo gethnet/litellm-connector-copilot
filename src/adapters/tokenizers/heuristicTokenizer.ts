@@ -54,7 +54,7 @@ export class HeuristicTokenizer implements Tokenizer {
             keysPresent.add("value");
             if (typeof value === "string") {
                 const tokens = this.countTokens(value).tokens;
-                StructuredLogger.debug("Counting string value tokens", {
+                StructuredLogger.trace("Counting string value tokens", {
                     length: value.length,
                     characterBased: Math.ceil(value.length / 3.5),
                     wordBased: Math.ceil(value.trim().split(/\s+/).length * 1.3),
@@ -65,7 +65,7 @@ export class HeuristicTokenizer implements Tokenizer {
             if (Array.isArray(value)) {
                 const joined = value.join("");
                 const tokens = this.countTokens(joined).tokens;
-                StructuredLogger.debug("Counting array of strings tokens", {
+                StructuredLogger.trace("Counting array of strings tokens", {
                     arrayLength: value.length,
                     joinedLength: joined.length,
                     characterBased: Math.ceil(joined.length / 3.5),
@@ -81,7 +81,7 @@ export class HeuristicTokenizer implements Tokenizer {
             const toolCall = part as { name?: string; input?: unknown };
             const serialized = `${toolCall.name ?? ""}${JSON.stringify(toolCall.input ?? {})}`;
             const tokens = this.countTokens(serialized).tokens;
-            StructuredLogger.debug("Counting tool call tokens", {
+            StructuredLogger.trace("Counting tool call tokens", {
                 name: toolCall.name ?? "(empty)",
                 inputKeys: Object.keys(toolCall.input ?? {}),
                 serializedLength: serialized.length,
@@ -99,7 +99,7 @@ export class HeuristicTokenizer implements Tokenizer {
                 // Count media types (images, PDFs) with conservative token estimates
                 if (mimeType.startsWith("image/") || mimeType === "application/pdf") {
                     const tokens = estimateMediaTokenCost(mimeType, data.length);
-                    StructuredLogger.debug("Counting image/PDF data part tokens", {
+                    StructuredLogger.trace("Counting image/PDF data part tokens", {
                         mimeType,
                         dataLength: data.length,
                         resultTokens: tokens,
@@ -110,7 +110,7 @@ export class HeuristicTokenizer implements Tokenizer {
                 if (mimeType.startsWith("text/") || mimeType.includes("json") || mimeType === "usage") {
                     const textContent = Buffer.from(data).toString("utf-8");
                     const tokens = this.countTokens(textContent).tokens;
-                    StructuredLogger.debug("Counting text/json data part tokens", {
+                    StructuredLogger.trace("Counting text/json data part tokens", {
                         mimeType,
                         dataLength: data.length,
                         textLength: textContent.length,
@@ -125,7 +125,7 @@ export class HeuristicTokenizer implements Tokenizer {
             keysPresent.add("content");
             const arrayContent = (part as { content: unknown[] }).content;
             const totalTokens = arrayContent.reduce<number>((sum, item) => sum + this.countPartTokens(item), 0);
-            StructuredLogger.debug("Counting nested content array tokens", {
+            StructuredLogger.trace("Counting nested content array tokens", {
                 innerArrayLength: arrayContent.length,
                 totalTokens,
             });

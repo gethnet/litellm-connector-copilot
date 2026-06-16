@@ -7,7 +7,9 @@ suite("SSE Decoder Unit Tests", () => {
     test("decodes simple data frames", async () => {
         const stream = new ReadableStream<Uint8Array>({
             start(controller) {
-                controller.enqueue(new TextEncoder().encode('data: {"text": "hello"}\n\ndata: {"text": "world"}\n\n'));
+                controller.enqueue(
+                    new TextEncoder().encode('data: {"text": "hello"}\n\ndata: {"text": "world"}\n\ndata: [DONE]\n\n')
+                );
                 controller.close();
             },
         });
@@ -82,7 +84,9 @@ suite("SSE Decoder Unit Tests", () => {
     test("ignores non-data lines", async () => {
         const stream = new ReadableStream<Uint8Array>({
             start(controller) {
-                controller.enqueue(new TextEncoder().encode(": ping\n\nevent: message\ndata: content\n\n"));
+                controller.enqueue(
+                    new TextEncoder().encode(": ping\n\nevent: message\ndata: content\n\ndata: [DONE]\n\n")
+                );
                 controller.close();
             },
         });
@@ -93,5 +97,38 @@ suite("SSE Decoder Unit Tests", () => {
         }
 
         assert.deepStrictEqual(results, ["content"]);
+    });
+
+    test("throws error when stream closes without [DONE] marker", async () => {
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode('data: {"text": "hello"}\n\n'));
+                controller.enqueue(new TextEncoder().encode('data: {"text": "world"}\n\n'));
+                // Intentionally close WITHOUT [DONE] marker
+                controller.close();
+            },
+        });
+
+        const results: string[] = [];
+        let threwError = false;
+        let errorMessage = "";
+
+        try {
+            for await (const payload of decodeSSE(stream)) {
+                results.push(payload);
+            }
+        } catch (err) {
+            threwError = true;
+            errorMessage = err instanceof Error ? err.message : String(err);
+        }
+
+        assert.strictEqual(threwError, true, "Expected decodeSSE to throw error when [DONE] marker missing");
+        assert.match(
+            errorMessage,
+            /Stream ended before \[DONE\] marker/,
+            "Error message should indicate missing [DONE] marker"
+        );
+        // Partial payloads should have been yielded before error
+        assert.deepStrictEqual(results, ['{"text": "hello"}', '{"text": "world"}']);
     });
 });

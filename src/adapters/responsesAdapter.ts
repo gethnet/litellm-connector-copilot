@@ -28,9 +28,10 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
             for (const tc of msg.tool_calls) {
                 const normalizedId = normalizeToolCallId(tc.id);
                 toolCallIdMap.set(tc.id, normalizedId);
-                Logger.trace(`[responsesAdapter] Mapped assistant tool call ID: ${tc.id} -> ${normalizedId}`);
+                Logger.trace(`[responsesAdapter] Mapped tool call ID: ${tc.id} -> ${normalizedId}`);
             }
-        } else if (msg.role === "tool" && msg.tool_call_id) {
+        }
+        if (msg.tool_call_id) {
             const normalizedId = normalizeToolCallId(msg.tool_call_id);
             toolCallIdMap.set(msg.tool_call_id, normalizedId);
             Logger.trace(`[responsesAdapter] Mapped tool result ID: ${msg.tool_call_id} -> ${normalizedId}`);
@@ -38,9 +39,21 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
     }
 
     // Second pass: process messages and add tool calls
+    // content can be string or ContentItem[] depending on message type
     for (const msg of messages) {
         if (msg.role === "system") {
-            instructions = typeof msg.content === "string" ? msg.content : undefined;
+            if (typeof msg.content === "string") {
+                instructions = msg.content;
+            } else if (Array.isArray(msg.content)) {
+                // Extract text from content items (OpenAI format: { type: "text", text: "..." })
+                instructions = msg.content
+                    .filter(
+                        (item): item is OpenAIChatMessageContentItem & { type: "text"; text: string } =>
+                            "type" in item && item.type === "text" && "text" in item && typeof item.text === "string"
+                    )
+                    .map((item) => item.text)
+                    .join(" ");
+            }
             continue;
         }
 
@@ -48,21 +61,49 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
             if (typeof msg.content === "string" && msg.content.trim()) {
                 inputArray.push({ type: "message", role: "user", content: msg.content });
             } else if (Array.isArray(msg.content)) {
-                for (const item of msg.content) {
-                    if (item.type === "text" && item.text && item.text.trim()) {
-                        inputArray.push({ type: "message", role: "user", content: item.text });
+                // Unpack content array into individual message items
+                for (const contentItem of msg.content) {
+                    if (contentItem.type === "text" && typeof contentItem.text === "string") {
+                        inputArray.push({
+                            type: "message",
+                            role: "user",
+                            content: contentItem.text,
+                        });
+                    } else if (contentItem.type === "image_url" && contentItem.image_url?.url) {
+                        console.log(
+                            `[responsesAdapter] User image: type=${contentItem.type}, url=${contentItem.image_url.url.substring(0, 50)}...`
+                        );
+                        inputArray.push({
+                            type: "message",
+                            role: "user",
+                            content: contentItem,
+                        } as unknown as LiteLLMResponseInputItem);
                     }
                 }
             }
         } else if (msg.role === "assistant") {
             // If assistant has tool calls, we add them.
-            // If it ALSO has text content, we add that as a message.
+            // If it ALSO has content, we add that as a message with text or image_url items.
             if (typeof msg.content === "string" && msg.content.trim()) {
                 inputArray.push({ type: "message", role: "assistant", content: msg.content });
             } else if (Array.isArray(msg.content)) {
-                for (const item of msg.content) {
-                    if (item.type === "text" && item.text && item.text.trim()) {
-                        inputArray.push({ type: "message", role: "assistant", content: item.text });
+                // Unpack content array into individual message items
+                for (const contentItem of msg.content) {
+                    if (contentItem.type === "text" && typeof contentItem.text === "string") {
+                        inputArray.push({
+                            type: "message",
+                            role: "assistant",
+                            content: contentItem.text,
+                        });
+                    } else if (contentItem.type === "image_url" && contentItem.image_url?.url) {
+                        console.log(
+                            `[responsesAdapter] Assistant image: type=${contentItem.type}, url=${contentItem.image_url.url.substring(0, 50)}...`
+                        );
+                        inputArray.push({
+                            type: "message",
+                            role: "assistant",
+                            content: contentItem,
+                        } as unknown as LiteLLMResponseInputItem);
                     }
                 }
             }

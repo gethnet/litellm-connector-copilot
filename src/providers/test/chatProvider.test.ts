@@ -1102,40 +1102,53 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         );
 
         const reported: vscode.LanguageModelResponsePart[] = [];
-        await provider.provideLanguageModelChatResponse(
-            {
-                id: "model-1",
-                name: "model-1",
-                tooltip: "",
-                family: "litellm",
-                version: "1.0.0",
-                maxInputTokens: 1000,
-                maxOutputTokens: 1000,
-                capabilities: { toolCalling: true, imageInput: false },
-            },
-            [
-                {
-                    role: vscode.LanguageModelChatMessageRole.User,
-                    name: undefined,
-                    content: [new vscode.LanguageModelTextPart("hi")],
-                },
-            ],
-            {
-                modelOptions: {},
-                tools: [],
-                toolMode: vscode.LanguageModelChatToolMode.Auto,
-                requestInitiator: "test",
-                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-api-key" } as unknown as Record<
-                    string,
-                    unknown
-                >,
-            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
-            { report: (part) => reported.push(part) },
-            new vscode.CancellationTokenSource().token
-        );
+        let threwError = false;
+        let errorMessage = "";
 
-        // Empty stream should not emit any parts (including usage data)
-        // flushUsage() checks for empty token counts and skips emission
+        try {
+            await provider.provideLanguageModelChatResponse(
+                {
+                    id: "model-1",
+                    name: "model-1",
+                    tooltip: "",
+                    family: "litellm",
+                    version: "1.0.0",
+                    maxInputTokens: 1000,
+                    maxOutputTokens: 1000,
+                    capabilities: { toolCalling: true, imageInput: false },
+                },
+                [
+                    {
+                        role: vscode.LanguageModelChatMessageRole.User,
+                        name: undefined,
+                        content: [new vscode.LanguageModelTextPart("hi")],
+                    },
+                ],
+                {
+                    modelOptions: {},
+                    tools: [],
+                    toolMode: vscode.LanguageModelChatToolMode.Auto,
+                    requestInitiator: "test",
+                    configuration: { baseUrl: "http://localhost:4000", apiKey: "test-api-key" } as unknown as Record<
+                        string,
+                        unknown
+                    >,
+                } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                { report: (part) => reported.push(part) },
+                new vscode.CancellationTokenSource().token
+            );
+        } catch (err) {
+            threwError = true;
+            errorMessage = err instanceof Error ? err.message : String(err);
+        }
+
+        // Empty stream without [DONE] should throw error
+        assert.strictEqual(threwError, true, "Expected provider to throw error for empty stream without [DONE]");
+        assert.match(
+            errorMessage,
+            /Stream ended before \[DONE\] marker/,
+            "Error should indicate missing [DONE] marker"
+        );
         assert.deepStrictEqual(reported.length, 0, "Expected no parts to be emitted for empty stream");
     });
 });
