@@ -17,7 +17,7 @@
     "type": "git",
     "url": "https://github.com/gethnet/litellm-connector-copilot"
   },
-  "version": "2.1.2",
+  "version": "2.1.3-dev1",
   "preview": true,
   "engines": {
     "vscode": "^1.120.0"
@@ -35,7 +35,11 @@
     "ai-connector",
     "openai",
     "anthropic",
-    "local-llm"
+    "local-llm",
+    "language model provider",
+    "language model",
+    "connector",
+    "copilot connector"
   ],
   "galleryBanner": {
     "color": "#100f11",
