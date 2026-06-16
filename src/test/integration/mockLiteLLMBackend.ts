@@ -220,16 +220,18 @@ export class MockLiteLLMBackend {
         // Send model info
         res.write(`data: ${JSON.stringify({ type: "session.created" })}\n\n`);
 
-        // Send output text
-        const responseText = `This is a mock response to: ${(request as Record<string, unknown>).model}`;
-        for (let i = 0; i < responseText.length; i += 5) {
-            const chunk = responseText.substring(i, i + 5);
+        // Send output text in chunks
+        const responseText = `This is a mock response to: ${String(request.model ?? "unknown")}`;
+        const chunkSize = 5;
+
+        for (let i = 0; i < responseText.length; i += chunkSize) {
+            const chunk = responseText.substring(i, i + chunkSize);
             res.write(`data: ${JSON.stringify({ type: "response.output_text.delta", delta: chunk })}\n\n`);
-            // Simulate streaming delay
+            // Simulate streaming delay (await ensures each chunk is fully written before continuing)
             await new Promise((resolve) => setTimeout(resolve, 10));
         }
 
-        // Send completion
+        // Send completion with usage info
         res.write(
             `data: ${JSON.stringify({
                 type: "response.completed",
@@ -251,35 +253,16 @@ export class MockLiteLLMBackend {
         const model = String(request.model ?? "gpt-4o");
         const responseText = this.generateResponse(model);
 
-        // Stream response in chunks
-        let sentChunks = 0;
+        // Pre-calculate all chunks
         const chunkSize = 20;
+        const chunks: string[] = [];
 
-        const sendChunk = (): void => {
-            const start = sentChunks * chunkSize;
-            const end = start + chunkSize;
-            const chunk = responseText.substring(start, end);
+        for (let i = 0; i < responseText.length; i += chunkSize) {
+            chunks.push(responseText.substring(i, i + chunkSize));
+        }
 
-            if (chunk.length === 0) {
-                // Send final delta with usage
-                res.write(
-                    `data: ${JSON.stringify({
-                        choices: [
-                            {
-                                delta: { content: null },
-                                finish_reason: "stop",
-                            },
-                        ],
-                        usage: {
-                            prompt_tokens: 10,
-                            completion_tokens: Math.ceil(responseText.length / 4),
-                        },
-                    })}\n\n`
-                );
-                res.end();
-                return;
-            }
-
+        // Send all content chunks
+        for (const chunk of chunks) {
             res.write(
                 `data: ${JSON.stringify({
                     choices: [
@@ -290,12 +273,25 @@ export class MockLiteLLMBackend {
                     ],
                 })}\n\n`
             );
+        }
 
-            sentChunks++;
-            setTimeout(sendChunk, 10);
-        };
+        // Send final delta with usage info, then immediately end
+        const finalChunk = `data: ${JSON.stringify({
+            choices: [
+                {
+                    delta: { content: null },
+                    finish_reason: "stop",
+                },
+            ],
+            usage: {
+                prompt_tokens: 10,
+                completion_tokens: Math.ceil(responseText.length / 4),
+            },
+        })}\n\n`;
 
-        sendChunk();
+        // Use end() with data parameter to atomically write+close
+        // This ensures the final chunk is sent before the socket closes
+        res.end(finalChunk);
     }
 
     private sendNonStreamingResponse(res: http.ServerResponse, request: Record<string, unknown>): void {

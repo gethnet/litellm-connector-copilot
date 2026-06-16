@@ -401,7 +401,7 @@ suite("MockLiteLLMBackend", () => {
         });
 
         test("should include usage in final streaming chunk", async () => {
-            backend = new MockLiteLLMBackend({ port: testPort });
+            backend = new MockLiteLLMBackend({ port: testPort, toolCallSupport: false });
             await backend.start();
 
             const requestBody = JSON.stringify({
@@ -556,9 +556,9 @@ suite("MockLiteLLMBackend", () => {
 
             const textParts: string[] = [];
             for (const event of parsedEvents) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-assignment
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-member-access
                 if ((event as any).type === "response.output_text.delta" && (event as any).delta) {
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-assignment
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-member-access
                     textParts.push((event as any).delta as string);
                 }
             }
