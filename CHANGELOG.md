@@ -2,7 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2.1.2] - 2026-06-16
+
+### ✨ Features
+
+* **🖼️ Multimodal Content Preservation**: The `/responses` adapter now preserves `image_url` items when converting user and assistant chat messages, allowing multimodal prompts to pass through instead of dropping image content. System messages with content arrays are now supported by joining text items into request instructions. (`src/adapters/responsesAdapter.ts`, `src/types.ts`)
 
 ### 🚀 Performance & Memory
 
@@ -12,21 +16,23 @@ All notable changes to this project will be documented in this file.
 * **🧼 Lifecycle Cleanup**: Extension now calls `clearSessionCaches()` on deactivation to reset caches on reload, ensuring clean session starts. (`src/extension.ts`)
 * **📊 Collective Impact**: All 4 memory fixes reduce total collection accumulation by **80.5%** (6,000 → ~1,167 entries per 500 turns) and cap long-session memory growth to **~14-15 MB** even at 1000+ turns (vs **21+ MB** unbounded). Stabilizes agentic sessions 500+ turns without GC pauses or hangs.
 
+### 🐛 Fixes
+
+* **SSE stream incomplete-response handling**: SSE streams that close without a `[DONE]` marker now throw an explicit error instead of silently completing with zero response parts. This prevents the retry loop and surfaces incomplete responses clearly to VS Code. Affects `/chat/completions` and `/responses` endpoints. (`src/adapters/sse/sseDecoder.ts`, `src/providers/liteLLMChatProvider.ts`)
+* **Text array content parsing in responses adapter**: Now correctly reads `content[].text` only from `{ type: "text" }` items when building response instructions, preventing non-text payloads from being misparsed. (`src/adapters/responsesAdapter.ts`)
+* **Chat request failure diagnostics**: Improved error logging to include full chat request error details (name, message, stack, root cause, caller, and stage), making failures easier to diagnose. Unified telemetry event from `request.fetch_failed` to `request.failed` for more complete context. (`src/providers/liteLLMChatProvider.ts`)
+
 ### 🧪 Tests
 
 * Added `LRUCache` utility with 8 comprehensive unit tests covering eviction, access ordering, and edge cases. (`src/utils/test/lruCache.test.ts`)
 * Added new audit trail test for bounded entries enforcement and FIFO eviction correctness. (`src/observability/test/auditTrail.test.ts`)
 * Enhanced memory profile integration test to simulate all 5 bounded collection phases with realistic 500-turn load. (`src/test/integration/memoryProfile.test.ts`)
+* Added unit coverage for user and assistant image content preservation in responses adapter. (`src/adapters/test/responsesAdapter.test.ts`)
+* Added comprehensive integration coverage for the mock backend across lifecycle, endpoints, streaming, tool calls, latency, errors, and concurrent requests. Hardened cancellation coverage to verify immediate aborts before `fetch` is called. (`src/test/integration/mockLiteLLMBackend.test.ts`, `src/test/integration/cancellation.test.ts`)
 
-### ✅ Quality
+### 🧹 Chores
 
-* All code follows strict TypeScript typing (no `any` types).
-* Full test coverage maintained at **87.75% statements**, **79.9% branches**, **84.86% functions**.
-* All 712 tests passing; no regressions.
-
-### 🐛 Fixes
-
-* **SSE stream incomplete-response handling**: SSE streams that close without a `[DONE]` marker now throw an explicit error instead of silently completing with zero response parts. This prevents the retry loop and surfaces incomplete responses clearly to VS Code. Affects `/chat/completions` and `/responses` endpoints. (`src/adapters/sse/sseDecoder.ts`, `src/providers/liteLLMChatProvider.ts`)
+* Downgraded heuristic tokenizer logs from debug to trace verbosity so token counting stays available without cluttering normal debug output. (`src/adapters/tokenizers/heuristicTokenizer.ts`)
 
 ## [2.1.1] - 2026-06-12
 
