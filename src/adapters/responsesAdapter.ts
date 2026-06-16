@@ -45,12 +45,13 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
             if (typeof msg.content === "string") {
                 instructions = msg.content;
             } else if (Array.isArray(msg.content)) {
+                // Extract text from content items (OpenAI format: { type: "text", text: "..." })
                 instructions = msg.content
                     .filter(
-                        (item): item is OpenAIChatMessageContentItem & { content?: unknown } =>
-                            "string" in item && "content" in item
+                        (item): item is OpenAIChatMessageContentItem & { type: "text"; text: string } =>
+                            "type" in item && item.type === "text" && "text" in item && typeof item.text === "string"
                     )
-                    .map((item) => item.content as unknown as string)
+                    .map((item) => item.text)
                     .join(" ");
             }
             continue;

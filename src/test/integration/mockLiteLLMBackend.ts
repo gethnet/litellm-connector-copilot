@@ -66,6 +66,7 @@ export class MockLiteLLMBackend {
                     reject(err);
                 } else {
                     console.log(`[MockLiteLLM] Server stopped`);
+                    this.server = null;
                     resolve();
                 }
             });
