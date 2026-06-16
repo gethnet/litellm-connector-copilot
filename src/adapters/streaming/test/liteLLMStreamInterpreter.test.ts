@@ -1,5 +1,5 @@
 import * as assert from "assert";
-import { interpretStreamEvent, createInitialStreamingState } from "../liteLLMStreamInterpreter";
+import { interpretStreamEvent, createInitialStreamingState, flushPendingBuffers } from "../liteLLMStreamInterpreter";
 
 declare const suite: (name: string, fn: () => void) => void;
 declare const test: (name: string, fn: () => void) => void;
@@ -764,5 +764,75 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
             assert.strictEqual(toolCallPart.name, "filesystem");
             assert.strictEqual(toolCallPart.args, '{"path":"/tmp"}');
         }
+    });
+});
+
+suite("flushPendingBuffers Unit Tests", () => {
+    test("flushes /responses-format tool calls and emits with reason: incomplete_stream_end", () => {
+        const state = createInitialStreamingState();
+
+        // Simulate buffered /responses tool calls
+        state.responseToolCallBuffers.set("call-id-1", { id: "call-id-1", name: "search", args: '{"q":"test"}' });
+        state.responseToolCallOrder = ["call-id-1"];
+
+        const parts = flushPendingBuffers(state);
+
+        assert.ok(parts.length >= 2, "Should emit tool call + finish part");
+        const toolCallPart = parts.find((p) => p.type === "tool_call");
+        assert.ok(toolCallPart && toolCallPart.type === "tool_call");
+        if (toolCallPart && toolCallPart.type === "tool_call") {
+            assert.strictEqual(toolCallPart.name, "search");
+        }
+        const finishPart = parts[parts.length - 1];
+        assert.strictEqual(finishPart.type, "finish");
+        assert.strictEqual((finishPart as unknown as { reason: string; type: string }).reason, "incomplete_stream_end");
+        assert.strictEqual(state.responseToolCallBuffers.size, 0, "Buffers should be cleared");
+        assert.strictEqual(state.responseToolCallOrder.length, 0);
+    });
+
+    test("flushes anonymous tool calls when buffered", () => {
+        const state = createInitialStreamingState();
+
+        state.anonymousResponseToolName = "execute_code";
+        state.anonymousResponseToolArgs = '{"code":"print(123)"}';
+
+        const parts = flushPendingBuffers(state);
+
+        const toolCallPart = parts.find((p) => p.type === "tool_call");
+        assert.ok(toolCallPart && toolCallPart.type === "tool_call");
+        if (toolCallPart && toolCallPart.type === "tool_call") {
+            assert.strictEqual(toolCallPart.name, "execute_code");
+        }
+        assert.strictEqual(state.anonymousResponseToolName, undefined, "Anonymous state should be cleared");
+        assert.strictEqual(state.anonymousResponseToolArgs, "");
+    });
+
+    test("skips malformed tool call args and still emits valid ones", () => {
+        const state = createInitialStreamingState();
+
+        // Add a malformed tool call (invalid JSON)
+        state.toolCallBuffers.set(0, { id: "bad-call", name: "badtool", args: "{invalid" });
+        state.toolCallBuffers.set(1, { id: "good-call", name: "goodtool", args: '{"ok":true}' });
+
+        const parts = flushPendingBuffers(state);
+
+        // Should still emit at least the finish part and try to emit good calls
+        const toolCallParts = parts.filter((p) => p.type === "tool_call");
+        assert.ok(toolCallParts.length <= 2, "Should skip invalid calls or emit only valid ones");
+        const finishPart = parts[parts.length - 1];
+        assert.strictEqual(finishPart.type, "finish");
+        assert.strictEqual((finishPart as unknown as { reason: string; type: string }).reason, "incomplete_stream_end");
+    });
+
+    test("handles empty buffers gracefully and still emits finish", () => {
+        const state = createInitialStreamingState();
+
+        const parts = flushPendingBuffers(state);
+
+        // Should emit at least a finish part even with empty buffers
+        assert.strictEqual(parts.length, 1, "Should emit one finish part");
+        const finishPart = parts[0];
+        assert.strictEqual(finishPart.type, "finish");
+        assert.strictEqual((finishPart as unknown as { reason: string; type: string }).reason, "incomplete_stream_end");
     });
 });

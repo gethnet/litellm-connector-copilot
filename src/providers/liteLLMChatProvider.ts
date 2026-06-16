@@ -22,7 +22,11 @@ import {
     getTotalTokenLimit,
 } from "../adapters/tokenUtils";
 import { decodeSSE } from "../adapters/sse/sseDecoder";
-import { createInitialStreamingState, interpretStreamEvent } from "../adapters/streaming/liteLLMStreamInterpreter";
+import {
+    createInitialStreamingState,
+    interpretStreamEvent,
+    flushPendingBuffers,
+} from "../adapters/streaming/liteLLMStreamInterpreter";
 import type { StreamingState } from "../adapters/streaming/liteLLMStreamInterpreter";
 import { emitPartsToVSCode } from "../adapters/streaming/vscodePartEmitter";
 import type { EffortFallbackCache } from "../utils/reasoningEffortFallback";
@@ -755,6 +759,58 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 eventCount,
                 stack: error instanceof Error ? error.stack : undefined,
             });
+
+            // Tier 2: Attempt recovery by flushing pending tool calls on stream error
+            const isStreamEndError =
+                error instanceof Error &&
+                (error.message.includes("Stream ended before [DONE] marker") ||
+                    error.message.includes("stream ended") ||
+                    error.message.includes("unexpected end"));
+
+            if (isStreamEndError && this._streamingState && eventCount > 0) {
+                Logger.info(
+                    `[processStreamingResponse] Attempting recovery: flushing ${eventCount} buffered tool calls`
+                );
+                StructuredLogger.info("stream.recovery_attempt", {
+                    reason: "stream_incomplete",
+                    eventCount,
+                    hasBufferedCalls:
+                        this._streamingState.responseToolCallBuffers.size > 0 ||
+                        this._streamingState.toolCallBuffers.size > 0,
+                });
+
+                try {
+                    // Flush all pending buffers and emit them
+                    const recoveredParts = flushPendingBuffers(this._streamingState);
+                    // recoveredParts includes at least the finish part, so check length > 1
+                    if (recoveredParts.length > 1) {
+                        // -1 because last part is finish
+                        Logger.debug(
+                            `[processStreamingResponse] Recovery emitted ${recoveredParts.length - 1} buffered tool calls`
+                        );
+                        emitPartsToVSCode(recoveredParts, progress);
+                        StructuredLogger.info("stream.recovery_success", {
+                            toolCallsFlushed: recoveredParts.filter((p) => p.type === "tool_call").length,
+                        });
+                        // Don't re-throw after successful recovery - partial response is better than hard failure
+                        return;
+                    } else {
+                        // No recoverable parts (empty stream), let error through
+                        Logger.debug(
+                            `[processStreamingResponse] No buffered tool calls to recover (${eventCount} events but empty buffers)`
+                        );
+                    }
+                } catch (recoveryErr) {
+                    Logger.warn(
+                        `[processStreamingResponse] Recovery failed: ${recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr)}`
+                    );
+                    StructuredLogger.warn("stream.recovery_failed", {
+                        originalError: error instanceof Error ? error.message : String(error),
+                        recoveryError: recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr),
+                    });
+                }
+            }
+
             throw error;
         } finally {
             if (watchdog) {

@@ -99,12 +99,43 @@ suite("SSE Decoder Unit Tests", () => {
         assert.deepStrictEqual(results, ["content"]);
     });
 
-    test("throws error when stream closes without [DONE] marker", async () => {
+    test("accepts stream that ends cleanly without [DONE] marker (clean buffer)", async () => {
+        // Bug #97 Tier 1: Stream closes with complete payloads but no [DONE] marker.
+        // This can happen with long-running requests to Azure AI/Anthropic proxies (63+ seconds).
+        // The stream is clean (all payloads received), so we should NOT throw error.
         const stream = new ReadableStream<Uint8Array>({
             start(controller) {
                 controller.enqueue(new TextEncoder().encode('data: {"text": "hello"}\n\n'));
                 controller.enqueue(new TextEncoder().encode('data: {"text": "world"}\n\n'));
-                // Intentionally close WITHOUT [DONE] marker
+                // Intentionally close WITHOUT [DONE] marker, but all payloads are complete
+                controller.close();
+            },
+        });
+
+        const results: string[] = [];
+        let threwError = false;
+
+        try {
+            for await (const payload of decodeSSE(stream)) {
+                results.push(payload);
+            }
+        } catch (_err) {
+            threwError = true;
+        }
+
+        // Should NOT throw error for clean stream end (buffer empty)
+        assert.strictEqual(threwError, false, "Should NOT throw error when stream ends cleanly (no pending data)");
+        // Both payloads should be yielded
+        assert.deepStrictEqual(results, ['{"text": "hello"}', '{"text": "world"}']);
+    });
+
+    test("throws error when stream closes with incomplete data in buffer (no [DONE])", async () => {
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode('data: {"text": "hello"}\n\n'));
+                // Send raw incomplete JSON (no "data:" prefix, won't extract as event)
+                controller.enqueue(new TextEncoder().encode('{"incomplete'));
+                // Close with truly incomplete data
                 controller.close();
             },
         });
@@ -122,13 +153,17 @@ suite("SSE Decoder Unit Tests", () => {
             errorMessage = err instanceof Error ? err.message : String(err);
         }
 
-        assert.strictEqual(threwError, true, "Expected decodeSSE to throw error when [DONE] marker missing");
+        assert.strictEqual(
+            threwError,
+            true,
+            "Expected decodeSSE to throw error when incomplete data remains in buffer"
+        );
         assert.match(
             errorMessage,
             /Stream ended before \[DONE\] marker/,
             "Error message should indicate missing [DONE] marker"
         );
-        // Partial payloads should have been yielded before error
-        assert.deepStrictEqual(results, ['{"text": "hello"}', '{"text": "world"}']);
+        // Only the complete payload should be yielded
+        assert.deepStrictEqual(results, ['{"text": "hello"}']);
     });
 });
