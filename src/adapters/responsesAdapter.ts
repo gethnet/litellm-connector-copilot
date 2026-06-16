@@ -70,13 +70,15 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
                             content: contentItem.text,
                         });
                     } else if (contentItem.type === "image_url" && contentItem.image_url?.url) {
-                        console.log(
+                        Logger.debug(
                             `[responsesAdapter] User image: type=${contentItem.type}, url=${contentItem.image_url.url.substring(0, 50)}...`
                         );
+                        // LiteLLM /responses requires content to be a string or array — NOT a bare dict.
+                        // Wrap the content item in an array to avoid ValueError: Invalid content type: <class 'dict'>
                         inputArray.push({
                             type: "message",
                             role: "user",
-                            content: contentItem,
+                            content: [contentItem],
                         } as unknown as LiteLLMResponseInputItem);
                     }
                 }
@@ -96,13 +98,15 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
                             content: contentItem.text,
                         });
                     } else if (contentItem.type === "image_url" && contentItem.image_url?.url) {
-                        console.log(
+                        Logger.debug(
                             `[responsesAdapter] Assistant image: type=${contentItem.type}, url=${contentItem.image_url.url.substring(0, 50)}...`
                         );
+                        // LiteLLM /responses requires content to be a string or array — NOT a bare dict.
+                        // Wrap the content item in an array to avoid ValueError: Invalid content type: <class 'dict'>
                         inputArray.push({
                             type: "message",
                             role: "assistant",
-                            content: contentItem,
+                            content: [contentItem],
                         } as unknown as LiteLLMResponseInputItem);
                     }
                 }

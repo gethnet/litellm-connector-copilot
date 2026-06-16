@@ -168,19 +168,49 @@ export async function* decodeSSE(
 
         // Check if stream ended without [DONE] marker
         if (!sawDone) {
-            Logger.error("[decodeSSE] Stream ended without [DONE] marker - response incomplete");
-            StructuredLogger.error("stream.ended_without_done", {
-                chunkCount,
-                payloadCount,
-                bufferLength: buffer.length,
-                note: "Stream ended prematurely - no [DONE] marker received",
-            });
+            // Only throw error if:
+            // 1. There is incomplete data remaining in the buffer (corruption), OR
+            // 2. No payloads were received at all (empty stream)
+            // Clean stream end with payloads but no [DONE] is accepted as implicit done
+            const bufferHasIncompletData = buffer.trim().length > 0;
+            const isEmptyStream = payloadCount === 0;
 
-            // Prepare error to throw after finally block (unless aborted or cancelled)
-            if (!aborted && !token?.isCancellationRequested) {
-                endError = new Error(
-                    `Stream ended before [DONE] marker - response may be incomplete (${payloadCount} payloads received, stream closed unexpectedly)`
+            if (bufferHasIncompletData) {
+                Logger.error("[decodeSSE] Stream ended with incomplete data in buffer");
+                StructuredLogger.error("stream.ended_without_done_incomplete_buffer", {
+                    chunkCount,
+                    payloadCount,
+                    bufferLength: buffer.length,
+                    note: "Stream ended with unprocessed data - response likely truncated",
+                });
+
+                if (!aborted && !token?.isCancellationRequested) {
+                    endError = new Error(
+                        `Stream ended before [DONE] marker with incomplete data - response truncated (${payloadCount} payloads received, ${buffer.length} bytes remaining)`
+                    );
+                }
+            } else if (isEmptyStream) {
+                Logger.error("[decodeSSE] Stream ended without any payloads or [DONE] marker");
+                StructuredLogger.error("stream.ended_without_done_empty_stream", {
+                    chunkCount,
+                    payloadCount: 0,
+                    note: "Stream ended without receiving any data",
+                });
+
+                if (!aborted && !token?.isCancellationRequested) {
+                    endError = new Error("Stream ended before [DONE] marker without receiving any payloads");
+                }
+            } else {
+                // Clean stream end (payloads received and complete, buffer empty, no [DONE])
+                // Tier 1: Accept as implicit [DONE]
+                Logger.debug(
+                    "[decodeSSE] Stream closed without [DONE] marker but all payloads complete (clean closure)"
                 );
+                StructuredLogger.info("stream.ended_without_done_clean_closure", {
+                    chunkCount,
+                    payloadCount,
+                    note: "Stream ended cleanly without [DONE] marker - treating as implicit complete",
+                });
             }
         }
     } finally {

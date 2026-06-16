@@ -894,3 +894,97 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
     });
     return allParts;
 }
+
+/**
+ * Flushes all buffered tool calls and emits them without requiring
+ * a response.completed or finish event. Used when stream ends prematurely.
+ *
+ * Emits:
+ * - All buffered /responses-format tool calls
+ * - Any anonymous tool call buffering
+ * - All buffered OpenAI-format tool calls
+ * - A finish part with reason "incomplete_stream_end"
+ *
+ * Returns an array of emitted parts in emission order.
+ */
+export function flushPendingBuffers(state: StreamingState): EmittedPart[] {
+    const parts: EmittedPart[] = [];
+    let toolCallIndex = 0;
+
+    // 1. Flush /responses-format tool calls
+    for (const id of state.responseToolCallOrder) {
+        const buffer = state.responseToolCallBuffers.get(id);
+        if (buffer) {
+            try {
+                JSON.parse(buffer.args);
+                parts.push({
+                    type: "tool_call",
+                    index: toolCallIndex++,
+                    id: id,
+                    name: buffer.name || "unknown_tool",
+                    args: buffer.args,
+                });
+                Logger.debug(`[flushPendingBuffers] Flushed /responses tool call: ${buffer.name} (id: ${id})`);
+            } catch {
+                Logger.warn(`[flushPendingBuffers] Skipping malformed /responses tool call args (id: ${id})`);
+            }
+        }
+    }
+    state.responseToolCallBuffers.clear();
+    state.responseToolCallOrder = [];
+
+    // 2. Flush anonymous tool call
+    if (state.anonymousResponseToolName && state.anonymousResponseToolArgs) {
+        try {
+            JSON.parse(state.anonymousResponseToolArgs);
+            parts.push({
+                type: "tool_call",
+                index: toolCallIndex++,
+                id: `anonymous_${Date.now()}`,
+                name: state.anonymousResponseToolName,
+                args: state.anonymousResponseToolArgs,
+            });
+            Logger.debug(`[flushPendingBuffers] Flushed anonymous tool call: ${state.anonymousResponseToolName}`);
+        } catch {
+            Logger.warn(
+                `[flushPendingBuffers] Skipping malformed anonymous tool call args: ${state.anonymousResponseToolArgs}`
+            );
+        }
+    }
+    state.anonymousResponseToolName = undefined;
+    state.anonymousResponseToolArgs = "";
+
+    // 3. Flush OpenAI-format buffered tool calls (delta-based)
+    for (const index of state.toolCallBuffers.keys()) {
+        const buffer = state.toolCallBuffers.get(index);
+        if (buffer) {
+            try {
+                JSON.parse(buffer.args);
+                parts.push({
+                    type: "tool_call",
+                    index: toolCallIndex++,
+                    id: buffer.id || `openai_${index}`,
+                    name: buffer.name || "unknown_tool",
+                    args: buffer.args,
+                });
+                Logger.debug(`[flushPendingBuffers] Flushed OpenAI tool call: ${buffer.name} (id: ${buffer.id})`);
+            } catch {
+                Logger.warn(`[flushPendingBuffers] Skipping malformed OpenAI tool call args at index ${index}`);
+            }
+        }
+    }
+    state.toolCallBuffers.clear();
+    state.completedToolCallIndices.clear();
+
+    // 4. Emit finish with "incomplete_stream_end" reason to signal partial response
+    Logger.debug(`[flushPendingBuffers] Emitting ${parts.length} flushed parts with incomplete_stream_end signal`);
+    StructuredLogger.debug("stream.pending_buffers_flushed", {
+        toolCallsEmitted: parts.filter((p) => p.type === "tool_call").length,
+    });
+    parts.push({
+        type: "finish",
+        reason: "incomplete_stream_end",
+    });
+
+    return parts;
+}

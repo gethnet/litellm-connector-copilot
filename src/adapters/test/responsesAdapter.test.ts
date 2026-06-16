@@ -233,6 +233,58 @@ suite("Responses Adapter Unit Tests", () => {
         assert.strictEqual(body.instructions, "sys");
     });
 
+    test("transformToResponsesFormat wraps user image_url content item in array (not bare dict)", () => {
+        // Reproduces addendum bug: LiteLLM raises ValueError: Invalid content type: <class 'dict'>
+        // when content is a bare object. The fix is to wrap it in an array.
+        const body = transformToResponsesFormat({
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [{ type: "image_url", image_url: { url: "https://example.com/image.png" } }],
+                },
+            ],
+        });
+
+        const input = body.input as Record<string, unknown>[];
+        assert.strictEqual(input.length, 1, "Should produce one input item");
+        const item = input[0];
+        assert.strictEqual(item.type, "message");
+        assert.strictEqual(item.role, "user");
+        // content must be an ARRAY, not a bare object
+        assert.ok(Array.isArray(item.content), "content must be an array, not a bare dict");
+        const content = item.content as Record<string, unknown>[];
+        assert.strictEqual(content.length, 1);
+        assert.strictEqual(content[0].type, "image_url");
+        assert.deepStrictEqual(content[0].image_url, { url: "https://example.com/image.png" });
+    });
+
+    test("transformToResponsesFormat wraps assistant image_url content item in array (not bare dict)", () => {
+        // Companion to the user image test — assistant vision messages have the same bug
+        const body = transformToResponsesFormat({
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "describe this image" }],
+                },
+                {
+                    role: "assistant",
+                    content: [{ type: "image_url", image_url: { url: "https://example.com/image.png" } }],
+                },
+            ],
+        });
+
+        const input = body.input as Record<string, unknown>[];
+        const imageMessage = input.find(
+            (i) => i.type === "message" && (i as Record<string, unknown>).role === "assistant"
+        );
+        assert.ok(imageMessage, "Should find assistant message");
+        assert.ok(Array.isArray((imageMessage as Record<string, unknown>).content), "content must be an array");
+        const content = (imageMessage as Record<string, unknown>).content as Record<string, unknown>[];
+        assert.strictEqual(content[0].type, "image_url");
+    });
+
     test("transformToResponsesFormat handles user message with mixed array content", () => {
         const body = transformToResponsesFormat({
             model: "m",
@@ -262,14 +314,14 @@ suite("Responses Adapter Unit Tests", () => {
         assert.strictEqual(textMessage.role, "user");
         assert.strictEqual(textMessage.content, "hello");
 
-        // Third item: image_url message (content is full contentItem object with image_url)
+        // Third item: image_url message — content must be an ARRAY (not a bare dict)
         const imageMessage = body.input[2] as LiteLLMResponseInputItem;
         assert.strictEqual(imageMessage.type, "message");
         assert.strictEqual(imageMessage.role, "user");
-        // For image_url, content is the full contentItem object
-        const content = imageMessage.content as unknown as { type: string; image_url?: { url: string } };
-        assert.strictEqual(content.type, "image_url");
-        assert.strictEqual(content.image_url?.url, "https://example.com/image.png");
+        const content = imageMessage.content as unknown as Record<string, unknown>[];
+        assert.ok(Array.isArray(content), "image_url content must be array-wrapped");
+        assert.strictEqual(content[0].type, "image_url");
+        assert.deepStrictEqual(content[0].image_url, { url: "https://example.com/image.png" });
     });
 
     test("transformToResponsesFormat preserves image_url content in user messages", () => {
@@ -302,6 +354,10 @@ suite("Responses Adapter Unit Tests", () => {
 
         assert.ok(textMessage, "Text message should be preserved");
         assert.ok(imageMessage, "Image message should be preserved");
+        assert.ok(
+            Array.isArray((imageMessage as Record<string, unknown>).content),
+            "image_url message content must be an array"
+        );
     });
 
     test("transformToResponsesFormat preserves image_url content in assistant messages", () => {
@@ -338,6 +394,10 @@ suite("Responses Adapter Unit Tests", () => {
 
         assert.ok(textMessage, "Assistant text message should be preserved");
         assert.ok(imageMessage, "Assistant image message should be preserved");
+        assert.ok(
+            Array.isArray((imageMessage as Record<string, unknown>).content),
+            "assistant image_url message content must be an array"
+        );
     });
 
     test("transformToResponsesFormat handles tool message with missing id", () => {
