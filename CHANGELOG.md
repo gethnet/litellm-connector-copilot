@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.3] - 2026-06-16
+
+### 🐛 Fixes
+
+* **🖼️ Image content serialization in `/responses` requests (bug [#98](https://github.com/gethnet/litellm-connector-copilot/issues/98))**: `image_url` content items in user and assistant messages are now correctly wrapped in an array before being sent to the `/responses` endpoint. Previously they were passed as a bare object, causing Azure (and other strict backends) to reject requests with `Invalid type for 'input[N].content': expected one of an array of objects or string, but got an object instead`. This failure was most visible in `inline-edit` sessions that include editor screenshots alongside a large conversation context. (`src/adapters/responsesAdapter.ts`)
+* **⚡ Incomplete stream recovery**: The provider now attempts a best-effort recovery when a stream ends without a `[DONE]` marker. Buffered `/responses`-format tool calls, anonymous tool calls, and OpenAI tool calls are flushed and emitted rather than silently dropped. A partial response is returned to VS Code instead of hard-failing. (`src/providers/liteLLMChatProvider.ts`, `src/adapters/streaming/liteLLMStreamInterpreter.ts`)
+* **🔇 Clean SSE closure handling**: SSE streams that close cleanly without buffered data are no longer treated as errors. Only genuinely truncated streams (data remains in the buffer) raise an error, producing clearer diagnostics for long-running proxy responses. (`src/adapters/sse/sseDecoder.ts`)
+
+### 🧪 Tests
+
+* **Regression coverage for bug #98**: Added an end-to-end inline-edit scenario test that builds a multi-turn conversation containing image content, tool invocations, and `reasoning_effort`, and asserts that no `message`-type input item produced by the adapter carries bare-object `content`. (`src/adapters/test/responsesAdapter.test.ts`)
+* **Buffered tool call recovery**: Added unit tests for `flushPendingBuffers()` covering `/responses`-format, anonymous, and OpenAI tool call flushing on incomplete streams, malformed arg recovery, and empty buffer handling. (`src/adapters/streaming/test/liteLLMStreamInterpreter.test.ts`)
+* **SSE clean closure / truncation detection**: Added regression tests for clean no-`[DONE]` termination (no error) and truncated buffer detection (explicit error). (`src/adapters/sse/test/sseDecoder.test.ts`)
+* **Provider-level incomplete stream recovery**: Added chat provider tests verifying best-effort recovery is attempted on stream-end errors and that previously buffered tool calls are emitted to VS Code. (`src/providers/test/chatProvider.test.ts`)
+
 ## [2.1.2] - 2026-06-16
 
 ### ✨ Features
