@@ -429,4 +429,118 @@ suite("Responses Adapter Unit Tests", () => {
         });
         assert.strictEqual(body.reasoning_effort, undefined);
     });
+
+    // Regression: bug #98 — inline-edit caller with image content sent to /responses endpoint.
+    //
+    // The inline-edit workflow produces large multi-turn conversations that include
+    // image_url content items (e.g. editor screenshots). Before the fix, the responses
+    // adapter set `content: contentItem` (a bare object) instead of `content: [contentItem]`
+    // (an array), causing Azure to reject the request with:
+    //   "Invalid type for 'input[N].content': expected one of an array of objects or string,
+    //    but got an object instead."
+    //
+    // This test builds a representative inline-edit session — system prompt, several
+    // user/assistant turns, one turn carrying an image, a tool invocation, and a final
+    // edit request — and asserts that every message-type input item produced by the
+    // adapter carries content that is either a string or an array, never a bare object.
+    test("transformToResponsesFormat inline-edit session with image content never produces bare-object content (bug #98)", () => {
+        const imageUrl =
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+        const body = transformToResponsesFormat({
+            model: "gpt-5.3-codex",
+            reasoning_effort: "medium",
+            messages: [
+                // Turn 0: system prompt
+                { role: "system", content: "You are a helpful inline code editor." },
+                // Turn 1: user sends a plain text description
+                { role: "user", content: "Please refactor this function to be more readable." },
+                // Turn 2: assistant responds with text
+                { role: "assistant", content: "Sure, here is the refactored version:" },
+                // Turn 3: user sends a follow-up with an image (editor screenshot) alongside text — the
+                // combination that triggers the inline-edit image path and previously produced a bare dict
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "Here is a screenshot of the current code:" },
+                        { type: "image_url", image_url: { url: imageUrl } },
+                    ],
+                },
+                // Turn 4: assistant invokes a tool
+                {
+                    role: "assistant",
+                    content: null as unknown as string,
+                    tool_calls: [
+                        {
+                            id: "call_abc123",
+                            type: "function",
+                            function: { name: "read_file", arguments: '{"path":"src/utils.ts"}' },
+                        },
+                    ],
+                },
+                // Turn 5: tool result
+                { role: "tool", tool_call_id: "call_abc123", content: "export function foo() { return 42; }" },
+                // Turn 6: assistant text reply
+                { role: "assistant", content: "I have read the file. Here is the improved version:" },
+                // Turn 7: user sends final edit instruction with another image
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "Apply this change to the highlighted region." },
+                        { type: "image_url", image_url: { url: imageUrl } },
+                    ],
+                },
+            ],
+        });
+
+        const input = body.input as Record<string, unknown>[];
+
+        // Every message-type item must carry content that is a string or an array.
+        // A bare object (typeof === "object" && !Array.isArray) is the invalid shape
+        // that Azure rejects and that was produced by the pre-fix adapter code.
+        const invalidItems = input.filter((item) => {
+            if (item.type !== "message") {
+                return false;
+            }
+            const content = item.content;
+            return content !== null && typeof content === "object" && !Array.isArray(content);
+        });
+
+        assert.strictEqual(
+            invalidItems.length,
+            0,
+            `Found ${invalidItems.length} message item(s) with bare-object content — Azure will reject these. ` +
+                `Offending items: ${JSON.stringify(invalidItems, null, 2)}`
+        );
+
+        // Additionally verify the two image-bearing user turns produce array-wrapped content.
+        const imageBearingMessages = input.filter(
+            (item) =>
+                item.type === "message" &&
+                Array.isArray(item.content) &&
+                (item.content as Record<string, unknown>[]).some((c) => c.type === "image_url")
+        );
+        assert.strictEqual(
+            imageBearingMessages.length,
+            2,
+            `Expected exactly 2 image-bearing message items (one per user image turn), got ${imageBearingMessages.length}`
+        );
+
+        for (const msg of imageBearingMessages) {
+            const content = msg.content as Record<string, unknown>[];
+            assert.ok(Array.isArray(content), "image-bearing message content must be an array");
+            const imageItem = content.find((c) => c.type === "image_url") as Record<string, unknown> | undefined;
+            assert.ok(imageItem, "image_url item must be present inside the content array");
+            assert.deepStrictEqual(imageItem.image_url, { url: imageUrl });
+        }
+
+        // Sanity-check: function_call and function_call_output items are present and correctly linked.
+        const functionCall = input.find((i) => i.type === "function_call") as Record<string, unknown> | undefined;
+        const functionOutput = input.find((i) => i.type === "function_call_output") as
+            | Record<string, unknown>
+            | undefined;
+        assert.ok(functionCall, "function_call item must be present");
+        assert.ok(functionOutput, "function_call_output item must be present");
+        assert.strictEqual(functionCall.call_id, functionOutput.call_id, "call_id must match between call and output");
+    });
 });
