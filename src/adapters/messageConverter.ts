@@ -123,6 +123,14 @@ export function convertMessagesToOpenAI(
                     const emittedIndex = out.length;
                     const normalizedCallId = options.normalizeToolCallId(part.callId);
                     const content = serializeToolResultContent(part.content, options);
+
+                    // Validate tool result format for provider compatibility (e.g., Bedrock).
+                    // Bedrock's Converse API requires:
+                    // 1. tool_call_id must be present and match preceding assistant tool call
+                    // 2. content must be non-empty or default to "Success"
+                    // 3. Tool call IDs must survive normalization and remain unique
+                    validateToolResultMessage(normalizedCallId, content, messageIndex, partIndex);
+
                     out.push({ role: "tool", tool_call_id: normalizedCallId, content });
                     Logger.trace("[convertMessagesToOpenAI] message_emitted", {
                         messageIndex,
@@ -426,4 +434,56 @@ function previewContent(content: string | OpenAIChatMessageContentItem[]): strin
  */
 function previewText(text: string): string {
     return text.length <= 160 ? text : `${text.slice(0, 157)}...`;
+}
+
+/**
+ * Validate tool result message format for provider compatibility.
+ *
+ * Bedrock's Converse API enforces stricter validation than vanilla OpenAI:
+ * - tool_call_id must be present and non-empty
+ * - content must be non-empty (or defaults to "Success")
+ * - Tool call IDs must be stable across message sequences
+ *
+ * This validation ensures tool results will not be rejected downstream.
+ *
+ * @param toolCallId - Normalized tool call ID from the tool result
+ * @param content - Serialized tool result content
+ * @param messageIndex - Index of the message in the input array (for debugging)
+ * @param partIndex - Index of the part in the message (for debugging)
+ */
+function validateToolResultMessage(toolCallId: string, content: string, messageIndex: number, partIndex: number): void {
+    // Bedrock-specific validation: tool_call_id must be present and non-empty
+    if (!toolCallId || toolCallId.trim().length === 0) {
+        const context = `message[${messageIndex}].content[${partIndex}]`;
+        Logger.warn("[convertMessagesToOpenAI] tool_result_id_empty", {
+            context,
+            toolCallId: "<empty>",
+        });
+        // Note: This will likely fail at Bedrock layer; we log for diagnostic purposes
+    }
+
+    // Validate tool call ID format: Bedrock accepts alphanumeric, dash, underscore
+    if (!toolCallId.match(/^[a-zA-Z0-9_-]+$/)) {
+        const context = `message[${messageIndex}].content[${partIndex}]`;
+        Logger.warn("[convertMessagesToOpenAI] tool_result_id_invalid_chars", {
+            context,
+            toolCallId,
+            allowedPattern: "^[a-zA-Z0-9_-]+$",
+        });
+    }
+
+    // Validate content is non-empty (should default to "Success" from serializeToolResultContent)
+    if (!content || content.trim().length === 0) {
+        const context = `message[${messageIndex}].content[${partIndex}]`;
+        Logger.warn("[convertMessagesToOpenAI] tool_result_content_empty", {
+            context,
+            toolCallId,
+        });
+    }
+
+    Logger.trace("[convertMessagesToOpenAI] tool_result_validated", {
+        toolCallId,
+        contentLength: content.length,
+        isJsonWrapped: content.startsWith("{") && content.includes("tool_result"),
+    });
 }

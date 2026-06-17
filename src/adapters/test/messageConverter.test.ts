@@ -833,3 +833,209 @@ suite("Message Converters — appendDataPart (via convertMessagesToOpenAI)", () 
         assert.strictEqual(result[0].content, "I processed: result");
     });
 });
+
+/**
+ * Test suite for tool result ID preservation and Bedrock compatibility.
+ *
+ * Bedrock's Converse API validation requires:
+ * 1. Tool result callId matches preceding assistant tool_call id
+ * 2. Tool result content is present and well-formed
+ * 3. Tool call IDs remain stable across normalization
+ */
+suite("Message Converters — Tool Result ID Preservation (Bedrock Compatibility)", () => {
+    test("preserves tool call ID in tool result message (exact match with normalization)", () => {
+        const callId = "call-abc-123-xyz";
+        const message: V2ChatMessage = {
+            role: "user",
+            name: undefined,
+            content: [
+                {
+                    type: "tool_result",
+                    callId,
+                    content: ["Tool result text"],
+                },
+            ],
+        };
+
+        const options: MessageConversionOptions = {
+            normalizeToolCallId: (id: string) => `normalized_${id}`,
+        };
+
+        const result = convertMessagesToOpenAI([message], options);
+        const toolMsg = result.find((m) => m.role === "tool");
+
+        assert.ok(toolMsg, "Expected a tool-role message in output");
+        assert.strictEqual(
+            toolMsg.tool_call_id,
+            `normalized_${callId}`,
+            "Tool result tool_call_id should match normalized call ID"
+        );
+    });
+
+    test("ensures tool result appears after assistant tool call in message sequence", () => {
+        const toolCallId = "call-xyz";
+        const messages: V2ChatMessage[] = [
+            {
+                role: "assistant",
+                name: undefined,
+                content: [
+                    {
+                        type: "tool_call",
+                        callId: toolCallId,
+                        name: "search_tool",
+                        input: {},
+                    },
+                ],
+            },
+            {
+                role: "user",
+                name: undefined,
+                content: [
+                    {
+                        type: "tool_result",
+                        callId: toolCallId,
+                        content: ["Found results"],
+                    },
+                ],
+            },
+        ];
+
+        const options: MessageConversionOptions = {
+            normalizeToolCallId: (id: string) => id,
+        };
+
+        const result = convertMessagesToOpenAI(messages, options);
+
+        // Verify sequence: assistant (with tool_call) → tool (with matching tool_call_id)
+        const toolCallMsg = result.find((m) => m.role === "assistant" && m.tool_calls && m.tool_calls.length > 0);
+        const toolResultMsg = result.find((m) => m.role === "tool");
+
+        assert.ok(toolCallMsg, "Expected assistant message with tool call");
+        assert.ok(toolResultMsg, "Expected tool message");
+
+        const toolCallMsgIndex = result.indexOf(toolCallMsg);
+        const toolResultMsgIndex = result.indexOf(toolResultMsg);
+
+        assert.ok(
+            toolResultMsgIndex > toolCallMsgIndex,
+            `Tool result message should come after assistant tool call (indices: ${toolCallMsgIndex} → ${toolResultMsgIndex})`
+        );
+
+        assert.strictEqual(
+            toolCallMsg.tool_calls![0].id,
+            toolResultMsg.tool_call_id,
+            "Tool call ID and tool result call_id must match exactly"
+        );
+    });
+
+    test("validates tool result ID format for provider compatibility", () => {
+        // Bedrock's toolUse IDs require alphanumeric + underscore/dash pattern
+        const callId = "call-abc-123";
+        const message: V2ChatMessage = {
+            role: "user",
+            name: undefined,
+            content: [
+                {
+                    type: "tool_result",
+                    callId,
+                    content: ["result"],
+                },
+            ],
+        };
+
+        const options: MessageConversionOptions = {
+            normalizeToolCallId: (id: string) => {
+                // Simulate Bedrock ID normalization: strip invalid chars, keep alphanumeric + underscore/dash
+                return id.replace(/[^a-zA-Z0-9_-]/g, "");
+            },
+        };
+
+        const result = convertMessagesToOpenAI([message], options);
+        const toolMsg = result.find((m) => m.role === "tool");
+
+        assert.ok(toolMsg, "Expected tool-role message");
+        assert.ok(
+            /^[a-zA-Z0-9_-]+$/.test(toolMsg.tool_call_id!),
+            `Normalized ID should contain only alphanumeric, dash, underscore; got: ${toolMsg.tool_call_id}`
+        );
+    });
+
+    test("handles multiple tool calls and results in correct sequence (Bedrock ordering)", () => {
+        const callId1 = "call-1";
+        const callId2 = "call-2";
+
+        const messages: V2ChatMessage[] = [
+            {
+                role: "assistant",
+                name: undefined,
+                content: [
+                    {
+                        type: "tool_call",
+                        callId: callId1,
+                        name: "func1",
+                        input: {},
+                    },
+                    {
+                        type: "tool_call",
+                        callId: callId2,
+                        name: "func2",
+                        input: {},
+                    },
+                ],
+            },
+            {
+                role: "user",
+                name: undefined,
+                content: [
+                    {
+                        type: "tool_result",
+                        callId: callId1,
+                        content: ["result 1"],
+                    },
+                    {
+                        type: "tool_result",
+                        callId: callId2,
+                        content: ["result 2"],
+                    },
+                ],
+            },
+        ];
+
+        const options: MessageConversionOptions = {
+            normalizeToolCallId: (id: string) => id,
+        };
+
+        const result = convertMessagesToOpenAI(messages, options);
+
+        const toolResults = result.filter((m) => m.role === "tool");
+        assert.strictEqual(toolResults.length, 2, "Expected 2 tool result messages");
+        assert.strictEqual(toolResults[0].tool_call_id, callId1, "First result should match first call");
+        assert.strictEqual(toolResults[1].tool_call_id, callId2, "Second result should match second call");
+    });
+
+    test("ensures tool result content is never empty (defaults to 'Success')", () => {
+        const callId = "call-empty";
+        const message: V2ChatMessage = {
+            role: "user",
+            name: undefined,
+            content: [
+                {
+                    type: "tool_result",
+                    callId,
+                    content: [], // Empty content array
+                },
+            ],
+        };
+
+        const options: MessageConversionOptions = {
+            normalizeToolCallId: (id: string) => id,
+        };
+
+        const result = convertMessagesToOpenAI([message], options);
+        const toolMsg = result.find((m) => m.role === "tool");
+
+        assert.ok(toolMsg, "Expected tool-role message");
+        assert.ok(toolMsg.content, "Tool result content should never be undefined or null");
+        assert.strictEqual(toolMsg.content, "Success", "Empty tool result should default to 'Success'");
+    });
+});
