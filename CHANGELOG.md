@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.4] - 2026-06-17
+
+### 🐛 Fixes
+
+* **🔧 Bedrock tool result formatting validation (bug [#100](https://github.com/gethnet/litellm-connector-copilot/issues/100))**: Added strict validation and diagnostic logging for tool result message format to ensure compatibility with Bedrock's Converse API. Tool result IDs are now validated to contain only alphanumeric characters, dashes, and underscores, and content is verified to be non-empty. When a tool result message fails format validation, diagnostic warnings are logged to aid troubleshooting without blocking the request. This prevents `BedrockException: Expected toolResult blocks` errors when using Bedrock backends with multi-turn conversations involving tool calls. (`src/adapters/messageConverter.ts`)
+
+### 🧪 Tests
+
+* **Tool result ID preservation and Bedrock compatibility**: Added comprehensive test suite validating tool result message format compliance, including ID normalization, message ordering, format validation for Bedrock-compatible character patterns, sequential tool call/result pairs, and content defaulting to "Success" for empty results. (`src/adapters/test/messageConverter.test.ts`)
+
 ## [2.1.3] - 2026-06-16
 
 ### 🐛 Fixes
