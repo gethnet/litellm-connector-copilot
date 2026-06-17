@@ -168,7 +168,7 @@ export class ConfigManager {
             .get<string>(ConfigManager.SCM_COMMIT_MSG_MODEL_ID_KEY, "")
             .trim();
         const v2ApiEnabled = workspaceConfig.get<boolean>(ConfigManager.ENABLE_RESPONSES_API, false);
-        const forceResponsesEndpoint = workspaceConfig.get<boolean>(ConfigManager.FORCE_RESPONSES_ENDPOINT_KEY, true);
+        const forceResponsesEndpoint = workspaceConfig.get<boolean>(ConfigManager.FORCE_RESPONSES_ENDPOINT_KEY, false);
         const allowChatCompletionsFallback = workspaceConfig.get<boolean>(
             ConfigManager.ALLOW_CHAT_COMPLETIONS_FALLBACK_KEY,
             false

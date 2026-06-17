@@ -186,7 +186,7 @@ export interface LiteLLMConfig {
     /**
      * When true, forces all models to use the `/responses` endpoint instead of per-model mode selection.
      * This ensures consistent behavior across models, especially for those that require reasoning support.
-     * Default: true (JSON-only, not in Settings UI).
+     * Default: false (opt-in, JSON-only, not in Settings UI).
      */
     forceResponsesEndpoint?: boolean;
 
