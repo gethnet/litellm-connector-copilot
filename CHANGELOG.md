@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.5] - 2026-06-17
+
+### 🐛 Fixes
+
+* **🔧 forceResponsesEndpoint default corrected to opt-in (bug [#102](https://github.com/gethnet/litellm-connector-copilot/issues/102))**: The hidden configuration flag `litellm-connector.forceResponsesEndpoint` now defaults to `false`, requiring explicit user opt-in. Previously, this flag was introduced in v2.1.0 with an unintended `true` default, causing all models to route through the `/responses` endpoint when `enableResponsesApi` was enabled — even without the user explicitly setting the flag. Hidden config flags should follow the principle of least surprise; they must not change default routing behavior unless explicitly enabled. (`src/config/configManager.ts`)
+
+### 📚 Documentation
+
+* **🧾 Updated JSDoc for forceResponsesEndpoint**: Clarified that the flag is opt-in, JSON-only, and not exposed in the Settings UI. (`src/types.ts`)
+
 ## [2.1.4] - 2026-06-17
 
 ### 🐛 Fixes

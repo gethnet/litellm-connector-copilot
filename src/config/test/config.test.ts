@@ -237,10 +237,10 @@ suite("ConfigManager Unit Tests", () => {
         assert.strictEqual(config.forceResponsesEndpoint, false);
     });
 
-    test("should default forceResponsesEndpoint to true when not set", async () => {
+    test("should default forceResponsesEndpoint to false when not set", async () => {
         settingsMap.delete("litellm-connector.forceResponsesEndpoint");
         const config = await configManager.getConfig();
-        assert.strictEqual(config.forceResponsesEndpoint, true);
+        assert.strictEqual(config.forceResponsesEndpoint, false);
     });
 
     test("should read allowChatCompletionsFallback from workspace settings", async () => {
