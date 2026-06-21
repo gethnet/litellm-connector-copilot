@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.6] - 2026-06-21
+
+### 🐛 Fixes
+
+* **🔧 String `category` on registered models (bug [#104](https://github.com/gethnet/litellm-connector-copilot/issues/104))**: `LanguageModelChatInformation.category` is now always a string (`'lightweight' | 'versatile' | 'powerful' | undefined`) emitted by the LiteLLM provider registry. Previously the registry set only the grouping object, which crashes VS Code's chat model picker (`getCategoryLabel`) with `TypeError: a.charAt is not a function` when its `default:` switch branch tries to call `.charAt` on the non-string value. With Copilot quota exhausted and BYOK models as the only viable option, this crash aborted `buildModelPickerItems()` and prevented the dropdown from ever opening. Per-backend picker section grouping is now driven by the existing vendor / id lookup rather than the `category` slot, so the picker continues to bucket models by backend. This is a workaround; the proper fix remains upstream in `microsoft/vscode` (add a `typeof === 'string'` guard in `getCategoryLabel`'s `default:` branch). (`src/providers/liteLLMProviderRegistry.ts`)
+* **🧠 Picker category derivation from capabilities**: Added `derivePickerCategory()` to map a model's derived capabilities to one of VS Code's three supported tags. `powerful` when reasoning is supported or the context window is ≥ 200k tokens, `versatile` when tools or vision are supported, `lightweight` for small-context models without tools/vision/reasoning, and `undefined` (never `null`, never an object) when no signal is conclusive. Decision order is `powerful` > `versatile` > `lightweight` > `undefined`. The helper is pure, deterministic, and has no I/O. (`src/utils/modelCapabilities.ts`)
+
+### 🧪 Tests
+
+* **`derivePickerCategory` branch coverage**: Added 6 unit tests covering each tier (lightweight / versatile / powerful / undefined), the large-context-window short-circuit, and a regression guard that the helper never returns `null` or a non-string value. (`src/utils/test/modelCapabilities.test.ts`)
+* **Registry `category` integration tests**: Added 4 integration tests asserting the registry emits `'versatile'` for balanced tools+vision models, `'powerful'` for reasoning-capable models, `'lightweight'` for small non-tooling models, and filters out the `'unknown model_name'` fallback so it never reaches VS Code. The existing per-backend grouping test continues to pass — we did not touch the grouping object. (`src/providers/test/liteLLMProviderBase.modelDisplay.test.ts`)
+
+### 🧹 Chores
+
+* **📦 `npm run check` script + version bump to `2.1.6`**: Added a top-level `check` script that chains lint, format, and coverage tests, giving a single command to validate the full pre-release gate. Bumped `package.json` to `2.1.6`. (`package.json`)
+* **🧼 Workspace metadata cleanup**: Removed the unused DeepWiki MCP server entry from `.vscode/mcp.json` and refreshed the investigative agent's tool list to match the current dev container. This keeps workspace metadata aligned with the actual setup. (`.vscode/mcp.json`, `.github/agents/investigative agent.agent.md`)
+
 ## [2.1.5] - 2026-06-17
 
 ### 🐛 Fixes

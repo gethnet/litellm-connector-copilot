@@ -70,6 +70,7 @@ import {
     getModelTags as getDerivedModelTags,
     buildReasoningEffortConfigurationSchema,
     getSupportedReasoningEfforts,
+    derivePickerCategory,
 } from "../utils/modelCapabilities";
 import { deriveGroupNameFromUrl } from "../utils";
 import type { LiteLLMConfig, LiteLLMModelInfo, LiteLLMModelInfoResponse } from "../types";
@@ -611,9 +612,24 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             capabilities,
             tags,
             isUserSelectable: true,
-            category: { label: displayLabel, order: 0 },
+            // The picker reads this field via `getCategoryLabel(category)` and
+            // crashes with `TypeError: a.charAt is not a function` when the
+            // value is not a string. The picker recognizes the three literals
+            // `lightweight` | `versatile` | `powerful` and handles `undefined`
+            // (omit tag). We MUST return one of those or `undefined` — never a
+            // grouping object, never `null`. See `.investigate/vscode-picker-charAt-bug.md`.
+            //
+            // Note on grouping: the picker does NOT read `category` for
+            // per-backend sectioning. Per the upstream
+            // `ModelPickerWidget.buildModelPickerItems()`, grouping is driven
+            // by `(vendor, groupName)` resolved through the workbench
+            // `ILanguageModelsService.getLanguageModelGroups()` lookup — not
+            // by anything we return in `category`. Returning a string here
+            // therefore does NOT regress per-backend picker sectioning; it
+            // only stops the crash on `getCategoryLabel`.
+            category: derivePickerCategory(derived),
             configurationSchema: reasoningSchema,
-        } as vscode.LanguageModelChatInformation;
+        } as unknown as vscode.LanguageModelChatInformation;
     }
 
     private sleep(ms: number, _token?: vscode.CancellationToken): Promise<void> {
