@@ -6,6 +6,8 @@ import {
     getSupportedReasoningEfforts,
     getDefaultReasoningEffort,
     buildReasoningEffortConfigurationSchema,
+    derivePickerCategory,
+    type DerivedModelCapabilities,
     type ExtendedModelInformation,
 } from "../modelCapabilities";
 import type { LiteLLMModelInfo, ModelCapabilityOverride, SupportedReasoningEffort } from "../../types";
@@ -557,6 +559,75 @@ suite("modelCapabilities", () => {
 
             assert.strictEqual(defaultEffort, "medium");
             assert.strictEqual(schema?.properties.reasoningEffort.default, "medium");
+        });
+    });
+
+    suite("derivePickerCategory", () => {
+        const baseDerived: DerivedModelCapabilities = {
+            supportsTools: false,
+            supportsVision: false,
+            supportsStreaming: true,
+            supportsReasoning: false,
+            supportsPdf: false,
+            supportsAudioInput: false,
+            supportsAudioOutput: false,
+            supportsComputerUse: false,
+            supportsFunctionCalling: false,
+            supportsToolChoice: false,
+            supportsSystemMessages: false,
+            supportsResponseSchema: false,
+            supportsPromptCaching: false,
+            supportsWebSearch: false,
+            supportsUrlContext: false,
+            supportsReasoningEffort: false,
+            supportsThinking: false,
+            endpointMode: "chat",
+            maxInputTokens: 100,
+            maxOutputTokens: 50,
+            rawContextWindow: 150,
+        };
+
+        test("returns 'versatile' for a balanced model (tools + vision, no reasoning, mid context)", () => {
+            assert.strictEqual(
+                derivePickerCategory({
+                    ...baseDerived,
+                    supportsTools: true,
+                    supportsVision: true,
+                    rawContextWindow: 128000,
+                }),
+                "versatile"
+            );
+        });
+
+        test("returns 'powerful' when reasoning is supported", () => {
+            assert.strictEqual(derivePickerCategory({ ...baseDerived, supportsReasoning: true }), "powerful");
+        });
+
+        test("returns 'powerful' when the model advertises a large context window (>= 200k tokens)", () => {
+            assert.strictEqual(derivePickerCategory({ ...baseDerived, rawContextWindow: 200000 }), "powerful");
+        });
+
+        test("returns 'lightweight' when no tools/vision/reasoning and small context window", () => {
+            assert.strictEqual(derivePickerCategory({ ...baseDerived, rawContextWindow: 8000 }), "lightweight");
+        });
+
+        test("returns undefined when no signals are present (mid-range context, no tools, no vision, no reasoning)", () => {
+            // Important: returning undefined means the picker omits the tag rather
+            // than crashing. We must NEVER return null or any non-string value.
+            // rawContextWindow is set to 64000 (between the 'lightweight' <= 32000
+            // and 'powerful' >= 200000 thresholds) so this is the only "no signal"
+            // branch the helper can hit.
+            assert.strictEqual(derivePickerCategory({ ...baseDerived, rawContextWindow: 64000 }), undefined);
+        });
+
+        test("returns a string literal — never null or an object (regression guard for VS Code picker crash)", () => {
+            const result = derivePickerCategory(baseDerived);
+            // Guard against the exact bug class: a non-string value reaching the
+            // picker's getCategoryLabel switch default branch.
+            assert.ok(
+                result === undefined || typeof result === "string",
+                `expected string | undefined, got ${typeof result}`
+            );
         });
     });
 });

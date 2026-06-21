@@ -480,3 +480,43 @@ export function formatModelDisplayLabel(modelOrName: ExtendedModelInformation | 
     const modelVendor = modelOrName.vendor;
     return modelVendor ? `[${modelVendor}] ${modelOrName.name}` : modelOrName.name;
 }
+
+/**
+ * Maps a derived capability bundle to the VS Code picker category tag.
+ *
+ * VS Code's chat picker (`getCategoryLabel` in
+ * `src/vs/workbench/contrib/chat/browser/widget/input/chatModelPicker.ts`)
+ * reads `LanguageModelChatInformation.category` as a `string | undefined`
+ * and crashes with `TypeError: a.charAt is not a function` when the field
+ * is not a string. This helper ensures we only ever return one of the
+ * three strings the picker recognizes (`lightweight` | `versatile` |
+ * `powerful`) or `undefined`. **Never** returns `null` or a non-string.
+ *
+ * The categorization is intentionally coarse and deterministic:
+ * - `powerful` when the model advertises reasoning OR a very large context
+ *   window (>= 200k tokens). Reasoning-capable and long-context models are
+ *   where users most need explicit guidance in the picker.
+ * - `versatile` when the model supports tools OR vision (general-purpose).
+ * - `lightweight` when none of the above apply and the model has a small
+ *   context window (proxy signal for "fast / cheap").
+ * - `undefined` when none of the signals are conclusive — the picker
+ *   already handles `undefined` by omitting the tag (the `case undefined`
+ *   branch in its switch).
+ *
+ * Decision order matters: `powerful` > `versatile` > `lightweight` > undefined.
+ * A model that meets the criteria for multiple tiers gets the highest one.
+ */
+export function derivePickerCategory(
+    derived: DerivedModelCapabilities
+): "lightweight" | "versatile" | "powerful" | undefined {
+    if (derived.supportsReasoning || derived.rawContextWindow >= 200000) {
+        return "powerful";
+    }
+    if (derived.supportsTools || derived.supportsVision) {
+        return "versatile";
+    }
+    if (derived.rawContextWindow <= 32000) {
+        return "lightweight";
+    }
+    return undefined;
+}

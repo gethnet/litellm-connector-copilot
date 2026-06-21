@@ -1,12 +1,6 @@
 {
 	"inputs": [],
 	"servers": {
-		"cognitionai/deepwiki": {
-			"type": "http",
-			"url": "https://mcp.deepwiki.com/mcp",
-			"gallery": "https://api.mcp.github.com",
-			"version": "1.0.0"
-		},
 		"posthog": {
 			"type": "http",
 			"url": "https://mcp.posthog.com/mcp"

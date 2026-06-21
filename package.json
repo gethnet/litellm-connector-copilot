@@ -17,7 +17,7 @@
 		"type": "git",
 		"url": "https://github.com/gethnet/litellm-connector-copilot"
 	},
-	"version": "2.1.5",
+	"version": "2.1.6",
 	"preview": true,
 	"engines": {
 		"vscode": "^1.120.0"
@@ -240,6 +240,7 @@
 		"clean": "find ./dist ./out ./coverage ./test-results -delete || true",
 		"clean:build": "find ./dist ./out -delete || true",
 		"clean:tests": "find ./coverage ./test-results -delete || true",
+		"check": "npm run lint; npm run format; npm run test:coverage;",
 		"precompile": "npm run clean",
 		"compile": "tsc -p ./",
 		"vscode:pack:dev": "npm run clean:build && tsc --noEmit && node esbuild.js && npx vsce package",
