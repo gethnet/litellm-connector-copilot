@@ -34,7 +34,7 @@ jobs:
       version: ${{ steps.package_info.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Dependencies
         run: npm install --include dev
