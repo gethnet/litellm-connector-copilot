@@ -319,12 +319,17 @@ export interface OpenAIChatCompletionRequest {
      * config, etc.). We deliberately use this single canonical format so the connector
      * never has to reason about per-provider request shaping.
      *
-     * Allowed values: "minimal" | "low" | "medium" | "high" | "xhigh".
+     * Two shapes are accepted:
+     *  - string: "minimal" | "low" | "medium" | "high" | "xhigh"
+     *  - object: { effort: "low" | "medium" | "high"; summary?: "auto" | "concise" | "detailed" }
+     *    — used by `gpt-5.4+` when callers want to control the summary text returned
+     *    alongside the reasoning text.
+     *
      * When omitted, LiteLLM falls back to the upstream model's default. We never
      * attach this field unless the user has explicitly selected an effort level via
      * the model picker or modelOptions override.
      */
-    reasoning_effort?: string;
+    reasoning_effort?: string | { effort: string; summary?: string };
     /**
      * LiteLLM passthrough body.
      * Used for features like caching controls.
@@ -359,9 +364,11 @@ export interface LiteLLMResponsesRequest {
     /**
      * Mirror of `OpenAIChatCompletionRequest.reasoning_effort` — LiteLLM accepts the
      * same flat snake_case key on `/responses`, so we propagate it unchanged from
-     * the canonical chat-shaped request body during transformation.
+     * the canonical chat-shaped request body during transformation. Accepts the
+     * same string-or-object shape as the chat-shaped request — see that field for
+     * details.
      */
-    reasoning_effort?: string;
+    reasoning_effort?: string | { effort: string; summary?: string };
     stream_options?: { include_usage?: boolean };
     /**
      * LiteLLM passthrough body.
@@ -385,7 +392,20 @@ export type LiteLLMResponseInputItem =
           content: string | OpenAIChatMessageContentItem[];
       }
     | { type: "function_call"; id: string; call_id?: string; name: string; arguments: string }
-    | { type: "function_call_output"; id?: string; call_id: string; output: string };
+    | { type: "function_call_output"; id?: string; call_id: string; output: string }
+    | {
+          /**
+           * Carries an Anthropic `thinking` or `redacted_thinking` block back
+           * to the model. `encrypted_content` is the signature (or the opaque
+           * redacted data) that the API uses to verify reasoning continuity
+           * across turns. `summary` carries the human-readable thinking text
+           * (empty for redacted blocks).
+           */
+          type: "reasoning";
+          id: string;
+          summary: Array<{ type: "summary_text"; text: string }>;
+          encrypted_content: string;
+      };
 
 /**
  * Tool definition for LiteLLM /responses endpoint.

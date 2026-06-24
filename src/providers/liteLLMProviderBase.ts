@@ -686,14 +686,19 @@ export abstract class LiteLLMProviderBase {
 
     private applyReasoningEffort(
         request: OpenAIChatCompletionRequest,
-        effort: SupportedReasoningEffort | undefined
+        effort: SupportedReasoningEffort | undefined,
+        summary?: "auto" | "concise" | "detailed"
     ): void {
         if (!effort || effort === "none") {
             const requestRecord = request as unknown as Record<string, unknown>;
             delete requestRecord.reasoning_effort;
             return;
         }
-        request.reasoning_effort = effort;
+        // Object form is used by `gpt-5.4+` callers (and the OpenAI Responses API
+        // in general) to control whether summary text is returned alongside the
+        // reasoning text. The OpenAI Chat Completions spec still accepts the
+        // legacy string form; both are forwarded to LiteLLM unchanged.
+        request.reasoning_effort = summary ? { effort, summary } : effort;
     }
 
     private notifyReasoningFallback(
