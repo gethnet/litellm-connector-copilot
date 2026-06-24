@@ -89,7 +89,10 @@ interface BaseTestAccess {
         requestId: string,
         modelId: string,
         disableRedaction: boolean
-    ) => { tools: readonly vscode.LanguageModelChatTool[] };
+    ) => {
+        tools: readonly vscode.LanguageModelChatTool[];
+        confidence: "none" | "low" | "high";
+    };
     isParameterSupported: (param: string, modelInfo: LiteLLMModelInfo | undefined, modelId?: string) => boolean;
     sanitizeErrorTextForLogs: (text: string) => string;
     collectMessageText: (m: vscode.LanguageModelChatRequestMessage) => string;
@@ -1282,14 +1285,27 @@ suite("LiteLLMProviderBase", () => {
 
         test("removes failing tool when enabled", () => {
             const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-            const result = access(provider).detectQuotaToolRedaction(
-                [makeText("Error: 429 rate limit exceeded when calling insert_edit_into_file")],
-                tools,
-                "rid",
-                "m",
-                false
-            );
+            const messages: vscode.LanguageModelChatRequestMessage[] = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    name: undefined,
+                    content: [new vscode.LanguageModelToolCallPart("call_legacy_1", "insert_edit_into_file", {})],
+                } as unknown as vscode.LanguageModelChatRequestMessage,
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [
+                        new vscode.LanguageModelToolResultPart("call_legacy_1", [
+                            new vscode.LanguageModelTextPart(
+                                "Error: 429 rate limit exceeded when calling insert_edit_into_file"
+                            ),
+                        ]),
+                    ],
+                } as unknown as vscode.LanguageModelChatRequestMessage,
+            ];
+            const result = access(provider).detectQuotaToolRedaction(messages, tools, "rid", "m", false);
             assert.strictEqual(result.tools.length, 0);
+            assert.strictEqual(result.confidence, "high");
         });
 
         test("does not remove tool when disabled", () => {
@@ -1302,6 +1318,7 @@ suite("LiteLLMProviderBase", () => {
                 true
             );
             assert.strictEqual(result.tools.length, 1);
+            assert.strictEqual(result.confidence, "none");
         });
 
         test("does not redact when quota tool is not present", () => {
@@ -1314,6 +1331,7 @@ suite("LiteLLMProviderBase", () => {
                 false
             );
             assert.strictEqual(result.tools.length, 1);
+            assert.strictEqual(result.confidence, "none");
         });
 
         test("does not redact when message has no text", () => {
@@ -1332,6 +1350,7 @@ suite("LiteLLMProviderBase", () => {
                 false
             );
             assert.strictEqual(result.tools.length, 1);
+            assert.strictEqual(result.confidence, "none");
         });
 
         test("does not redact when quota regex does not match", () => {
@@ -1344,6 +1363,7 @@ suite("LiteLLMProviderBase", () => {
                 false
             );
             assert.strictEqual(result.tools.length, 1);
+            assert.strictEqual(result.confidence, "none");
         });
 
         test("does not redact when tool regex does not match", () => {
@@ -1356,6 +1376,7 @@ suite("LiteLLMProviderBase", () => {
                 false
             );
             assert.strictEqual(result.tools.length, 1);
+            assert.strictEqual(result.confidence, "low");
         });
 
         test("does not redact on echoed Copilot context without rate/quota signal", () => {
@@ -1368,6 +1389,100 @@ suite("LiteLLMProviderBase", () => {
                 false
             );
             assert.strictEqual(result.tools.length, 1);
+            assert.strictEqual(result.confidence, "none");
+        });
+
+        // Helper functions for new confidence-aware tests
+        const makeToolResultMessage = (
+            callId: string,
+            _toolName: string,
+            resultText: string
+        ): vscode.LanguageModelChatRequestMessage =>
+            ({
+                role: vscode.LanguageModelChatMessageRole.User,
+                name: undefined,
+                content: [
+                    new vscode.LanguageModelToolResultPart(callId, [new vscode.LanguageModelTextPart(resultText)]),
+                ],
+            }) as unknown as vscode.LanguageModelChatRequestMessage;
+
+        const makeAssistantToolCall = (callId: string, toolName: string): vscode.LanguageModelChatRequestMessage =>
+            ({
+                role: vscode.LanguageModelChatMessageRole.Assistant,
+                name: undefined,
+                content: [new vscode.LanguageModelToolCallPart(callId, toolName, {})],
+            }) as unknown as vscode.LanguageModelChatRequestMessage;
+
+        test("redacts on real tool-result quota error for the matching tool", () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const messages = [
+                makeAssistantToolCall("call_1", "insert_edit_into_file"),
+                makeToolResultMessage(
+                    "call_1",
+                    "insert_edit_into_file",
+                    "Error: 429 rate limit exceeded while writing file"
+                ),
+            ];
+            const tools: vscode.LanguageModelChatTool[] = [
+                { name: "insert_edit_into_file", description: "", inputSchema: {} },
+            ];
+            const result = access(provider).detectQuotaToolRedaction(messages, tools, "rid", "m", false);
+            assert.strictEqual(result.tools.length, 0);
+            assert.strictEqual(result.confidence, "high");
+        });
+
+        test("does not redact when reminderInstructions body mentions both patterns", () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            // A plausible <reminderInstructions> body — text content only, no tool parts.
+            const reminder =
+                "If a tool returns 429 / rate limit exceeded / quota exceeded when calling " +
+                "tools like insert_edit_into_file or replace_string_in_file, do not retry.";
+            const result = access(provider).detectQuotaToolRedaction([makeText(reminder)], tools, "rid", "m", false);
+            assert.strictEqual(result.tools.length, 1);
+            assert.strictEqual(result.confidence, "low");
+        });
+
+        test("does not redact when userRequest body mentions both patterns", () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const userRequest =
+                "Help me debug a 429 quota exceeded error coming from insert_edit_into_file in our e2e tests.";
+            const result = access(provider).detectQuotaToolRedaction([makeText(userRequest)], tools, "rid", "m", false);
+            assert.strictEqual(result.tools.length, 1);
+            assert.strictEqual(result.confidence, "low");
+        });
+
+        test("does not redact when quota error is in an older turn (not the most recent tool result)", () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const messages = [
+                // Older assistant turn that did NOT call insert_edit_into_file.
+                makeText("Earlier in the conversation."),
+                // Old quota tool result for a different tool.
+                makeToolResultMessage("call_old", "run_in_terminal", "Error: 429 rate limit exceeded"),
+                // Most recent user turn: a clean new request with no quota signal.
+                makeText("Now please continue with the on-boarding flow."),
+            ];
+            const result = access(provider).detectQuotaToolRedaction(messages, tools, "rid", "m", false);
+            assert.strictEqual(result.tools.length, 1);
+            // We find the quota error in an old tool result, but since it's for a
+            // non-redactable tool, we return "low" confidence (not our concern).
+            assert.strictEqual(result.confidence, "low");
+        });
+
+        test("does not redact when tool result is for a different tool than the matched one", () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const messages = [
+                makeAssistantToolCall("call_2", "run_in_terminal"),
+                makeToolResultMessage("call_2", "run_in_terminal", "Error: 429 rate limit exceeded from upstream"),
+            ];
+            const tools: vscode.LanguageModelChatTool[] = [
+                { name: "insert_edit_into_file", description: "", inputSchema: {} },
+                { name: "run_in_terminal", description: "", inputSchema: {} },
+            ];
+            const result = access(provider).detectQuotaToolRedaction(messages, tools, "rid", "m", false);
+            assert.strictEqual(result.tools.length, 2);
+            // We find a real quota error in a tool result, but it's for run_in_terminal
+            // which we don't redact, so it's "low" confidence (observability only).
+            assert.strictEqual(result.confidence, "low");
         });
     });
 

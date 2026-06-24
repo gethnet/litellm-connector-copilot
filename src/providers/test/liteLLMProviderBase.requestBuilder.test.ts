@@ -15,7 +15,7 @@ suite("RequestBuilder", () => {
         builder = new RequestBuilder({
             configManager,
             getReasoningEffort: () => undefined,
-            detectQuotaToolRedaction: (messages, tools) => ({ tools }),
+            detectQuotaToolRedaction: (messages, tools) => ({ tools, confidence: "none" as const }),
             stripUnsupportedParametersFromRequest: () => {},
             isParameterSupported: () => true,
             getTelemetryOptions: () => ({ caller: "test", justification: undefined, modelConfiguration: {} }),

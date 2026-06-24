@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+## [2.1.7] - 2026-06-24
+
+### 🐛 Fixes
+
+* **🛡️ Stop redacting `insert_edit_into_file` on the first turn of every session (bug [#106](https://github.com/gethnet/litellm-connector-copilot/issues/106))**: Quota detection now only redacts on **high-confidence** matches — a real `LanguageModelToolResultPart` whose `callId` resolves to a redactable tool name. The previous regex-pair detector matched Copilot's own `<reminderInstructions>` scaffolding (which describes quota handling as guidance to the model) and stripped file-edit tools on every turn, even when no actual quota error had occurred. A low-confidence branch still logs a DEBUG trace and **does not** mutate the request or emit a fake `quota_exceeded:<tool>` failure event into telemetry, eliminating the noisy PostHog signal. (`src/providers/liteLLMProviderBase.ts`, `src/providers/base/requestBuilder.ts`, `src/providers/base/types.ts`)
+
+### 🧪 Tests
+
+* **High-confidence redaction coverage**: Updated the redaction tests to cover high-confidence `LanguageModelToolResultPart` matches, wrapper-only false positives (`<reminderInstructions>`-style echoed text), and non-redactable tool results. The detector is now verified to leave the tool list alone when only prompt scaffolding references the tool name. (`src/providers/test/liteLLMProviderBase.test.ts`)
+* **Request builder fixtures**: Adjusted request builder test fixtures for the new confidence field on the redaction result so the pipeline stays deterministic. (`src/providers/test/liteLLMProviderBase.requestBuilder.test.ts`)
+
+### 🧹 Chores
+
+* **📦 Version bump to `2.1.7`**: Promoted the package from `2.1.6` to `2.1.7` to ship the redaction fix. (`package.json`)
+
 ## [2.1.6] - 2026-06-21
 
 ### 🐛 Fixes
