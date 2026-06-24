@@ -17,7 +17,10 @@ export interface RequestBuilderDeps {
         modelId: string,
         disableRedaction: boolean,
         caller?: string
-    ) => { tools: readonly vscode.LanguageModelChatTool[] };
+    ) => {
+        tools: readonly vscode.LanguageModelChatTool[];
+        confidence: "none" | "low" | "high";
+    };
     stripUnsupportedParametersFromRequest: (
         requestBody: Record<string, unknown>,
         modelInfo: LiteLLMModelInfo | undefined,

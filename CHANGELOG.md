@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### 🐛 Fixes
+
+* **Stop redacting `insert_edit_into_file` on the first turn of every session**: Quota detection now only redacts on high-confidence matches: a real `LanguageModelToolResultPart` whose `callId` resolves to a redactable tool name. The previous regex-pair detector matched Copilot's own `<reminderInstructions>` scaffolding (which describes quota handling) and stripped file-edit tools on every turn. Low-confidence matches are logged at DEBUG and no longer emit a fake `quota_exceeded:<tool>` failure event into telemetry. (`src/providers/liteLLMProviderBase.ts`)
+
 ## [2.1.6] - 2026-06-21
 
 ### 🐛 Fixes

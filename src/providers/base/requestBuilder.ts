@@ -55,6 +55,9 @@ export class RequestBuilder {
             config.disableQuotaToolRedaction === true,
             _caller
         );
+        // `confidence` is intentionally not threaded into the request body
+        // today. It is consumed by the base for logging/telemetry already;
+        // this call site only needs the (possibly redacted) tool list.
         const toolConfig = convertTools({ ...options, tools: toolRedaction.tools });
         const messagesToUse = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo);
         const openaiMessages = convertMessages(messagesToUse);
