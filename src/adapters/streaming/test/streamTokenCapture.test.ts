@@ -213,4 +213,110 @@ suite("StreamTokenCapture", () => {
         const snapshot = capture.getSnapshot();
         assert.ok(snapshot.toolTokens > 0, "snapshot should still reflect tool estimate");
     });
+
+    // Regression tests for reasoning token handling with redacted/omitted thinking
+    test("redacted_thinking parts do not advance the local reasoning buffer", () => {
+        // The Anthropic `redacted_thinking` block carries encrypted data and no
+        // plaintext. The local token estimate must not count the metadata
+        // (which would inflate usage), and the part must still flow through
+        // to VS Code unchanged.
+        const ThinkingPartCtor = (vscode as unknown as Record<string, unknown>).LanguageModelThinkingPart as
+            | (new (
+                  value: string | string[],
+                  id?: string,
+                  metadata?: Record<string, unknown>
+              ) => vscode.LanguageModelResponsePart)
+            | undefined;
+        if (!ThinkingPartCtor) {
+            return;
+        }
+
+        const { parts, progress } = createInnerProgress();
+        const capture = new StreamTokenCapture("model-x", progress);
+        const tracking = capture.progress;
+
+        const redacted = new ThinkingPartCtor("", undefined, {
+            redactedData: "encrypted_blob",
+            display: "omitted",
+        });
+        tracking.report(redacted);
+
+        // Local estimate stays at zero — the upstream usage DataPart (when
+        // it arrives) is the authoritative source.
+        const snapshot = capture.getSnapshot();
+        assert.strictEqual(snapshot.reasoningTokens, 0, "redacted data must not be counted as visible reasoning");
+
+        // The part itself still flows to the inner progress.
+        assert.strictEqual(parts.length, 1);
+        const forwarded = parts[0] as { metadata?: Record<string, unknown> };
+        assert.strictEqual(forwarded.metadata?.redactedData, "encrypted_blob");
+    });
+
+    test("signature-only thinking parts (display=omitted) do not advance the reasoning buffer", () => {
+        // Anthropic's `display: "omitted"` mode streams a thinking block
+        // with no `thinking_delta` events — only a single `signature_delta`
+        // that closes the block. The connector must still forward the part
+        // to VS Code but the value is empty so the local token count stays
+        // at zero (the upstream `usage.reasoning_tokens` will be
+        // authoritative when it arrives).
+        const ThinkingPartCtor = (vscode as unknown as Record<string, unknown>).LanguageModelThinkingPart as
+            | (new (
+                  value: string | string[],
+                  id?: string,
+                  metadata?: Record<string, unknown>
+              ) => vscode.LanguageModelResponsePart)
+            | undefined;
+        if (!ThinkingPartCtor) {
+            return;
+        }
+
+        const { parts, progress } = createInnerProgress();
+        const capture = new StreamTokenCapture("model-x", progress);
+        const tracking = capture.progress;
+
+        const sigOnly = new ThinkingPartCtor("", undefined, {
+            signature: "OmitSigExample",
+            display: "omitted",
+        });
+        tracking.report(sigOnly);
+
+        const snapshot = capture.getSnapshot();
+        assert.strictEqual(
+            snapshot.reasoningTokens,
+            0,
+            "signature-only parts have no visible text to count"
+        );
+        assert.strictEqual(parts.length, 1, "signature-only part still flows to VS Code");
+    });
+
+    test("upstream reasoning_tokens from response.completed overrides the local zero for redacted/omitted flows", () => {
+        // When the upstream sends a `response.completed` frame with
+        // `usage.completion_tokens_details.reasoning_tokens` (normalized by
+        // liteLLMStreamInterpreter's normalizeUsagePayload), that number is
+        // authoritative. This test guards against a refactor that prefers
+        // the local count (which is zero for redacted/omitted flows) over
+        // the upstream number.
+        const { progress } = createInnerProgress();
+        const capture = new StreamTokenCapture("model-x", progress);
+        const tracking = capture.progress;
+
+        // No visible thinking parts at all (omitted/display flow).
+        // Upstream reports the true reasoning_tokens in response.completed.
+        // Note: The stream interpreter normalizes output_token_details -> completion_tokens_details
+        tracking.report(
+            asUsagePart({
+                prompt_tokens: 4,
+                completion_tokens: 12,
+                total_tokens: 16,
+                completion_tokens_details: { reasoning_tokens: 9 },
+            })
+        );
+
+        const snapshot = capture.getSnapshot();
+        assert.strictEqual(
+            snapshot.reasoningTokens,
+            9,
+            "upstream reasoning_tokens must be preferred over the local zero estimate"
+        );
+    });
 });

@@ -836,3 +836,118 @@ suite("flushPendingBuffers Unit Tests", () => {
         assert.strictEqual((finishPart as unknown as { reason: string; type: string }).reason, "incomplete_stream_end");
     });
 });
+
+suite("Anthropic Thinking Block Support", () => {
+    test("emits thinking part when content_block_start with type=thinking", () => {
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent(
+            {
+                type: "response.content_block_start",
+                index: 0,
+                block: { type: "thinking", id: "thought-1" },
+            },
+            state
+        );
+
+        assert.ok(parts.length >= 1, "Should emit at least one part");
+        const thinkingPart = parts.find((p) => p.type === "thinking");
+        assert.ok(thinkingPart, "Should emit a thinking part");
+        if (thinkingPart && thinkingPart.type === "thinking") {
+            assert.strictEqual(thinkingPart.value, "");
+            assert.strictEqual(thinkingPart.metadata?.display, undefined);
+        }
+    });
+
+    test("emits thinking part with display=summarized when content_block_start specifies it", () => {
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent(
+            {
+                type: "response.content_block_start",
+                index: 0,
+                block: { type: "thinking", id: "thought-1", display: "summarized" },
+            },
+            state
+        );
+
+        const thinkingPart = parts.find((p) => p.type === "thinking");
+        assert.ok(thinkingPart && thinkingPart.type === "thinking");
+        if (thinkingPart && thinkingPart.type === "thinking") {
+            assert.strictEqual(thinkingPart.metadata?.display, "summarized");
+        }
+    });
+
+    test("emits thinking part with redactedData when content_block_start has redacted=true", () => {
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent(
+            {
+                type: "response.content_block_start",
+                index: 0,
+                block: { type: "thinking", id: "thought-1", redacted: true, redacted_data: "encrypted_blob_123" },
+            },
+            state
+        );
+
+        const thinkingPart = parts.find((p) => p.type === "thinking");
+        assert.ok(thinkingPart && thinkingPart.type === "thinking");
+        if (thinkingPart && thinkingPart.type === "thinking") {
+            assert.strictEqual(thinkingPart.value, "");
+            assert.strictEqual(thinkingPart.metadata?.redactedData, "encrypted_blob_123");
+            assert.strictEqual(thinkingPart.metadata?.display, "omitted");
+        }
+    });
+
+    test("emits signature-only thinking part when content_block_delta has signature_delta", () => {
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent(
+            {
+                type: "response.content_block_delta",
+                index: 0,
+                delta: { type: "signature_delta", signature: "OmitSigExample123" },
+            },
+            state
+        );
+
+        const thinkingPart = parts.find((p) => p.type === "thinking");
+        assert.ok(thinkingPart && thinkingPart.type === "thinking");
+        if (thinkingPart && thinkingPart.type === "thinking") {
+            assert.strictEqual(thinkingPart.value, "");
+            assert.strictEqual(thinkingPart.metadata?.signature, "OmitSigExample123");
+            assert.strictEqual(thinkingPart.metadata?.display, "omitted");
+        }
+    });
+
+    test("preserves display metadata in output_reasoning.delta when display is set", () => {
+        const state = createInitialStreamingState();
+
+        // First set display via content_block_start
+        interpretStreamEvent(
+            {
+                type: "response.content_block_start",
+                index: 0,
+                block: { type: "thinking", id: "thought-1", display: "omitted" },
+            },
+            state
+        );
+
+        // Now receive reasoning delta but display is still "omitted" means no thinking_delta events
+        // In practice, display:omitted means the model won't send thinking deltas, only signature
+        const parts = interpretStreamEvent(
+            {
+                type: "response.output_reasoning.delta",
+                delta: "This should not happen with display:omitted",
+            },
+            state
+        );
+
+        // If display:omitted and we still get deltas, they should carry the metadata
+        const thinkingPart = parts.find((p) => p.type === "thinking");
+        assert.ok(thinkingPart && thinkingPart.type === "thinking");
+        if (thinkingPart && thinkingPart.type === "thinking") {
+            assert.strictEqual(thinkingPart.metadata?.display, "omitted");
+        }
+    });
+});

@@ -21,6 +21,18 @@ export interface StreamingState {
      */
     anonymousResponseToolName: string | undefined;
     anonymousResponseToolArgs: string;
+    /**
+     * Tracks the current thinking block type for Anthropic content_block events.
+     * "thinking" = normal thinking block
+     * "redacted_thinking" = safety-redacted thinking block (encrypted content)
+     */
+    currentThinkingBlockType: "thinking" | "redacted_thinking" | undefined;
+    /**
+     * Tracks the display mode for the current thinking block.
+     * "summarized" = thinking content is visible (default)
+     * "omitted" = only signature present, no thinking_delta events
+     */
+    currentThinkingDisplay: "summarized" | "omitted" | undefined;
 }
 
 export function createInitialStreamingState(): StreamingState {
@@ -34,6 +46,8 @@ export function createInitialStreamingState(): StreamingState {
         mergeReasoningContentInChoices: false,
         anonymousResponseToolName: undefined,
         anonymousResponseToolArgs: "",
+        currentThinkingBlockType: undefined,
+        currentThinkingDisplay: undefined,
     };
 }
 
@@ -74,13 +88,15 @@ function normalizeUsagePayload(usage: RawUsagePayload): OpenAIUsagePayload {
     }
 
     const completionTokenDetails: OpenAIUsageCompletionTokenDetails = {};
+    // Prefer completion_tokens_details over output_token_details (OpenAI vs Anthropic naming)
     const reasoningTokens =
         usage.completion_tokens_details?.reasoning_tokens ?? usage.output_token_details?.reasoning_tokens;
     if (typeof reasoningTokens === "number") {
         completionTokenDetails.reasoning_tokens = reasoningTokens;
-    } else if (usage.output_token_details !== undefined || usage.completion_tokens_details !== undefined) {
-        completionTokenDetails.reasoning_tokens = 0;
     }
+    // Only set to 0 if the provider explicitly sent 0 in completion_tokens_details.
+    // Don't set to 0 if output_token_details exists but doesn't have reasoning_tokens
+    // (that means the value was not provided by upstream, not that it's 0).
     const toolTokens = usage.completion_tokens_details?.tool_tokens ?? usage.output_token_details?.tool_tokens;
     if (typeof toolTokens === "number") {
         completionTokenDetails.tool_tokens = toolTokens;
@@ -549,11 +565,78 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
     }
     if (data.type === "response.output_reasoning.delta" && typeof data.delta === "string") {
         Logger.trace(`[interpretStreamEvent] Emitting /responses thinking delta: ${data.delta.length} chars`);
-        thinkingParts.push({ type: "thinking", value: data.delta });
+        // Include display metadata if set (for display: "omitted" mode, no thinking_delta events)
+        const metadata = state.currentThinkingDisplay
+            ? { display: state.currentThinkingDisplay }
+            : undefined;
+        thinkingParts.push({ type: "thinking", value: data.delta, metadata });
         StructuredLogger.trace("stream.responses_reasoning_delta", {
             length: data.delta.length,
             preview: data.delta.substring(0, 100),
+            display: state.currentThinkingDisplay,
         });
+    }
+
+    // 2a. Handle Anthropic content_block_start for thinking blocks
+    if (data.type === "response.content_block_start") {
+        const block = data.block as Record<string, unknown> | undefined;
+        if (block?.type === "thinking") {
+            const isRedacted = block.redacted === true;
+            state.currentThinkingBlockType = isRedacted ? "redacted_thinking" : "thinking";
+            state.currentThinkingDisplay = block.display as "summarized" | "omitted" | undefined;
+
+            // Always emit an empty thinking part when a thinking block starts.
+            // For redacted: includes redactedData and display:omitted.
+            // For display:omitted: includes display:omitted (no thinking_delta events will follow).
+            // For normal: includes display if specified, otherwise just an empty start marker.
+            // This ensures VS Code consumer knows a thinking block has started.
+            const thinkingMetadata: Record<string, unknown> = {};
+            if (isRedacted) {
+                const redactedData = typeof block.redacted_data === "string" ? block.redacted_data : undefined;
+                thinkingMetadata.redactedData = redactedData;
+                thinkingMetadata.display = "omitted";
+                Logger.info(
+                    `[interpretStreamEvent] Emitting redacted_thinking block, data present: ${!!redactedData}`
+                );
+                StructuredLogger.trace("stream.redacted_thinking_block", {
+                    hasRedactedData: !!redactedData,
+                });
+            } else if (state.currentThinkingDisplay) {
+                thinkingMetadata.display = state.currentThinkingDisplay;
+                Logger.trace(
+                    `[interpretStreamEvent] Emitting thinking block with display: ${state.currentThinkingDisplay}`
+                );
+                StructuredLogger.trace("stream.thinking_block_with_display", {
+                    display: state.currentThinkingDisplay,
+                });
+            } else {
+                Logger.trace(`[interpretStreamEvent] content_block_start for thinking block`);
+            }
+
+            thinkingParts.push({
+                type: "thinking",
+                value: "",
+                metadata: Object.keys(thinkingMetadata).length > 0 ? thinkingMetadata : undefined,
+            });
+        }
+    }
+
+    // 2b. Handle Anthropic content_block_delta for signature_delta
+    if (data.type === "response.content_block_delta") {
+        const delta = data.delta as Record<string, unknown> | undefined;
+        if (delta?.type === "signature_delta") {
+            const signature = typeof delta.signature === "string" ? delta.signature : undefined;
+            state.currentThinkingDisplay = "omitted";
+            Logger.info(`[interpretStreamEvent] Emitting signature-only thinking part, signature length: ${signature?.length ?? 0}`);
+            thinkingParts.push({
+                type: "thinking",
+                value: "",
+                metadata: { signature, display: "omitted" },
+            });
+            StructuredLogger.trace("stream.signature_delta", {
+                signatureLength: signature?.length ?? 0,
+            });
+        }
     }
 
     // 2b. Robust event shape: response.output_item.delta (keyed on item.call_id)
