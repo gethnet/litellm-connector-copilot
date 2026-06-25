@@ -312,19 +312,24 @@ The ingress pipeline is agnostic to endpoint choice:
 
 ## 5) Change workflow (agent/CI)
 
-### Commands
-- `npm run lint` — ESLint checks (may apply autofixes depending on config)
-- `npm run format` — Prettier formatting
+### Commands (permitted only)
+- `npm run clean` — Clean build artifacts
 - `npm run compile` — TypeScript typecheck/build validation
-- `npm run test` — Unit tests
-- `npm run test:coverage` — Unit tests with coverage report (prefer this)
+- `npm run lint` — ESLint checks
+- `npm run lint:fix` — ESLint checks with autofix
+- `npm run format` — Prettier formatting check
+- `npm run format:fix` — Prettier formatting with fix
+- `npm run test:coverage` — Unit tests with coverage report (use this for testing)
+- `npm run bump-version patch|minor|dev` — Version bumps
+
+> ⚠️ **DO NOT use `npm run test`**, `npm run check`, or any other npm scripts — they may cause issues. Only run the commands listed above.
 
 ### When to run what
 - Before implementing non-trivial logic: add or update the relevant tests first.
 - Before/after non-trivial edits: run `npm run compile` and `npm run test:coverage`.
 - Before finishing the task: verify the changed files contain the intended code or that new files exist with the expected contents.
-- Before finishing the tasks run: `npm run lint`, `npm run format`, and `npm run test:coverage`
-- Before opening/updating a PR: run `npm run lint`, `npm run format`, `npm run test:coverage`.
+- Before finishing the tasks run: run `npm run lint` → `npm run format` → `npm run test:coverage` independently (verify each succeeds)
+- Before opening/updating a PR: run `npm run lint` → `npm run format` → `npm run test:coverage` independently (verify each succeeds)
 
 ### Validation requirements
 - Do not assume an edit succeeded. Confirm the change by inspecting the file contents or verifying the new file exists on disk with the expected content.
