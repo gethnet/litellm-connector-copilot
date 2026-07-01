@@ -69,7 +69,7 @@ Group by responsibility and keep folder placement intuitive to a first-time read
 - `src/providers/`: Language Model provider implementations
   - `liteLLMProviderBase.ts` — Shared orchestration base class
   - `liteLLMChatProvider.ts` — Chat API provider (extends base)
-  - `liteLLMCompletionProvider.ts` — Completions API provider (extends base)
+  - `liteLLMCommitProvider.ts` — Commit message generation provider (extends base; command-backed, not a registered LM text-completion provider)
   - `index.ts` — Provider exports
 - `src/adapters/`: HTTP clients, payload shaping, endpoint-specific parsing
 - `src/utils/`: shared utilities (logging, telemetry, model helpers)
@@ -93,7 +93,7 @@ When introducing a new folder or module, make the ownership boundary obvious fro
   - Telemetry and error handling
 - **Derived classes** extend base and implement VS Code protocols:
   - `LiteLLMChatProvider`: Implements `LanguageModelChatProvider`, handles chat streaming specifics
-  - `LiteLLMCompletionProvider`: Implements `LanguageModelTextCompletionProvider`, wraps prompts
+  - `LiteLLMCommitMessageProvider`: Command-backed commit generation (not a registered LM provider)
   - Both delegate request building to base, eliminating duplication
 - **Benefit**: Adding new provider types requires minimal code (protocol wrapper only)
 - **BackendRegistry** (`LiteLLMProviderRegistry`): The single source of truth for backends and their associated models. Owns the discovery HTTP fetch, the per-group namespacing, the change detection, and the per-model capability caches. See "BackendRegistry contract" below.
@@ -154,21 +154,15 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
   - Returns `LanguageModelChatInformation` entries with `isUserSelectable: true` so models appear in the picker
   - Reuses the base request pipeline for normalization, filtering, trimming, and routing
 
-- **Completions Provider**: `src/providers/liteLLMCompletionProvider.ts`
-  - Implements `vscode.LanguageModelTextCompletionProvider`
-  - Extends `LiteLLMProviderBase` and adds completion-specific protocol wrapping only
-  - Converts prompt input into request messages that the shared pipeline can process
-  - Extracts completion text from streamed or buffered responses
-  - Reuses base logic for validation, parameter filtering, token management, routing, and error handling
-
-- **Commit / auxiliary providers**: keep any specialized provider thin and protocol-focused
-  - Reuse the shared base lifecycle whenever the provider still targets LiteLLM-backed request orchestration
-  - Avoid re-implementing shared request preparation, endpoint selection, or quota/error logic in derived providers
+- **Commit provider**: `src/providers/liteLLMCommitProvider.ts`
+  - Implements commit-message generation only (not a `LanguageModelTextCompletionProvider`)
+  - Reuses the shared base lifecycle for LiteLLM-backed request orchestration
+  - Avoids re-implementing shared request preparation, endpoint selection, or quota/error logic
 
 - **Entry Point**: `src/extension.ts`
-  - Activates extension and instantiates exactly one `LiteLLMChatProvider` and one `LiteLLMCompletionProvider`
+  - Activates extension and instantiates exactly one `LiteLLMChatProvider` and one `LiteLLMCommitMessageProvider`
   - Registers `LiteLLMChatProvider` with `vscode.lm.registerLanguageModelChatProvider("litellm-connector", provider)`
-  - Registers `LiteLLMCompletionProvider` with `vscode.lm.registerLanguageModelTextCompletionProvider("litellm-connector", provider)`
+  - The extension does NOT register a `LanguageModelTextCompletionProvider`. Completions are handled by VS Code's native tag-routing (the `inline-completions` tag on chat models) routed through the chat provider.
   - Both providers share same `context.secrets` for `SecretStorage` (if needed for non-provider secrets)
   - Both receive per-group configuration from VS Code via `options.configuration` in `provideLanguageModelChatInformation` and request methods
   - Configuration schema defined in `package.json` `languageModelChatProviders` contribution point (VS Code 1.120 per-group format)

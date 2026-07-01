@@ -60,7 +60,7 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 | 💭 **Thinking Support** | Full Anthropic thinking content (signatures, redacted, display metadata) |
 | 🌊 **Real-Time Streaming** | Watch responses as they're generated |
 | 🛠️ **Tool Calling** | Models can use tools to interact with your workspace |
-| 👁️ **Vision** | Image and PDF analysis support |
+| 👁️ **Vision** | Image analysis support |
 | 📊 **Token Tracking** | Real-time input/output token usage |
 | ✍️ **Commit Generation** | Generate conventional commit messages from staged changes |
 | 🔐 **Secure** | API keys stored in VS Code's encrypted storage |
@@ -87,7 +87,6 @@ Base URL + API key are configured through **VS Code's Language Models UI** (run 
 | `commitModelIdOverride` | `""` | Model ID for commit message generation |
 | `inactivityTimeout` | `60` | Seconds before stream is considered idle |
 | `disableCaching` | `true` | Send `no-cache` headers |
-| `enableResponsesApi` | `false` | **(Experimental)** Use `/responses` endpoint |
 | `enableModelOverrides` | `true` | Enable model override rules |
 
 ### Advanced (JSON-Only)
@@ -98,7 +97,6 @@ These aren't in Settings UI — add to `settings.json` if needed:
 |---------|---------|------------|
 | `forceResponsesEndpoint` | `false` | Force all models to use `/responses` endpoint for consistent reasoning/thinking support |
 | `allowChatCompletionsFallback` | `false` | Fall back to `/chat/completions` if `/responses` fails (needs `forceResponsesEndpoint: true`) |
-| `sendDefaultParameters` | `false` | Send default temperature/penalty values. Usually not needed |
 
 ---
 

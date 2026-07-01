@@ -281,11 +281,7 @@ suite("StreamTokenCapture", () => {
         tracking.report(sigOnly);
 
         const snapshot = capture.getSnapshot();
-        assert.strictEqual(
-            snapshot.reasoningTokens,
-            0,
-            "signature-only parts have no visible text to count"
-        );
+        assert.strictEqual(snapshot.reasoningTokens, 0, "signature-only parts have no visible text to count");
         assert.strictEqual(parts.length, 1, "signature-only part still flows to VS Code");
     });
 

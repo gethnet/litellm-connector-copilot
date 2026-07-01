@@ -145,43 +145,19 @@ export interface LiteLLMConfig {
      */
     enableModelOverrides?: boolean;
     /**
-     * Reasoning capability overrides supplied by the user. Mirrors the
-     * `litellm-connector.modelOverrides` configuration array and is merged with
-     * bundled defaults by the override loader.
-     */
-    modelOverrides?: ModelOverride[];
-    /**
      * Per-model capability overrides exposed to VS Code.
      * Key is the Model ID (e.g. 'gpt-4o').
      * When set, overrides the auto-derived toolCalling / imageInput capabilities.
      */
     modelCapabilitiesOverrides?: Record<string, ModelCapabilityOverride>;
     /**
-     * Optional: force a specific model id (e.g. for inline completions).
+     * Optional: force a specific model id.
      * When unset, the provider uses the model selected by Copilot/VS Code.
      */
     modelIdOverride?: string;
 
-    /** Enable VS Code inline completions backed by LiteLLM (stable API). */
-    inlineCompletionsEnabled?: boolean;
-
-    /** Model id to use for LiteLLM inline completions. */
-    inlineCompletionsModelId?: string;
-
-    /** Max context tokens to use for LiteLLM inline completions. */
-    inlineCompletionsMaxContextTokens?: number;
-
     /** Model id to use for LiteLLM commit message generation. */
     commitModelIdOverride?: string;
-
-    /** Experimental: enable V2 Chat Provider using proposed VS Code APIs. */
-    v2ApiEnabled?: boolean;
-
-    /**
-     * Experimental: enable the /responses endpoint for backend-specific routing.
-     * When true, prioritizes /responses with automatic fallback to /chat/completions.
-     */
-    enableResponses?: boolean;
 
     /**
      * When true, forces all models to use the `/responses` endpoint instead of per-model mode selection.
@@ -197,8 +173,7 @@ export interface LiteLLMConfig {
      */
     allowChatCompletionsFallback?: boolean;
 
-    /** When enabled, send default values for temperature, frequency_penalty, and presence_penalty if not provided by VS Code. */
-    sendDefaultParameters?: boolean;
+    // sendDefaultParameters was removed in v2.2.0 (deprecated v1.5.0). Use individual modelOptions instead.
 }
 
 /**

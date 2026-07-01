@@ -566,9 +566,7 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
     if (data.type === "response.output_reasoning.delta" && typeof data.delta === "string") {
         Logger.trace(`[interpretStreamEvent] Emitting /responses thinking delta: ${data.delta.length} chars`);
         // Include display metadata if set (for display: "omitted" mode, no thinking_delta events)
-        const metadata = state.currentThinkingDisplay
-            ? { display: state.currentThinkingDisplay }
-            : undefined;
+        const metadata = state.currentThinkingDisplay ? { display: state.currentThinkingDisplay } : undefined;
         thinkingParts.push({ type: "thinking", value: data.delta, metadata });
         StructuredLogger.trace("stream.responses_reasoning_delta", {
             length: data.delta.length,
@@ -595,9 +593,7 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                 const redactedData = typeof block.redacted_data === "string" ? block.redacted_data : undefined;
                 thinkingMetadata.redactedData = redactedData;
                 thinkingMetadata.display = "omitted";
-                Logger.info(
-                    `[interpretStreamEvent] Emitting redacted_thinking block, data present: ${!!redactedData}`
-                );
+                Logger.info(`[interpretStreamEvent] Emitting redacted_thinking block, data present: ${!!redactedData}`);
                 StructuredLogger.trace("stream.redacted_thinking_block", {
                     hasRedactedData: !!redactedData,
                 });
@@ -627,7 +623,9 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
         if (delta?.type === "signature_delta") {
             const signature = typeof delta.signature === "string" ? delta.signature : undefined;
             state.currentThinkingDisplay = "omitted";
-            Logger.info(`[interpretStreamEvent] Emitting signature-only thinking part, signature length: ${signature?.length ?? 0}`);
+            Logger.info(
+                `[interpretStreamEvent] Emitting signature-only thinking part, signature length: ${signature?.length ?? 0}`
+            );
             thinkingParts.push({
                 type: "thinking",
                 value: "",

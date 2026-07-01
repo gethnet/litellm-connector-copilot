@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### 🛠️ Fixed
+- `allowChatCompletionsFallback` now actually falls back from `/responses` to `/chat/completions` on 5xx (previously documented but unimplemented — triggered by a user 500 error on `azure_ai/gpt-5.4-mini`)
+- `disableCaching` now reaches the HTTP client on the request hot path and the `countTokens` path (previously read but never threaded into `LiteLLMClient`; default `true` is now effective)
+- Removed `litellm-connector.sendDefaultParameters` setting and its consumer (honors the v1.5.0 deprecation; the setting was broken-from-birth — never read by `getConfig()` — and was explicitly marked "temporary, will be removed in a future version. Defaults will be omitted by default." Defaults are now omitted by default as documented)
+- `LiteLLM: Set Log Level` command now declared in `package.json` and registered in `extension.ts` (previously orphaned handler)
+- Removed dead config fields from `LiteLLMConfig`: `inlineCompletionsEnabled`, `inlineCompletionsModelId`, `inlineCompletionsMaxContextTokens`, `v2ApiEnabled`, `enableResponses`, and dead plumbing for `modelOverrides`/`enableModelOverrides` (the underlying workspace SETTINGS stay live; only the unused config-object fields are removed)
+- Removed dead `litellm-connector.enableResponsesApi` setting from `package.json` (zero consumers — `/responses` routing is controlled by `forceResponsesEndpoint` and per-model proxy `mode` advertisement, not this setting)
+- Fixed `enableModelOverrides` `package.json` default (`false` → `true`) to match the runtime default
+- Telemetry no longer reports `inline-completions`/`responses-api` config toggles (the underlying fields gated no behavior)
+
+### 📚 Docs
+- Corrected `AGENTS.md` completions-provider-registration claim to match reality (no `LanguageModelTextCompletionProvider` is registered; inline completions served via VS Code native model-tag routing)
+- Corrected `README.marketplace.md` "Image and PDF analysis" claim to "Image analysis support"
+- Removed stale `enableResponsesApi` rows from `README.md` and `README.marketplace.md` setting tables
+
 ## [2.1.8] - 2026-06-24
 
 ### 🧹 Chores

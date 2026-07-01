@@ -10,14 +10,12 @@ import type {
 } from "../../types";
 
 suite("Types Unit Tests", () => {
-    test("LiteLLMConfig supports optional inline completions fields", () => {
+    test("LiteLLMConfig supports commit model id override", () => {
         const cfg: LiteLLMConfig = {
-            inlineCompletionsEnabled: true,
-            inlineCompletionsModelId: "m1",
+            commitModelIdOverride: "gpt-4",
         };
 
-        assert.strictEqual(cfg.inlineCompletionsEnabled, true);
-        assert.strictEqual(cfg.inlineCompletionsModelId, "m1");
+        assert.strictEqual(cfg.commitModelIdOverride, "gpt-4");
     });
 
     test("OpenAIChatCompletionRequest shape is assignable", () => {

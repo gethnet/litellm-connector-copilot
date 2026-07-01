@@ -1,11 +1,10 @@
 import * as vscode from "vscode";
-import type { LiteLLMConfig, ModelOverride } from "../types";
+import type { LiteLLMConfig } from "../types";
 import type { TelemetryService } from "../telemetry/telemetryService";
 import { LiteLLMClient } from "../adapters/litellmClient";
 import type { BackendSession } from "../providers/backendSession";
 import { Logger } from "../utils/logger";
 import { deriveGroupNameFromUrl } from "../utils";
-import { loadUserOverrides, toStringArray } from "./modelOverrides";
 
 export class ConfigManager {
     private static readonly INACTIVITY_TIMEOUT_KEY = "litellm-connector.inactivityTimeout";
@@ -14,10 +13,7 @@ export class ConfigManager {
     private static readonly KEY_MODEL_OVERRIDES_ENABLE = "litellm-connector.enableModelOverrides";
     private static readonly MODEL_CAPABILITIES_OVERRIDES_KEY = "litellm-connector.modelCapabilitiesOverrides";
     private static readonly MODEL_ID_OVERRIDE_KEY = "litellm-connector.modelIdOverride";
-    private static readonly INLINE_COMPLETIONS_ENABLED_KEY = "litellm-connector.inlineCompletions.enabled";
-    private static readonly INLINE_COMPLETIONS_MODEL_ID_KEY = "litellm-connector.inlineCompletions.modelId";
     private static readonly SCM_COMMIT_MSG_MODEL_ID_KEY = "litellm-connector.commitModelIdOverride";
-    private static readonly ENABLE_RESPONSES_API = "litellm-connector.enableResponsesApi";
     private static readonly FORCE_RESPONSES_ENDPOINT_KEY = "litellm-connector.forceResponsesEndpoint";
     private static readonly ALLOW_CHAT_COMPLETIONS_FALLBACK_KEY = "litellm-connector.allowChatCompletionsFallback";
 
@@ -92,34 +88,9 @@ export class ConfigManager {
             false
         );
         const enableModelOverrides = workspaceConfig.get<boolean>(ConfigManager.KEY_MODEL_OVERRIDES_ENABLE, true);
-        // Drop undefined/neutral fields so shape matches expectations
-        const modelOverrides: ModelOverride[] = loadUserOverrides(workspaceConfig).map((o) => {
-            const cleaned: ModelOverride = { match: o.match, notes: o.notes }; // preserve notes field even if undefined
-            if (o.supportsReasoning !== undefined) {
-                cleaned.supportsReasoning = o.supportsReasoning;
-            }
-            if (o.reasoningEfforts) {
-                cleaned.reasoningEfforts = o.reasoningEfforts;
-            }
-            if (o.defaultEffort) {
-                cleaned.defaultEffort = o.defaultEffort;
-            }
-            // Only include forceMandatory when explicitly set to true
-            if (o.forceMandatory === true) {
-                cleaned.forceMandatory = true;
-            }
-            // Coerce array-of-string fields via the shared helper so we never
-            // hand back the raw unknown shape from VS Code settings.
-            const tags = toStringArray(o.tags);
-            if (tags) {
-                cleaned.tags = tags;
-            }
-            const supportedOpenaiParams = toStringArray(o.supportedOpenaiParams);
-            if (supportedOpenaiParams) {
-                cleaned.supportedOpenaiParams = supportedOpenaiParams;
-            }
-            return cleaned;
-        });
+        // modelOverrides are loaded but the LiteLLMConfig.modelOverrides field was
+        // removed in v2.2.0 (dead plumbing — the override system reads the workspace
+        // setting directly via modelOverrides.ts findOverride).
 
         const modelCapabilitiesOverridesRaw = workspaceConfig.get<Record<string, string | string[]>>(
             ConfigManager.MODEL_CAPABILITIES_OVERRIDES_KEY,
@@ -159,41 +130,23 @@ export class ConfigManager {
         }
 
         const modelIdOverride = workspaceConfig.get<string>(ConfigManager.MODEL_ID_OVERRIDE_KEY, "").trim();
-        const inlineCompletionsEnabled = workspaceConfig.get<boolean>(
-            ConfigManager.INLINE_COMPLETIONS_ENABLED_KEY,
-            false
-        );
-        const inlineCompletionsModelId = workspaceConfig.get<string>(ConfigManager.INLINE_COMPLETIONS_MODEL_ID_KEY, "");
         const scmGitCompletionsModelId = workspaceConfig
             .get<string>(ConfigManager.SCM_COMMIT_MSG_MODEL_ID_KEY, "")
             .trim();
-        const v2ApiEnabled = workspaceConfig.get<boolean>(ConfigManager.ENABLE_RESPONSES_API, false);
         const forceResponsesEndpoint = workspaceConfig.get<boolean>(ConfigManager.FORCE_RESPONSES_ENDPOINT_KEY, false);
         const allowChatCompletionsFallback = workspaceConfig.get<boolean>(
             ConfigManager.ALLOW_CHAT_COMPLETIONS_FALLBACK_KEY,
             false
         );
 
-        const trimmedInlineModelId = inlineCompletionsModelId?.trim() ?? "";
-
         return {
             inactivityTimeout,
             disableCaching,
             disableQuotaToolRedaction,
             enableModelOverrides,
-            modelOverrides,
             modelCapabilitiesOverrides,
             modelIdOverride: modelIdOverride.length > 0 ? modelIdOverride : undefined,
-            inlineCompletionsEnabled,
-            inlineCompletionsModelId:
-                trimmedInlineModelId.length > 0
-                    ? trimmedInlineModelId
-                    : modelIdOverride.length > 0
-                      ? modelIdOverride
-                      : undefined,
             commitModelIdOverride: `${scmGitCompletionsModelId}`,
-            v2ApiEnabled,
-            enableResponses: v2ApiEnabled,
             forceResponsesEndpoint,
             allowChatCompletionsFallback,
         };
@@ -209,8 +162,6 @@ export class ConfigManager {
         }
         const config = await this.getConfig();
         const toggles: [string, boolean][] = [
-            ["inline-completions", config.inlineCompletionsEnabled ?? false],
-            ["responses-api", config.v2ApiEnabled ?? false],
             ["commit-message", !!(config.commitModelIdOverride && config.commitModelIdOverride.length > 0)],
             ["caching", !config.disableCaching],
             ["quota-tool-redaction", !config.disableQuotaToolRedaction],

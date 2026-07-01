@@ -32,7 +32,7 @@ suite("RequestBuilder", () => {
     teardown(() => sandbox.restore());
 
     test("buildOpenAIChatRequest caps max_tokens to model maxOutputTokens", async () => {
-        configManager.getConfig.resolves({ sendDefaultParameters: false });
+        configManager.getConfig.resolves({});
         const model = { id: "gpt-x", maxInputTokens: 100, maxOutputTokens: 50 } as vscode.LanguageModelChatInformation;
         const messages: vscode.LanguageModelChatRequestMessage[] = [
             {
@@ -54,7 +54,7 @@ suite("RequestBuilder", () => {
     });
 
     test("buildV2ChatRequest preserves tool_choice", async () => {
-        configManager.getConfig.resolves({ sendDefaultParameters: true });
+        configManager.getConfig.resolves({});
         const model = { id: "gpt-v2", maxInputTokens: 100, maxOutputTokens: 20 } as vscode.LanguageModelChatInformation;
         const messages = [
             {

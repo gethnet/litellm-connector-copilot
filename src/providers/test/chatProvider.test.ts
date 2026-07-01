@@ -1060,8 +1060,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         );
 
         const usagePart = parts.find((part) => part instanceof vscode.LanguageModelDataPart) as
-            | vscode.LanguageModelDataPart
-            | undefined;
+            vscode.LanguageModelDataPart | undefined;
         if (usagePart) {
             const payload = JSON.parse(Buffer.from(usagePart.data).toString("utf-8")) as {
                 completion_tokens: number;

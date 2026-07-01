@@ -112,7 +112,16 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
                 }
             }
             if ((msg as { thinking_blocks?: unknown[] }).thinking_blocks) {
-                const thinkingBlocks = (msg as { thinking_blocks?: Array<{ type?: string; thinking?: string; signature?: string; data?: string }> }).thinking_blocks;
+                const thinkingBlocks = (
+                    msg as {
+                        thinking_blocks?: Array<{
+                            type?: string;
+                            thinking?: string;
+                            signature?: string;
+                            data?: string;
+                        }>;
+                    }
+                ).thinking_blocks;
                 if (Array.isArray(thinkingBlocks)) {
                     for (const block of thinkingBlocks) {
                         if (block && typeof block === "object") {

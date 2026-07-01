@@ -138,7 +138,6 @@ Base URL and API key are configured through **VS Code's Language Models provider
 | `litellm-connector.commitModelIdOverride` | string | `""` | Model ID for git commit message generation |
 | `litellm-connector.inactivityTimeout` | number | `60` | Seconds before connection is considered idle |
 | `litellm-connector.disableCaching` | boolean | `true` | Send `no-cache` headers to bypass LiteLLM caching |
-| `litellm-connector.enableResponsesApi` | boolean | `false` | **(Experimental)** Enable `/responses` endpoint |
 | `litellm-connector.disableQuotaToolRedaction` | boolean | `false` | Disable automatic tool removal on quota errors |
 | `litellm-connector.enableModelOverrides` | boolean | `true` | Master toggle for model override system |
 | `litellm-connector.modelOverrides` | array | `[]` | User-supplied regex-based override rules |
@@ -154,7 +153,6 @@ These settings are **not visible in the Settings UI** — they're for power user
 |---------|------|---------|------------|
 | `litellm-connector.forceResponsesEndpoint` | boolean | `false` | Forces all models to use the `/responses` endpoint instead of per-model mode selection. Useful when you need consistent reasoning/thinking support across all models, or want to ensure all requests use the newer API for features like summary control. |
 | `litellm-connector.allowChatCompletionsFallback` | boolean | `false` | When `forceResponsesEndpoint` is true, this lets the connector fall back to `/chat/completions` if `/responses` fails. Escape hatch for models that don't support `/responses`. |
-| `litellm-connector.sendDefaultParameters` | boolean | `false` | Send default values for `temperature`, `frequency_penalty`, and `presence_penalty` if VS Code doesn't provide them. Usually not needed — `false` is recommended. |
 
 **To add a hidden setting:**
 1. Open `settings.json` (Preferences: Open Settings JSON)

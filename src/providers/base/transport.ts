@@ -17,7 +17,11 @@ export class Transport {
     private readonly configManager: TransportDeps["configManager"];
     private readonly userAgent: string;
     private readonly logger: TransportDeps["logger"];
-    private readonly liteLLMClientFactory: (backend: { url: string; key?: string }) => LiteLLMClient;
+    private readonly liteLLMClientFactory: (backend: {
+        url: string;
+        key?: string;
+        disableCaching?: boolean;
+    }) => LiteLLMClient;
 
     constructor(deps: TransportDeps) {
         this.configManager = deps.configManager;
@@ -25,7 +29,11 @@ export class Transport {
         this.logger = deps.logger;
         this.liteLLMClientFactory =
             deps.liteLLMClientFactory ??
-            ((backend) => new LiteLLMClient({ url: backend.url, key: backend.key }, this.userAgent));
+            ((backend) =>
+                new LiteLLMClient(
+                    { url: backend.url, key: backend.key, disableCaching: backend.disableCaching },
+                    this.userAgent
+                ));
     }
 
     public async sendRequestWithRetry(args: SendRequestArgs): Promise<ReadableStream<Uint8Array>> {
@@ -87,10 +95,14 @@ export class Transport {
             throw new Error(errMsg);
         }
 
+        // Thread disableCaching from the per-call configuration through to the
+        // LiteLLMClient so Cache-Control headers are set on the HTTP connection.
+        const disableCaching =
+            typeof configuration?.disableCaching === "boolean" ? configuration.disableCaching : undefined;
         this.logger.trace(
-            `[transport.sendRequestToLiteLLM] Creating client: baseUrl=${baseUrl}, timeout=${modelInfo?.timeout ?? "default"}ms`
+            `[transport.sendRequestToLiteLLM] Creating client: baseUrl=${baseUrl}, timeout=${modelInfo?.timeout ?? "default"}ms, disableCaching=${disableCaching}`
         );
-        const client = this.liteLLMClientFactory({ url: baseUrl, key: apiKey });
+        const client = this.liteLLMClientFactory({ url: baseUrl, key: apiKey, disableCaching });
 
         this.logger.info(
             `[transport.sendRequestToLiteLLM] Sending request to LiteLLM: model=${request.model} caller=${caller} streaming=true`
@@ -106,6 +118,15 @@ export class Transport {
             top_p: request.top_p,
         });
 
+        // Read the per-call fallback flag from the per-group configuration.
+        // VS Code 1.120 delivers workspace settings via options.configuration on
+        // every call; the chat provider merges LiteLLMConfig into this object
+        // before invoking the transport, so allowChatCompletionsFallback lives
+        // here rather than on a globally-cached config.
+        const allowFallback =
+            typeof configuration?.allowChatCompletionsFallback === "boolean" &&
+            configuration.allowChatCompletionsFallback === true;
+
         try {
             const stream = await client.chat(request, modelInfo?.mode, token, modelInfo);
             this.logger.debug(`[transport.sendRequestToLiteLLM] HTTP stream established for model: ${request.model}`);
@@ -115,6 +136,32 @@ export class Transport {
             });
             return stream;
         } catch (err) {
+            // Documented escape hatch: when forceResponsesEndpoint (or a
+            // backend-advertised mode) routes a model to /responses and the
+            // proxy returns a 5xx (e.g. Azure AI returning a chat-completions
+            // schema that LiteLLM cannot parse into ResponsesAPIResponse),
+            // retry exactly once on /chat/completions. Only /responses 5xx
+            // triggers the fallback — 4xx and chat-mode failures propagate as
+            // hard failures. This is the behavior README.md advertises for
+            // `litellm-connector.allowChatCompletionsFallback`.
+            const isResponsesMode = modelInfo?.mode === "responses";
+            const is500 = err instanceof Error && /LiteLLM API error: 5\d\d/.test(err.message);
+            if (allowFallback && isResponsesMode && is500) {
+                this.logger.warn(
+                    `[transport.sendRequestToLiteLLM] /responses failed with 5xx for model ${request.model}; falling back to /chat/completions (allowChatCompletionsFallback=true)`,
+                    err
+                );
+                StructuredLogger.warn("transport.responses_fallback_to_chat", {
+                    model: request.model,
+                    caller,
+                    error: err instanceof Error ? err.message : String(err),
+                });
+                const chatModelInfo: LiteLLMModelInfo | undefined = modelInfo
+                    ? { ...modelInfo, mode: "chat" }
+                    : modelInfo;
+                return client.chat(request, "chat", token, chatModelInfo);
+            }
+
             this.logger.error(`[transport.sendRequestToLiteLLM] HTTP request failed for model ${request.model}`, err);
             StructuredLogger.error("transport.http_request_failed", {
                 model: request.model,
