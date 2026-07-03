@@ -2,7 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2.1.8] - Unreleased
+
+### 🚀 Features
+
+* **💰 Model pricing display in picker**: Added support for displaying LiteLLM model pricing in the VS Code model picker using the official VS Code proposed API (`inputCost`, `outputCost`, `cacheCost`, `cacheWriteCost`, `priceCategory`). Pricing is extracted from LiteLLM's `/model/info` endpoint and surfaced as "credits per million tokens" with category badges ("Low cost", "Medium cost", "High cost", "Very high cost").
+* **📊 Per-request cost tracking**: Added cost calculation to the streaming token capture pipeline. Estimated costs (input, output, total) are computed from token counts × per-token pricing and attached to usage DataParts for telemetry. Cost fields are also reported through the telemetry service's lifecycle events.
+* **🔧 Display pricing toggle**: Added `displayPricingInPicker` workspace setting to control whether pricing is shown in the model picker (default: `true`).
 
 ### 🛠️ Fixed
 - `allowChatCompletionsFallback` now actually falls back from `/responses` to `/chat/completions` on 5xx (previously documented but unimplemented — triggered by a user 500 error on `azure_ai/gpt-5.4-mini`)
@@ -18,32 +24,18 @@ All notable changes to this project will be documented in this file.
 - Corrected `AGENTS.md` completions-provider-registration claim to match reality (no `LanguageModelTextCompletionProvider` is registered; inline completions served via VS Code native model-tag routing)
 - Corrected `README.marketplace.md` "Image and PDF analysis" claim to "Image analysis support"
 - Removed stale `enableResponsesApi` rows from `README.md` and `README.marketplace.md` setting tables
-
-## [2.1.8] - 2026-06-24
-
-### 🧹 Chores
-
-* **📦 TypeScript 6 upgrade**: Upgraded from TypeScript 5.x to TypeScript 6.0.3 (with `@types/node` ^26.0.1, `typescript-eslint` ^8.62.0). The upgrade brings modern TypeScript features while maintaining full compatibility with the codebase. (`package.json`)
-
-### 🚀 Features
-
-* **💭 Full Anthropic thinking/thinking content coverage**: Added support for:
-  - `signature` (encrypted thinking signature) emitted on last `content_block_delta` when `display: "omitted"`
-  - `redacted_thinking` content blocks emitted via `content_block_start` with `redacted: true`
-  - `display` metadata preservation (`"summarized"` vs `"omitted"`) throughout the streaming path
-  - Thinking blocks now emit with proper metadata for multi-turn Anthropic tool-use flows, preserving reasoning continuity
-  - `thinking_blocks` round-trip preservation in Responses Adapter for multi-turn flows
-* **🔢 Token accounting correctness**: Fixed `normalizeUsagePayload` to not zero-out `reasoning_tokens` when only `output_token_details` exists without an explicit value. Upstream `reasoning_tokens` now correctly flows through to telemetry.
-* **📊 Reasoning effort object format**: Added support for `{ effort: string; summary?: string }` format in `reasoning_effort`, enabling `gpt-5.4+` and OpenAI Responses API summary control (`"auto" | "concise" | "detailed"`)
+- Updated `AGENTS.md` to document the cost tracking pipeline architecture
 
 ### 🧪 Tests
 
-* **Anthropic thinking block support**: Added 5 tests covering `content_block_start` (thinking type), `content_block_start` with `display: summarized`, `content_block_start` with `redacted=true`, `content_block_delta` with `signature_delta`, and display metadata preservation in `output_reasoning.delta`.
-* **Token capture regression tests**: Added 3 tests verifying redacted/signature-only thinking parts don't advance local reasoning buffer, and that upstream `reasoning_tokens` from `response.completed` overrides local zero estimates.
+* **Pricing calculator**: Added comprehensive test suite covering extraction from model info (including scientific notation and IEEE 754 artifact handling), formatting for detail and tooltip, and cost calculation with cache read/creation token accounting.
+* **Provider registry pricing**: Added integration tests verifying pricing fields are correctly propagated to `LanguageModelChatInformation` via the official proposed API.
+* **Stream token capture cost**: Added tests for cost calculation in the token snapshot, verifying estimated costs are correctly attached to usage DataParts.
 
 ### 🧹 Chores
 
-* **📦 Version bump to `2.1.8-dev1`**: Started development cycle for thinking content coverage. (`package.json`)
+* **🆕 New utils: pricingCalculator**: Extracted pricing logic into a reusable utility module with pure functions for extraction, formatting, and calculation.
+* **📦 Created proposed API types**: Added `src/vscode.proposed.languageModelPricing.d.ts` to define the VS Code proposed API for pricing fields.
 
 ## [2.1.7] - 2026-06-24
 

@@ -70,6 +70,12 @@ export interface OpenAIUsagePayload {
     system_prompt_tokens?: number;
     reserved_output_tokens?: number;
     total_token_max?: number;
+    /** Estimated cost in USD attributed to input (prompt) tokens. */
+    estimated_input_cost?: number;
+    /** Estimated cost in USD attributed to output (completion) tokens. */
+    estimated_output_cost?: number;
+    /** Estimated total cost in USD (input + output + cache adjustments). */
+    estimated_total_cost?: number;
 }
 
 /**
@@ -173,6 +179,9 @@ export interface LiteLLMConfig {
      */
     allowChatCompletionsFallback?: boolean;
 
+    /** When true, show pricing data in the model picker hover (if available from /model/info). Default: true. */
+    displayPricingInPicker?: boolean;
+
     // sendDefaultParameters was removed in v2.2.0 (deprecated v1.5.0). Use individual modelOptions instead.
 }
 
@@ -218,6 +227,11 @@ export interface LiteLLMModelInfo {
     supports_url_context?: boolean | null;
     supports_reasoning?: boolean | null;
     supports_computer_use?: boolean | null;
+    // Pricing fields (per-token costs, USD). Optional; absent when backend does not return pricing.
+    input_cost_per_token?: number | null;
+    output_cost_per_token?: number | null;
+    cache_read_input_token_cost?: number | null;
+    cache_creation_input_token_cost?: number | null;
     // Extended reasoning effort support fields from LiteLLM
     // (for future use when LiteLLM provides explicit effort level fields)
     supports_minimal_reasoning_effort?: boolean | null;
@@ -378,7 +392,7 @@ export type LiteLLMResponseInputItem =
            */
           type: "reasoning";
           id: string;
-          summary: Array<{ type: "summary_text"; text: string }>;
+          summary: { type: "summary_text"; text: string }[];
           encrypted_content: string;
       };
 

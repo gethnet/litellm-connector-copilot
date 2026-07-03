@@ -16,6 +16,7 @@ export class ConfigManager {
     private static readonly SCM_COMMIT_MSG_MODEL_ID_KEY = "litellm-connector.commitModelIdOverride";
     private static readonly FORCE_RESPONSES_ENDPOINT_KEY = "litellm-connector.forceResponsesEndpoint";
     private static readonly ALLOW_CHAT_COMPLETIONS_FALLBACK_KEY = "litellm-connector.allowChatCompletionsFallback";
+    private static readonly DISPLAY_PRICING_IN_PICKER_KEY = "litellm-connector.displayPricingInPicker";
 
     private _telemetryService?: TelemetryService;
 
@@ -138,6 +139,7 @@ export class ConfigManager {
             ConfigManager.ALLOW_CHAT_COMPLETIONS_FALLBACK_KEY,
             false
         );
+        const displayPricingInPicker = workspaceConfig.get<boolean>(ConfigManager.DISPLAY_PRICING_IN_PICKER_KEY, true); // Ensure config precedence for displayPricingInPicker
 
         return {
             inactivityTimeout,
@@ -149,6 +151,7 @@ export class ConfigManager {
             commitModelIdOverride: `${scmGitCompletionsModelId}`,
             forceResponsesEndpoint,
             allowChatCompletionsFallback,
+            displayPricingInPicker,
         };
     }
 

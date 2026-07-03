@@ -190,6 +190,16 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
 
 When architecture changes, update this section in the same change so the document remains a reliable map of the codebase.
 
+### Cost Tracking Pipeline
+- **Pricing extraction**: `src/utils/pricingCalculator.ts` provides pure helpers to extract pricing from `LiteLLMModelInfo` (including nested `pricing` fallback), format display strings, derive price categories, and calculate request costs from token snapshots.
+- **Model picker pricing surfaces**: `src/providers/liteLLMProviderRegistry.ts` maps per-token LiteLLM pricing to VS Code per-1M fields (`inputCost`, `outputCost`, `cacheCost`, `cacheWriteCost`, `priceCategory`) and sets `pricing` for compact labels.
+- **Fallback picker detail/tooltip**: when enabled by `displayPricingInPicker`, `toVSCodeInfo()` appends compact pricing to `detail` and appends a pricing breakdown to `tooltip` for environments where hover pricing tables are unavailable.
+- **Price category strategy**: `derivePriceCategory()` categorizes by `maxCost` (highest per-1M input/output cost) using thresholds `<=10` low, `<20` medium, `<=100` high, otherwise very_high.
+- **Token snapshot cost fields**: `src/adapters/streaming/streamTokenCapture.ts` stores flat estimated fields (`estimatedInputCost`, `estimatedOutputCost`, `estimatedTotalCost`) on `TokenSnapshot`.
+- **Usage payload enrichment**: usage DataParts include `estimated_input_cost`, `estimated_output_cost`, and `estimated_total_cost` in `OpenAIUsagePayload` for downstream consumers and telemetry, while remaining compatible with VS Code's required usage fields.
+- **Telemetry propagation**: `src/utils/telemetry.ts` carries flat estimated cost fields in `IMetrics`; `src/telemetry/telemetryService.ts` accepts nested `cost?: CostSummary` and emits estimated cost event properties.
+- **Numeric handling**: scientific-notation pricing values are supported as native `number`; `calculateRequestCost()` normalizes floating artifacts with fixed precision while display formatting handles human-readable rounding.
+
 #### BackendRegistry contract (`src/providers/litellmProviderRegistry.ts`)
 
 The `BackendRegistry` (class `LiteLLMProviderRegistry`) is the **single
@@ -269,11 +279,13 @@ Keep this pipeline shared unless the change is intentionally protocol-specific a
 - **Streaming state management**: buffer partial tool calls when SSE frames arrive fragmented
 - **Response emission**: emit `LanguageModelResponsePart`, `LanguageModelToolCallPart`, `LanguageModelToolResultPart` to progress callback
 - **Tool call parsing**: extract and validate tool calls from streaming chunks
+- **Cost tracking**: pricing from LiteLLM `/model/info` is extracted and propagated through `StreamTokenCapture`; request-level estimated costs are attached to usage payloads and telemetry metrics.
 
 #### Completions-Specific Logic (Completions Provider)
 - **Prompt wrapping**: convert simple `string` prompt to `LanguageModelChatRequestMessage` for base pipeline
 - **Stream text extraction**: parse SSE chunks and accumulate completion text
 - **Model selection**: resolve model using `modelIdOverride` config or first available model with `inline-completions` tag
+- **Cost tracking**: completions reuse the same pricing/token snapshot pipeline so estimated request costs are reported consistently with chat.
 
 #### Configuration Flow (v1.120+, per-group)
 Configuration from user settings reaches providers via VS Code's language model API on a per-group basis:

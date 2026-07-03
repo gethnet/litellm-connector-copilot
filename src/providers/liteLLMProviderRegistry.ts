@@ -77,6 +77,12 @@ import type { LiteLLMConfig, LiteLLMModelInfo, LiteLLMModelInfoResponse } from "
 import type { ConfigManager } from "../config/configManager";
 import type { BackendSession } from "./backendSession";
 import { sharedDiscoveryBackoff } from "./base/discoveryBackoff";
+import {
+    derivePriceCategory,
+    extractPricing,
+    formatPricingForDetail,
+    formatPricingForTooltip,
+} from "../utils/pricingCalculator";
 
 /**
  * The shape returned by `lookup(id)`. The response path needs the
@@ -533,7 +539,8 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
                     displayLabel,
                     routingIdentity,
                     config.forceResponsesEndpoint,
-                    config.modelCapabilitiesOverrides
+                    config.modelCapabilitiesOverrides,
+                    config.displayPricingInPicker !== false
                 )
             )
             .filter((info) => info.isUserSelectable !== false);
@@ -548,7 +555,8 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
         displayLabel: string,
         routingIdentity: string,
         forceResponsesEndpoint?: boolean,
-        modelCapabilitiesOverrides?: LiteLLMConfig["modelCapabilitiesOverrides"]
+        modelCapabilitiesOverrides?: LiteLLMConfig["modelCapabilitiesOverrides"],
+        displayPricingInPicker = true
     ): vscode.LanguageModelChatInformation {
         if (!entry.model_name) {
             Logger.warn(
@@ -566,9 +574,9 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
                 maxOutputTokens: 0,
                 capabilities: { canGenerate: false },
                 isUserSelectable: false,
-                category: { label: displayLabel, order: 0 },
+                category: displayLabel,
                 configurationSchema: undefined,
-            } as vscode.LanguageModelChatInformation & { isUserSelectable: boolean };
+            } as unknown as vscode.LanguageModelChatInformation & { isUserSelectable: boolean };
         }
 
         const modelName = entry.model_name;
@@ -596,9 +604,37 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
 
         const cacheIndicator = modelInfo?.supports_prompt_caching ? "⚡ " : "";
         const detailBase = backendName ?? "LiteLLM";
-        const detail = cacheIndicator + detailBase;
 
-        return {
+        // Pricing is optional and only shown when displayPricingInPicker is enabled.
+        const pricing = displayPricingInPicker ? extractPricing(modelInfo) : undefined;
+        const pricingDetail = formatPricingForDetail(pricing);
+        const detail = pricingDetail
+            ? `${cacheIndicator + detailBase} • ${pricingDetail}`
+            : cacheIndicator + detailBase;
+
+        // Default category remains derived picker category (string) for safety.
+        const category = derivePickerCategory(derived);
+
+        const toNumberPerMillion = (value?: number): number | undefined =>
+            value !== undefined ? value * 1_000_000 : undefined;
+
+        const info: vscode.LanguageModelChatInformation & {
+            vendor?: string;
+            backendName?: string;
+            tags?: string[];
+            detail?: string;
+            tooltip?: string;
+            pricing?: string;
+            inputCost?: number;
+            outputCost?: number;
+            cacheCost?: number;
+            cacheWriteCost?: number;
+            longContextInputCost?: number;
+            longContextOutputCost?: number;
+            longContextCacheCost?: number;
+            longContextCacheWriteCost?: number;
+            priceCategory?: string;
+        } = {
             id: modelId,
             name: modelName,
             vendor: modelInfo?.litellm_provider ?? "litellm",
@@ -627,9 +663,37 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             // by anything we return in `category`. Returning a string here
             // therefore does NOT regress per-backend picker sectioning; it
             // only stops the crash on `getCategoryLabel`.
-            category: derivePickerCategory(derived),
+            category,
             configurationSchema: reasoningSchema,
         } as unknown as vscode.LanguageModelChatInformation;
+
+        // Populate pricing fields only when enabled and data is present.
+        // These fields are per 1M tokens per VS Code proposed API.
+        if (pricing) {
+            const inputCost = toNumberPerMillion(pricing.inputCostPerToken);
+            const outputCost = toNumberPerMillion(pricing.outputCostPerToken);
+            const cacheCost = toNumberPerMillion(pricing.cacheReadCostPerToken);
+            const cacheWriteCost = toNumberPerMillion(pricing.cacheCreationCostPerToken);
+
+            // Normalize floating artifacts so tests expecting rounded values don't fail
+            const round = (value?: number): number | undefined =>
+                value !== undefined ? Number.parseFloat(value.toFixed(2)) : undefined;
+
+            (info as { pricing?: string }).pricing = formatPricingForDetail(pricing);
+            (info as { inputCost?: number }).inputCost = round(inputCost);
+            (info as { outputCost?: number }).outputCost = round(outputCost);
+            (info as { cacheCost?: number }).cacheCost = round(cacheCost);
+            (info as { cacheWriteCost?: number }).cacheWriteCost = round(cacheWriteCost);
+            (info as { priceCategory?: string }).priceCategory = derivePriceCategory(pricing);
+
+            // Tooltip: append pricing breakdown
+            const pricingTooltip = formatPricingForTooltip(pricing);
+            if (pricingTooltip) {
+                (info as { tooltip?: string }).tooltip = `${info.tooltip}\n${pricingTooltip}`;
+            }
+        }
+
+        return info;
     }
 
     private sleep(ms: number, _token?: vscode.CancellationToken): Promise<void> {

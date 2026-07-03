@@ -1216,7 +1216,7 @@ export abstract class LiteLLMProviderBase {
      * `collectMessageText` but operates on a single part's `content` field
      * (which is itself an array of `LanguageModelTextPart`-shaped objects).
      */
-    private collectPartText(content: ReadonlyArray<unknown>): string {
+    private collectPartText(content: readonly unknown[]): string {
         let text = "";
         for (const part of content) {
             if (part instanceof vscode.LanguageModelTextPart) {

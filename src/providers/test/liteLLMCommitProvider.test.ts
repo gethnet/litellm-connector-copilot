@@ -648,6 +648,9 @@ suite("LiteLLMCommitMessageProvider", () => {
             const call = reportMetricStub.firstCall.args[0];
             assert.strictEqual(call.status, "success");
             assert.strictEqual(call.caller, "scm-generator");
+            assert.strictEqual(call.estimatedInputCost, undefined);
+            assert.strictEqual(call.estimatedOutputCost, undefined);
+            assert.strictEqual(call.estimatedTotalCost, undefined);
 
             tokenSource.dispose();
         });
@@ -673,6 +676,9 @@ suite("LiteLLMCommitMessageProvider", () => {
             assert.ok(reportMetricStub.calledOnce);
             const call = reportMetricStub.firstCall.args[0];
             assert.strictEqual(call.status, "failure");
+            assert.strictEqual(call.estimatedInputCost, undefined);
+            assert.strictEqual(call.estimatedOutputCost, undefined);
+            assert.strictEqual(call.estimatedTotalCost, undefined);
 
             tokenSource.dispose();
         });

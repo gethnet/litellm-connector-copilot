@@ -114,12 +114,12 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
             if ((msg as { thinking_blocks?: unknown[] }).thinking_blocks) {
                 const thinkingBlocks = (
                     msg as {
-                        thinking_blocks?: Array<{
+                        thinking_blocks?: {
                             type?: string;
                             thinking?: string;
                             signature?: string;
                             data?: string;
-                        }>;
+                        }[];
                     }
                 ).thinking_blocks;
                 if (Array.isArray(thinkingBlocks)) {

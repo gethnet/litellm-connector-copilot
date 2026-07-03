@@ -6,6 +6,7 @@ import type {
     OpenAIUsagePayload,
     OpenAIUsagePromptTokenDetails,
 } from "../../types";
+import { calculateRequestCost, extractPricing, type RequestCost } from "../../utils/pricingCalculator";
 
 /**
  * Snapshot of all tracked token counts for a single request.
@@ -27,6 +28,11 @@ export interface TokenSnapshot {
 
     // Metadata
     sawUpstreamUsage: boolean;
+
+    // Pricing-aware cost estimation (USD). Zero when pricing unavailable.
+    estimatedInputCost?: number;
+    estimatedOutputCost?: number;
+    estimatedTotalCost?: number;
 }
 
 /**
@@ -43,8 +49,9 @@ export interface TokenSnapshot {
  */
 export class StreamTokenCapture {
     private readonly _inner: vscode.Progress<vscode.LanguageModelResponsePart>;
-    private readonly _modelId: string;
-    private readonly _modelInfo?: LiteLLMModelInfo;
+    private _modelId: string;
+    private _modelInfo?: LiteLLMModelInfo;
+    private _pricing: ReturnType<typeof extractPricing>;
 
     // Accumulated internal counts (populated during streaming)
     private _textBuffer = "";
@@ -71,6 +78,13 @@ export class StreamTokenCapture {
         this._modelId = modelId;
         this._inner = inner;
         this._modelInfo = modelInfo;
+        this._pricing = extractPricing(modelInfo);
+    }
+
+    public setModelInfo(modelId: string, modelInfo?: LiteLLMModelInfo): void {
+        this._modelInfo = modelInfo;
+        this._pricing = extractPricing(modelInfo);
+        this._modelId = modelId;
     }
 
     // ── Input-side configuration (call before sending the request) ──
@@ -105,7 +119,7 @@ export class StreamTokenCapture {
         const completionDetails: OpenAIUsageCompletionTokenDetails | undefined =
             this._upstream?.completion_tokens_details;
 
-        return {
+        const snapshot: TokenSnapshot = {
             // Input — prefer upstream, fall back to pre-computed estimate
             promptTokens: this._upstream?.prompt_tokens ?? this._estimatedPromptTokens,
             cachedTokens: promptDetails?.cached_tokens ?? 0,
@@ -124,6 +138,21 @@ export class StreamTokenCapture {
 
             sawUpstreamUsage: hasUpstream,
         };
+
+        const cost: RequestCost = calculateRequestCost({
+            promptTokens: snapshot.promptTokens,
+            completionTokens: snapshot.completionTokens,
+            cachedTokens: snapshot.cachedTokens,
+            cacheCreationInputTokens: snapshot.cacheCreationInputTokens,
+            pricing: this._pricing,
+        });
+        if (this._pricing) {
+            snapshot.estimatedInputCost = cost.inputCost;
+            snapshot.estimatedOutputCost = cost.outputCost;
+            snapshot.estimatedTotalCost = cost.totalCost;
+        }
+
+        return snapshot;
     }
 
     // ── Flush usage data (call after stream completes if no upstream usage was seen) ──
@@ -202,6 +231,16 @@ export class StreamTokenCapture {
             usagePayload.total_token_max = this._totalTokenMax;
         }
 
+        if (snapshot.estimatedInputCost !== undefined) {
+            usagePayload.estimated_input_cost = snapshot.estimatedInputCost;
+        }
+        if (snapshot.estimatedOutputCost !== undefined) {
+            usagePayload.estimated_output_cost = snapshot.estimatedOutputCost;
+        }
+        if (snapshot.estimatedTotalCost !== undefined) {
+            usagePayload.estimated_total_cost = snapshot.estimatedTotalCost;
+        }
+
         // Emit the usage DataPart
         const payloadJson = JSON.stringify(usagePayload);
         const payloadBytes = new TextEncoder().encode(payloadJson);
@@ -277,6 +316,17 @@ export class StreamTokenCapture {
                 reserved_output_tokens: this._upstream.reserved_output_tokens ?? this._reservedOutputTokens,
                 total_token_max: this._upstream.total_token_max ?? this._totalTokenMax,
             };
+
+            const cost: RequestCost = calculateRequestCost({
+                promptTokens: enriched.prompt_tokens ?? 0,
+                completionTokens: enriched.completion_tokens ?? 0,
+                cachedTokens: enriched.prompt_tokens_details?.cached_tokens ?? 0,
+                cacheCreationInputTokens: enriched.prompt_tokens_details?.cache_creation_input_tokens ?? 0,
+                pricing: this._pricing,
+            });
+            enriched.estimated_input_cost = cost.inputCost;
+            enriched.estimated_output_cost = cost.outputCost;
+            enriched.estimated_total_cost = cost.totalCost;
 
             // Re-encode and forward the enriched usage
             const enrichedBytes = new TextEncoder().encode(JSON.stringify(enriched));

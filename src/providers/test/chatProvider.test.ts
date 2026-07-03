@@ -893,6 +893,9 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
             undefined
         );
         assert.strictEqual(payload.system_prompt_tokens, 5);
+        assert.strictEqual(payload.estimated_input_cost, 0);
+        assert.strictEqual(payload.estimated_output_cost, 0);
+        assert.strictEqual(payload.estimated_total_cost, 0);
 
         sinon.assert.calledWithMatch(telemetrySpy, sinon.match({ tokensIn: 12, tokensOut: 7 }));
     });
@@ -981,6 +984,9 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
             system_prompt_tokens?: number;
             prompt_tokens_details?: { cached_tokens?: number };
             completion_tokens_details?: { reasoning_tokens?: number; tool_tokens?: number };
+            estimated_input_cost?: number;
+            estimated_output_cost?: number;
+            estimated_total_cost?: number;
         };
 
         assert.strictEqual(finalPayload.prompt_tokens, 12);
@@ -990,6 +996,9 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         assert.strictEqual(finalPayload.completion_tokens_details?.reasoning_tokens, 2);
         assert.strictEqual(finalPayload.completion_tokens_details?.tool_tokens, 1);
         assert.strictEqual(finalPayload.system_prompt_tokens, 5);
+        assert.strictEqual(finalPayload.estimated_input_cost, 0);
+        assert.strictEqual(finalPayload.estimated_output_cost, 0);
+        assert.strictEqual(finalPayload.estimated_total_cost, 0);
     });
 
     test("counts tool-call only responses in fallback token reporting", async () => {
@@ -1065,15 +1074,25 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
             const payload = JSON.parse(Buffer.from(usagePart.data).toString("utf-8")) as {
                 completion_tokens: number;
                 completion_tokens_details?: { tool_tokens?: number };
+                estimated_input_cost?: number;
+                estimated_output_cost?: number;
+                estimated_total_cost?: number;
             };
             assert.ok(payload.completion_tokens > 0);
             assert.ok((payload.completion_tokens_details?.tool_tokens ?? 0) > 0);
+            assert.strictEqual(payload.estimated_input_cost ?? 0, 0);
+            assert.strictEqual(payload.estimated_output_cost ?? 0, 0);
+            assert.strictEqual(payload.estimated_total_cost ?? 0, 0);
         }
         sinon.assert.calledWithMatch(
             telemetrySpy,
             sinon.match((metric: unknown) => {
-                const typedMetric = metric as { tokensOut?: number; toolTokens?: number };
-                return (typedMetric.tokensOut ?? 0) > 0 && (typedMetric.toolTokens ?? 0) > 0;
+                const typedMetric = metric as { tokensOut?: number; toolTokens?: number; estimatedTotalCost?: number };
+                return (
+                    (typedMetric.tokensOut ?? 0) > 0 &&
+                    (typedMetric.toolTokens ?? 0) > 0 &&
+                    (typedMetric.estimatedTotalCost ?? 0) === 0
+                );
             })
         );
     });

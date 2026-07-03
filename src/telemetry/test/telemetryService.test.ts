@@ -124,6 +124,11 @@ suite("TelemetryService", () => {
             durationMs: 42,
             tokensIn: 7,
             tokensOut: 11,
+            cost: {
+                estimated_input_cost: 0.01,
+                estimated_output_cost: 0.02,
+                estimated_total_cost: 0.03,
+            },
         });
 
         assert.strictEqual(adapterMock.capture.calledOnce, true);
@@ -131,6 +136,9 @@ suite("TelemetryService", () => {
         assert.strictEqual(event.event, "request_completed");
         assert.strictEqual(event.properties.request_id, "req-complete-123");
         assert.strictEqual(event.properties.caller, "inline-completions");
+        assert.strictEqual(event.properties.estimated_input_cost, 0.01);
+        assert.strictEqual(event.properties.estimated_output_cost, 0.02);
+        assert.strictEqual(event.properties.estimated_total_cost, 0.03);
     });
 
     test("captureRequestFailed includes request_id when provided", () => {
@@ -150,6 +158,11 @@ suite("TelemetryService", () => {
             endpoint: "unknown",
             durationMs: 12,
             errorType: "boom",
+            cost: {
+                estimated_input_cost: 0.1,
+                estimated_output_cost: 0.2,
+                estimated_total_cost: 0.3,
+            },
         });
 
         assert.strictEqual(adapterMock.capture.calledOnce, true);
@@ -158,6 +171,9 @@ suite("TelemetryService", () => {
         assert.strictEqual(event.properties.request_id, "req-fail-123");
         assert.strictEqual(event.properties.error_type, "boom");
         assert.strictEqual(event.properties.duration_ms, 12);
+        assert.strictEqual(event.properties.estimated_input_cost, 0.1);
+        assert.strictEqual(event.properties.estimated_output_cost, 0.2);
+        assert.strictEqual(event.properties.estimated_total_cost, 0.3);
     });
 
     test("captureRequestCompleted normalizes request telemetry property keys", () => {
@@ -178,6 +194,11 @@ suite("TelemetryService", () => {
             durationMs: 77,
             tokensIn: 12,
             tokensOut: 34,
+            cost: {
+                estimated_input_cost: 1,
+                estimated_output_cost: 2,
+                estimated_total_cost: 3,
+            },
         });
 
         assert.strictEqual(adapterMock.capture.calledOnce, true);
@@ -187,6 +208,9 @@ suite("TelemetryService", () => {
         assert.strictEqual(event.properties.duration_ms, 77);
         assert.strictEqual(event.properties.tokens_in, 12);
         assert.strictEqual(event.properties.tokens_out, 34);
+        assert.strictEqual(event.properties.estimated_input_cost, 1);
+        assert.strictEqual(event.properties.estimated_output_cost, 2);
+        assert.strictEqual(event.properties.estimated_total_cost, 3);
     });
 
     test("captureRequestCachingBypassed emits dedicated event with snake_case properties", () => {

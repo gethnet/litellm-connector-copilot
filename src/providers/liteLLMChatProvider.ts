@@ -149,6 +149,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             reservedOutputTokens?: number;
             totalTokenMax?: number;
             sawUsageDataPart: boolean;
+            estimatedInputCost?: number;
+            estimatedOutputCost?: number;
+            estimatedTotalCost?: number;
         }
     ): void {
         Logger.debug(
@@ -164,7 +167,10 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 `system_prompt_tokens=${usage.systemPromptTokens ?? "n/a"} reserved_output_tokens=${
                     usage.reservedOutputTokens ?? "n/a"
                 } ` +
-                `total_token_max=${usage.totalTokenMax ?? "n/a"} streamed_usage=${usage.sawUsageDataPart}`
+                `total_token_max=${usage.totalTokenMax ?? "n/a"} streamed_usage=${usage.sawUsageDataPart} ` +
+                `estimated_input_cost=${usage.estimatedInputCost ?? "n/a"} estimated_output_cost=${
+                    usage.estimatedOutputCost ?? "n/a"
+                } estimated_total_cost=${usage.estimatedTotalCost ?? "n/a"}`
         );
     }
 
@@ -437,6 +443,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                                 durationMs: LiteLLMTelemetry.endTimer(startTime),
                                 tokensIn,
                                 tokensOut,
+                                estimatedInputCost: snapshot.estimatedInputCost,
+                                estimatedOutputCost: snapshot.estimatedOutputCost,
+                                estimatedTotalCost: snapshot.estimatedTotalCost,
                                 status: "success" as const,
                                 caller,
                             };
@@ -445,6 +454,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                                 tokensIn,
                                 tokensOut,
                                 sawUsageDataPart: snapshot.sawUpstreamUsage,
+                                estimatedInputCost: snapshot.estimatedInputCost,
+                                estimatedOutputCost: snapshot.estimatedOutputCost,
+                                estimatedTotalCost: snapshot.estimatedTotalCost,
                             });
 
                             // Return early - all processing complete, prevent fall-through
@@ -516,6 +528,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             const acceptedPredictionTokens = snapshot.acceptedPredictionTokens || undefined;
             const rejectedPredictionTokens = snapshot.rejectedPredictionTokens || undefined;
             const cacheCreationInputTokens = snapshot.cacheCreationInputTokens || undefined;
+            const estimatedInputCost = snapshot.estimatedInputCost;
+            const estimatedOutputCost = snapshot.estimatedOutputCost;
+            const estimatedTotalCost = snapshot.estimatedTotalCost;
 
             const metric = {
                 requestId,
@@ -531,6 +546,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 rejectedPredictionTokens,
                 reservedOutputTokens,
                 totalTokenMax,
+                estimatedInputCost,
+                estimatedOutputCost,
+                estimatedTotalCost,
                 status: "success" as const,
                 caller,
                 cacheReadRatio:
@@ -552,6 +570,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 reservedOutputTokens,
                 totalTokenMax,
                 sawUsageDataPart: snapshot.sawUpstreamUsage,
+                estimatedInputCost,
+                estimatedOutputCost,
+                estimatedTotalCost,
             });
 
             // Usage data is now handled exclusively by StreamTokenCapture

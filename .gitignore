@@ -5,8 +5,7 @@ package-lock.json
 .idea/
 
 # Worktrees
-.worktrees
-main-registry-rebuild
+.worktrees/**
 
 out
 dist
