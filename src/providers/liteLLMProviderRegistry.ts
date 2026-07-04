@@ -64,6 +64,7 @@
 import * as vscode from "vscode";
 import type { LanguageModelChatInformation } from "vscode";
 import { Logger } from "../utils/logger";
+import { StructuredLogger } from "../observability/structuredLogger";
 import {
     deriveCapabilitiesFromModelInfo,
     capabilitiesToVSCode,
@@ -73,16 +74,47 @@ import {
     derivePickerCategory,
 } from "../utils/modelCapabilities";
 import { deriveGroupNameFromUrl } from "../utils";
+import { sha256HexAsync } from "../utils/discoveryHash";
 import type { LiteLLMConfig, LiteLLMModelInfo, LiteLLMModelInfoResponse } from "../types";
 import type { ConfigManager } from "../config/configManager";
 import type { BackendSession } from "./backendSession";
 import { sharedDiscoveryBackoff } from "./base/discoveryBackoff";
+import { DebouncedEmitter } from "./base/debouncedEmitter";
 import {
     derivePriceCategory,
     extractPricing,
     formatPricingForDetail,
     formatPricingForTooltip,
 } from "../utils/pricingCalculator";
+
+/**
+ * Cached result from a /model/info discovery call.
+ */
+interface CachedDiscoveryResult {
+    readonly bodyHash: string;
+    readonly models: readonly vscode.LanguageModelChatInformation[];
+    readonly fetchedAtMs: number;
+    readonly ttlMs: number;
+}
+
+/**
+ * Computes a deterministic cache key for discovery responses.
+ * Key format: normalizedBaseUrl#apiKeyHashSuffix
+ * apiKey is hashed with SHA-256 and only the first 8 chars are used internally.
+ * The raw API key is never logged or persisted.
+ */
+async function hashApiKeySuffixAsync(apiKey: string | undefined): Promise<string> {
+    return apiKey ? (await sha256HexAsync(apiKey)).slice(0, 8) : "anonymous";
+}
+
+function normalizeBaseUrl(baseUrl: string): string {
+    // Remove trailing slashes and normalize https:// prefix
+    return baseUrl.replace(/\/+$/, "").replace(/^http:\/\//i, "https://");
+}
+
+async function toDiscoveryCacheKey(baseUrl: string, apiKey: string | undefined): Promise<string> {
+    return `${normalizeBaseUrl(baseUrl)}#${await hashApiKeySuffixAsync(apiKey)}`;
+}
 
 /**
  * The shape returned by `lookup(id)`. The response path needs the
@@ -164,6 +196,16 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
 
     private readonly _onDidChangeEmitter = new vscode.EventEmitter<void>();
 
+    // Discovery response cache for /model/info responses
+    private readonly discoveryResponseCache = new Map<string, CachedDiscoveryResult>();
+
+    // Debounced change event emitter (initialized lazily on first use)
+    private _debouncedOnDidChange: DebouncedEmitter | undefined;
+
+    // Discovery debounce defaults
+    private static readonly DEFAULT_DISCOVERY_FIRE_DEBOUNCE_MS = 250;
+    private static readonly DEFAULT_DISCOVERY_FIRE_MIN_INTERVAL_MS = 2_000;
+
     /**
      * Emits when a backend's discovered model set has actually changed
      * since the prior delivery. The base provider subscribes once and
@@ -175,6 +217,37 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
         this.configManager = deps.configManager;
         this._userAgent = deps.userAgent;
         this._onModernConfigurationDetected = deps.onModernConfigurationDetected;
+    }
+
+    /**
+     * Gets or creates the debounced change emitter. Uses workspace config if available,
+     * otherwise falls back to defaults. This is called lazily to avoid async config
+     * reads during construction.
+     */
+    private async getDebouncedEmitter(): Promise<DebouncedEmitter> {
+        if (!this._debouncedOnDidChange) {
+            const config = await this.configManager.getConfig();
+            const debounceMs =
+                config.discoveryFireDebounceMs ?? LiteLLMProviderRegistry.DEFAULT_DISCOVERY_FIRE_DEBOUNCE_MS;
+            const minIntervalMs =
+                config.discoveryFireMinIntervalMs ?? LiteLLMProviderRegistry.DEFAULT_DISCOVERY_FIRE_MIN_INTERVAL_MS;
+
+            this._debouncedOnDidChange = new DebouncedEmitter(
+                () => this._onDidChangeEmitter.fire(),
+                debounceMs,
+                minIntervalMs,
+                (reasons) => {
+                    if (reasons.length > 1) {
+                        StructuredLogger.debug("discovery.fire_debounced", {
+                            baseUrl: reasons[0] ?? "unknown",
+                            coalescedFires: reasons.length,
+                            windowMs: debounceMs,
+                        });
+                    }
+                }
+            );
+        }
+        return this._debouncedOnDidChange;
     }
 
     // -------------------------------------------------------------------------
@@ -206,7 +279,11 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
     ): Promise<LanguageModelChatInformation[]> {
         const outcome = await this.discoverInternal(options, token);
         if (outcome.changed) {
-            this._onDidChangeEmitter.fire();
+            // Use debounced emitter to rate-limit rapid changes
+            const debouncedEmitter = await this.getDebouncedEmitter();
+            const baseUrl = outcome.session?.baseUrl ?? "unknown";
+            debouncedEmitter.fire(baseUrl);
+            StructuredLogger.debug("discovery.fire", { baseUrl, reason: "model_change" });
         }
         return outcome.models;
     }
@@ -324,6 +401,7 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
     public clear(): void {
         this.entries.clear();
         this.modelsByBackend.clear();
+        this.discoveryResponseCache.clear();
     }
 
     /**
@@ -334,6 +412,7 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
         this.modelInfoCache.clear();
         this.derivedCapabilitiesCache.clear();
         this.unsupportedParamsByModel.clear();
+        this.discoveryResponseCache.clear();
         sharedDiscoveryBackoff.reset();
     }
 
@@ -360,6 +439,7 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
     }
 
     public dispose(): void {
+        this._debouncedOnDidChange?.dispose();
         this._onDidChangeEmitter.dispose();
     }
 
@@ -525,7 +605,42 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
         routingIdentity: string
     ): Promise<vscode.LanguageModelChatInformation[]> {
         const config = await this.configManager.getConfig();
+        const ttlMs = config.discoveryCacheTtlMs ?? 60_000;
+
+        // Check cache first
+        const cacheKey = await toDiscoveryCacheKey(session.baseUrl, session.apiKey);
+        if (ttlMs > 0) {
+            const cached = this.discoveryResponseCache.get(cacheKey);
+            if (cached && Date.now() - cached.fetchedAtMs < ttlMs) {
+                StructuredLogger.debug("discovery.cache_hit", {
+                    baseUrl: session.baseUrl,
+                    ageMs: Date.now() - cached.fetchedAtMs,
+                    ttlMs,
+                    modelCount: cached.models.length,
+                    bodyHash: cached.bodyHash.slice(0, 8),
+                });
+                return [...cached.models];
+            }
+            StructuredLogger.debug("discovery.cache_miss", {
+                baseUrl: session.baseUrl,
+                reason: !cached ? "missing" : "expired",
+            });
+        }
+
+        // Fetch fresh data
+        StructuredLogger.trace("discovery.request_start", {
+            baseUrl: session.baseUrl,
+            url: "/model/info",
+            timeoutMs: config.discoveryTimeoutMs ?? 5_000,
+        });
+        const startTime = Date.now();
         const models = await session.client.getModelInfo(token);
+        const durationMs = Date.now() - startTime;
+        StructuredLogger.debug("discovery.request_success", {
+            baseUrl: session.baseUrl,
+            durationMs,
+            modelCount: models.data?.length ?? 0,
+        });
         if (!models?.data?.length) {
             return [];
         }
@@ -544,6 +659,24 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
                 )
             )
             .filter((info) => info.isUserSelectable !== false);
+
+        // Cache the response if TTL > 0
+        if (ttlMs > 0) {
+            // Create a deterministic hash of the response body
+            const bodyHash = await sha256HexAsync(JSON.stringify(models.data ?? []));
+            this.discoveryResponseCache.set(cacheKey, {
+                bodyHash,
+                models: infos,
+                fetchedAtMs: Date.now(),
+                ttlMs,
+            });
+            StructuredLogger.debug("discovery.cached", {
+                baseUrl: session.baseUrl,
+                bodyHash: bodyHash.slice(0, 8),
+                modelCount: infos.length,
+                ttlMs,
+            });
+        }
 
         return infos;
     }

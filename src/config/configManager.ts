@@ -17,6 +17,22 @@ export class ConfigManager {
     private static readonly FORCE_RESPONSES_ENDPOINT_KEY = "litellm-connector.forceResponsesEndpoint";
     private static readonly ALLOW_CHAT_COMPLETIONS_FALLBACK_KEY = "litellm-connector.allowChatCompletionsFallback";
     private static readonly DISPLAY_PRICING_IN_PICKER_KEY = "litellm-connector.displayPricingInPicker";
+    private static readonly DISCOVERY_TIMEOUT_MS_KEY = "litellm-connector.discoveryTimeoutMs";
+    private static readonly DISCOVERY_CACHE_TTL_MS_KEY = "litellm-connector.discoveryCacheTtlMs";
+    private static readonly DISCOVERY_FIRE_DEBOUNCE_MS_KEY = "litellm-connector.discoveryFireDebounceMs";
+    private static readonly DISCOVERY_FIRE_MIN_INTERVAL_MS_KEY = "litellm-connector.discoveryFireMinIntervalMs";
+
+    // Discovery config defaults and bounds
+    private static readonly DEFAULT_DISCOVERY_TIMEOUT_MS = 5_000;
+    private static readonly MIN_DISCOVERY_TIMEOUT_MS = 500;
+    private static readonly MAX_DISCOVERY_TIMEOUT_MS = 60_000;
+    private static readonly DEFAULT_DISCOVERY_CACHE_TTL_MS = 60_000;
+    private static readonly MIN_DISCOVERY_CACHE_TTL_MS = 0;
+    private static readonly MAX_DISCOVERY_CACHE_TTL_MS = 300_000;
+    private static readonly DEFAULT_DISCOVERY_FIRE_DEBOUNCE_MS = 250;
+    private static readonly MAX_DISCOVERY_FIRE_DEBOUNCE_MS = 5_000;
+    private static readonly DEFAULT_DISCOVERY_FIRE_MIN_INTERVAL_MS = 2_000;
+    private static readonly MAX_DISCOVERY_FIRE_MIN_INTERVAL_MS = 30_000;
 
     private _telemetryService?: TelemetryService;
 
@@ -65,6 +81,42 @@ export class ConfigManager {
 
     public async getSecret(key: string): Promise<string | undefined> {
         return this.secrets.get(key);
+    }
+
+    /**
+     * Clamps a discovery timeout value to valid bounds.
+     */
+    private clampDiscoveryTimeoutMs(value: number | undefined): number {
+        if (typeof value !== "number" || Number.isNaN(value)) {
+            return ConfigManager.DEFAULT_DISCOVERY_TIMEOUT_MS;
+        }
+        return Math.min(
+            ConfigManager.MAX_DISCOVERY_TIMEOUT_MS,
+            Math.max(ConfigManager.MIN_DISCOVERY_TIMEOUT_MS, value)
+        );
+    }
+
+    /**
+     * Clamps a discovery cache TTL value to valid bounds.
+     */
+    private clampDiscoveryCacheTtlMs(value: number | undefined): number {
+        if (typeof value !== "number" || Number.isNaN(value)) {
+            return ConfigManager.DEFAULT_DISCOVERY_CACHE_TTL_MS;
+        }
+        return Math.min(
+            ConfigManager.MAX_DISCOVERY_CACHE_TTL_MS,
+            Math.max(ConfigManager.MIN_DISCOVERY_CACHE_TTL_MS, value)
+        );
+    }
+
+    /**
+     * Generic range clamp for discovery settings.
+     */
+    private clampRange(value: number | undefined, min: number, max: number, defaultValue: number): number {
+        if (typeof value !== "number" || Number.isNaN(value)) {
+            return defaultValue;
+        }
+        return Math.min(max, Math.max(min, value));
     }
 
     public setTelemetryService(service: TelemetryService): void {
@@ -141,6 +193,25 @@ export class ConfigManager {
         );
         const displayPricingInPicker = workspaceConfig.get<boolean>(ConfigManager.DISPLAY_PRICING_IN_PICKER_KEY, true); // Ensure config precedence for displayPricingInPicker
 
+        const discoveryTimeoutMs = this.clampDiscoveryTimeoutMs(
+            workspaceConfig.get<number>(ConfigManager.DISCOVERY_TIMEOUT_MS_KEY)
+        );
+        const discoveryCacheTtlMs = this.clampDiscoveryCacheTtlMs(
+            workspaceConfig.get<number>(ConfigManager.DISCOVERY_CACHE_TTL_MS_KEY)
+        );
+        const discoveryFireDebounceMs = this.clampRange(
+            workspaceConfig.get<number>(ConfigManager.DISCOVERY_FIRE_DEBOUNCE_MS_KEY),
+            0,
+            ConfigManager.MAX_DISCOVERY_FIRE_DEBOUNCE_MS,
+            ConfigManager.DEFAULT_DISCOVERY_FIRE_DEBOUNCE_MS
+        );
+        const discoveryFireMinIntervalMs = this.clampRange(
+            workspaceConfig.get<number>(ConfigManager.DISCOVERY_FIRE_MIN_INTERVAL_MS_KEY),
+            0,
+            ConfigManager.MAX_DISCOVERY_FIRE_MIN_INTERVAL_MS,
+            ConfigManager.DEFAULT_DISCOVERY_FIRE_MIN_INTERVAL_MS
+        );
+
         return {
             inactivityTimeout,
             disableCaching,
@@ -152,6 +223,10 @@ export class ConfigManager {
             forceResponsesEndpoint,
             allowChatCompletionsFallback,
             displayPricingInPicker,
+            discoveryTimeoutMs,
+            discoveryCacheTtlMs,
+            discoveryFireDebounceMs,
+            discoveryFireMinIntervalMs,
         };
     }
 

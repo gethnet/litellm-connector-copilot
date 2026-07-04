@@ -252,10 +252,18 @@ broke change detection). With the merge, `discoverModels` is the only
 call site that needs to know the write protocol exists, and consumers
 see a single ingress.
 
-**Stateless by design**: there is no model-list cache, no in-flight
-de-duplication, and no TTL. Every `discoverModels` call is a single
-HTTP round-trip. The "ghost cache" is gone, and the picker always
-reflects the live state of the backend.
+**Short-lived discovery cache**: the registry keeps a TTL-bound response
+cache keyed by normalized `baseUrl` plus an API-key hash suffix (first 8
+chars of SHA-256). Cache entries are invalidated by `clear()`,
+`clearCaches()`, and manual reloads. Set `discoveryCacheTtlMs=0` to
+disable caching entirely.
+
+**Debounced outward change notifications**: the registry coalesces repeated
+discovery changes through a trailing-edge debounce and minimum fire
+interval before forwarding to VS Code. This reduces re-query amplification
+across configured provider groups without suppressing real model changes.
+Configure via `discoveryFireDebounceMs` (default 250ms) and
+`discoveryFireMinIntervalMs` (default 2000ms), or disable by setting to 0.
 
 ### Key logic (extension)
 

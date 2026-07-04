@@ -88,6 +88,11 @@ Base URL + API key are configured through **VS Code's Language Models UI** (run 
 | `inactivityTimeout` | `60` | Seconds before stream is considered idle |
 | `disableCaching` | `true` | Send `no-cache` headers |
 | `enableModelOverrides` | `true` | Enable model override rules |
+| `displayPricingInPicker` | `true` | Show model pricing in picker |
+| `discoveryTimeoutMs` | `5000` | Timeout (ms) for model discovery |
+| `discoveryCacheTtlMs` | `60000` | Cache TTL (ms), 0 to disable |
+| `discoveryFireDebounceMs` | `250` | Debounce (ms) for change notifications |
+| `discoveryFireMinIntervalMs` | `2000` | Min interval (ms) between notifications |
 
 ### Advanced (JSON-Only)
 

@@ -182,6 +182,18 @@ export interface LiteLLMConfig {
     /** When true, show pricing data in the model picker hover (if available from /model/info). Default: true. */
     displayPricingInPicker?: boolean;
 
+    /** Timeout in milliseconds for /model/info discovery requests. Default: 5000. */
+    discoveryTimeoutMs?: number;
+
+    /** TTL in milliseconds for cached /model/info discovery responses. Default: 60000. Set to 0 to disable caching. */
+    discoveryCacheTtlMs?: number;
+
+    /** Trailing-edge debounce window in milliseconds for outward model-discovery change notifications. Default: 250. */
+    discoveryFireDebounceMs?: number;
+
+    /** Minimum interval in milliseconds between outward model-discovery change notifications. Default: 2000. */
+    discoveryFireMinIntervalMs?: number;
+
     // sendDefaultParameters was removed in v2.2.0 (deprecated v1.5.0). Use individual modelOptions instead.
 }
 
@@ -196,6 +208,8 @@ export interface LiteLLMClientConfig {
     url: string;
     key?: string;
     disableCaching?: boolean;
+    /** Timeout in milliseconds for /model/info discovery requests. Default: 5000. */
+    discoveryTimeoutMs?: number;
 }
 
 /**

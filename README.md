@@ -142,6 +142,11 @@ Base URL and API key are configured through **VS Code's Language Models provider
 | `litellm-connector.enableModelOverrides` | boolean | `true` | Master toggle for model override system |
 | `litellm-connector.modelOverrides` | array | `[]` | User-supplied regex-based override rules |
 | `litellm-connector.modelCapabilitiesOverrides` | object | `{}` | Override `toolCalling` / `imageInput` capabilities |
+| `litellm-connector.displayPricingInPicker` | boolean | `true` | Show model pricing in the model picker |
+| `litellm-connector.discoveryTimeoutMs` | number | `5000` | Timeout (ms) for `/model/info` discovery requests |
+| `litellm-connector.discoveryCacheTtlMs` | number | `60000` | TTL (ms) for cached discovery responses. Set 0 to disable |
+| `litellm-connector.discoveryFireDebounceMs` | number | `250` | Debounce window (ms) for model-change notifications |
+| `litellm-connector.discoveryFireMinIntervalMs` | number | `2000` | Min interval (ms) between change notifications |
 
 > **Tip**: Most users won't need to touch these — the defaults work great!
 

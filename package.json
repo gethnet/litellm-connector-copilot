@@ -1,7 +1,7 @@
 {
 	"name": "litellm-connector-copilot",
 	"displayName": "LiteLLM Connector for Copilot",
-	"version": "2.1.8-dev3",
+	"version": "2.1.8-dev5",
 	"description": "An extension that integrates LiteLLM proxy into Copilot",
 	"categories": [
 		"AI",
@@ -191,6 +191,46 @@
 					"type": "boolean",
 					"default": true,
 					"description": "Show model pricing in the model picker when available."
+				},
+				"litellm-connector.discoveryTimeoutMs": {
+					"type": "number",
+					"default": 5000,
+					"minimum": 500,
+					"maximum": 60000,
+					"tags": [
+						"advanced"
+					],
+					"description": "Timeout in milliseconds for /model/info discovery requests. Default: 5000."
+				},
+				"litellm-connector.discoveryCacheTtlMs": {
+					"type": "number",
+					"default": 60000,
+					"minimum": 0,
+					"maximum": 300000,
+					"tags": [
+						"advanced"
+					],
+					"description": "TTL in milliseconds for cached /model/info discovery responses. Set to 0 to disable caching. Default: 60000."
+				},
+				"litellm-connector.discoveryFireDebounceMs": {
+					"type": "number",
+					"default": 250,
+					"minimum": 0,
+					"maximum": 5000,
+					"tags": [
+						"advanced"
+					],
+					"description": "Trailing-edge debounce window in milliseconds for outward model-discovery change notifications. Set to 0 to disable debouncing. Default: 250."
+				},
+				"litellm-connector.discoveryFireMinIntervalMs": {
+					"type": "number",
+					"default": 2000,
+					"minimum": 0,
+					"maximum": 30000,
+					"tags": [
+						"advanced"
+					],
+					"description": "Minimum interval in milliseconds between outward model-discovery change notifications. Set to 0 to disable rate limiting. Default: 2000."
 				}
 			}
 		},
