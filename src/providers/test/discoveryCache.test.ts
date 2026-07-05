@@ -1,6 +1,5 @@
 import * as assert from "assert";
 import * as sinon from "sinon";
-import * as vscode from "vscode";
 import { ConfigManager } from "../../config/configManager";
 import { LiteLLMProviderRegistry } from "../liteLLMProviderRegistry";
 
@@ -11,13 +10,6 @@ import { LiteLLMProviderRegistry } from "../liteLLMProviderRegistry";
 suite("Discovery Cache", () => {
     let sandbox: sinon.SinonSandbox;
     let configManager: sinon.SinonStubbedInstance<ConfigManager>;
-
-    const mockSecrets = {
-        get: async () => undefined,
-        store: async () => {},
-        delete: async () => {},
-        onDidChange: new vscode.EventEmitter<vscode.SecretStorageChangeEvent>().event,
-    } as unknown as vscode.SecretStorage;
 
     setup(() => {
         sandbox = sinon.createSandbox();
@@ -43,8 +35,6 @@ suite("Discovery Cache", () => {
         // Clear any caches
         registry.clearCaches();
 
-        // Capture that discovery was called
-        const discoverCallCount = 0;
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const _originalDiscover = (registry as unknown as { discoverModels: typeof registry.discoverModels })
             .discoverModels;

@@ -98,6 +98,7 @@ suite("ManageConfig Command Unit Tests", () => {
 
         await handler?.();
 
+        sinon.assert.calledOnce(warningStub);
         sinon.assert.calledOnceWithExactly(mockConfigManager.resetConfiguration);
         assert.strictEqual(infoStub.callCount, 1);
         assert.ok(
