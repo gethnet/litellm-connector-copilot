@@ -16,6 +16,9 @@ export interface IMetrics {
     rejectedPredictionTokens?: number;
     reservedOutputTokens?: number;
     totalTokenMax?: number;
+    estimatedInputCost?: number;
+    estimatedOutputCost?: number;
+    estimatedTotalCost?: number;
     status: "success" | "failure" | "caching_bypassed";
     error?: string;
     caller?: string;
@@ -47,7 +50,11 @@ export class LiteLLMTelemetry {
                 metric.acceptedPredictionTokens ?? "n/a"
             } rejected_prediction_tokens=${metric.rejectedPredictionTokens ?? "n/a"} token_count_max=${
                 metric.reservedOutputTokens ?? "n/a"
-            } total_token_max=${metric.totalTokenMax ?? "n/a"}`
+            } total_token_max=${metric.totalTokenMax ?? "n/a"} estimated_input_cost=${
+                metric.estimatedInputCost ?? "n/a"
+            } estimated_output_cost=${metric.estimatedOutputCost ?? "n/a"} estimated_total_cost=${
+                metric.estimatedTotalCost ?? "n/a"
+            }`
         );
 
         if (this._telemetryService) {

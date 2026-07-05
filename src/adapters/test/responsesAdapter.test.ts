@@ -537,8 +537,7 @@ suite("Responses Adapter Unit Tests", () => {
         // Sanity-check: function_call and function_call_output items are present and correctly linked.
         const functionCall = input.find((i) => i.type === "function_call") as Record<string, unknown> | undefined;
         const functionOutput = input.find((i) => i.type === "function_call_output") as
-            | Record<string, unknown>
-            | undefined;
+            Record<string, unknown> | undefined;
         assert.ok(functionCall, "function_call item must be present");
         assert.ok(functionOutput, "function_call_output item must be present");
         assert.strictEqual(functionCall.call_id, functionOutput.call_id, "call_id must match between call and output");

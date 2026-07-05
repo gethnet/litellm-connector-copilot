@@ -148,7 +148,10 @@ export abstract class LiteLLMProviderBase {
             userAgent: this.userAgent,
             logger: Logger,
             liteLLMClientFactory: (backend) =>
-                new LiteLLMClient({ url: backend.url, key: backend.key }, this.userAgent),
+                new LiteLLMClient(
+                    { url: backend.url, key: backend.key, disableCaching: backend.disableCaching },
+                    this.userAgent
+                ),
         };
         this._transport = new Transport(transportDeps);
     }
@@ -318,7 +321,16 @@ export abstract class LiteLLMProviderBase {
                     return localCount;
                 }
 
-                const singleClient = new LiteLLMClient({ url: backend.baseUrl, key: backend.apiKey }, this.userAgent);
+                // Thread disableCaching for cache-bypass consistency on the
+                // countTokens path. Fetch the workspace config once; the cost
+                // is negligible next to the HTTP round-trip. Without this the
+                // token-counting requests bypass the cache-bypass that the
+                // request hot path now applies (Step 2 of the original plan).
+                const countCfg = await this._configManager.getConfig();
+                const singleClient = new LiteLLMClient(
+                    { url: backend.baseUrl, key: backend.apiKey, disableCaching: countCfg.disableCaching },
+                    this.userAgent
+                );
 
                 // Set up orphan cleanup timeout (will delete from pendingRequests if exceeded)
                 timeoutHandle = setTimeout(() => {
@@ -519,9 +531,7 @@ export abstract class LiteLLMProviderBase {
 
     protected normalizeMessagesForV2Pipeline(
         messages: readonly (
-            | vscode.LanguageModelChatRequestMessage
-            | vscode.LanguageModelChatMessage2
-            | vscode.LanguageModelChatMessage
+            vscode.LanguageModelChatRequestMessage | vscode.LanguageModelChatMessage2 | vscode.LanguageModelChatMessage
         )[]
     ): V2ChatMessage[] {
         return normalizeMessagesForV2Pipeline(messages);
@@ -686,14 +696,19 @@ export abstract class LiteLLMProviderBase {
 
     private applyReasoningEffort(
         request: OpenAIChatCompletionRequest,
-        effort: SupportedReasoningEffort | undefined
+        effort: SupportedReasoningEffort | undefined,
+        summary?: "auto" | "concise" | "detailed"
     ): void {
         if (!effort || effort === "none") {
             const requestRecord = request as unknown as Record<string, unknown>;
             delete requestRecord.reasoning_effort;
             return;
         }
-        request.reasoning_effort = effort;
+        // Object form is used by `gpt-5.4+` callers (and the OpenAI Responses API
+        // in general) to control whether summary text is returned alongside the
+        // reasoning text. The OpenAI Chat Completions spec still accepts the
+        // legacy string form; both are forwarded to LiteLLM unchanged.
+        request.reasoning_effort = summary ? { effort, summary } : effort;
     }
 
     private notifyReasoningFallback(
@@ -729,7 +744,7 @@ export abstract class LiteLLMProviderBase {
                 token,
                 caller,
                 modelInfo,
-                this.getCallTimeConfiguration(options, model)
+                await this.getCallTimeConfiguration(options, model)
             );
         } catch (err) {
             if (!isContextOverflowError(err)) {
@@ -756,7 +771,7 @@ export abstract class LiteLLMProviderBase {
                     token,
                     caller,
                     modelInfo,
-                    this.getCallTimeConfiguration(options, model)
+                    await this.getCallTimeConfiguration(options, model)
                 );
             } catch (retryErr) {
                 if (isContextOverflowError(retryErr)) {
@@ -786,10 +801,10 @@ export abstract class LiteLLMProviderBase {
      * routable. If neither channel has the model, the call is a
      * configuration problem and the transport surfaces a visible error.
      */
-    private getCallTimeConfiguration(
+    private async getCallTimeConfiguration(
         options: vscode.ProvideLanguageModelChatResponseOptions,
         model: vscode.LanguageModelChatInformation
-    ): Record<string, unknown> | undefined {
+    ): Promise<Record<string, unknown> | undefined> {
         const opt = options as vscode.ProvideLanguageModelChatResponseOptions & {
             configuration?: Record<string, unknown>;
         };
@@ -809,11 +824,22 @@ export abstract class LiteLLMProviderBase {
         // non-empty). Anything else falls through to the registry.
         const optBaseUrl = typeof opt.configuration?.baseUrl === "string" ? opt.configuration.baseUrl.trim() : "";
         const optApiKey = typeof opt.configuration?.apiKey === "string" ? opt.configuration.apiKey.trim() : "";
+
+        // Fetch workspace-config toggles once so both paths can merge them.
+        const cfg = await this._configManager.getConfig();
+
         if (opt.configuration && optBaseUrl.length > 0 && optApiKey.length > 0) {
             Logger.trace(
                 `getCallTimeConfiguration: HIT via options.configuration modelId="${model.id}" baseUrl="${optBaseUrl}"`
             );
-            return opt.configuration;
+            // Merge workspace-config ergonomic toggles onto the per-group
+            // configuration so the transport can read allowChatCompletionsFallback
+            // and disableCaching without a separate config fetch on the hot path.
+            return {
+                ...opt.configuration,
+                allowChatCompletionsFallback: cfg.allowChatCompletionsFallback,
+                disableCaching: cfg.disableCaching,
+            };
         }
         if (opt.configuration) {
             // Object is present but malformed (empty / missing fields).
@@ -838,7 +864,15 @@ export abstract class LiteLLMProviderBase {
         const entry = this._registry.lookup(model.id);
         if (entry) {
             Logger.trace(`getCallTimeConfiguration: registry HIT modelId="${model.id}" -> baseUrl="${entry.baseUrl}"`);
-            return { baseUrl: entry.baseUrl, apiKey: entry.apiKey };
+            // Same ergonomic-toggle merge as the options.configuration path above,
+            // so /responses fallback + disableCaching work regardless of which
+            // path resolved baseUrl/apiKey.
+            return {
+                baseUrl: entry.baseUrl,
+                apiKey: entry.apiKey,
+                allowChatCompletionsFallback: cfg.allowChatCompletionsFallback,
+                disableCaching: cfg.disableCaching,
+            };
         }
         Logger.warn(
             `getCallTimeConfiguration: registry MISS modelId="${model.id}" modelName="${model.name}" — request will fail with configuration error`
@@ -1182,7 +1216,7 @@ export abstract class LiteLLMProviderBase {
      * `collectMessageText` but operates on a single part's `content` field
      * (which is itself an array of `LanguageModelTextPart`-shaped objects).
      */
-    private collectPartText(content: ReadonlyArray<unknown>): string {
+    private collectPartText(content: readonly unknown[]): string {
         let text = "";
         for (const part of content) {
             if (part instanceof vscode.LanguageModelTextPart) {

@@ -69,7 +69,7 @@ Group by responsibility and keep folder placement intuitive to a first-time read
 - `src/providers/`: Language Model provider implementations
   - `liteLLMProviderBase.ts` — Shared orchestration base class
   - `liteLLMChatProvider.ts` — Chat API provider (extends base)
-  - `liteLLMCompletionProvider.ts` — Completions API provider (extends base)
+  - `liteLLMCommitProvider.ts` — Commit message generation provider (extends base; command-backed, not a registered LM text-completion provider)
   - `index.ts` — Provider exports
 - `src/adapters/`: HTTP clients, payload shaping, endpoint-specific parsing
 - `src/utils/`: shared utilities (logging, telemetry, model helpers)
@@ -93,7 +93,7 @@ When introducing a new folder or module, make the ownership boundary obvious fro
   - Telemetry and error handling
 - **Derived classes** extend base and implement VS Code protocols:
   - `LiteLLMChatProvider`: Implements `LanguageModelChatProvider`, handles chat streaming specifics
-  - `LiteLLMCompletionProvider`: Implements `LanguageModelTextCompletionProvider`, wraps prompts
+  - `LiteLLMCommitMessageProvider`: Command-backed commit generation (not a registered LM provider)
   - Both delegate request building to base, eliminating duplication
 - **Benefit**: Adding new provider types requires minimal code (protocol wrapper only)
 - **BackendRegistry** (`LiteLLMProviderRegistry`): The single source of truth for backends and their associated models. Owns the discovery HTTP fetch, the per-group namespacing, the change detection, and the per-model capability caches. See "BackendRegistry contract" below.
@@ -154,21 +154,15 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
   - Returns `LanguageModelChatInformation` entries with `isUserSelectable: true` so models appear in the picker
   - Reuses the base request pipeline for normalization, filtering, trimming, and routing
 
-- **Completions Provider**: `src/providers/liteLLMCompletionProvider.ts`
-  - Implements `vscode.LanguageModelTextCompletionProvider`
-  - Extends `LiteLLMProviderBase` and adds completion-specific protocol wrapping only
-  - Converts prompt input into request messages that the shared pipeline can process
-  - Extracts completion text from streamed or buffered responses
-  - Reuses base logic for validation, parameter filtering, token management, routing, and error handling
-
-- **Commit / auxiliary providers**: keep any specialized provider thin and protocol-focused
-  - Reuse the shared base lifecycle whenever the provider still targets LiteLLM-backed request orchestration
-  - Avoid re-implementing shared request preparation, endpoint selection, or quota/error logic in derived providers
+- **Commit provider**: `src/providers/liteLLMCommitProvider.ts`
+  - Implements commit-message generation only (not a `LanguageModelTextCompletionProvider`)
+  - Reuses the shared base lifecycle for LiteLLM-backed request orchestration
+  - Avoids re-implementing shared request preparation, endpoint selection, or quota/error logic
 
 - **Entry Point**: `src/extension.ts`
-  - Activates extension and instantiates exactly one `LiteLLMChatProvider` and one `LiteLLMCompletionProvider`
+  - Activates extension and instantiates exactly one `LiteLLMChatProvider` and one `LiteLLMCommitMessageProvider`
   - Registers `LiteLLMChatProvider` with `vscode.lm.registerLanguageModelChatProvider("litellm-connector", provider)`
-  - Registers `LiteLLMCompletionProvider` with `vscode.lm.registerLanguageModelTextCompletionProvider("litellm-connector", provider)`
+  - The extension does NOT register a `LanguageModelTextCompletionProvider`. Completions are handled by VS Code's native tag-routing (the `inline-completions` tag on chat models) routed through the chat provider.
   - Both providers share same `context.secrets` for `SecretStorage` (if needed for non-provider secrets)
   - Both receive per-group configuration from VS Code via `options.configuration` in `provideLanguageModelChatInformation` and request methods
   - Configuration schema defined in `package.json` `languageModelChatProviders` contribution point (VS Code 1.120 per-group format)
@@ -195,6 +189,16 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
 **Structural rule of thumb**: shared cross-provider behavior belongs in the base class or adapters; VS Code protocol specifics belong in the single derived provider that owns that protocol. Do not fork chat-protocol logic into version-suffixed siblings.
 
 When architecture changes, update this section in the same change so the document remains a reliable map of the codebase.
+
+### Cost Tracking Pipeline
+- **Pricing extraction**: `src/utils/pricingCalculator.ts` provides pure helpers to extract pricing from `LiteLLMModelInfo` (including nested `pricing` fallback), format display strings, derive price categories, and calculate request costs from token snapshots.
+- **Model picker pricing surfaces**: `src/providers/liteLLMProviderRegistry.ts` maps per-token LiteLLM pricing to VS Code per-1M fields (`inputCost`, `outputCost`, `cacheCost`, `cacheWriteCost`, `priceCategory`) and sets `pricing` for compact labels.
+- **Fallback picker detail/tooltip**: when enabled by `displayPricingInPicker`, `toVSCodeInfo()` appends compact pricing to `detail` and appends a pricing breakdown to `tooltip` for environments where hover pricing tables are unavailable.
+- **Price category strategy**: `derivePriceCategory()` categorizes by `maxCost` (highest per-1M input/output cost) using thresholds `<=10` low, `<20` medium, `<=100` high, otherwise very_high.
+- **Token snapshot cost fields**: `src/adapters/streaming/streamTokenCapture.ts` stores flat estimated fields (`estimatedInputCost`, `estimatedOutputCost`, `estimatedTotalCost`) on `TokenSnapshot`.
+- **Usage payload enrichment**: usage DataParts include `estimated_input_cost`, `estimated_output_cost`, and `estimated_total_cost` in `OpenAIUsagePayload` for downstream consumers and telemetry, while remaining compatible with VS Code's required usage fields.
+- **Telemetry propagation**: `src/utils/telemetry.ts` carries flat estimated cost fields in `IMetrics`; `src/telemetry/telemetryService.ts` accepts nested `cost?: CostSummary` and emits estimated cost event properties.
+- **Numeric handling**: scientific-notation pricing values are supported as native `number`; `calculateRequestCost()` normalizes floating artifacts with fixed precision while display formatting handles human-readable rounding.
 
 #### BackendRegistry contract (`src/providers/litellmProviderRegistry.ts`)
 
@@ -248,10 +252,18 @@ broke change detection). With the merge, `discoverModels` is the only
 call site that needs to know the write protocol exists, and consumers
 see a single ingress.
 
-**Stateless by design**: there is no model-list cache, no in-flight
-de-duplication, and no TTL. Every `discoverModels` call is a single
-HTTP round-trip. The "ghost cache" is gone, and the picker always
-reflects the live state of the backend.
+**Short-lived discovery cache**: the registry keeps a TTL-bound response
+cache keyed by normalized `baseUrl` plus an API-key hash suffix (first 8
+chars of SHA-256). Cache entries are invalidated by `clear()`,
+`clearCaches()`, and manual reloads. Set `discoveryCacheTtlMs=0` to
+disable caching entirely.
+
+**Debounced outward change notifications**: the registry coalesces repeated
+discovery changes through a trailing-edge debounce and minimum fire
+interval before forwarding to VS Code. This reduces re-query amplification
+across configured provider groups without suppressing real model changes.
+Configure via `discoveryFireDebounceMs` (default 250ms) and
+`discoveryFireMinIntervalMs` (default 2000ms), or disable by setting to 0.
 
 ### Key logic (extension)
 
@@ -275,11 +287,13 @@ Keep this pipeline shared unless the change is intentionally protocol-specific a
 - **Streaming state management**: buffer partial tool calls when SSE frames arrive fragmented
 - **Response emission**: emit `LanguageModelResponsePart`, `LanguageModelToolCallPart`, `LanguageModelToolResultPart` to progress callback
 - **Tool call parsing**: extract and validate tool calls from streaming chunks
+- **Cost tracking**: pricing from LiteLLM `/model/info` is extracted and propagated through `StreamTokenCapture`; request-level estimated costs are attached to usage payloads and telemetry metrics.
 
 #### Completions-Specific Logic (Completions Provider)
 - **Prompt wrapping**: convert simple `string` prompt to `LanguageModelChatRequestMessage` for base pipeline
 - **Stream text extraction**: parse SSE chunks and accumulate completion text
 - **Model selection**: resolve model using `modelIdOverride` config or first available model with `inline-completions` tag
+- **Cost tracking**: completions reuse the same pricing/token snapshot pipeline so estimated request costs are reported consistently with chat.
 
 #### Configuration Flow (v1.120+, per-group)
 Configuration from user settings reaches providers via VS Code's language model API on a per-group basis:
@@ -312,19 +326,24 @@ The ingress pipeline is agnostic to endpoint choice:
 
 ## 5) Change workflow (agent/CI)
 
-### Commands
-- `npm run lint` — ESLint checks (may apply autofixes depending on config)
-- `npm run format` — Prettier formatting
+### Commands (permitted only)
+- `npm run clean` — Clean build artifacts
 - `npm run compile` — TypeScript typecheck/build validation
-- `npm run test` — Unit tests
-- `npm run test:coverage` — Unit tests with coverage report (prefer this)
+- `npm run lint` — ESLint checks
+- `npm run lint:fix` — ESLint checks with autofix
+- `npm run format` — Prettier formatting check
+- `npm run format:fix` — Prettier formatting with fix
+- `npm run test:coverage` — Unit tests with coverage report (use this for testing)
+- `npm run bump-version patch|minor|dev` — Version bumps
+
+> ⚠️ **DO NOT use `npm run test`**, `npm run check`, or any other npm scripts — they may cause issues. Only run the commands listed above.
 
 ### When to run what
 - Before implementing non-trivial logic: add or update the relevant tests first.
 - Before/after non-trivial edits: run `npm run compile` and `npm run test:coverage`.
 - Before finishing the task: verify the changed files contain the intended code or that new files exist with the expected contents.
-- Before finishing the tasks run: `npm run lint`, `npm run format`, and `npm run test:coverage`
-- Before opening/updating a PR: run `npm run lint`, `npm run format`, `npm run test:coverage`.
+- Before finishing the tasks run: run `npm run lint` → `npm run format` → `npm run test:coverage` independently (verify each succeeds)
+- Before opening/updating a PR: run `npm run lint` → `npm run format` → `npm run test:coverage` independently (verify each succeeds)
 
 ### Validation requirements
 - Do not assume an edit succeeded. Confirm the change by inspecting the file contents or verifying the new file exists on disk with the expected content.

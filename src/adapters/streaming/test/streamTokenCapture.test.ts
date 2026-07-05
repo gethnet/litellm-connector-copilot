@@ -1,6 +1,7 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import { StreamTokenCapture } from "../streamTokenCapture";
+import { calculateRequestCost } from "../../../utils/pricingCalculator";
 
 suite("StreamTokenCapture", () => {
     function createInnerProgress(): {
@@ -133,11 +134,17 @@ suite("StreamTokenCapture", () => {
             completion_tokens?: number;
             total_tokens?: number;
             completion_tokens_details?: { tool_tokens?: number };
+            estimated_input_cost?: number;
+            estimated_output_cost?: number;
+            estimated_total_cost?: number;
         };
         assert.strictEqual(payload.prompt_tokens, 1);
         assert.strictEqual(payload.completion_tokens, 1);
         assert.strictEqual(payload.total_tokens, 2);
         assert.strictEqual((payload.completion_tokens_details?.tool_tokens ?? 0) > 0, true);
+        assert.strictEqual(payload.estimated_input_cost, 0);
+        assert.strictEqual(payload.estimated_output_cost, 0);
+        assert.strictEqual(payload.estimated_total_cost, 0);
     });
 
     test("merge is monotonic across multiple usage frames", () => {
@@ -151,6 +158,76 @@ suite("StreamTokenCapture", () => {
         const snapshot = capture.getSnapshot();
         assert.strictEqual(snapshot.promptTokens, 4);
         assert.strictEqual(snapshot.completionTokens, 2, "should pick max completion tokens");
+    });
+
+    test("computes estimated costs when pricing is available", () => {
+        const reportedParts: vscode.LanguageModelDataPart[] = [];
+        const progress: vscode.Progress<vscode.LanguageModelResponsePart> = {
+            report: (part) => {
+                if (part instanceof vscode.LanguageModelDataPart && part.mimeType === "usage") {
+                    reportedParts.push(part);
+                }
+            },
+        };
+
+        const usage = {
+            prompt_tokens: 100,
+            completion_tokens: 25,
+            total_tokens: 125,
+            prompt_tokens_details: {
+                cached_tokens: 10,
+                cache_creation_input_tokens: 5,
+            },
+        };
+
+        const capture = new StreamTokenCapture("model-id", progress, {
+            model: "gpt-4o",
+            mode: "chat",
+            pricing: {
+                inputCostPerToken: 2e-6,
+                outputCostPerToken: 3e-6,
+                cacheCreationCostPerToken: 1e-6,
+                cacheReadCostPerToken: 5e-7,
+            },
+        });
+
+        capture.progress.report(asUsagePart(usage));
+        const snapshot = capture.getSnapshot();
+
+        const expectedCost = calculateRequestCost({
+            promptTokens: usage.prompt_tokens,
+            completionTokens: usage.completion_tokens,
+            cachedTokens: usage.prompt_tokens_details.cached_tokens,
+            cacheCreationInputTokens: usage.prompt_tokens_details.cache_creation_input_tokens,
+            pricing: {
+                inputCostPerToken: 2e-6,
+                outputCostPerToken: 3e-6,
+                cacheCreationCostPerToken: 1e-6,
+                cacheReadCostPerToken: 5e-7,
+            },
+        });
+
+        assert.deepStrictEqual(snapshot, {
+            promptTokens: 100,
+            cachedTokens: 10,
+            cacheCreationInputTokens: 5,
+            systemPromptTokens: 0,
+            completionTokens: 25,
+            reasoningTokens: 0,
+            toolTokens: 0,
+            acceptedPredictionTokens: 0,
+            rejectedPredictionTokens: 0,
+            sawUpstreamUsage: true,
+            estimatedInputCost: expectedCost.inputCost,
+            estimatedOutputCost: expectedCost.outputCost,
+            estimatedTotalCost: expectedCost.totalCost,
+        });
+
+        assert.strictEqual(reportedParts.length, 1);
+        const forwardedUsage = JSON.parse(Buffer.from(reportedParts[0].data).toString("utf-8"));
+        assert.strictEqual(forwardedUsage.estimated_input_cost, expectedCost.inputCost);
+        assert.strictEqual(forwardedUsage.estimated_output_cost, expectedCost.outputCost);
+        assert.strictEqual(forwardedUsage.estimated_total_cost, expectedCost.totalCost);
     });
 
     test("thinking detection checks ThinkingPart before TextPart fallback", () => {
@@ -205,12 +282,120 @@ suite("StreamTokenCapture", () => {
             reserved_output_tokens?: number;
             total_token_max?: number;
             completion_tokens_details?: { tool_tokens?: number };
+            estimated_input_cost?: number;
+            estimated_output_cost?: number;
+            estimated_total_cost?: number;
         };
         assert.strictEqual(payload.reserved_output_tokens, 77);
         assert.strictEqual(payload.total_token_max, 123);
         assert.strictEqual(typeof payload.completion_tokens_details?.tool_tokens, "number");
+        assert.strictEqual(payload.estimated_input_cost, 0);
+        assert.strictEqual(payload.estimated_output_cost, 0);
+        assert.strictEqual(payload.estimated_total_cost, 0);
 
         const snapshot = capture.getSnapshot();
         assert.ok(snapshot.toolTokens > 0, "snapshot should still reflect tool estimate");
+    });
+
+    // Regression tests for reasoning token handling with redacted/omitted thinking
+    test("redacted_thinking parts do not advance the local reasoning buffer", () => {
+        // The Anthropic `redacted_thinking` block carries encrypted data and no
+        // plaintext. The local token estimate must not count the metadata
+        // (which would inflate usage), and the part must still flow through
+        // to VS Code unchanged.
+        const ThinkingPartCtor = (vscode as unknown as Record<string, unknown>).LanguageModelThinkingPart as
+            | (new (
+                  value: string | string[],
+                  id?: string,
+                  metadata?: Record<string, unknown>
+              ) => vscode.LanguageModelResponsePart)
+            | undefined;
+        if (!ThinkingPartCtor) {
+            return;
+        }
+
+        const { parts, progress } = createInnerProgress();
+        const capture = new StreamTokenCapture("model-x", progress);
+        const tracking = capture.progress;
+
+        const redacted = new ThinkingPartCtor("", undefined, {
+            redactedData: "encrypted_blob",
+            display: "omitted",
+        });
+        tracking.report(redacted);
+
+        // Local estimate stays at zero — the upstream usage DataPart (when
+        // it arrives) is the authoritative source.
+        const snapshot = capture.getSnapshot();
+        assert.strictEqual(snapshot.reasoningTokens, 0, "redacted data must not be counted as visible reasoning");
+
+        // The part itself still flows to the inner progress.
+        assert.strictEqual(parts.length, 1);
+        const forwarded = parts[0] as { metadata?: Record<string, unknown> };
+        assert.strictEqual(forwarded.metadata?.redactedData, "encrypted_blob");
+    });
+
+    test("signature-only thinking parts (display=omitted) do not advance the reasoning buffer", () => {
+        // Anthropic's `display: "omitted"` mode streams a thinking block
+        // with no `thinking_delta` events — only a single `signature_delta`
+        // that closes the block. The connector must still forward the part
+        // to VS Code but the value is empty so the local token count stays
+        // at zero (the upstream `usage.reasoning_tokens` will be
+        // authoritative when it arrives).
+        const ThinkingPartCtor = (vscode as unknown as Record<string, unknown>).LanguageModelThinkingPart as
+            | (new (
+                  value: string | string[],
+                  id?: string,
+                  metadata?: Record<string, unknown>
+              ) => vscode.LanguageModelResponsePart)
+            | undefined;
+        if (!ThinkingPartCtor) {
+            return;
+        }
+
+        const { parts, progress } = createInnerProgress();
+        const capture = new StreamTokenCapture("model-x", progress);
+        const tracking = capture.progress;
+
+        const sigOnly = new ThinkingPartCtor("", undefined, {
+            signature: "OmitSigExample",
+            display: "omitted",
+        });
+        tracking.report(sigOnly);
+
+        const snapshot = capture.getSnapshot();
+        assert.strictEqual(snapshot.reasoningTokens, 0, "signature-only parts have no visible text to count");
+        assert.strictEqual(parts.length, 1, "signature-only part still flows to VS Code");
+    });
+
+    test("upstream reasoning_tokens from response.completed overrides the local zero for redacted/omitted flows", () => {
+        // When the upstream sends a `response.completed` frame with
+        // `usage.completion_tokens_details.reasoning_tokens` (normalized by
+        // liteLLMStreamInterpreter's normalizeUsagePayload), that number is
+        // authoritative. This test guards against a refactor that prefers
+        // the local count (which is zero for redacted/omitted flows) over
+        // the upstream number.
+        const { progress } = createInnerProgress();
+        const capture = new StreamTokenCapture("model-x", progress);
+        const tracking = capture.progress;
+
+        // No visible thinking parts at all (omitted/display flow).
+        // Upstream reports the true reasoning_tokens in response.completed.
+        // Note: The stream interpreter normalizes output_token_details -> completion_tokens_details
+        tracking.report(
+            asUsagePart({
+                prompt_tokens: 4,
+                completion_tokens: 12,
+                total_tokens: 16,
+                completion_tokens_details: { reasoning_tokens: 9 },
+            })
+        );
+
+        const snapshot = capture.getSnapshot();
+        assert.strictEqual(
+            snapshot.reasoningTokens,
+            9,
+            "upstream reasoning_tokens must be preferred over the local zero estimate"
+        );
     });
 });

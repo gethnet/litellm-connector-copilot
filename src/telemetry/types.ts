@@ -10,6 +10,12 @@ export interface TelemetryEvent {
     timestamp?: Date;
 }
 
+export interface CostSummary {
+    estimated_input_cost?: number;
+    estimated_output_cost?: number;
+    estimated_total_cost?: number;
+}
+
 export interface PostHogConfig {
     apiKey: string;
     host: string;

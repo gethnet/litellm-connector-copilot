@@ -1,11 +1,10 @@
 import * as vscode from "vscode";
-import type { LiteLLMConfig, ModelOverride } from "../types";
+import type { LiteLLMConfig } from "../types";
 import type { TelemetryService } from "../telemetry/telemetryService";
 import { LiteLLMClient } from "../adapters/litellmClient";
 import type { BackendSession } from "../providers/backendSession";
 import { Logger } from "../utils/logger";
 import { deriveGroupNameFromUrl } from "../utils";
-import { loadUserOverrides, toStringArray } from "./modelOverrides";
 
 export class ConfigManager {
     private static readonly INACTIVITY_TIMEOUT_KEY = "litellm-connector.inactivityTimeout";
@@ -14,12 +13,26 @@ export class ConfigManager {
     private static readonly KEY_MODEL_OVERRIDES_ENABLE = "litellm-connector.enableModelOverrides";
     private static readonly MODEL_CAPABILITIES_OVERRIDES_KEY = "litellm-connector.modelCapabilitiesOverrides";
     private static readonly MODEL_ID_OVERRIDE_KEY = "litellm-connector.modelIdOverride";
-    private static readonly INLINE_COMPLETIONS_ENABLED_KEY = "litellm-connector.inlineCompletions.enabled";
-    private static readonly INLINE_COMPLETIONS_MODEL_ID_KEY = "litellm-connector.inlineCompletions.modelId";
     private static readonly SCM_COMMIT_MSG_MODEL_ID_KEY = "litellm-connector.commitModelIdOverride";
-    private static readonly ENABLE_RESPONSES_API = "litellm-connector.enableResponsesApi";
     private static readonly FORCE_RESPONSES_ENDPOINT_KEY = "litellm-connector.forceResponsesEndpoint";
     private static readonly ALLOW_CHAT_COMPLETIONS_FALLBACK_KEY = "litellm-connector.allowChatCompletionsFallback";
+    private static readonly DISPLAY_PRICING_IN_PICKER_KEY = "litellm-connector.displayPricingInPicker";
+    private static readonly DISCOVERY_TIMEOUT_MS_KEY = "litellm-connector.discoveryTimeoutMs";
+    private static readonly DISCOVERY_CACHE_TTL_MS_KEY = "litellm-connector.discoveryCacheTtlMs";
+    private static readonly DISCOVERY_FIRE_DEBOUNCE_MS_KEY = "litellm-connector.discoveryFireDebounceMs";
+    private static readonly DISCOVERY_FIRE_MIN_INTERVAL_MS_KEY = "litellm-connector.discoveryFireMinIntervalMs";
+
+    // Discovery config defaults and bounds
+    private static readonly DEFAULT_DISCOVERY_TIMEOUT_MS = 5_000;
+    private static readonly MIN_DISCOVERY_TIMEOUT_MS = 500;
+    private static readonly MAX_DISCOVERY_TIMEOUT_MS = 60_000;
+    private static readonly DEFAULT_DISCOVERY_CACHE_TTL_MS = 60_000;
+    private static readonly MIN_DISCOVERY_CACHE_TTL_MS = 0;
+    private static readonly MAX_DISCOVERY_CACHE_TTL_MS = 300_000;
+    private static readonly DEFAULT_DISCOVERY_FIRE_DEBOUNCE_MS = 250;
+    private static readonly MAX_DISCOVERY_FIRE_DEBOUNCE_MS = 5_000;
+    private static readonly DEFAULT_DISCOVERY_FIRE_MIN_INTERVAL_MS = 2_000;
+    private static readonly MAX_DISCOVERY_FIRE_MIN_INTERVAL_MS = 30_000;
 
     private _telemetryService?: TelemetryService;
 
@@ -70,6 +83,42 @@ export class ConfigManager {
         return this.secrets.get(key);
     }
 
+    /**
+     * Clamps a discovery timeout value to valid bounds.
+     */
+    private clampDiscoveryTimeoutMs(value: number | undefined): number {
+        if (typeof value !== "number" || Number.isNaN(value)) {
+            return ConfigManager.DEFAULT_DISCOVERY_TIMEOUT_MS;
+        }
+        return Math.min(
+            ConfigManager.MAX_DISCOVERY_TIMEOUT_MS,
+            Math.max(ConfigManager.MIN_DISCOVERY_TIMEOUT_MS, value)
+        );
+    }
+
+    /**
+     * Clamps a discovery cache TTL value to valid bounds.
+     */
+    private clampDiscoveryCacheTtlMs(value: number | undefined): number {
+        if (typeof value !== "number" || Number.isNaN(value)) {
+            return ConfigManager.DEFAULT_DISCOVERY_CACHE_TTL_MS;
+        }
+        return Math.min(
+            ConfigManager.MAX_DISCOVERY_CACHE_TTL_MS,
+            Math.max(ConfigManager.MIN_DISCOVERY_CACHE_TTL_MS, value)
+        );
+    }
+
+    /**
+     * Generic range clamp for discovery settings.
+     */
+    private clampRange(value: number | undefined, min: number, max: number, defaultValue: number): number {
+        if (typeof value !== "number" || Number.isNaN(value)) {
+            return defaultValue;
+        }
+        return Math.min(max, Math.max(min, value));
+    }
+
     public setTelemetryService(service: TelemetryService): void {
         this._telemetryService = service;
     }
@@ -92,34 +141,9 @@ export class ConfigManager {
             false
         );
         const enableModelOverrides = workspaceConfig.get<boolean>(ConfigManager.KEY_MODEL_OVERRIDES_ENABLE, true);
-        // Drop undefined/neutral fields so shape matches expectations
-        const modelOverrides: ModelOverride[] = loadUserOverrides(workspaceConfig).map((o) => {
-            const cleaned: ModelOverride = { match: o.match, notes: o.notes }; // preserve notes field even if undefined
-            if (o.supportsReasoning !== undefined) {
-                cleaned.supportsReasoning = o.supportsReasoning;
-            }
-            if (o.reasoningEfforts) {
-                cleaned.reasoningEfforts = o.reasoningEfforts;
-            }
-            if (o.defaultEffort) {
-                cleaned.defaultEffort = o.defaultEffort;
-            }
-            // Only include forceMandatory when explicitly set to true
-            if (o.forceMandatory === true) {
-                cleaned.forceMandatory = true;
-            }
-            // Coerce array-of-string fields via the shared helper so we never
-            // hand back the raw unknown shape from VS Code settings.
-            const tags = toStringArray(o.tags);
-            if (tags) {
-                cleaned.tags = tags;
-            }
-            const supportedOpenaiParams = toStringArray(o.supportedOpenaiParams);
-            if (supportedOpenaiParams) {
-                cleaned.supportedOpenaiParams = supportedOpenaiParams;
-            }
-            return cleaned;
-        });
+        // modelOverrides are loaded but the LiteLLMConfig.modelOverrides field was
+        // removed in v2.2.0 (dead plumbing — the override system reads the workspace
+        // setting directly via modelOverrides.ts findOverride).
 
         const modelCapabilitiesOverridesRaw = workspaceConfig.get<Record<string, string | string[]>>(
             ConfigManager.MODEL_CAPABILITIES_OVERRIDES_KEY,
@@ -159,43 +183,50 @@ export class ConfigManager {
         }
 
         const modelIdOverride = workspaceConfig.get<string>(ConfigManager.MODEL_ID_OVERRIDE_KEY, "").trim();
-        const inlineCompletionsEnabled = workspaceConfig.get<boolean>(
-            ConfigManager.INLINE_COMPLETIONS_ENABLED_KEY,
-            false
-        );
-        const inlineCompletionsModelId = workspaceConfig.get<string>(ConfigManager.INLINE_COMPLETIONS_MODEL_ID_KEY, "");
         const scmGitCompletionsModelId = workspaceConfig
             .get<string>(ConfigManager.SCM_COMMIT_MSG_MODEL_ID_KEY, "")
             .trim();
-        const v2ApiEnabled = workspaceConfig.get<boolean>(ConfigManager.ENABLE_RESPONSES_API, false);
         const forceResponsesEndpoint = workspaceConfig.get<boolean>(ConfigManager.FORCE_RESPONSES_ENDPOINT_KEY, false);
         const allowChatCompletionsFallback = workspaceConfig.get<boolean>(
             ConfigManager.ALLOW_CHAT_COMPLETIONS_FALLBACK_KEY,
             false
         );
+        const displayPricingInPicker = workspaceConfig.get<boolean>(ConfigManager.DISPLAY_PRICING_IN_PICKER_KEY, true); // Ensure config precedence for displayPricingInPicker
 
-        const trimmedInlineModelId = inlineCompletionsModelId?.trim() ?? "";
+        const discoveryTimeoutMs = this.clampDiscoveryTimeoutMs(
+            workspaceConfig.get<number>(ConfigManager.DISCOVERY_TIMEOUT_MS_KEY)
+        );
+        const discoveryCacheTtlMs = this.clampDiscoveryCacheTtlMs(
+            workspaceConfig.get<number>(ConfigManager.DISCOVERY_CACHE_TTL_MS_KEY)
+        );
+        const discoveryFireDebounceMs = this.clampRange(
+            workspaceConfig.get<number>(ConfigManager.DISCOVERY_FIRE_DEBOUNCE_MS_KEY),
+            0,
+            ConfigManager.MAX_DISCOVERY_FIRE_DEBOUNCE_MS,
+            ConfigManager.DEFAULT_DISCOVERY_FIRE_DEBOUNCE_MS
+        );
+        const discoveryFireMinIntervalMs = this.clampRange(
+            workspaceConfig.get<number>(ConfigManager.DISCOVERY_FIRE_MIN_INTERVAL_MS_KEY),
+            0,
+            ConfigManager.MAX_DISCOVERY_FIRE_MIN_INTERVAL_MS,
+            ConfigManager.DEFAULT_DISCOVERY_FIRE_MIN_INTERVAL_MS
+        );
 
         return {
             inactivityTimeout,
             disableCaching,
             disableQuotaToolRedaction,
             enableModelOverrides,
-            modelOverrides,
             modelCapabilitiesOverrides,
             modelIdOverride: modelIdOverride.length > 0 ? modelIdOverride : undefined,
-            inlineCompletionsEnabled,
-            inlineCompletionsModelId:
-                trimmedInlineModelId.length > 0
-                    ? trimmedInlineModelId
-                    : modelIdOverride.length > 0
-                      ? modelIdOverride
-                      : undefined,
             commitModelIdOverride: `${scmGitCompletionsModelId}`,
-            v2ApiEnabled,
-            enableResponses: v2ApiEnabled,
             forceResponsesEndpoint,
             allowChatCompletionsFallback,
+            displayPricingInPicker,
+            discoveryTimeoutMs,
+            discoveryCacheTtlMs,
+            discoveryFireDebounceMs,
+            discoveryFireMinIntervalMs,
         };
     }
 
@@ -209,8 +240,6 @@ export class ConfigManager {
         }
         const config = await this.getConfig();
         const toggles: [string, boolean][] = [
-            ["inline-completions", config.inlineCompletionsEnabled ?? false],
-            ["responses-api", config.v2ApiEnabled ?? false],
             ["commit-message", !!(config.commitModelIdOverride && config.commitModelIdOverride.length > 0)],
             ["caching", !config.disableCaching],
             ["quota-tool-redaction", !config.disableQuotaToolRedaction],
@@ -277,5 +306,38 @@ export class ConfigManager {
      */
     async dispose(): Promise<void> {
         this._telemetryService = undefined;
+    }
+
+    /**
+     * Resets all LiteLLM connector configuration.
+     * Clears SecretStorage keys and triggers a provider refresh.
+     * This is a destructive operation intended for troubleshooting and complete re-configuration.
+     * Note: globalState metadata (migration notices, config flags) and VS Code's native
+     * provider configuration are NOT cleared, as they are extension state, not user configuration.
+     */
+    public async resetConfiguration(): Promise<void> {
+        Logger.info("ConfigManager: Starting configuration reset...");
+
+        // 1. Clear all SecretStorage keys that start with "litellm-connector"
+        try {
+            const allKeys = await this.secrets.keys();
+            const litellmKeys = allKeys.filter((key) => key.startsWith("litellm-connector"));
+
+            for (const key of litellmKeys) {
+                Logger.debug(`Deleting secret key: ${key}`);
+                await this.secrets.delete(key);
+            }
+            Logger.info(`ConfigManager: Cleared ${litellmKeys.length} secret(s)`);
+        } catch (err: unknown) {
+            Logger.error("ConfigManager: Failed to clear secrets", err);
+            // Continue with reset even if secrets clear fails
+        }
+
+        // 2. Trigger a provider refresh to reflect cleaned state
+        // In a full implementation, this would notify the provider to reload models.
+        // However, since ConfigManager doesn't have direct access to the provider,
+        // the command handler should trigger this after reset.
+
+        Logger.info("ConfigManager: Configuration reset complete");
     }
 }

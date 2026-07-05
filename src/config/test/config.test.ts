@@ -105,47 +105,8 @@ suite("ConfigManager Unit Tests", () => {
         assert.deepStrictEqual(cfg.modelCapabilitiesOverrides, {});
     });
 
-    test("getConfig reads modelOverrides array shape", async () => {
-        settingsMap.set("litellm-connector.modelOverrides", [
-            {
-                match: "gpt-5",
-                supportsReasoning: true,
-                reasoningEfforts: ["none", "low", "medium", "high"],
-                defaultEffort: "medium",
-            },
-            {
-                match: "",
-                supportsReasoning: true,
-            },
-            {
-                match: "claude-3",
-                supportsReasoning: null,
-                reasoningEfforts: ["none", "low", "medium", "high"],
-                defaultEffort: "medium",
-                notes: "keep minimal",
-            },
-        ]);
-
-        const manager = new ConfigManager(mockSecrets);
-        const cfg = await manager.getConfig();
-
-        assert.deepStrictEqual(cfg.modelOverrides, [
-            {
-                match: "gpt-5",
-                supportsReasoning: true,
-                reasoningEfforts: ["none", "low", "medium", "high"],
-                defaultEffort: "medium",
-                notes: undefined,
-            },
-            {
-                match: "claude-3",
-                supportsReasoning: null,
-                reasoningEfforts: ["none", "low", "medium", "high"],
-                defaultEffort: "medium",
-                notes: "keep minimal",
-            },
-        ]);
-    });
+    // getConfig modelOverrides test removed in v2.2.0 (LiteLLMConfig.modelOverrides field removed
+    // — dead plumbing; override system reads workspace setting directly).
 
     // resolveBackends tests removed - method no longer exists (VS Code 1.120+ per-group configuration)
 
@@ -157,8 +118,6 @@ suite("ConfigManager Unit Tests", () => {
         } as unknown as TelemetryService;
         manager.setTelemetryService(telemetryMock);
 
-        settingsMap.set("litellm-connector.inlineCompletions.enabled", true);
-        settingsMap.set("litellm-connector.enableResponsesApi", true);
         settingsMap.set("litellm-connector.commitModelIdOverride", "gpt-4");
         settingsMap.set("litellm-connector.disableCaching", false);
         settingsMap.set("litellm-connector.disableQuotaToolRedaction", false);
@@ -168,9 +127,7 @@ suite("ConfigManager Unit Tests", () => {
 
         await manager.reportFeatureToggles("test_source");
 
-        assert.strictEqual(captureStub.callCount, 5);
-        assert.ok(captureStub.calledWith("inline-completions", true, "test_source"));
-        assert.ok(captureStub.calledWith("responses-api", true, "test_source"));
+        assert.strictEqual(captureStub.callCount, 3);
         assert.ok(captureStub.calledWith("commit-message", true, "test_source"));
         assert.ok(captureStub.calledWith("caching", true, "test_source"));
         assert.ok(captureStub.calledWith("quota-tool-redaction", true, "test_source"));
@@ -253,5 +210,37 @@ suite("ConfigManager Unit Tests", () => {
         settingsMap.delete("litellm-connector.allowChatCompletionsFallback");
         const config = await configManager.getConfig();
         assert.strictEqual(config.allowChatCompletionsFallback, false);
+    });
+
+    test("every LiteLLMConfig field is populated by getConfig() (anti-dead-config guard)", async () => {
+        // This test exists because settings were previously declared, read into
+        // LiteLLMConfig, and reported to telemetry WITHOUT any runtime behavior.
+        // If you add a new LiteLLMConfig field, you MUST also wire it to behavior
+        // or this guard will fail. Do NOT weaken this guard — codify the contract.
+        //
+        // The strong guard is the per-feature wiring tests (transport.fallback,
+        // disableCaching.wiring). This test pins the expected live field set so
+        // a dead field addition is at least surfaced here.
+        const config = await configManager.getConfig();
+        const liveFields: (keyof typeof config)[] = [
+            "inactivityTimeout",
+            "disableCaching",
+            "disableQuotaToolRedaction",
+            "enableModelOverrides",
+            "modelCapabilitiesOverrides",
+            "modelIdOverride",
+            "commitModelIdOverride",
+            "forceResponsesEndpoint",
+            "allowChatCompletionsFallback",
+            // NOTE: sendDefaultParameters, inlineCompletions*, v2ApiEnabled,
+            // enableResponses, modelOverrides (field) are intentionally absent —
+            // removed as dead config. Do NOT re-add them.
+        ];
+        for (const field of liveFields) {
+            assert.ok(
+                field in config,
+                `LiteLLMConfig.${field} must be populated by getConfig() — if removed, update this guard`
+            );
+        }
     });
 });

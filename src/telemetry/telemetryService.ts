@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { PostHogAdapter } from "./posthogAdapter";
 import type {
     LegacyConfigMigrationEvent,
+    CostSummary,
     TelemetryEvent,
     TelemetryCaptureExceptionOptions,
     TelemetryEventProperties,
@@ -96,6 +97,7 @@ export class TelemetryService implements vscode.Disposable {
             stack?: string;
             status?: string;
             reason?: string;
+            cost?: CostSummary;
         }
     ): void {
         const properties: TelemetryEventProperties = {
@@ -112,6 +114,9 @@ export class TelemetryService implements vscode.Disposable {
             error: props.error,
             stack: props.stack,
             reason: props.reason,
+            estimated_input_cost: props.cost?.estimated_input_cost,
+            estimated_output_cost: props.cost?.estimated_output_cost,
+            estimated_total_cost: props.cost?.estimated_total_cost,
         };
 
         this.capture(eventName, properties);
@@ -222,6 +227,7 @@ export class TelemetryService implements vscode.Disposable {
         durationMs: number;
         tokensIn: number;
         tokensOut: number;
+        cost?: CostSummary;
     }): void {
         this.captureRequestLifecycleEvent("request_completed", props);
     }
@@ -235,6 +241,7 @@ export class TelemetryService implements vscode.Disposable {
         tokensIn: number;
         tokensOut: number;
         cacheReadRatio?: number;
+        cost?: CostSummary;
     }): void {
         this.captureRequestLifecycleEvent("request_completed", props);
     }
@@ -246,6 +253,7 @@ export class TelemetryService implements vscode.Disposable {
         endpoint: string;
         durationMs: number;
         errorType: string;
+        cost?: CostSummary;
     }): void {
         this.captureRequestLifecycleEvent("request_failed", props);
     }
@@ -256,6 +264,7 @@ export class TelemetryService implements vscode.Disposable {
         model: string;
         endpoint?: string;
         reason?: string;
+        cost?: CostSummary;
     }): void {
         this.captureRequestLifecycleEvent("request_caching_bypassed", props);
     }

@@ -117,7 +117,7 @@ interface BaseTestAccess {
     getCallTimeConfiguration: (
         options: vscode.ProvideLanguageModelChatResponseOptions,
         model: vscode.LanguageModelChatInformation
-    ) => Record<string, unknown> | undefined;
+    ) => Promise<Record<string, unknown> | undefined>;
     applyReasoningEffort: (
         request: OpenAIChatCompletionRequest,
         effort: OpenAIChatCompletionRequest["reasoning_effort"] | undefined
@@ -181,104 +181,8 @@ suite("LiteLLMProviderBase", () => {
         sandbox.restore();
     });
 
-    suite("buildOpenAIChatRequest — default parameters", () => {
-        test("respects sendDefaultParameters = false (default)", async () => {
-            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-
-            const model: vscode.LanguageModelChatInformation = {
-                id: "m",
-                name: "m",
-                tooltip: "",
-                family: "litellm",
-                version: "1.0.0",
-                maxInputTokens: 1000,
-                maxOutputTokens: 1000,
-                capabilities: { toolCalling: true, imageInput: false },
-            };
-
-            const request = await access(provider).buildOpenAIChatRequest(
-                [
-                    {
-                        role: vscode.LanguageModelChatMessageRole.User,
-                        name: undefined,
-                        content: [new vscode.LanguageModelTextPart("hi")],
-                    },
-                ],
-                model,
-                {} as vscode.ProvideLanguageModelChatResponseOptions,
-                undefined,
-                "test"
-            );
-
-            assert.strictEqual(request.temperature, undefined);
-            assert.strictEqual(request.top_p, undefined);
-        });
-
-        test("respects sendDefaultParameters = true", async () => {
-            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-            const configManager = access(provider)._configManager;
-            sandbox.stub(configManager, "getConfig").resolves({ sendDefaultParameters: true } as never);
-            const model: vscode.LanguageModelChatInformation = {
-                id: "m",
-                name: "m",
-                tooltip: "",
-                family: "litellm",
-                version: "1.0.0",
-                maxInputTokens: 1000,
-                maxOutputTokens: 1000,
-                capabilities: { toolCalling: true, imageInput: false },
-            };
-
-            const request = await access(provider).buildOpenAIChatRequest(
-                [
-                    {
-                        role: vscode.LanguageModelChatMessageRole.User,
-                        name: undefined,
-                        content: [new vscode.LanguageModelTextPart("hi")],
-                    },
-                ],
-                model,
-                {} as unknown as vscode.ProvideLanguageModelChatResponseOptions,
-                undefined,
-                "test"
-            );
-
-            // Default temperature when sendDefaultParameters is true
-            assert.strictEqual(request.temperature, 0.7);
-        });
-
-        test("prefers modelOptions over defaults", async () => {
-            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-            const model: vscode.LanguageModelChatInformation = {
-                id: "m",
-                name: "m",
-                tooltip: "",
-                family: "litellm",
-                version: "1.0.0",
-                maxInputTokens: 1000,
-                maxOutputTokens: 1000,
-                capabilities: { toolCalling: true, imageInput: false },
-            };
-
-            const request = await access(provider).buildOpenAIChatRequest(
-                [
-                    {
-                        role: vscode.LanguageModelChatMessageRole.User,
-                        name: undefined,
-                        content: [new vscode.LanguageModelTextPart("hi")],
-                    },
-                ],
-                model,
-                {
-                    modelOptions: { sendDefaultParameters: true, temperature: 0.3 },
-                } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
-                undefined,
-                "test"
-            );
-
-            assert.strictEqual(request.temperature, 0.3);
-        });
-    });
+    // buildOpenAIChatRequest default-parameters tests removed in v2.2.0
+    // (sendDefaultParameters was deprecated in v1.5.0 and removed per plan).
 
     suite("reasoning effort handling", () => {
         const model: vscode.LanguageModelChatInformation = {
@@ -853,6 +757,9 @@ suite("LiteLLMProviderBase", () => {
             const configManager = access(provider)._configManager;
             const mockSession = makeMockSession();
             sandbox.stub(configManager, "convertProviderConfiguration").returns(mockSession);
+            // Disable discovery caching for this test - we want to verify the HTTP client
+            // is called again (not that the response cache is disabled)
+            sandbox.stub(configManager, "getConfig").resolves({ discoveryCacheTtlMs: 0 });
 
             // First discovery returns models
             const first = await provider.discoverModels(
@@ -982,7 +889,10 @@ suite("LiteLLMProviderBase", () => {
                     client: { getModelInfo: getModelInfoStub },
                 } as unknown as BackendSession;
                 const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-                localSandbox.stub(access(provider)._configManager, "convertProviderConfiguration").returns(session);
+                const configManager = access(provider)._configManager;
+                localSandbox.stub(configManager, "convertProviderConfiguration").returns(session);
+                // Disable discovery caching so subsequent calls actually call the client
+                localSandbox.stub(configManager, "getConfig").resolves({ discoveryCacheTtlMs: 0 });
                 const fired: number[] = [];
                 provider.onDidChangeLanguageModelChatInformation(() => fired.push(1));
 
@@ -1016,7 +926,8 @@ suite("LiteLLMProviderBase", () => {
                 const sessionA = makeSession([{ model_name: "gpt-4", litellm_provider: "openai" }]);
                 const sessionB = makeSession([{ model_name: "claude-3", litellm_provider: "anthropic" }]);
                 const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-                const stub = localSandbox.stub(access(provider)._configManager, "convertProviderConfiguration");
+                const configManager = access(provider)._configManager;
+                const stub = localSandbox.stub(configManager, "convertProviderConfiguration");
                 stub.callsFake((_groupName: string, config: Record<string, unknown>) => {
                     if (config.baseUrl === "http://a") {
                         return sessionA;
@@ -1026,6 +937,8 @@ suite("LiteLLMProviderBase", () => {
                     }
                     return undefined;
                 });
+                // Disable discovery caching so subsequent calls actually call the client
+                localSandbox.stub(configManager, "getConfig").resolves({ discoveryCacheTtlMs: 0 });
 
                 const fired: number[] = [];
                 provider.onDidChangeLanguageModelChatInformation(() => fired.push(1));
@@ -1118,11 +1031,11 @@ suite("LiteLLMProviderBase", () => {
     });
 
     suite("getCallTimeConfiguration — per-group config at response time", () => {
-        test("prefers options.configuration when present", () => {
+        test("prefers options.configuration when present", async () => {
             const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
             const optionsConfig = { baseUrl: "https://from-options", apiKey: "k-options" };
             const modelConfig = { baseUrl: "https://from-model", apiKey: "k-model" };
-            const result = access(provider).getCallTimeConfiguration(
+            const result = await access(provider).getCallTimeConfiguration(
                 { configuration: optionsConfig } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
                 {
                     id: "m",
@@ -1132,10 +1045,14 @@ suite("LiteLLMProviderBase", () => {
                     configuration: modelConfig,
                 } as unknown as vscode.LanguageModelChatInformation
             );
-            assert.strictEqual(result, optionsConfig);
+            assert.ok(result);
+            assert.strictEqual(result!.baseUrl, optionsConfig.baseUrl);
+            assert.strictEqual(result!.apiKey, optionsConfig.apiKey);
+            // merged config toggles should also be present
+            assert.strictEqual(result!.allowChatCompletionsFallback, false);
         });
 
-        test("falls back to the BackendRegistry when options.configuration is missing", () => {
+        test("falls back to the BackendRegistry when options.configuration is missing", async () => {
             // VS Code 1.120 does NOT carry the per-group config on
             // `ProvideLanguageModelChatResponseOptions`. The response path
             // falls back to the in-memory `LiteLLMProviderRegistry` keyed
@@ -1150,7 +1067,7 @@ suite("LiteLLMProviderBase", () => {
                 rawModelName: "m",
                 routingIdentity: "",
             });
-            const result = access(provider).getCallTimeConfiguration(
+            const result = await access(provider).getCallTimeConfiguration(
                 {} as vscode.ProvideLanguageModelChatResponseOptions,
                 {
                     id: "m",
@@ -1159,12 +1076,16 @@ suite("LiteLLMProviderBase", () => {
                     version: "1.0",
                 } as unknown as vscode.LanguageModelChatInformation
             );
-            assert.deepStrictEqual(result, registryEntry);
+            assert.ok(result);
+            assert.deepStrictEqual(result!.baseUrl, registryEntry.baseUrl);
+            assert.strictEqual(result!.apiKey, registryEntry.apiKey);
+            // merged config toggles should also be present
+            assert.strictEqual(result!.allowChatCompletionsFallback, false);
         });
 
-        test("returns undefined when neither options nor model carry configuration", () => {
+        test("returns undefined when neither options nor model carry configuration", async () => {
             const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-            const result = access(provider).getCallTimeConfiguration(
+            const result = await access(provider).getCallTimeConfiguration(
                 {} as vscode.ProvideLanguageModelChatResponseOptions,
                 {
                     id: "m",

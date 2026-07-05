@@ -111,6 +111,52 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
                     }
                 }
             }
+            if ((msg as { thinking_blocks?: unknown[] }).thinking_blocks) {
+                const thinkingBlocks = (
+                    msg as {
+                        thinking_blocks?: {
+                            type?: string;
+                            thinking?: string;
+                            signature?: string;
+                            data?: string;
+                        }[];
+                    }
+                ).thinking_blocks;
+                if (Array.isArray(thinkingBlocks)) {
+                    for (const block of thinkingBlocks) {
+                        if (block && typeof block === "object") {
+                            if (typeof block.signature === "string") {
+                                // Emit a `reasoning` input item carrying the thinking text
+                                // (or empty string for redacted blocks) and the encrypted
+                                // signature. Anthropic uses the signature to verify the
+                                // thinking block was actually produced by the model.
+                                const thinkingText = typeof block.thinking === "string" ? block.thinking : "";
+                                inputArray.push({
+                                    type: "reasoning",
+                                    id: `reasoning_${inputArray.length}`,
+                                    summary: thinkingText ? [{ type: "summary_text", text: thinkingText }] : [],
+                                    encrypted_content: block.signature,
+                                } as unknown as LiteLLMResponseInputItem);
+                                Logger.trace(
+                                    `[responsesAdapter] Preserving thinking_block (${thinkingText.length} chars, sig ${block.signature.length} bytes)`
+                                );
+                            } else if (typeof block.data === "string") {
+                                // redacted_thinking block: opaque data, no text. The API
+                                // still requires it to be passed back unchanged.
+                                inputArray.push({
+                                    type: "reasoning",
+                                    id: `reasoning_${inputArray.length}`,
+                                    summary: [],
+                                    encrypted_content: block.data,
+                                } as unknown as LiteLLMResponseInputItem);
+                                Logger.trace(
+                                    `[responsesAdapter] Preserving redacted_thinking block (${block.data.length} bytes)`
+                                );
+                            }
+                        }
+                    }
+                }
+            }
             if (msg.tool_calls) {
                 for (const tc of msg.tool_calls) {
                     const normalizedId = toolCallIdMap.get(tc.id) || normalizeToolCallId(tc.id);

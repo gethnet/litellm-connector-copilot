@@ -70,6 +70,12 @@ export interface OpenAIUsagePayload {
     system_prompt_tokens?: number;
     reserved_output_tokens?: number;
     total_token_max?: number;
+    /** Estimated cost in USD attributed to input (prompt) tokens. */
+    estimated_input_cost?: number;
+    /** Estimated cost in USD attributed to output (completion) tokens. */
+    estimated_output_cost?: number;
+    /** Estimated total cost in USD (input + output + cache adjustments). */
+    estimated_total_cost?: number;
 }
 
 /**
@@ -145,43 +151,19 @@ export interface LiteLLMConfig {
      */
     enableModelOverrides?: boolean;
     /**
-     * Reasoning capability overrides supplied by the user. Mirrors the
-     * `litellm-connector.modelOverrides` configuration array and is merged with
-     * bundled defaults by the override loader.
-     */
-    modelOverrides?: ModelOverride[];
-    /**
      * Per-model capability overrides exposed to VS Code.
      * Key is the Model ID (e.g. 'gpt-4o').
      * When set, overrides the auto-derived toolCalling / imageInput capabilities.
      */
     modelCapabilitiesOverrides?: Record<string, ModelCapabilityOverride>;
     /**
-     * Optional: force a specific model id (e.g. for inline completions).
+     * Optional: force a specific model id.
      * When unset, the provider uses the model selected by Copilot/VS Code.
      */
     modelIdOverride?: string;
 
-    /** Enable VS Code inline completions backed by LiteLLM (stable API). */
-    inlineCompletionsEnabled?: boolean;
-
-    /** Model id to use for LiteLLM inline completions. */
-    inlineCompletionsModelId?: string;
-
-    /** Max context tokens to use for LiteLLM inline completions. */
-    inlineCompletionsMaxContextTokens?: number;
-
     /** Model id to use for LiteLLM commit message generation. */
     commitModelIdOverride?: string;
-
-    /** Experimental: enable V2 Chat Provider using proposed VS Code APIs. */
-    v2ApiEnabled?: boolean;
-
-    /**
-     * Experimental: enable the /responses endpoint for backend-specific routing.
-     * When true, prioritizes /responses with automatic fallback to /chat/completions.
-     */
-    enableResponses?: boolean;
 
     /**
      * When true, forces all models to use the `/responses` endpoint instead of per-model mode selection.
@@ -197,8 +179,22 @@ export interface LiteLLMConfig {
      */
     allowChatCompletionsFallback?: boolean;
 
-    /** When enabled, send default values for temperature, frequency_penalty, and presence_penalty if not provided by VS Code. */
-    sendDefaultParameters?: boolean;
+    /** When true, show pricing data in the model picker hover (if available from /model/info). Default: true. */
+    displayPricingInPicker?: boolean;
+
+    /** Timeout in milliseconds for /model/info discovery requests. Default: 5000. */
+    discoveryTimeoutMs?: number;
+
+    /** TTL in milliseconds for cached /model/info discovery responses. Default: 60000. Set to 0 to disable caching. */
+    discoveryCacheTtlMs?: number;
+
+    /** Trailing-edge debounce window in milliseconds for outward model-discovery change notifications. Default: 250. */
+    discoveryFireDebounceMs?: number;
+
+    /** Minimum interval in milliseconds between outward model-discovery change notifications. Default: 2000. */
+    discoveryFireMinIntervalMs?: number;
+
+    // sendDefaultParameters was removed in v2.2.0 (deprecated v1.5.0). Use individual modelOptions instead.
 }
 
 /**
@@ -212,6 +208,8 @@ export interface LiteLLMClientConfig {
     url: string;
     key?: string;
     disableCaching?: boolean;
+    /** Timeout in milliseconds for /model/info discovery requests. Default: 5000. */
+    discoveryTimeoutMs?: number;
 }
 
 /**
@@ -243,6 +241,11 @@ export interface LiteLLMModelInfo {
     supports_url_context?: boolean | null;
     supports_reasoning?: boolean | null;
     supports_computer_use?: boolean | null;
+    // Pricing fields (per-token costs, USD). Optional; absent when backend does not return pricing.
+    input_cost_per_token?: number | null;
+    output_cost_per_token?: number | null;
+    cache_read_input_token_cost?: number | null;
+    cache_creation_input_token_cost?: number | null;
     // Extended reasoning effort support fields from LiteLLM
     // (for future use when LiteLLM provides explicit effort level fields)
     supports_minimal_reasoning_effort?: boolean | null;
@@ -319,12 +322,17 @@ export interface OpenAIChatCompletionRequest {
      * config, etc.). We deliberately use this single canonical format so the connector
      * never has to reason about per-provider request shaping.
      *
-     * Allowed values: "minimal" | "low" | "medium" | "high" | "xhigh".
+     * Two shapes are accepted:
+     *  - string: "minimal" | "low" | "medium" | "high" | "xhigh"
+     *  - object: { effort: "low" | "medium" | "high"; summary?: "auto" | "concise" | "detailed" }
+     *    — used by `gpt-5.4+` when callers want to control the summary text returned
+     *    alongside the reasoning text.
+     *
      * When omitted, LiteLLM falls back to the upstream model's default. We never
      * attach this field unless the user has explicitly selected an effort level via
      * the model picker or modelOptions override.
      */
-    reasoning_effort?: string;
+    reasoning_effort?: string | { effort: string; summary?: string };
     /**
      * LiteLLM passthrough body.
      * Used for features like caching controls.
@@ -359,9 +367,11 @@ export interface LiteLLMResponsesRequest {
     /**
      * Mirror of `OpenAIChatCompletionRequest.reasoning_effort` — LiteLLM accepts the
      * same flat snake_case key on `/responses`, so we propagate it unchanged from
-     * the canonical chat-shaped request body during transformation.
+     * the canonical chat-shaped request body during transformation. Accepts the
+     * same string-or-object shape as the chat-shaped request — see that field for
+     * details.
      */
-    reasoning_effort?: string;
+    reasoning_effort?: string | { effort: string; summary?: string };
     stream_options?: { include_usage?: boolean };
     /**
      * LiteLLM passthrough body.
@@ -385,7 +395,20 @@ export type LiteLLMResponseInputItem =
           content: string | OpenAIChatMessageContentItem[];
       }
     | { type: "function_call"; id: string; call_id?: string; name: string; arguments: string }
-    | { type: "function_call_output"; id?: string; call_id: string; output: string };
+    | { type: "function_call_output"; id?: string; call_id: string; output: string }
+    | {
+          /**
+           * Carries an Anthropic `thinking` or `redacted_thinking` block back
+           * to the model. `encrypted_content` is the signature (or the opaque
+           * redacted data) that the API uses to verify reasoning continuity
+           * across turns. `summary` carries the human-readable thinking text
+           * (empty for redacted blocks).
+           */
+          type: "reasoning";
+          id: string;
+          summary: { type: "summary_text"; text: string }[];
+          encrypted_content: string;
+      };
 
 /**
  * Tool definition for LiteLLM /responses endpoint.

@@ -2,7 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2.1.8] - 2026-07-04
+
+### 🚀 Features
+
+* **💰 Model pricing display in picker**: Added support for displaying LiteLLM model pricing in the VS Code model picker using the official VS Code proposed API (`inputCost`, `outputCost`, `cacheCost`, `cacheWriteCost`, `priceCategory`). Pricing is extracted from LiteLLM's `/model/info` endpoint and surfaced as "credits per million tokens" with category badges ("Low cost", "Medium cost", "High cost", "Very high cost").
+* **📊 Per-request cost tracking**: Added cost calculation to the streaming token capture pipeline. Estimated costs (input, output, total) are computed from token counts × per-token pricing and attached to usage DataParts for telemetry. Cost fields are also reported through the telemetry service's lifecycle events.
+* **🔧 Display pricing toggle**: Added `displayPricingInPicker` workspace setting to control whether pricing is shown in the model picker (default: `true`).
+* **🩹 Stabilize model discovery**: Added discovery response caching (`discoveryCacheTtlMs`), explicit request timeouts (`discoveryTimeoutMs`), and debounced change notifications (`discoveryFireDebounceMs`, `discoveryFireMinIntervalMs`) to prevent VS Code from re-querying `/model/info` too frequently and causing avoidable proxy traffic and extension-host churn. Hash-based cache keys isolate requests by backend URL + API key suffix.
+
+### 🛠️ Fixed
+- `allowChatCompletionsFallback` now actually falls back from `/responses` to `/chat/completions` on 5xx (previously documented but unimplemented — triggered by a user 500 error on `azure_ai/gpt-5.4-mini`)
+- `disableCaching` now reaches the HTTP client on the request hot path and the `countTokens` path (previously read but never threaded into `LiteLLMClient`; default `true` is now effective)
+- Removed `litellm-connector.sendDefaultParameters` setting and its consumer (honors the v1.5.0 deprecation; the setting was broken-from-birth — never read by `getConfig()` — and was explicitly marked "temporary, will be removed in a future version. Defaults will be omitted by default." Defaults are now omitted by default as documented)
+- `LiteLLM: Set Log Level` command now declared in `package.json` and registered in `extension.ts` (previously orphaned handler)
+- Removed dead config fields from `LiteLLMConfig`: `inlineCompletionsEnabled`, `inlineCompletionsModelId`, `inlineCompletionsMaxContextTokens`, `v2ApiEnabled`, `enableResponses`, and dead plumbing for `modelOverrides`/`enableModelOverrides` (the underlying workspace SETTINGS stay live; only the unused config-object fields are removed)
+- Removed dead `litellm-connector.enableResponsesApi` setting from `package.json` (zero consumers — `/responses` routing is controlled by `forceResponsesEndpoint` and per-model proxy `mode` advertisement, not this setting)
+- Fixed `enableModelOverrides` `package.json` default (`false` → `true`) to match the runtime default
+- Telemetry no longer reports `inline-completions`/`responses-api` config toggles (the underlying fields gated no behavior)
+
+### 📚 Docs
+- Corrected `AGENTS.md` completions-provider-registration claim to match reality (no `LanguageModelTextCompletionProvider` is registered; inline completions served via VS Code native model-tag routing)
+- Corrected `README.marketplace.md` "Image and PDF analysis" claim to "Image analysis support"
+- Removed stale `enableResponsesApi` rows from `README.md` and `README.marketplace.md` setting tables
+- Updated `AGENTS.md` to document the cost tracking pipeline architecture
+
+### 🧪 Tests
+
+* **Pricing calculator**: Added comprehensive test suite covering extraction from model info (including scientific notation and IEEE 754 artifact handling), formatting for detail and tooltip, and cost calculation with cache read/creation token accounting.
+* **Provider registry pricing**: Added integration tests verifying pricing fields are correctly propagated to `LanguageModelChatInformation` via the official proposed API.
+* **Stream token capture cost**: Added tests for cost calculation in the token snapshot, verifying estimated costs are correctly attached to usage DataParts.
+
+### 🧹 Chores
+
+* **🆕 New utils: pricingCalculator**: Extracted pricing logic into a reusable utility module with pure functions for extraction, formatting, and calculation.
+* **📦 Created proposed API types**: Added `src/vscode.proposed.languageModelPricing.d.ts` to define the VS Code proposed API for pricing fields.
 
 ## [2.1.7] - 2026-06-24
 

@@ -65,12 +65,7 @@ export interface LogEvent {
  * Hook points in the request lifecycle.
  */
 export type HookPoint =
-    | "before:prepare"
-    | "before:transform"
-    | "before:transmit"
-    | "after:transmit"
-    | "after:receive"
-    | "after:transform";
+    "before:prepare" | "before:transform" | "before:transmit" | "after:transmit" | "after:receive" | "after:transform";
 
 /**
  * Context passed to hook handlers.

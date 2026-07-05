@@ -94,6 +94,88 @@ suite("LiteLLM model display", () => {
         );
     });
 
+    test("populates pricing fields when backend returns pricing and displayPricingInPicker is enabled", async () => {
+        const mockSecrets: vscode.SecretStorage = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            onDidChange: (_listener: unknown) => ({ dispose() {} }),
+        } as unknown as vscode.SecretStorage;
+
+        const provider = new LiteLLMChatProvider(mockSecrets, "test-agent");
+
+        // Force config defaults to include displayPricingInPicker: true
+        const providerAny = provider as unknown as {
+            _configManager: { getConfig: () => Promise<unknown> };
+        };
+        sandbox.stub(providerAny._configManager, "getConfig").resolves({
+            inactivityTimeout: 60,
+            disableCaching: true,
+            disableQuotaToolRedaction: false,
+            enableModelOverrides: true,
+            modelCapabilitiesOverrides: {},
+            forceResponsesEndpoint: false,
+            allowChatCompletionsFallback: false,
+            displayPricingInPicker: true,
+        });
+
+        const token = new vscode.CancellationTokenSource().token;
+
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({
+            data: [
+                {
+                    model_name: "priced-model",
+                    model_info: {
+                        key: "example/priced-model",
+                        litellm_provider: "openai",
+                        mode: "responses",
+                        max_output_tokens: 4096,
+                        max_input_tokens: 8192,
+                        // Pricing (per-token) — will be scaled to per-1M for VS Code fields
+                        input_cost_per_token: 0.000001,
+                        output_cost_per_token: 0.000005,
+                        cache_read_input_token_cost: 0.0000001,
+                        cache_creation_input_token_cost: 0.00000125,
+                    },
+                },
+            ],
+        });
+
+        const models = await provider.discoverModels(
+            {
+                silent: true,
+                configuration: { baseUrl: "http://example", apiKey: "test-key" },
+            },
+            token
+        );
+
+        assert.strictEqual(models.length, 1);
+        const info = models[0] as unknown as {
+            pricing?: string;
+            inputCost?: number;
+            outputCost?: number;
+            cacheCost?: number;
+            cacheWriteCost?: number;
+            priceCategory?: string;
+            category?: string;
+            detail?: string;
+        };
+
+        // Per-1M scaling expectations
+        assert.strictEqual(info.inputCost, 1); // $0.000001 * 1_000_000
+        assert.strictEqual(info.outputCost, 5); // $0.000005 * 1_000_000
+        assert.strictEqual(info.cacheCost, 0.1); // $0.0000001 * 1_000_000
+        assert.strictEqual(info.cacheWriteCost, 1.25); // $0.00000125 * 1_000_000
+        assert.strictEqual(info.priceCategory, "low");
+
+        // Pricing label uses compact detail formatter ($X/1M inp • $Y/1M out)
+        assert.strictEqual(info.pricing, "$1.00/1M inp • $5.00/1M out");
+        assert.strictEqual(info.detail, "example • $1.00/1M inp • $5.00/1M out");
+
+        // Category must remain a string to avoid picker crash
+        assert.strictEqual(typeof info.category, "string");
+    });
+
     test("adds cache indicator to detail string for models with prompt caching support", async () => {
         const mockSecrets: vscode.SecretStorage = {
             get: async () => undefined,

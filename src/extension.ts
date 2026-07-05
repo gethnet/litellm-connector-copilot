@@ -4,9 +4,11 @@ import { ConfigManager } from "./config/configManager";
 import {
     registerManageConfigCommand,
     registerReloadModelsCommand,
+    registerResetConfigurationCommand,
     registerShowModelsCommand,
 } from "./commands/manageConfig";
 import { registerGenerateCommitMessageCommand } from "./commands/generateCommitMessage";
+import { registerSetLogLevelCommand } from "./commands/setLogLevel";
 import { LiteLLMCommitMessageProvider } from "./providers/liteLLMCommitProvider";
 import { Logger } from "./utils/logger";
 import { StructuredLogger } from "./observability";
@@ -158,7 +160,6 @@ export function activate(context: vscode.ExtensionContext): void {
     // Emit feature usage snapshot after config is loaded
     void configManager.getConfig().then((config) => {
         telemetryService.captureFeatureUsageSnapshot({
-            "responses-api": config.v2ApiEnabled ?? false,
             "commit-message": !!(config.commitModelIdOverride && config.commitModelIdOverride.length > 0),
             caching: !config.disableCaching,
             "quota-tool-redaction": !config.disableQuotaToolRedaction,
@@ -288,9 +289,11 @@ export function activate(context: vscode.ExtensionContext): void {
         context.subscriptions.push(
             registerManageConfigCommand(context, configManager, activeProvider, telemetryService)
         );
+        context.subscriptions.push(registerResetConfigurationCommand(context, configManager, telemetryService));
         context.subscriptions.push(registerShowModelsCommand(activeProvider, telemetryService));
         context.subscriptions.push(registerReloadModelsCommand(activeProvider, telemetryService));
         context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider, telemetryService));
+        context.subscriptions.push(registerSetLogLevelCommand());
         Logger.info("Config command registered.");
     } catch (cmdErr) {
         Logger.error("Failed to register commands", cmdErr);

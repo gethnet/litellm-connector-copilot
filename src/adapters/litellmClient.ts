@@ -14,8 +14,22 @@ import { isAnthropicModel } from "../utils/modelUtils";
 import { LiteLLMTelemetry } from "../utils/telemetry";
 import type { TelemetryService } from "../telemetry/telemetryService";
 
+/**
+ * Error thrown when a /model/info discovery request times out.
+ */
+class DiscoveryTimeoutError extends Error {
+    public readonly code = "DISCOVERY_TIMEOUT";
+
+    public constructor(timeoutMs: number) {
+        super(`discovery timeout after ${timeoutMs}ms`);
+        this.name = "DiscoveryTimeoutError";
+    }
+}
+
 export class LiteLLMClient {
     private _telemetryService?: TelemetryService;
+
+    private static readonly DEFAULT_DISCOVERY_TIMEOUT_MS = 5_000;
 
     constructor(
         private readonly config: LiteLLMClientConfig,
@@ -31,6 +45,10 @@ export class LiteLLMClient {
      */
     async getModelInfo(token?: vscode.CancellationToken): Promise<LiteLLMModelInfoResponse> {
         const controller = new AbortController();
+
+        const timeoutMs = this.config.discoveryTimeoutMs ?? LiteLLMClient.DEFAULT_DISCOVERY_TIMEOUT_MS;
+        const timer = setTimeout(() => controller.abort(new DiscoveryTimeoutError(timeoutMs)), timeoutMs);
+
         if (token) {
             token.onCancellationRequested(() => controller.abort());
         }
@@ -63,11 +81,19 @@ export class LiteLLMClient {
             Logger.error(`Failed to fetch model info after trying fallback URLs: ${status} ${statusText}`);
             throw new Error(`Failed to fetch model info: ${status} ${statusText}`);
         } catch (err) {
+            // Check if the error was caused by our timeout
+            if (controller.signal.aborted && controller.signal.reason instanceof DiscoveryTimeoutError) {
+                Logger.warn(`Discovery timeout after ${timeoutMs}ms`);
+                throw controller.signal.reason;
+            }
+
             if (this._telemetryService) {
                 const errorType = err instanceof Error ? err.name : "FetchError";
                 this._telemetryService.captureConnectionError("getModelInfo", errorType);
             }
             throw err;
+        } finally {
+            clearTimeout(timer);
         }
     }
 
@@ -391,7 +417,12 @@ export class LiteLLMClient {
             try {
                 const response = await fetch(url, { ...init, signal: controller.signal });
                 if (!response) {
-                    throw new Error("No response returned from fetch");
+                    if (attempt >= maxRetries) {
+                        throw new Error("No response returned from fetch");
+                    }
+                    attempt++;
+                    await this.sleep(delayMs, options?.token);
+                    continue;
                 }
                 if (response.ok || attempt >= maxRetries || response.status < 500 || response.status >= 600) {
                     return response;

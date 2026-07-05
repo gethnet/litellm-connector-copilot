@@ -45,6 +45,17 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
             options as unknown as vscode.ProvideLanguageModelChatResponseOptions
         );
         const justification = telemetry.justification;
+        const tokenCapture = new StreamTokenCapture(
+            "commit-model-unresolved",
+            {
+                report: (part) => {
+                    if (part instanceof vscode.LanguageModelTextPart && onProgress) {
+                        onProgress(part.value);
+                    }
+                },
+            },
+            undefined
+        );
 
         Logger.info(
             `Commit message request started | RequestID: ${requestId} | Caller: ${caller} | Justification: ${justification || "none"}`
@@ -65,6 +76,7 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
                 throw new Error("No model available for commit message generation");
             }
             modelId = model.id;
+            tokenCapture.setModelInfo(model.id, this._registry.getModelInfo(model.id));
             // Capability lookup goes directly to the BackendRegistry — same
             // single-source-of-truth read as the chat and completion paths.
             const modelInfo = this._registry.getModelInfo(model.id);
@@ -103,17 +115,6 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
             );
 
             // Send the request
-            const tokenCapture = new StreamTokenCapture(
-                model.id,
-                {
-                    report: (part) => {
-                        if (part instanceof vscode.LanguageModelTextPart && onProgress) {
-                            onProgress(part.value);
-                        }
-                    },
-                },
-                modelInfo
-            );
             tokenCapture.setEstimatedPromptTokens(tokensIn ?? 0);
             const trackingProgress = tokenCapture.progress;
 
@@ -133,6 +134,7 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
                 "scm-generator",
                 modelInfo
             );
+            const snapshot = tokenCapture.getSnapshot();
 
             // Extract the final text from the stream
             const commitMessage = await this.extractTextFromStream(stream, token, onProgress);
@@ -140,7 +142,6 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
             // Sanitize the message by stripping markdown code blocks
             const sanitizedMessage = stripMarkdownCodeBlocks(commitMessage);
 
-            const snapshot = tokenCapture.getSnapshot();
             const tokensOut = snapshot.sawUpstreamUsage
                 ? snapshot.completionTokens
                 : countTokens(sanitizedMessage, this.getRawModelName(model.id), modelInfo);
@@ -151,6 +152,9 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
                 durationMs: LiteLLMTelemetry.endTimer(startTime),
                 tokensIn,
                 tokensOut,
+                estimatedInputCost: snapshot.estimatedInputCost,
+                estimatedOutputCost: snapshot.estimatedOutputCost,
+                estimatedTotalCost: snapshot.estimatedTotalCost,
                 status: "success",
                 caller: "scm-generator",
             });
@@ -160,11 +164,16 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
             const errorMsg = err instanceof Error ? err.message : String(err);
             Logger.error(`Commit message generation failed: ${errorMsg}`, err);
 
+            const snapshot = tokenCapture.getSnapshot();
+
             LiteLLMTelemetry.reportMetric({
                 requestId,
                 model: modelId,
                 durationMs: LiteLLMTelemetry.endTimer(startTime),
                 tokensIn,
+                estimatedInputCost: snapshot?.estimatedInputCost,
+                estimatedOutputCost: snapshot?.estimatedOutputCost,
+                estimatedTotalCost: snapshot?.estimatedTotalCost,
                 status: "failure",
                 error: errorMsg,
                 caller: "scm-generator",

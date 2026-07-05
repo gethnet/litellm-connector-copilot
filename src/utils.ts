@@ -437,9 +437,7 @@ import { lmcr_toString } from "./utils/mapChatRoles";
 
 export function normalizeMessagesForV2Pipeline(
     messages: readonly (
-        | vscode.LanguageModelChatRequestMessage
-        | vscode.LanguageModelChatMessage2
-        | vscode.LanguageModelChatMessage
+        vscode.LanguageModelChatRequestMessage | vscode.LanguageModelChatMessage2 | vscode.LanguageModelChatMessage
     )[]
 ): V2ChatMessage[] {
     Logger.info("Entering normalizeMessagesForV2Pipeline", { messageCount: messages.length });

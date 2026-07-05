@@ -87,15 +87,15 @@ export class RequestBuilder {
 
         if (this.isParameterSupported("temperature", modelInfo, rawModelId)) {
             const temp = mo.temperature as number | undefined;
-            requestBody.temperature = temp ?? (config.sendDefaultParameters ? 0.7 : undefined);
+            requestBody.temperature = temp;
         }
         if (this.isParameterSupported("frequency_penalty", modelInfo, rawModelId)) {
             const fp = mo.frequency_penalty as number | undefined;
-            requestBody.frequency_penalty = fp ?? (config.sendDefaultParameters ? 0.2 : undefined);
+            requestBody.frequency_penalty = fp;
         }
         if (this.isParameterSupported("presence_penalty", modelInfo, rawModelId)) {
             const pp = mo.presence_penalty as number | undefined;
-            requestBody.presence_penalty = pp ?? (config.sendDefaultParameters ? 0.1 : undefined);
+            requestBody.presence_penalty = pp;
         }
         if (this.isParameterSupported("stop", modelInfo, rawModelId) && mo.stop) {
             requestBody.stop = mo.stop as string | string[];
@@ -126,8 +126,6 @@ export class RequestBuilder {
         modelInfo?: LiteLLMModelInfo,
         _caller?: string
     ): Promise<OpenAIChatCompletionRequest> {
-        const config = await this.configManager.getConfig();
-
         // See `buildOpenAIChatRequest` for the rationale: `model.id` is
         // namespaced, the body needs the raw model name.
         const rawModelId = this.extractRawModelName(model.id);
@@ -156,15 +154,15 @@ export class RequestBuilder {
 
         if (this.isParameterSupported("temperature", modelInfo, rawModelId)) {
             const temp = mo.temperature as number | undefined;
-            requestBody.temperature = temp ?? (config.sendDefaultParameters ? 0.7 : undefined);
+            requestBody.temperature = temp;
         }
         if (this.isParameterSupported("frequency_penalty", modelInfo, rawModelId)) {
             const fp = mo.frequency_penalty as number | undefined;
-            requestBody.frequency_penalty = fp ?? (config.sendDefaultParameters ? 0.2 : undefined);
+            requestBody.frequency_penalty = fp;
         }
         if (this.isParameterSupported("presence_penalty", modelInfo, rawModelId)) {
             const pp = mo.presence_penalty as number | undefined;
-            requestBody.presence_penalty = pp ?? (config.sendDefaultParameters ? 0.1 : undefined);
+            requestBody.presence_penalty = pp;
         }
         if (this.isParameterSupported("top_p", modelInfo, rawModelId) && typeof mo.top_p === "number") {
             requestBody.top_p = mo.top_p;
