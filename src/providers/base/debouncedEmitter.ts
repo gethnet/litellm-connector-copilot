@@ -20,14 +20,27 @@ export class DebouncedEmitter {
      * into a single actual fire after the window elapses.
      */
     public fire(reason: string): void {
-        this.pendingReasons.push(reason);
+        // When delay would be 0 (both debounceMs=0 and minIntervalMs=0), fire immediately
+        // without deferring - behaves like an immediate emitter where each fire fires
+        const sinceLastFireMs = Date.now() - this.lastFireAtMs;
+        const delayMs = Math.max(this.debounceMs, Math.max(0, this.minIntervalMs - sinceLastFireMs));
 
-        if (this.timer) {
+        if (delayMs === 0) {
+            // Immediate mode: fire right away without any debouncing
+            // Each fire() triggers a fire - no coalescing in this mode
+            this.pendingReasons.push(reason);
+            const reasons = [reason]; // Fire just this reason, not all pending
+            this.onCoalesced(reasons);
+            this.fireNow();
+            // Don't update lastFireAtMs for immediate mode - allows rapid successive fires
             return;
         }
 
-        const sinceLastFireMs = Date.now() - this.lastFireAtMs;
-        const delayMs = Math.max(this.debounceMs, Math.max(0, this.minIntervalMs - sinceLastFireMs));
+        // Normal debounced mode: defer the fire until delay elapses
+        this.pendingReasons.push(reason);
+        if (this.timer) {
+            return;
+        }
 
         this.timer = setTimeout(() => {
             const reasons = [...this.pendingReasons];

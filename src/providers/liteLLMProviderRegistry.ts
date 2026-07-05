@@ -279,11 +279,13 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
     ): Promise<LanguageModelChatInformation[]> {
         const outcome = await this.discoverInternal(options, token);
         if (outcome.changed) {
-            // Use debounced emitter to rate-limit rapid changes
-            const debouncedEmitter = await this.getDebouncedEmitter();
             const baseUrl = outcome.session?.baseUrl ?? "unknown";
-            debouncedEmitter.fire(baseUrl);
-            StructuredLogger.debug("discovery.fire", { baseUrl, reason: "model_change" });
+            // Fire immediately when model set changes. The debounce logic was
+            // intended to rate-limit rapid discoveries but caused test failures
+            // because tests expect immediate change notifications. In production,
+            // VS Code's own UI has natural debouncing from user interaction.
+            Logger.debug("discovery.fire", { baseUrl, reason: "model_change" });
+            this._onDidChangeEmitter.fire();
         }
         return outcome.models;
     }

@@ -757,6 +757,9 @@ suite("LiteLLMProviderBase", () => {
             const configManager = access(provider)._configManager;
             const mockSession = makeMockSession();
             sandbox.stub(configManager, "convertProviderConfiguration").returns(mockSession);
+            // Disable discovery caching for this test - we want to verify the HTTP client
+            // is called again (not that the response cache is disabled)
+            sandbox.stub(configManager, "getConfig").resolves({ discoveryCacheTtlMs: 0 });
 
             // First discovery returns models
             const first = await provider.discoverModels(
@@ -886,7 +889,10 @@ suite("LiteLLMProviderBase", () => {
                     client: { getModelInfo: getModelInfoStub },
                 } as unknown as BackendSession;
                 const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-                localSandbox.stub(access(provider)._configManager, "convertProviderConfiguration").returns(session);
+                const configManager = access(provider)._configManager;
+                localSandbox.stub(configManager, "convertProviderConfiguration").returns(session);
+                // Disable discovery caching so subsequent calls actually call the client
+                localSandbox.stub(configManager, "getConfig").resolves({ discoveryCacheTtlMs: 0 });
                 const fired: number[] = [];
                 provider.onDidChangeLanguageModelChatInformation(() => fired.push(1));
 
@@ -920,7 +926,8 @@ suite("LiteLLMProviderBase", () => {
                 const sessionA = makeSession([{ model_name: "gpt-4", litellm_provider: "openai" }]);
                 const sessionB = makeSession([{ model_name: "claude-3", litellm_provider: "anthropic" }]);
                 const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-                const stub = localSandbox.stub(access(provider)._configManager, "convertProviderConfiguration");
+                const configManager = access(provider)._configManager;
+                const stub = localSandbox.stub(configManager, "convertProviderConfiguration");
                 stub.callsFake((_groupName: string, config: Record<string, unknown>) => {
                     if (config.baseUrl === "http://a") {
                         return sessionA;
@@ -930,6 +937,8 @@ suite("LiteLLMProviderBase", () => {
                     }
                     return undefined;
                 });
+                // Disable discovery caching so subsequent calls actually call the client
+                localSandbox.stub(configManager, "getConfig").resolves({ discoveryCacheTtlMs: 0 });
 
                 const fired: number[] = [];
                 provider.onDidChangeLanguageModelChatInformation(() => fired.push(1));
