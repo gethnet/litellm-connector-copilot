@@ -4,6 +4,7 @@ import { ConfigManager } from "./config/configManager";
 import {
     registerManageConfigCommand,
     registerReloadModelsCommand,
+    registerResetConfigurationCommand,
     registerShowModelsCommand,
 } from "./commands/manageConfig";
 import { registerGenerateCommitMessageCommand } from "./commands/generateCommitMessage";
@@ -288,6 +289,7 @@ export function activate(context: vscode.ExtensionContext): void {
         context.subscriptions.push(
             registerManageConfigCommand(context, configManager, activeProvider, telemetryService)
         );
+        context.subscriptions.push(registerResetConfigurationCommand(context, configManager, telemetryService));
         context.subscriptions.push(registerShowModelsCommand(activeProvider, telemetryService));
         context.subscriptions.push(registerReloadModelsCommand(activeProvider, telemetryService));
         context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider, telemetryService));

@@ -81,6 +81,10 @@
         "title": "LiteLLM: Manage Configuration"
       },
       {
+        "command": "litellm-connector.resetConfiguration",
+        "title": "LiteLLM: Reset All Configuration"
+      },
+      {
         "command": "litellm-connector.generateCommitMessage",
         "title": "Generate Commit Message",
         "icon": "$(sparkle)"

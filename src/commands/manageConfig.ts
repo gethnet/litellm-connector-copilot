@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import type { ConfigManager } from "../config/configManager";
 import type { LiteLLMChatProvider } from "../providers";
 import type { TelemetryService } from "../telemetry/telemetryService";
+import { Logger } from "../utils/logger";
 
 function createConfigHandler(
     _configManager: ConfigManager,
@@ -25,6 +26,53 @@ function createConfigHandler(
         } catch {
             // Fallback for builds where the chat management command is unavailable.
             await vscode.commands.executeCommand("workbench.action.openSettings", "@tag:language-model");
+        }
+    };
+}
+
+/**
+ * Creates the handler for the reset configuration command.
+ * Shows a confirmation dialog before wiping all configuration.
+ */
+function createResetConfigurationHandler(
+    configManager: ConfigManager,
+    _telemetryService?: TelemetryService
+): () => Promise<void> {
+    return async (): Promise<void> => {
+        // Show confirmation dialog
+        const reset = "Reset Configuration";
+        const cancel = "Cancel";
+
+        const choice = await vscode.window.showWarningMessage(
+            "This will remove all LiteLLM provider groups, API keys, and settings. " +
+                "You will need to re-configure the extension from scratch.",
+            { modal: true },
+            reset,
+            cancel
+        );
+
+        if (choice !== reset) {
+            Logger.info("Reset configuration cancelled by user");
+            return;
+        }
+
+        Logger.info("User confirmed reset configuration");
+
+        try {
+            await configManager.resetConfiguration();
+
+            await vscode.window.showInformationMessage(
+                "LiteLLM configuration has been reset. " +
+                    "Use 'LiteLLM: Manage Configuration' to re-configure providers."
+            );
+
+            Logger.info("Configuration reset completed successfully");
+        } catch (err: unknown) {
+            Logger.error("Configuration reset failed", err);
+
+            await vscode.window.showErrorMessage(
+                `Failed to reset configuration: ${err instanceof Error ? err.message : String(err)}`
+            );
         }
     };
 }
@@ -123,4 +171,15 @@ export function registerReloadModelsCommand(
             vscode.window.showWarningMessage(`LiteLLM: Model reload failed: ${msg}`);
         }
     });
+}
+
+export function registerResetConfigurationCommand(
+    context: vscode.ExtensionContext,
+    configManager: ConfigManager,
+    telemetryService?: TelemetryService
+): vscode.Disposable {
+    return vscode.commands.registerCommand(
+        "litellm-connector.resetConfiguration",
+        createResetConfigurationHandler(configManager, telemetryService)
+    );
 }
