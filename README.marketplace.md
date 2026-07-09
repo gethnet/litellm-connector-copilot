@@ -10,7 +10,12 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.1.8
+## 🆕 What's New in 2.1.9
+
+- 🛠️ **Capability-aware tool choice** — Omits `tool_choice` when LiteLLM model metadata explicitly says the parameter is unsupported, while preserving compatibility for models without explicit capability metadata.
+- ☁️ **Azure GPT-5.6 compatibility** — Prevents unsupported `tool_choice` fields from being sent in tool-enabled requests to affected Azure deployments.
+
+## Previous Release: 2.1.8
 
 - 💭 Full Anthropic thinking content support (signatures, redacted thinking, display metadata)
 - 🔢 Token accounting fixes — reasoning tokens now flow correctly to telemetry

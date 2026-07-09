@@ -726,7 +726,7 @@ export function convertTools(options: vscode.ProvideLanguageModelChatResponseOpt
             } satisfies OpenAIFunctionToolDef;
         });
 
-    let tool_choice: "auto" | { type: "function"; function: { name: string } } = "auto";
+    let tool_choice: "auto" | { type: "function"; function: { name: string } } | undefined = undefined;
     if (options.toolMode === vscode.LanguageModelChatToolMode.Required) {
         if (tools.length !== 1) {
             Logger.error("ToolMode.Required but multiple tools:", tools.length);
@@ -734,8 +734,12 @@ export function convertTools(options: vscode.ProvideLanguageModelChatResponseOpt
         }
         tool_choice = { type: "function", function: { name: sanitizeFunctionName(tools[0].name) } };
     }
+    // Note: tool_choice is NOT set to "auto" by default - only when explicitly Required.
+    // The request builder will add tool_choice: "auto" if tools are present AND the model
+    // supports tool_choice per its capabilities. This prevents passing unsupported tool_choice
+    // to models like GPT-5.6 Azure that don't support the parameter.
 
-    return { tools: toolDefs, tool_choice };
+    return { tools: toolDefs, ...(tool_choice !== undefined && { tool_choice }) };
 }
 
 /**

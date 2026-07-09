@@ -8,7 +8,14 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.1.8
+## 🆕 What's New in 2.1.9
+
+> Version 2.1.9 improves tool-calling compatibility with LiteLLM models that explicitly do not support the `tool_choice` parameter.
+
+- 🛠️ **Capability-aware tool choice** — The connector now omits `tool_choice` when LiteLLM's model metadata does not list it as supported, while preserving the existing default for models without explicit capability metadata.
+- ☁️ **Azure GPT-5.6 compatibility** — Tool-enabled requests no longer send the unsupported `tool_choice` field to affected Azure deployments.
+
+## Previous Release: 2.1.8
 
 > Version 2.1.8 delivers full Anthropic thinking content coverage, token accounting correctness fixes, and reasoning effort object format support for GPT-5.4+.
 

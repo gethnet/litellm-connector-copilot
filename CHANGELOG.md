@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.9] - 2026-07-09
+
+### 🐛 Fixes
+
+* **🛠️ Capability-aware `tool_choice` filtering (bug [#114](https://github.com/gethnet/litellm-connector-copilot/issues/114))**: Tool-enabled requests now omit the `tool_choice` parameter when LiteLLM's `supported_openai_params` metadata explicitly does not list it. Models with explicit support continue to receive `tool_choice: "auto"` for automatic tool selection, while models without capability metadata retain the previous compatibility behavior. This prevents Azure GPT-5.6 and similar deployments from rejecting requests because of an unsupported parameter. (`src/utils.ts`, `src/providers/base/requestBuilder.ts`, `src/providers/liteLLMProviderBase.ts`)
+
+### 🧪 Tests
+
+* Added regression coverage for `tool_choice` capability detection, request construction, unsupported-parameter filtering, and automatic-mode behavior. (`src/providers/test/parameterValidation.test.ts`, `src/providers/test/liteLLMProviderBase.requestBuilder.test.ts`, `src/providers/test/liteLLMProviderBase.test.ts`, `src/utils/test/utils.test.ts`)
+
 ## [2.1.8] - 2026-07-04
 
 ### 🚀 Features
