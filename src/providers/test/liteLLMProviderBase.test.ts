@@ -1169,6 +1169,22 @@ suite("LiteLLMProviderBase", () => {
             access(provider).stripUnsupportedParametersFromRequest(body, {} as LiteLLMModelInfo, "any-model");
             assert.strictEqual(body.temperature, 0.5);
         });
+
+        test("removes tool_choice when not in supported_openai_params", () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const body: Record<string, unknown> = { tools: [], tool_choice: "auto", model: "gpt-5.6" };
+            const modelInfo: LiteLLMModelInfo = { model: "gpt-5.6", supported_openai_params: ["tools"] };
+            access(provider).stripUnsupportedParametersFromRequest(body, modelInfo, "gpt-5.6");
+            assert.strictEqual(body.tool_choice, undefined);
+        });
+
+        test("preserves tool_choice when model supports it", () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const body: Record<string, unknown> = { tools: [], tool_choice: "auto", model: "gpt-4" };
+            const modelInfo: LiteLLMModelInfo = { model: "gpt-4", supported_openai_params: ["tools", "tool_choice"] };
+            access(provider).stripUnsupportedParametersFromRequest(body, modelInfo, "gpt-4");
+            assert.strictEqual(body.tool_choice, "auto");
+        });
     });
 
     suite("isParameterSupported", () => {

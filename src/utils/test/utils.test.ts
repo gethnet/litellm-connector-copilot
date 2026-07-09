@@ -307,6 +307,18 @@ suite("Utility Unit Tests", () => {
         assert.strictEqual(res.tool_choice?.function.name, "tool_-bad_name");
     });
 
+    test("convertTools should NOT return tool_choice when toolMode is Auto/undefined", () => {
+        const tools: vscode.LanguageModelChatTool[] = [{ name: "tool1", description: "test", inputSchema: {} }];
+
+        const res = convertTools({
+            tools,
+            toolMode: vscode.LanguageModelChatToolMode.Auto,
+            requestInitiator: "test",
+        });
+
+        assert.strictEqual(res.tool_choice, undefined, "tool_choice should be undefined when toolMode is Auto");
+    });
+
     test("convertTools returns empty when no tools", () => {
         const res = convertTools({
             tools: [],

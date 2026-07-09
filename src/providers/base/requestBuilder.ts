@@ -107,8 +107,24 @@ export class RequestBuilder {
         if (toolConfig.tools) {
             requestBody.tools = toolConfig.tools as unknown as OpenAIFunctionToolDef[];
         }
-        if (toolConfig.tool_choice) {
-            requestBody.tool_choice = toolConfig.tool_choice;
+
+        // Only include tool_choice when:
+        // 1. Model supports tool_choice (per isParameterSupported), AND
+        // 2. Tools are present, AND
+        //    a. Explicitly required by toolMode (toolConfig.tool_choice is set), OR
+        //    b. Model supports it - default to "auto" for backward compatibility
+        if (toolConfig.tools && toolConfig.tools.length > 0) {
+            if (this.isParameterSupported("tool_choice", modelInfo, rawModelId)) {
+                if (toolConfig.tool_choice) {
+                    // Explicitly required tool (toolMode === Required)
+                    requestBody.tool_choice = toolConfig.tool_choice;
+                } else {
+                    // Model supports tool_choice, tools present, but no explicit required mode
+                    // Default to "auto" for backward compatibility
+                    requestBody.tool_choice = "auto";
+                }
+            }
+            // If model doesn't support tool_choice, omit it entirely
         }
 
         this.stripUnsupportedParametersFromRequest(
@@ -171,8 +187,24 @@ export class RequestBuilder {
         if (toolConfig.tools) {
             requestBody.tools = toolConfig.tools as unknown as OpenAIFunctionToolDef[];
         }
-        if (toolConfig.tool_choice) {
-            requestBody.tool_choice = toolConfig.tool_choice;
+
+        // Only include tool_choice when:
+        // 1. Model supports tool_choice (per isParameterSupported), AND
+        // 2. Tools are present, AND
+        //    a. Explicitly required by toolMode (toolConfig.tool_choice is set), OR
+        //    b. Model supports it - default to "auto" for backward compatibility
+        if (toolConfig.tools && toolConfig.tools.length > 0) {
+            if (this.isParameterSupported("tool_choice", modelInfo, rawModelId)) {
+                if (toolConfig.tool_choice) {
+                    // Explicitly required tool (toolMode === Required)
+                    requestBody.tool_choice = toolConfig.tool_choice;
+                } else {
+                    // Model supports tool_choice, tools present, but no explicit required mode
+                    // Default to "auto" for backward compatibility
+                    requestBody.tool_choice = "auto";
+                }
+            }
+            // If model doesn't support tool_choice, omit it entirely
         }
 
         this.stripUnsupportedParametersFromRequest(

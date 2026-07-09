@@ -94,4 +94,38 @@ suite("Parameter Validation from supported_openai_params", () => {
         // Without supported_openai_params the parameter is allowed
         assert.strictEqual(result, true);
     });
+
+    test("tool_choice is restrictable and requires explicit support", () => {
+        const modelInfo: LiteLLMModelInfo = {
+            supported_openai_params: ["temperature", "top_p", "stream"],
+        };
+        const result = provider.testIsParameterSupported("tool_choice", modelInfo, "test-model");
+        // tool_choice should be restrictable like temperature/reasoning_effort
+        // should return false when not in supported_openai_params
+        assert.strictEqual(result, false);
+    });
+
+    test("tool_choice is supported when listed in supported_openai_params", () => {
+        const modelInfo: LiteLLMModelInfo = {
+            supported_openai_params: ["temperature", "tool_choice", "stream"],
+        };
+        const result = provider.testIsParameterSupported("tool_choice", modelInfo, "test-model");
+        // tool_choice is listed, should return true
+        assert.strictEqual(result, true);
+    });
+
+    test("tool_choice defaults to true when supported_openai_params is undefined", () => {
+        const result = provider.testIsParameterSupported("tool_choice", undefined, "test-model");
+        // Without supported_openai_params the parameter is allowed (backward compat)
+        assert.strictEqual(result, true);
+    });
+
+    test("tool_choice returns false for GPT-5.6 Azure models not listing it in supported params", () => {
+        const modelInfo: LiteLLMModelInfo = {
+            model: "gpt-5.6",
+            supported_openai_params: ["tools", "temperature", "top_p"],
+        };
+        const result = provider.testIsParameterSupported("tool_choice", modelInfo, "gpt-5.6");
+        assert.strictEqual(result, false);
+    });
 });

@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as sinon from "sinon";
+import * as assert from "assert";
 import { RequestBuilder } from "../base/requestBuilder";
 import { ConfigManager } from "../../config/configManager";
 import type { LiteLLMModelInfo } from "../../types";
@@ -81,5 +82,86 @@ suite("RequestBuilder", () => {
             type: "function",
             function: { name: "test_tool" },
         });
+    });
+
+    test("buildOpenAIChatRequest omits tool_choice when not supported by model", async () => {
+        // Create a builder where isParameterSupported returns false for tool_choice
+        const builderWithGating = new RequestBuilder({
+            configManager,
+            getReasoningEffort: () => undefined,
+            detectQuotaToolRedaction: (messages, tools) => ({ tools, confidence: "none" as const }),
+            stripUnsupportedParametersFromRequest: () => {},
+            isParameterSupported: (param: string) => param !== "tool_choice", // tool_choice not supported
+            getTelemetryOptions: () => ({ caller: "test", justification: undefined, modelConfiguration: {} }),
+            usageOptOutModels: new Set(),
+            extractRawModelName: (id: string) => {
+                const slash = id.indexOf("/");
+                return slash < 0 ? id : id.slice(slash + 1);
+            },
+        });
+
+        configManager.getConfig.resolves({});
+        const model = {
+            id: "azure/gpt-5.6",
+            maxInputTokens: 100000,
+            maxOutputTokens: 4096,
+        } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("test")],
+                name: undefined,
+            },
+        ];
+        const modelInfo = { model: "gpt-5.6", supported_openai_params: ["tools"] } as LiteLLMModelInfo;
+
+        const req = await builderWithGating.buildOpenAIChatRequest(
+            messages,
+            model,
+            {
+                tools: [{ name: "tool1", description: "test", inputSchema: {} }],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                modelOptions: {},
+                requestInitiator: "test",
+            } as vscode.ProvideLanguageModelChatResponseOptions,
+            modelInfo,
+            "test"
+        );
+
+        // tool_choice should be undefined when not supported by model
+        assert.strictEqual(req.tool_choice, undefined);
+    });
+
+    test("buildOpenAIChatRequest adds tool_choice: auto when supported and tools present", async () => {
+        configManager.getConfig.resolves({});
+        const model = {
+            id: "openai/gpt-4",
+            maxInputTokens: 100000,
+            maxOutputTokens: 4096,
+        } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("test")],
+                name: undefined,
+            },
+        ];
+        const modelInfo = { model: "gpt-4", supported_openai_params: ["tools", "tool_choice"] } as LiteLLMModelInfo;
+
+        const req = await builder.buildOpenAIChatRequest(
+            messages,
+            model,
+            {
+                tools: [{ name: "tool1", description: "test", inputSchema: {} }],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                modelOptions: {},
+                requestInitiator: "test",
+            } as vscode.ProvideLanguageModelChatResponseOptions,
+            modelInfo,
+            "test"
+        );
+
+        // tool_choice should be "auto" when model supports it and tools are present
+        assert.strictEqual(req.tool_choice, "auto");
     });
 });

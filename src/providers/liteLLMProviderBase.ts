@@ -950,6 +950,7 @@ export abstract class LiteLLMProviderBase {
             "frequency_penalty",
             "stop",
             "reasoning_effort",
+            "tool_choice",
         ]);
         return restrictableParams.has(param.toLowerCase());
     }
@@ -969,6 +970,7 @@ export abstract class LiteLLMProviderBase {
             "no_cache",
             "no-cache",
             "extra_body",
+            "tool_choice", // Added for GPT-5.6 Azure and similar models that don't support tool_choice
         ];
         for (const p of paramsToCheck) {
             if (!this.isParameterSupported(p, modelInfo, modelId) && p in requestBody) {
