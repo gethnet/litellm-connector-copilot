@@ -571,7 +571,11 @@ suite("MockLiteLLMBackend", () => {
 
     suite("Tool Call Support", () => {
         test("should support tool calls in non-streaming responses when enabled", async () => {
-            backend = new MockLiteLLMBackend({ port: testPort, toolCallSupport: true });
+            backend = new MockLiteLLMBackend({
+                port: testPort,
+                toolCallSupport: true,
+                random: () => 0.99,
+            });
             await backend.start();
 
             let toolCallFound = false;
@@ -597,7 +601,7 @@ suite("MockLiteLLMBackend", () => {
                 }
             }
 
-            assert.ok(toolCallFound, "Should eventually generate a tool call response (30% probability per request)");
+            assert.ok(toolCallFound, "Should generate a tool call response when tool-call selection is enabled");
         });
 
         test("should disable tool calls when toolCallSupport is false", async () => {
@@ -621,7 +625,11 @@ suite("MockLiteLLMBackend", () => {
         });
 
         test("should handle streaming tool calls", async () => {
-            backend = new MockLiteLLMBackend({ port: testPort, toolCallSupport: true });
+            backend = new MockLiteLLMBackend({
+                port: testPort,
+                toolCallSupport: true,
+                random: () => 0.99,
+            });
             await backend.start();
 
             let toolCallStreamFound = false;

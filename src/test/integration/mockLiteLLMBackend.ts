@@ -22,6 +22,7 @@ export interface MockBackendOptions {
     port: number;
     latencyMs?: number;
     toolCallSupport?: boolean;
+    random?: () => number;
     reasoningSupport?: boolean;
 }
 
@@ -30,6 +31,7 @@ export class MockLiteLLMBackend {
     private port: number;
     private latencyMs: number;
     private toolCallSupport: boolean;
+    private readonly random: () => number;
     private reasoningSupport: boolean;
     private requestCount = 0;
 
@@ -37,6 +39,7 @@ export class MockLiteLLMBackend {
         this.port = options.port;
         this.latencyMs = options.latencyMs ?? 50;
         this.toolCallSupport = options.toolCallSupport ?? true;
+        this.random = options.random ?? Math.random;
         this.reasoningSupport = options.reasoningSupport ?? true;
     }
 
@@ -165,7 +168,7 @@ export class MockLiteLLMBackend {
         const request = JSON.parse(body) as Record<string, unknown>;
 
         // Simulate tool call if requested
-        if (this.toolCallSupport && Math.random() > 0.7) {
+        if (this.toolCallSupport && this.random() > 0.7) {
             this.sendToolCallResponse(res, request);
             return;
         }
