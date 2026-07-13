@@ -11,6 +11,7 @@ const bundledOverridesData: unknown = bundledOverridesSource;
  * Kept in sync with src/utils/modelCapabilities.ts.
  */
 const LITELLM_REASONING_EFFORT_MAPPING: Record<string, SupportedReasoningEffort> = {
+    supports_none_reasoning_effort: "none",
     supports_minimal_reasoning_effort: "minimal",
     supports_low_reasoning_effort: "low",
     supports_xlow_reasoning_effort: "low",
@@ -20,7 +21,15 @@ const LITELLM_REASONING_EFFORT_MAPPING: Record<string, SupportedReasoningEffort>
     supports_max_reasoning_effort: "max",
 } as const satisfies Record<string, SupportedReasoningEffort>;
 
-const CANONICAL_REASONING_EFFORTS: readonly SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
+const CANONICAL_REASONING_EFFORTS: readonly SupportedReasoningEffort[] = [
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+];
 
 const CANONICAL_DEFAULT_EFFORT: SupportedReasoningEffort = "medium";
 
@@ -29,7 +38,15 @@ const MODEL_OVERRIDES_SETTING_KEY = "litellm-connector.modelOverrides";
 let bundledOverridesCache: ModelOverride[] | undefined;
 
 function isSupportedReasoningEffort(value: unknown): value is SupportedReasoningEffort {
-    return value === "none" || value === "low" || value === "medium" || value === "high";
+    return (
+        value === "none" ||
+        value === "minimal" ||
+        value === "low" ||
+        value === "medium" ||
+        value === "high" ||
+        value === "xhigh" ||
+        value === "max"
+    );
 }
 
 /**
@@ -168,12 +185,17 @@ function getExplicitReasoningEfforts(modelInfo?: LiteLLMModelInfo): SupportedRea
         return undefined;
     }
     const explicitEfforts: SupportedReasoningEffort[] = [];
+    let hasAnyExplicitField = false;
     for (const [key, value] of Object.entries(LITELLM_REASONING_EFFORT_MAPPING)) {
-        if (modelInfo[key as keyof LiteLLMModelInfo] === true) {
+        const fieldValue = modelInfo[key as keyof LiteLLMModelInfo];
+        if (fieldValue === true) {
             explicitEfforts.push(value as SupportedReasoningEffort);
         }
+        if (fieldValue !== undefined && fieldValue !== null) {
+            hasAnyExplicitField = true;
+        }
     }
-    return explicitEfforts.length > 0 ? explicitEfforts : undefined;
+    return hasAnyExplicitField ? explicitEfforts : undefined;
 }
 
 export function getEffectiveEfforts(
@@ -207,10 +229,12 @@ export function getEffectiveEfforts(
         }
 
         // When the proxy exposes explicit effort flags, prefer those over non-mandatory overrides.
+        // explicitEfforts is undefined when no effort fields are present (fall back to defaults),
+        // or an array (possibly empty) when fields are present — respect explicit false values.
         const explicitEfforts = getExplicitReasoningEfforts(modelInfo)
             ?.filter(isSupportedReasoningEffort)
             .filter((effort, index, arr) => arr.indexOf(effort) === index);
-        if (explicitEfforts && explicitEfforts.length > 0) {
+        if (explicitEfforts !== undefined) {
             return explicitEfforts;
         }
 
@@ -231,6 +255,14 @@ export function getEffectiveEfforts(
         }
 
         return [];
+    }
+
+    // No override: check explicit effort fields first, then fall back to canonical.
+    const explicitEfforts = getExplicitReasoningEfforts(modelInfo)
+        ?.filter(isSupportedReasoningEffort)
+        .filter((effort, index, arr) => arr.indexOf(effort) === index);
+    if (explicitEfforts !== undefined) {
+        return explicitEfforts;
     }
 
     if (modelInfo?.supports_reasoning) {
