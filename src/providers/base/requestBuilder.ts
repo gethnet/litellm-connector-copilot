@@ -75,8 +75,7 @@ export class RequestBuilder {
                     ? Math.min(mo.max_tokens, model.maxOutputTokens)
                     : model.maxOutputTokens,
             ...(this.isParameterSupported("reasoning_effort", modelInfo, rawModelId) &&
-            reasoningEffort &&
-            reasoningEffort !== "none"
+            reasoningEffort
                 ? { reasoning_effort: reasoningEffort }
                 : {}),
         };
@@ -162,8 +161,7 @@ export class RequestBuilder {
                     ? Math.min(options.modelOptions.max_tokens, model.maxOutputTokens)
                     : model.maxOutputTokens,
             ...(this.isParameterSupported("reasoning_effort", modelInfo, rawModelId) &&
-            reasoningEffort &&
-            reasoningEffort !== "none"
+            reasoningEffort
                 ? { reasoning_effort: reasoningEffort }
                 : {}),
         };

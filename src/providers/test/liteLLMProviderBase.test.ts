@@ -197,15 +197,14 @@ suite("LiteLLMProviderBase", () => {
         };
 
         suite("applyReasoningEffort", () => {
-            test("omits reasoning_effort field when effort is 'none'", () => {
+            test("sends reasoning_effort='none' as a real value", () => {
                 const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
                 const request = { model: "test-model", messages: [] } as OpenAIChatCompletionRequest;
 
                 access(provider).applyReasoningEffort(request, "none");
 
                 const recordRequest = request as unknown as Record<string, unknown>;
-                assert.strictEqual(recordRequest.reasoning_effort, undefined);
-                assert.ok(!("reasoning_effort" in request));
+                assert.strictEqual(recordRequest.reasoning_effort, "none");
             });
 
             test("sets reasoning_effort field for non-none values", () => {
@@ -286,7 +285,7 @@ suite("LiteLLMProviderBase", () => {
             assert.strictEqual(request.reasoning_effort, undefined);
         });
 
-        test("treats picker 'none' as opt-out and omits reasoning_effort", async () => {
+        test("sends picker 'none' as reasoning_effort value", async () => {
             const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
             const request = await access(provider).buildOpenAIChatRequest(
                 [
@@ -303,7 +302,7 @@ suite("LiteLLMProviderBase", () => {
                 undefined,
                 "test"
             );
-            assert.strictEqual(request.reasoning_effort, undefined);
+            assert.strictEqual(request.reasoning_effort, "none");
         });
     });
 

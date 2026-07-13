@@ -460,10 +460,6 @@ export abstract class LiteLLMProviderBase {
         const pickerEffort = telemetry.modelConfiguration?.reasoningEffort;
         Logger.debug(`[getReasoningEffort] pickerEffort (from modelConfiguration): ${pickerEffort}`);
         if (typeof pickerEffort === "string") {
-            if (pickerEffort === "none") {
-                Logger.trace(`[reasoning] Picker selected "none" for ${model.id}; suppressing reasoning_effort field.`);
-                return undefined;
-            }
             Logger.debug(`[getReasoningEffort] Returning pickerEffort without validation: ${pickerEffort}`);
             return pickerEffort;
         }
@@ -471,9 +467,6 @@ export abstract class LiteLLMProviderBase {
         const modelOptions = (options.modelOptions as Record<string, unknown> | undefined) ?? {};
         const overrideEffort = modelOptions.reasoning_effort ?? modelOptions.reasoningEffort;
         if (typeof overrideEffort === "string") {
-            if (overrideEffort === "none") {
-                return undefined;
-            }
             if (this.isReasoningEffortSupported(overrideEffort, modelInfo, model.id)) {
                 return overrideEffort;
             }
@@ -699,7 +692,7 @@ export abstract class LiteLLMProviderBase {
         effort: SupportedReasoningEffort | undefined,
         summary?: "auto" | "concise" | "detailed"
     ): void {
-        if (!effort || effort === "none") {
+        if (!effort) {
             const requestRecord = request as unknown as Record<string, unknown>;
             delete requestRecord.reasoning_effort;
             return;

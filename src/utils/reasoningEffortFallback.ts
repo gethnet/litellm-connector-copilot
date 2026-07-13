@@ -2,7 +2,15 @@ import type { SupportedReasoningEffort } from "../types";
 import { Logger } from "./logger";
 
 // Reasoning effort ladder from most to least capable. `undefined` means omit the parameter entirely.
-const EFFORT_LADDER: readonly SupportedReasoningEffort[] = ["xhigh", "high", "medium", "low", "minimal", "none"];
+const EFFORT_LADDER: readonly SupportedReasoningEffort[] = [
+    "max",
+    "xhigh",
+    "high",
+    "medium",
+    "low",
+    "minimal",
+    "none",
+];
 
 function nextLowerEffort(effort: SupportedReasoningEffort): SupportedReasoningEffort | undefined {
     const index = EFFORT_LADDER.indexOf(effort);
