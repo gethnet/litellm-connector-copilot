@@ -135,7 +135,7 @@ export class ConfigManager {
         const workspaceConfig = vscode.workspace.getConfiguration();
 
         const inactivityTimeout = workspaceConfig.get<number>(ConfigManager.INACTIVITY_TIMEOUT_KEY, 60);
-        const disableCaching = workspaceConfig.get<boolean>(ConfigManager.DISABLE_CACHING_KEY, true);
+        const disableCaching = workspaceConfig.get<boolean>(ConfigManager.DISABLE_CACHING_KEY, false);
         const disableQuotaToolRedaction = workspaceConfig.get<boolean>(
             ConfigManager.DISABLE_QUOTA_TOOL_REDACTION_KEY,
             false

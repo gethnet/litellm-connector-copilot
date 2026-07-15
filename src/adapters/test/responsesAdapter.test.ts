@@ -4,6 +4,29 @@ import { normalizeToolCallId } from "../../utils";
 import type { OpenAIFunctionToolDef, OpenAIChatMessage, LiteLLMResponseInputItem } from "../../types";
 
 suite("Responses Adapter Unit Tests", () => {
+    test("transformToResponsesFormat preserves cache bypass extra_body", () => {
+        const body = transformToResponsesFormat({
+            model: "cache-capable-model",
+            messages: [{ role: "user", content: "hello" }],
+            extra_body: { cache: { "no-cache": true } },
+        });
+
+        assert.deepStrictEqual(body.extra_body, { cache: { "no-cache": true } });
+    });
+
+    test("transformToResponsesFormat never creates a cache_control carrier object", () => {
+        const body = transformToResponsesFormat({
+            model: "cache-capable-model",
+            messages: [{ role: "user", content: "hello" }],
+            extra_body: { cache: { "no-cache": true } },
+        });
+        const serialized = JSON.stringify(body);
+
+        assert.ok(!serialized.includes("cache_control"));
+        assert.ok(!serialized.includes("cache-control"));
+        assert.ok(!serialized.includes("$mid"));
+    });
+
     test("transformToResponsesFormat normalizes tool call IDs", () => {
         const body = transformToResponsesFormat({
             model: "m",

@@ -106,6 +106,26 @@ suite("Parameter Validation from supported_openai_params", () => {
         assert.strictEqual(result, true);
     });
 
+    test("cache is restrictable and requires explicit support", () => {
+        const modelInfo: LiteLLMModelInfo = {
+            supported_openai_params: ["stream", "temperature"],
+        };
+
+        assert.strictEqual(provider.testIsParameterSupported("cache", modelInfo, "azure_ai/gpt-4o-mini"), false);
+    });
+
+    test("cache is supported when listed in supported_openai_params", () => {
+        const modelInfo: LiteLLMModelInfo = {
+            supported_openai_params: ["stream", "cache"],
+        };
+
+        assert.strictEqual(provider.testIsParameterSupported("cache", modelInfo, "cache-capable-model"), true);
+    });
+
+    test("cache remains allowed when supported_openai_params is unavailable", () => {
+        assert.strictEqual(provider.testIsParameterSupported("cache", undefined, "legacy-model"), true);
+    });
+
     test("tool_choice is restrictable and requires explicit support", () => {
         const modelInfo: LiteLLMModelInfo = {
             supported_openai_params: ["temperature", "top_p", "stream"],

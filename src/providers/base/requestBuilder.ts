@@ -32,6 +32,20 @@ export class RequestBuilder {
         this.extractRawModelName = deps.extractRawModelName;
     }
 
+    private addCacheBypassIfEnabled(requestBody: OpenAIChatCompletionRequest, disableCaching: boolean): void {
+        if (!disableCaching) {
+            return;
+        }
+
+        requestBody.extra_body = {
+            ...requestBody.extra_body,
+            cache: {
+                ...(requestBody.extra_body?.cache ?? {}),
+                "no-cache": true,
+            },
+        };
+    }
+
     public async buildOpenAIChatRequest(
         messages: readonly vscode.LanguageModelChatRequestMessage[],
         model: vscode.LanguageModelChatInformation,
@@ -125,6 +139,7 @@ export class RequestBuilder {
             // If model doesn't support tool_choice, omit it entirely
         }
 
+        this.addCacheBypassIfEnabled(requestBody, config.disableCaching === true);
         this.stripUnsupportedParametersFromRequest(
             requestBody as unknown as Record<string, unknown>,
             modelInfo,
@@ -140,6 +155,7 @@ export class RequestBuilder {
         modelInfo?: LiteLLMModelInfo,
         _caller?: string
     ): Promise<OpenAIChatCompletionRequest> {
+        const config = await this.configManager.getConfig();
         // See `buildOpenAIChatRequest` for the rationale: `model.id` is
         // namespaced, the body needs the raw model name.
         const rawModelId = this.extractRawModelName(model.id);
@@ -203,6 +219,7 @@ export class RequestBuilder {
             // If model doesn't support tool_choice, omit it entirely
         }
 
+        this.addCacheBypassIfEnabled(requestBody, config.disableCaching === true);
         this.stripUnsupportedParametersFromRequest(
             requestBody as unknown as Record<string, unknown>,
             modelInfo,

@@ -1183,6 +1183,36 @@ suite("LiteLLMProviderBase", () => {
             assert.strictEqual(eb.cache?.other, "x");
         });
 
+        test("removes nested cache controls when the model explicitly excludes cache", () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const body: Record<string, unknown> = {
+                extra_body: { cache: { "no-cache": true }, passthrough: "keep" },
+            };
+
+            access(provider).stripUnsupportedParametersFromRequest(
+                body,
+                { supported_openai_params: ["stream", "temperature"] } as LiteLLMModelInfo,
+                "azure_ai/gpt-4o-mini"
+            );
+
+            assert.deepStrictEqual(body.extra_body, { passthrough: "keep" });
+        });
+
+        test("preserves nested cache controls when the model explicitly supports cache", () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const body: Record<string, unknown> = {
+                extra_body: { cache: { "no-cache": true } },
+            };
+
+            access(provider).stripUnsupportedParametersFromRequest(
+                body,
+                { supported_openai_params: ["stream", "cache"] } as LiteLLMModelInfo,
+                "cache-capable-model"
+            );
+
+            assert.deepStrictEqual(body.extra_body, { cache: { "no-cache": true } });
+        });
+
         test("preserves supported fields when model has no limitations", () => {
             const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
             const body: Record<string, unknown> = { temperature: 0.5 };

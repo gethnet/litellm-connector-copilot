@@ -42,7 +42,7 @@ suite("ConfigManager Unit Tests", () => {
                 case "litellm-connector.inactivityTimeout":
                     return 60;
                 case "litellm-connector.disableCaching":
-                    return true;
+                    return false;
                 case "litellm-connector.disableQuotaToolRedaction":
                     return false;
                 case "litellm-connector.modelOverrides":
@@ -79,6 +79,12 @@ suite("ConfigManager Unit Tests", () => {
         const config = await manager.getConfig();
         // url and key are no longer part of LiteLLMConfig (VS Code 1.120+ per-group configuration)
         assert.strictEqual(config.modelIdOverride, undefined);
+    });
+
+    test("getConfig defaults disableCaching to false", async () => {
+        const config = await configManager.getConfig();
+
+        assert.strictEqual(config.disableCaching, false);
     });
 
     test("getConfig reads modelCapabilitiesOverrides", async () => {
