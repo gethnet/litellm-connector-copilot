@@ -362,9 +362,25 @@ suite("modelCapabilities", () => {
     });
 
     suite("getSupportedReasoningEfforts", () => {
-        const canonicalGpt5Efforts: SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
-        const claudeEfforts: SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
-        const canonicalCatchAllEfforts: SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
+        const canonicalGpt5Efforts: SupportedReasoningEffort[] = [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+        ];
+        const claudeEfforts: SupportedReasoningEffort[] = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+        const canonicalCatchAllEfforts: SupportedReasoningEffort[] = [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+        ];
 
         test("returns empty array when supports_reasoning is true but reasoning_effort not in supported_openai_params", () => {
             const modelInfo: LiteLLMModelInfo = {
@@ -424,8 +440,17 @@ suite("modelCapabilities", () => {
 
             const result = getSupportedReasoningEfforts(modelInfo, "gpt-5.4-mini");
 
-            // Canonical ladder is now limited to none/low/medium/high.
-            assert.deepStrictEqual(result, ["none", "low", "medium", "high"]);
+            // Only xhigh is explicitly supported; explicit fields take precedence over the default ladder.
+            assert.deepStrictEqual(result, ["xhigh"]);
+        });
+
+        test("recognizes supports_none_reasoning_effort without broadening the result", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                supports_none_reasoning_effort: true,
+                supported_openai_params: ["reasoning_effort"],
+            };
+
+            assert.deepStrictEqual(getSupportedReasoningEfforts(modelInfo, "test-model"), ["none"]);
         });
 
         test("returns Claude ladder for claude-haiku-4-5", () => {

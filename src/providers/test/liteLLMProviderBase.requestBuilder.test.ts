@@ -84,6 +84,70 @@ suite("RequestBuilder", () => {
         });
     });
 
+    test("buildOpenAIChatRequest serializes an explicitly selected none effort", async () => {
+        configManager.getConfig.resolves({});
+        const noneBuilder = new RequestBuilder({
+            configManager,
+            getReasoningEffort: () => "none",
+            detectQuotaToolRedaction: (messages, tools) => ({ tools, confidence: "none" as const }),
+            stripUnsupportedParametersFromRequest: () => {},
+            isParameterSupported: (param: string) => param === "reasoning_effort",
+            getTelemetryOptions: () => ({ caller: "test", justification: undefined, modelConfiguration: {} }),
+            usageOptOutModels: new Set(),
+            extractRawModelName: (id: string) => id,
+        });
+        const model = { id: "gpt-5", maxInputTokens: 100, maxOutputTokens: 50 } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("hi")],
+                name: undefined,
+            },
+        ];
+
+        const request = await noneBuilder.buildOpenAIChatRequest(
+            messages,
+            model,
+            { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions,
+            { supported_openai_params: ["reasoning_effort"] },
+            "test"
+        );
+
+        assert.strictEqual(request.reasoning_effort, "none");
+    });
+
+    test("buildV2ChatRequest omits none when reasoning_effort is unsupported", async () => {
+        configManager.getConfig.resolves({});
+        const noneBuilder = new RequestBuilder({
+            configManager,
+            getReasoningEffort: () => "none",
+            detectQuotaToolRedaction: (messages, tools) => ({ tools, confidence: "none" as const }),
+            stripUnsupportedParametersFromRequest: () => {},
+            isParameterSupported: (param: string) => param !== "reasoning_effort",
+            getTelemetryOptions: () => ({ caller: "test", justification: undefined, modelConfiguration: {} }),
+            usageOptOutModels: new Set(),
+            extractRawModelName: (id: string) => id,
+        });
+        const model = { id: "gpt-5", maxInputTokens: 100, maxOutputTokens: 50 } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("hi")],
+                name: undefined,
+            },
+        ];
+
+        const request = await noneBuilder.buildV2ChatRequest(
+            messages as never,
+            model,
+            { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions,
+            { supported_openai_params: ["stream"] },
+            "test"
+        );
+
+        assert.strictEqual(request.reasoning_effort, undefined);
+    });
+
     test("buildOpenAIChatRequest omits tool_choice when not supported by model", async () => {
         // Create a builder where isParameterSupported returns false for tool_choice
         const builderWithGating = new RequestBuilder({

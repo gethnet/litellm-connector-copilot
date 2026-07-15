@@ -11,6 +11,7 @@ const bundledOverridesData: unknown = bundledOverridesSource;
  * Kept in sync with src/utils/modelCapabilities.ts.
  */
 const LITELLM_REASONING_EFFORT_MAPPING: Record<string, SupportedReasoningEffort> = {
+    supports_none_reasoning_effort: "none",
     supports_minimal_reasoning_effort: "minimal",
     supports_low_reasoning_effort: "low",
     supports_xlow_reasoning_effort: "low",
@@ -20,7 +21,15 @@ const LITELLM_REASONING_EFFORT_MAPPING: Record<string, SupportedReasoningEffort>
     supports_max_reasoning_effort: "max",
 } as const satisfies Record<string, SupportedReasoningEffort>;
 
-const CANONICAL_REASONING_EFFORTS: readonly SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
+const CANONICAL_REASONING_EFFORTS: readonly SupportedReasoningEffort[] = [
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+];
 
 const CANONICAL_DEFAULT_EFFORT: SupportedReasoningEffort = "medium";
 
@@ -29,7 +38,15 @@ const MODEL_OVERRIDES_SETTING_KEY = "litellm-connector.modelOverrides";
 let bundledOverridesCache: ModelOverride[] | undefined;
 
 function isSupportedReasoningEffort(value: unknown): value is SupportedReasoningEffort {
-    return value === "none" || value === "low" || value === "medium" || value === "high";
+    return (
+        value === "none" ||
+        value === "minimal" ||
+        value === "low" ||
+        value === "medium" ||
+        value === "high" ||
+        value === "xhigh" ||
+        value === "max"
+    );
 }
 
 /**
@@ -168,12 +185,17 @@ function getExplicitReasoningEfforts(modelInfo?: LiteLLMModelInfo): SupportedRea
         return undefined;
     }
     const explicitEfforts: SupportedReasoningEffort[] = [];
+    let hasExplicitField = false;
     for (const [key, value] of Object.entries(LITELLM_REASONING_EFFORT_MAPPING)) {
-        if (modelInfo[key as keyof LiteLLMModelInfo] === true) {
-            explicitEfforts.push(value as SupportedReasoningEffort);
+        const fieldValue = modelInfo[key as keyof LiteLLMModelInfo];
+        if (fieldValue !== undefined && fieldValue !== null) {
+            hasExplicitField = true;
+        }
+        if (fieldValue === true) {
+            explicitEfforts.push(value);
         }
     }
-    return explicitEfforts.length > 0 ? explicitEfforts : undefined;
+    return hasExplicitField ? explicitEfforts : undefined;
 }
 
 export function getEffectiveEfforts(
@@ -197,23 +219,26 @@ export function getEffectiveEfforts(
         return [];
     }
 
+    // Explicit LiteLLM effort fields are authoritative, including an explicit
+    // all-false set. Do this before the generic supports_reasoning fallback so
+    // metadata cannot be broadened into the canonical effort ladder.
+    const explicitEfforts = getExplicitReasoningEfforts(modelInfo)
+        ?.filter(isSupportedReasoningEffort)
+        .filter((effort, index, arr) => arr.indexOf(effort) === index);
+
+    if (override?.supportsReasoning === false) {
+        return [];
+    }
+
+    if (override?.forceMandatory) {
+        return overrideEfforts ?? [...CANONICAL_REASONING_EFFORTS];
+    }
+
+    if (explicitEfforts !== undefined) {
+        return explicitEfforts;
+    }
+
     if (override) {
-        if (override.supportsReasoning === false) {
-            return [];
-        }
-
-        if (override.forceMandatory) {
-            return overrideEfforts ?? [...CANONICAL_REASONING_EFFORTS];
-        }
-
-        // When the proxy exposes explicit effort flags, prefer those over non-mandatory overrides.
-        const explicitEfforts = getExplicitReasoningEfforts(modelInfo)
-            ?.filter(isSupportedReasoningEffort)
-            .filter((effort, index, arr) => arr.indexOf(effort) === index);
-        if (explicitEfforts && explicitEfforts.length > 0) {
-            return explicitEfforts;
-        }
-
         // Non-mandatory overrides do not apply when LiteLLM has valid capability data.
         // Models with supports_reasoning: true but no explicit effort flags fall back to
         // canonical efforts, allowing the caller to use DEFAULT_REASONING_EFFORTS or

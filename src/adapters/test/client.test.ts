@@ -374,8 +374,10 @@ suite("LiteLLM Client Unit Tests", () => {
             statusText: "OK",
         });
 
-        fetchStub.onCall(0).resolves(rateLimitResponse);
-        fetchStub.onCall(1).resolves(successResponse);
+        // Keep the stub total: if the implementation accidentally performs a
+        // third fetch, it should receive a real response and fail the call-count
+        // assertion rather than producing the misleading "No response" error.
+        fetchStub.callsFake(async () => (fetchStub.callCount === 1 ? rateLimitResponse : successResponse));
 
         await client.chat({ model: "m", messages: [] });
 

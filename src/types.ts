@@ -246,8 +246,8 @@ export interface LiteLLMModelInfo {
     output_cost_per_token?: number | null;
     cache_read_input_token_cost?: number | null;
     cache_creation_input_token_cost?: number | null;
-    // Extended reasoning effort support fields from LiteLLM
-    // (for future use when LiteLLM provides explicit effort level fields)
+    // Explicit reasoning effort support fields reported by LiteLLM.
+    supports_none_reasoning_effort?: boolean | null;
     supports_minimal_reasoning_effort?: boolean | null;
     supports_low_reasoning_effort?: boolean | null;
     supports_medium_reasoning_effort?: boolean | null;

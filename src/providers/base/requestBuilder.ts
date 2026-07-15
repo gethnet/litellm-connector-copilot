@@ -74,9 +74,7 @@ export class RequestBuilder {
                 typeof mo.max_tokens === "number"
                     ? Math.min(mo.max_tokens, model.maxOutputTokens)
                     : model.maxOutputTokens,
-            ...(this.isParameterSupported("reasoning_effort", modelInfo, rawModelId) &&
-            reasoningEffort &&
-            reasoningEffort !== "none"
+            ...(this.isParameterSupported("reasoning_effort", modelInfo, rawModelId) && reasoningEffort
                 ? { reasoning_effort: reasoningEffort }
                 : {}),
         };
@@ -161,9 +159,7 @@ export class RequestBuilder {
                 typeof options.modelOptions?.max_tokens === "number"
                     ? Math.min(options.modelOptions.max_tokens, model.maxOutputTokens)
                     : model.maxOutputTokens,
-            ...(this.isParameterSupported("reasoning_effort", modelInfo, rawModelId) &&
-            reasoningEffort &&
-            reasoningEffort !== "none"
+            ...(this.isParameterSupported("reasoning_effort", modelInfo, rawModelId) && reasoningEffort
                 ? { reasoning_effort: reasoningEffort }
                 : {}),
         };

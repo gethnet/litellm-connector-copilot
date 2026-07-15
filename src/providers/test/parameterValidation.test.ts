@@ -89,6 +89,17 @@ suite("Parameter Validation from supported_openai_params", () => {
         assert.strictEqual(result, true);
     });
 
+    test("keeps reasoning_effort restricted when explicit effort metadata exists but the parameter is absent", () => {
+        const modelInfo: LiteLLMModelInfo = {
+            supports_reasoning: true,
+            supports_xhigh_reasoning_effort: true,
+            supported_openai_params: ["stream"],
+        };
+        const result = provider.testIsParameterSupported("reasoning_effort", modelInfo, "gpt-5.4-mini");
+
+        assert.strictEqual(result, false);
+    });
+
     test("reasoning_effort defaults to true when supported_openai_params is undefined", () => {
         const result = provider.testIsParameterSupported("reasoning_effort", undefined, "test-model");
         // Without supported_openai_params the parameter is allowed
