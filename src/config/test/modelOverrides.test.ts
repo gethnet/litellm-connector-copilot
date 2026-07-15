@@ -12,7 +12,7 @@ import {
 import type { LiteLLMModelInfo } from "../../types";
 import { Logger } from "../../utils/logger";
 
-const CANONICAL_REASONING_EFFORTS = ["none", "low", "medium", "high"] as const;
+const CANONICAL_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 suite("modelOverrides", () => {
     let getConfigurationStub: sinon.SinonStub;
@@ -122,6 +122,38 @@ suite("modelOverrides", () => {
         assert.deepStrictEqual(unsupported, []);
     });
 
+    test("accepts all supported reasoning effort values in user overrides", () => {
+        const userOverride: ModelOverride = {
+            match: "^test-model$",
+            supportsReasoning: true,
+            reasoningEfforts: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+            defaultEffort: "max",
+        };
+        getConfigurationStub.returns(buildWorkspaceConfiguration([userOverride]));
+
+        const override = findOverride("test-model");
+
+        assert.ok(override);
+        assert.deepStrictEqual(override?.reasoningEfforts, userOverride.reasoningEfforts);
+        assert.strictEqual(override?.defaultEffort, "max");
+    });
+
+    test("returns no effective efforts when explicit LiteLLM effort fields are all false", () => {
+        getConfigurationStub.returns(buildWorkspaceConfiguration([]));
+        const modelInfo: LiteLLMModelInfo = {
+            supports_reasoning: true,
+            supports_none_reasoning_effort: false,
+            supports_minimal_reasoning_effort: false,
+            supports_low_reasoning_effort: false,
+            supports_medium_reasoning_effort: false,
+            supports_high_reasoning_effort: false,
+            supports_xhigh_reasoning_effort: false,
+            supports_max_reasoning_effort: false,
+        };
+
+        assert.deepStrictEqual(getEffectiveEfforts("test-model", modelInfo), []);
+    });
+
     test("getDefaultEffort returns undefined when no override and no model info", () => {
         getConfigurationStub.returns(buildWorkspaceConfiguration([]));
 
@@ -166,7 +198,7 @@ suite("modelOverrides", () => {
         const result = getEffectiveEfforts("test-model", modelInfo);
         // If LiteLLM has valid data, returns enumeration. When supports_reasoning is true
         // but no effort flags are set, falls back to DEFAULT_REASONING_EFFORTS.
-        assert.deepStrictEqual(result, ["none", "low", "medium", "high"]);
+        assert.deepStrictEqual(result, CANONICAL_REASONING_EFFORTS);
     });
 
     test("findOverride returns undefined when enableModelOverrides is false", () => {
@@ -202,7 +234,7 @@ suite("modelOverrides", () => {
 
         // When overrides are disabled, forceMandatory should have no effect.
         // Model has supports_reasoning but no explicit effort flags, so falls back to canonical.
-        assert.deepStrictEqual(result, ["none", "low", "medium", "high"]);
+        assert.deepStrictEqual(result, CANONICAL_REASONING_EFFORTS);
     });
 
     test("getDefaultEffort ignores overrides when enableModelOverrides is false", () => {

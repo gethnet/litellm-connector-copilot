@@ -33,6 +33,46 @@ suite("modelCapabilities - Reasoning Overhaul", () => {
             assert.ok(result.includes("low"));
         });
 
+        test("extracts the explicit none reasoning effort field", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                supports_none_reasoning_effort: true,
+                supported_openai_params: ["reasoning_effort"],
+            };
+
+            const result = getSupportedReasoningEfforts(modelInfo, "test-model");
+
+            assert.deepStrictEqual(result, ["none"]);
+        });
+
+        test("does not broaden explicit all-false effort metadata into defaults", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                supports_reasoning: true,
+                supports_none_reasoning_effort: false,
+                supports_minimal_reasoning_effort: false,
+                supports_low_reasoning_effort: false,
+                supports_medium_reasoning_effort: false,
+                supports_high_reasoning_effort: false,
+                supports_xhigh_reasoning_effort: false,
+                supports_max_reasoning_effort: false,
+                supported_openai_params: ["reasoning_effort"],
+            };
+
+            const result = getSupportedReasoningEfforts(modelInfo, "test-model");
+
+            assert.deepStrictEqual(result, []);
+        });
+
+        test("uses every supported effort in the generic reasoning fallback", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                supports_reasoning: true,
+                supported_openai_params: ["reasoning_effort"],
+            };
+
+            const result = getSupportedReasoningEfforts(modelInfo, "test-model");
+
+            assert.deepStrictEqual(result, ["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+        });
+
         test("treats null values as undefined (not false)", () => {
             const modelInfo: LiteLLMModelInfo = {
                 supports_reasoning: null, // should be treated as undefined

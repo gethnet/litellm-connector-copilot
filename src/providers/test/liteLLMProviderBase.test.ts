@@ -197,15 +197,14 @@ suite("LiteLLMProviderBase", () => {
         };
 
         suite("applyReasoningEffort", () => {
-            test("omits reasoning_effort field when effort is 'none'", () => {
+            test("sends reasoning_effort='none' as a real value", () => {
                 const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
                 const request = { model: "test-model", messages: [] } as OpenAIChatCompletionRequest;
 
                 access(provider).applyReasoningEffort(request, "none");
 
                 const recordRequest = request as unknown as Record<string, unknown>;
-                assert.strictEqual(recordRequest.reasoning_effort, undefined);
-                assert.ok(!("reasoning_effort" in request));
+                assert.strictEqual(recordRequest.reasoning_effort, "none");
             });
 
             test("sets reasoning_effort field for non-none values", () => {
@@ -286,7 +285,7 @@ suite("LiteLLMProviderBase", () => {
             assert.strictEqual(request.reasoning_effort, undefined);
         });
 
-        test("treats picker 'none' as opt-out and omits reasoning_effort", async () => {
+        test("sends picker 'none' as reasoning_effort value", async () => {
             const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
             const request = await access(provider).buildOpenAIChatRequest(
                 [
@@ -300,9 +299,30 @@ suite("LiteLLMProviderBase", () => {
                 {
                     configuration: { baseUrl: "https://wolfram.example", apiKey: "k", reasoningEffort: "none" },
                 } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
-                undefined,
+                { supports_reasoning: true, supported_openai_params: ["reasoning_effort"] },
                 "test"
             );
+            assert.strictEqual(request.reasoning_effort, "none");
+        });
+
+        test("does not serialize picker none when the model rejects reasoning_effort", async () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const request = await access(provider).buildOpenAIChatRequest(
+                [
+                    {
+                        role: vscode.LanguageModelChatMessageRole.User,
+                        name: undefined,
+                        content: [new vscode.LanguageModelTextPart("hi")],
+                    },
+                ],
+                model,
+                {
+                    configuration: { baseUrl: "https://wolfram.example", apiKey: "k", reasoningEffort: "none" },
+                } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                { supports_reasoning: true, supported_openai_params: ["stream"] },
+                "test"
+            );
+
             assert.strictEqual(request.reasoning_effort, undefined);
         });
     });
@@ -1161,6 +1181,36 @@ suite("LiteLLMProviderBase", () => {
             const eb = body.extra_body as { cache?: { other?: string } };
             assert.ok(eb.cache);
             assert.strictEqual(eb.cache?.other, "x");
+        });
+
+        test("removes nested cache controls when the model explicitly excludes cache", () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const body: Record<string, unknown> = {
+                extra_body: { cache: { "no-cache": true }, passthrough: "keep" },
+            };
+
+            access(provider).stripUnsupportedParametersFromRequest(
+                body,
+                { supported_openai_params: ["stream", "temperature"] } as LiteLLMModelInfo,
+                "azure_ai/gpt-4o-mini"
+            );
+
+            assert.deepStrictEqual(body.extra_body, { passthrough: "keep" });
+        });
+
+        test("preserves nested cache controls when the model explicitly supports cache", () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const body: Record<string, unknown> = {
+                extra_body: { cache: { "no-cache": true } },
+            };
+
+            access(provider).stripUnsupportedParametersFromRequest(
+                body,
+                { supported_openai_params: ["stream", "cache"] } as LiteLLMModelInfo,
+                "cache-capable-model"
+            );
+
+            assert.deepStrictEqual(body.extra_body, { cache: { "no-cache": true } });
         });
 
         test("preserves supported fields when model has no limitations", () => {

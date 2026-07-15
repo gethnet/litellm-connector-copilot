@@ -89,10 +89,41 @@ suite("Parameter Validation from supported_openai_params", () => {
         assert.strictEqual(result, true);
     });
 
+    test("keeps reasoning_effort restricted when explicit effort metadata exists but the parameter is absent", () => {
+        const modelInfo: LiteLLMModelInfo = {
+            supports_reasoning: true,
+            supports_xhigh_reasoning_effort: true,
+            supported_openai_params: ["stream"],
+        };
+        const result = provider.testIsParameterSupported("reasoning_effort", modelInfo, "gpt-5.4-mini");
+
+        assert.strictEqual(result, false);
+    });
+
     test("reasoning_effort defaults to true when supported_openai_params is undefined", () => {
         const result = provider.testIsParameterSupported("reasoning_effort", undefined, "test-model");
         // Without supported_openai_params the parameter is allowed
         assert.strictEqual(result, true);
+    });
+
+    test("cache is restrictable and requires explicit support", () => {
+        const modelInfo: LiteLLMModelInfo = {
+            supported_openai_params: ["stream", "temperature"],
+        };
+
+        assert.strictEqual(provider.testIsParameterSupported("cache", modelInfo, "azure_ai/gpt-4o-mini"), false);
+    });
+
+    test("cache is supported when listed in supported_openai_params", () => {
+        const modelInfo: LiteLLMModelInfo = {
+            supported_openai_params: ["stream", "cache"],
+        };
+
+        assert.strictEqual(provider.testIsParameterSupported("cache", modelInfo, "cache-capable-model"), true);
+    });
+
+    test("cache remains allowed when supported_openai_params is unavailable", () => {
+        assert.strictEqual(provider.testIsParameterSupported("cache", undefined, "legacy-model"), true);
     });
 
     test("tool_choice is restrictable and requires explicit support", () => {

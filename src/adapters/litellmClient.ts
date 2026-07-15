@@ -11,7 +11,6 @@ import type {
 import { transformToResponsesFormat } from "./responsesAdapter";
 import { Logger } from "../utils/logger";
 import { isAnthropicModel } from "../utils/modelUtils";
-import { LiteLLMTelemetry } from "../utils/telemetry";
 import type { TelemetryService } from "../telemetry/telemetryService";
 
 /**
@@ -193,26 +192,8 @@ export class LiteLLMClient {
         const endpoint = this.getEndpoint(mode);
         let body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest = request;
 
-        const isAnthropic = isAnthropicModel(request.model, modelInfo);
-
-        if (this.config.disableCaching) {
-            if (isAnthropic) {
-                Logger.info(`Bypassing 'disable caching' for Anthropic/Claude model: ${request.model}`);
-                LiteLLMTelemetry.reportMetric({
-                    requestId: `bypass-${Math.random().toString(36).substring(7)}`,
-                    model: request.model,
-                    status: "caching_bypassed",
-                });
-            } else {
-                body = this.withNoCacheExtraBody(body);
-            }
-        }
-
         if (endpoint === "/responses") {
             body = transformToResponsesFormat(request);
-            if (this.config.disableCaching && !isAnthropic) {
-                body = this.withNoCacheExtraBody(body);
-            }
         }
 
         Logger.trace(`Sending chat request to ${endpoint}`, { model: request.model });
@@ -222,7 +203,7 @@ export class LiteLLMClient {
                 `${this.config.url}${endpoint}`,
                 {
                     method: "POST",
-                    headers: this.getHeaders(request.model, modelInfo),
+                    headers: this.getHeaders(request.model, modelInfo, body),
                     body: JSON.stringify(body),
                 },
                 { token }
@@ -252,7 +233,7 @@ export class LiteLLMClient {
                 const strippedBody: OpenAIChatCompletionRequest | LiteLLMResponsesRequest = JSON.parse(
                     JSON.stringify(body)
                 ) as OpenAIChatCompletionRequest | LiteLLMResponsesRequest;
-                const headers = this.getHeaders(request.model, modelInfo);
+                const headers = this.getHeaders(request.model, modelInfo, strippedBody);
 
                 // Cast to unknown first for index signature access
                 const stripedAsAny = strippedBody as unknown as Record<string, unknown>;
@@ -354,7 +335,11 @@ export class LiteLLMClient {
         return response.body as ReadableStream<Uint8Array>;
     }
 
-    private getHeaders(modelId?: string, modelInfo?: LiteLLMModelInfo): Record<string, string> {
+    private getHeaders(
+        modelId?: string,
+        modelInfo?: LiteLLMModelInfo,
+        body?: OpenAIChatCompletionRequest | LiteLLMResponsesRequest
+    ): Record<string, string> {
         const headers: Record<string, string> = {
             "Content-Type": "application/json",
             "User-Agent": this.userAgent,
@@ -363,13 +348,14 @@ export class LiteLLMClient {
             headers.Authorization = `Bearer ${this.config.key}`;
             headers["X-API-Key"] = this.config.key;
         }
-        if (this.config.disableCaching) {
-            const isAnthropic = modelId ? isAnthropicModel(modelId, modelInfo) : false;
-            if (!isAnthropic) {
-                headers["Cache-Control"] = "no-cache";
-            }
+        if (this.hasCacheBypassControl(body) && !isAnthropicModel(modelId ?? "", modelInfo)) {
+            headers["Cache-Control"] = "no-cache";
         }
         return headers;
+    }
+
+    private hasCacheBypassControl(body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest | undefined): boolean {
+        return body?.extra_body?.cache?.["no-cache"] === true;
     }
 
     private getEndpoint(mode?: string): string {
@@ -381,21 +367,6 @@ export class LiteLLMClient {
         }
         // Default to chat/completions for backward compatibility
         return "/chat/completions";
-    }
-
-    private withNoCacheExtraBody(
-        body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest
-    ): OpenAIChatCompletionRequest | LiteLLMResponsesRequest {
-        const extraBody = body.extra_body ?? {};
-        const cache = (extraBody.cache ?? {}) as Record<string, unknown>;
-        cache["no-cache"] = true;
-        return {
-            ...body,
-            extra_body: {
-                ...extraBody,
-                cache,
-            },
-        };
     }
 
     private async fetchWithRetry(

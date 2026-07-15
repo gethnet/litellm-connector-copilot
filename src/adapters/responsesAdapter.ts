@@ -253,6 +253,7 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
         // and the connector keeps a single canonical request shape.
         reasoning_effort: requestBody.reasoning_effort,
         stream_options: requestBody.stream_options,
+        extra_body: requestBody.extra_body,
     };
 
     if (requestBody.tools) {

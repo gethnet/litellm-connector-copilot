@@ -460,10 +460,6 @@ export abstract class LiteLLMProviderBase {
         const pickerEffort = telemetry.modelConfiguration?.reasoningEffort;
         Logger.debug(`[getReasoningEffort] pickerEffort (from modelConfiguration): ${pickerEffort}`);
         if (typeof pickerEffort === "string") {
-            if (pickerEffort === "none") {
-                Logger.trace(`[reasoning] Picker selected "none" for ${model.id}; suppressing reasoning_effort field.`);
-                return undefined;
-            }
             Logger.debug(`[getReasoningEffort] Returning pickerEffort without validation: ${pickerEffort}`);
             return pickerEffort;
         }
@@ -471,9 +467,6 @@ export abstract class LiteLLMProviderBase {
         const modelOptions = (options.modelOptions as Record<string, unknown> | undefined) ?? {};
         const overrideEffort = modelOptions.reasoning_effort ?? modelOptions.reasoningEffort;
         if (typeof overrideEffort === "string") {
-            if (overrideEffort === "none") {
-                return undefined;
-            }
             if (this.isReasoningEffortSupported(overrideEffort, modelInfo, model.id)) {
                 return overrideEffort;
             }
@@ -699,7 +692,7 @@ export abstract class LiteLLMProviderBase {
         effort: SupportedReasoningEffort | undefined,
         summary?: "auto" | "concise" | "detailed"
     ): void {
-        if (!effort || effort === "none") {
+        if (!effort) {
             const requestRecord = request as unknown as Record<string, unknown>;
             delete requestRecord.reasoning_effort;
             return;
@@ -951,6 +944,7 @@ export abstract class LiteLLMProviderBase {
             "stop",
             "reasoning_effort",
             "tool_choice",
+            "cache",
         ]);
         return restrictableParams.has(param.toLowerCase());
     }
@@ -966,10 +960,8 @@ export abstract class LiteLLMProviderBase {
             "frequency_penalty",
             "presence_penalty",
             "top_p",
-            "cache",
             "no_cache",
             "no-cache",
-            "extra_body",
             "tool_choice", // Added for GPT-5.6 Azure and similar models that don't support tool_choice
         ];
         for (const p of paramsToCheck) {
@@ -978,21 +970,15 @@ export abstract class LiteLLMProviderBase {
             }
         }
 
-        if ("cache" in requestBody) {
-            delete requestBody.cache;
-        }
-
+        // LiteLLM's cache bypass is carried only by extra_body.cache. It is
+        // retained when the model explicitly supports the cache parameter.
+        delete requestBody.cache;
         if (requestBody.extra_body && typeof requestBody.extra_body === "object") {
-            const eb = requestBody.extra_body as Record<string, unknown>;
-            if (eb.cache && typeof eb.cache === "object") {
-                const cache = eb.cache as Record<string, unknown>;
-                delete cache["no-cache"];
-                delete cache.no_cache;
-                if (Object.keys(cache).length === 0) {
-                    delete eb.cache;
-                }
+            const extraBody = requestBody.extra_body as Record<string, unknown>;
+            if (!this.isParameterSupported("cache", modelInfo, modelId)) {
+                delete extraBody.cache;
             }
-            if (Object.keys(eb).length === 0) {
+            if (Object.keys(extraBody).length === 0) {
                 delete requestBody.extra_body;
             }
         }

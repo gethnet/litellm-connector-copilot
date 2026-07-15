@@ -5,6 +5,7 @@ import {
     isReasoningError,
     markReasoningFallbackNotified,
 } from "../reasoningEffortFallback";
+import type { SupportedReasoningEffort } from "../../types";
 
 interface HttpErrorLike {
     status?: number;
@@ -25,16 +26,22 @@ suite("reasoningEffortFallback", () => {
         assert.strictEqual(effort, "high");
     });
 
-    test("recordFailure walks the effort ladder until the effort is omitted", () => {
-        type ReasoningEffort = "xhigh" | "high" | "medium" | "low" | "minimal" | "none" | undefined;
-
-        let effort: ReasoningEffort = "xhigh";
-        const expectedNext: ReasoningEffort[] = ["high", "medium", "low", "minimal", "none", undefined];
+    test("recordFailure walks from max through every effort until the parameter is omitted", () => {
+        let effort: SupportedReasoningEffort | undefined = "max";
+        const expectedNext: (SupportedReasoningEffort | undefined)[] = [
+            "xhigh",
+            "high",
+            "medium",
+            "low",
+            "minimal",
+            "none",
+            undefined,
+        ];
 
         for (const expected of expectedNext) {
             const next = cache.recordFailure("model-a", effort);
             assert.strictEqual(next, expected);
-            effort = next ?? effort;
+            effort = next;
         }
     });
 

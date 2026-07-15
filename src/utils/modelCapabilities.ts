@@ -167,9 +167,11 @@ export function getModelTags(
 
 /**
  * Mapping of LiteLLM reasoning effort fields to standard effort values.
- * This supports the 5 LiteLLM reasoning effort levels for model picker UI.
+ * The xlow alias is normalized to low because the public picker vocabulary has
+ * one low-effort value while LiteLLM may expose either field name.
  */
 const LITELLM_REASONING_EFFORT_MAPPING: Record<string, SupportedReasoningEffort> = {
+    supports_none_reasoning_effort: "none",
     supports_minimal_reasoning_effort: "minimal",
     supports_low_reasoning_effort: "low",
     supports_xlow_reasoning_effort: "low",
@@ -184,7 +186,15 @@ const LITELLM_REASONING_EFFORT_MAPPING: Record<string, SupportedReasoningEffort>
  * but doesn't specify exact effort levels (supports_reasoning: true).
  * Uses a conservative set to avoid unsupported effort flags being exposed in the UI.
  */
-const DEFAULT_REASONING_EFFORTS: readonly SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
+const DEFAULT_REASONING_EFFORTS: readonly SupportedReasoningEffort[] = [
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+];
 
 /**
  * Type definition for extended properties on LanguageModelChatInformation.
@@ -271,7 +281,7 @@ export function getSupportedReasoningEfforts(
         }
         // Still check for explicit effort fields as some models may have them
         const explicitEfforts = extractExplicitReasoningEfforts(modelInfo);
-        if (explicitEfforts.length > 0) {
+        if (explicitEfforts !== undefined) {
             return explicitEfforts;
         }
         return [];
@@ -285,7 +295,7 @@ export function getSupportedReasoningEfforts(
     // treat it as unknown and do not block effort exposure.
     const paramStatus = reasoningEffortParamStatus(modelInfo);
     const explicitEfforts = extractExplicitReasoningEfforts(modelInfo);
-    if (paramStatus === false && explicitEfforts.length === 0) {
+    if (paramStatus === false && explicitEfforts === undefined) {
         // reasoning_effort explicitly excluded and no fine-grained effort fields — hide picker
         return [];
     }
@@ -297,7 +307,7 @@ export function getSupportedReasoningEfforts(
         overrideEfforts = getEffectiveEfforts(modelId, modelInfo, config);
     }
 
-    if (explicitEfforts.length > 0) {
+    if (explicitEfforts !== undefined) {
         // If overrides provide a broader or different ladder, prefer them when non-empty
         if (overrideEfforts.length > 0) {
             return overrideEfforts;
@@ -321,22 +331,36 @@ export function getSupportedReasoningEfforts(
  * Extract reasoning efforts from explicit effort level fields in LiteLLM model info.
  * Example: supports_high_reasoning_effort: true → includes "high"
  */
-function extractExplicitReasoningEfforts(modelInfo?: LiteLLMModelInfo): SupportedReasoningEffort[] {
+function extractExplicitReasoningEfforts(modelInfo?: LiteLLMModelInfo): SupportedReasoningEffort[] | undefined {
     if (!modelInfo) {
-        return [];
+        return undefined;
     }
 
     const efforts = new Set<SupportedReasoningEffort>();
+    let hasExplicitField = false;
     for (const [key, effortValue] of Object.entries(LITELLM_REASONING_EFFORT_MAPPING)) {
-        // Use safe property access - any null values treated as undefined
         const value = modelInfo[key as keyof LiteLLMModelInfo];
+        if (value !== undefined && value !== null) {
+            hasExplicitField = true;
+        }
         if (value === true) {
             efforts.add(effortValue);
         }
     }
 
-    // Sort efforts in standard order: none, minimal, low, medium, high, xhigh, max
-    const effortOrder: SupportedReasoningEffort[] = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+    if (!hasExplicitField) {
+        return undefined;
+    }
+
+    const effortOrder: readonly SupportedReasoningEffort[] = [
+        "none",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+    ];
     return effortOrder.filter((e) => efforts.has(e));
 }
 

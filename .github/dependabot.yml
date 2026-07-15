@@ -11,6 +11,9 @@ updates:
       # Ignore @types/node updates beyond version 22
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # Ignore typescript major updates
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
