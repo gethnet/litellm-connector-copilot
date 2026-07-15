@@ -91,7 +91,7 @@ Base URL + API key are configured through **VS Code's Language Models UI** (run 
 |---------|---------|-------------|
 | `commitModelIdOverride` | `""` | Model ID for commit message generation |
 | `inactivityTimeout` | `60` | Seconds before stream is considered idle |
-| `disableCaching` | `true` | Send `no-cache` headers |
+| `disableCaching` | `false` | When enabled, bypass LiteLLM caching for models that advertise support for the `cache` parameter |
 | `enableModelOverrides` | `true` | Enable model override rules |
 | `displayPricingInPicker` | `true` | Show model pricing in picker |
 | `discoveryTimeoutMs` | `5000` | Timeout (ms) for model discovery |

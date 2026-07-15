@@ -144,7 +144,7 @@ Base URL and API key are configured through **VS Code's Language Models provider
 |---------|------|---------|-------------|
 | `litellm-connector.commitModelIdOverride` | string | `""` | Model ID for git commit message generation |
 | `litellm-connector.inactivityTimeout` | number | `60` | Seconds before connection is considered idle |
-| `litellm-connector.disableCaching` | boolean | `true` | Send `no-cache` headers to bypass LiteLLM caching |
+| `litellm-connector.disableCaching` | boolean | `false` | When enabled, bypass LiteLLM caching for models that advertise support for the `cache` parameter |
 | `litellm-connector.disableQuotaToolRedaction` | boolean | `false` | Disable automatic tool removal on quota errors |
 | `litellm-connector.enableModelOverrides` | boolean | `true` | Master toggle for model override system |
 | `litellm-connector.modelOverrides` | array | `[]` | User-supplied regex-based override rules |
@@ -155,7 +155,7 @@ Base URL and API key are configured through **VS Code's Language Models provider
 | `litellm-connector.discoveryFireDebounceMs` | number | `250` | Debounce window (ms) for model-change notifications |
 | `litellm-connector.discoveryFireMinIntervalMs` | number | `2000` | Min interval (ms) between change notifications |
 
-> **Tip**: Most users won't need to touch these — the defaults work great!
+> **Tip**: Most users won't need to touch these — the defaults work great! Caching bypass is opt-in; set `litellm-connector.disableCaching` to `true` only when you want to bypass LiteLLM caching for compatible models.
 
 ### ⚡ Advanced / Hidden Settings (JSON-Only)
 

@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.0] - 2026-07-15
+
+### 🐛 Fixes
+
+* **🧼 Strip unsupported `cache` parameters from Azure model requests (bug [#117](https://github.com/gethnet/litellm-connector-copilot/issues/117))**: Cache bypass settings are now applied only when the selected model advertises `cache` in LiteLLM's `supported_openai_params`. Azure deployments that reject the `cache` parameter no longer receive an unsupported request field, while models that support it can still bypass LiteLLM caching when `disableCaching` is enabled. (`src/providers/base/requestBuilder.ts`, `src/adapters/litellmClient.ts`, `src/config/configManager.ts`)
+
+* **⚙️ Cache bypass is now opt-in**: The `disableCaching` setting now defaults to `false` instead of `true`. Enable it deliberately when LiteLLM caching should be bypassed for compatible models; existing users who relied on the previous default should review their settings after upgrading. (`package.json`, `src/config/configManager.ts`)
+
+* **📦 Preserve cache and request metadata for `/responses`**: Request `extra_body` data is now forwarded when chat requests are translated to the `/responses` format, keeping model-aware cache handling consistent across supported endpoints. (`src/adapters/responsesAdapter.ts`)
+
+### 🧠 Model Capability Improvements
+
+* **🎯 More accurate reasoning-effort detection**: Explicit LiteLLM reasoning-effort fields are now authoritative, including an explicit all-disabled set. Support for `none`, `minimal`, `xhigh`, and `max` effort values is recognized consistently across bundled and user model overrides. (`src/config/modelOverrides.ts`, `src/utils/modelCapabilities.ts`, `src/utils/reasoningEffortFallback.ts`)
+
+### 🧪 Tests
+
+* Added regression coverage for Azure-compatible cache parameter filtering, cache bypass request construction, `/responses` request translation, explicit reasoning-effort metadata, and expanded reasoning-effort fallback behavior. (`src/adapters/test/client.test.ts`, `src/adapters/test/responsesAdapter.test.ts`, `src/providers/test/liteLLMProviderBase.requestBuilder.test.ts`, `src/providers/test/liteLLMProviderBase.test.ts`, `src/providers/test/parameterValidation.test.ts`, `src/config/test/modelOverrides.test.ts`, `src/utils/test/modelCapabilities.test.ts`, `src/utils/test/reasoningEffortFallback.test.ts`)
+
 ## [2.1.9] - 2026-07-09
 
 ### 🐛 Fixes
