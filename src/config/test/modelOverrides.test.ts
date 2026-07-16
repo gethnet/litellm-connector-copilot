@@ -12,7 +12,7 @@ import {
 import type { LiteLLMModelInfo } from "../../types";
 import { Logger } from "../../utils/logger";
 
-const CANONICAL_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+const CANONICAL_REASONING_EFFORTS = ["none", "low", "medium", "high"] as const;
 
 suite("modelOverrides", () => {
     let getConfigurationStub: sinon.SinonStub;
@@ -120,6 +120,28 @@ suite("modelOverrides", () => {
 
         assert.deepStrictEqual(supported, CANONICAL_REASONING_EFFORTS);
         assert.deepStrictEqual(unsupported, []);
+    });
+
+    test("merges partial explicit LiteLLM efforts into the canonical fallback", () => {
+        getConfigurationStub.returns(buildWorkspaceConfiguration([]));
+        const modelInfo: LiteLLMModelInfo = {
+            supports_reasoning: true,
+            supports_none_reasoning_effort: true,
+            supports_minimal_reasoning_effort: null,
+            supports_low_reasoning_effort: null,
+            supports_medium_reasoning_effort: null,
+            supports_high_reasoning_effort: null,
+            supports_xhigh_reasoning_effort: true,
+            supports_max_reasoning_effort: null,
+        };
+
+        assert.deepStrictEqual(getEffectiveEfforts("luna-model", modelInfo), [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+        ]);
     });
 
     test("accepts all supported reasoning effort values in user overrides", () => {

@@ -21,7 +21,11 @@ const LITELLM_REASONING_EFFORT_MAPPING: Record<string, SupportedReasoningEffort>
     supports_max_reasoning_effort: "max",
 } as const satisfies Record<string, SupportedReasoningEffort>;
 
-const CANONICAL_REASONING_EFFORTS: readonly SupportedReasoningEffort[] = [
+const CANONICAL_REASONING_EFFORTS: readonly SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
+
+const CANONICAL_DEFAULT_EFFORT: SupportedReasoningEffort = "medium";
+
+const REASONING_EFFORT_ORDER: readonly SupportedReasoningEffort[] = [
     "none",
     "minimal",
     "low",
@@ -31,7 +35,13 @@ const CANONICAL_REASONING_EFFORTS: readonly SupportedReasoningEffort[] = [
     "max",
 ];
 
-const CANONICAL_DEFAULT_EFFORT: SupportedReasoningEffort = "medium";
+function mergeReasoningEfforts(
+    baseline: readonly SupportedReasoningEffort[],
+    explicit: readonly SupportedReasoningEffort[]
+): SupportedReasoningEffort[] {
+    const supported = new Set<SupportedReasoningEffort>([...baseline, ...explicit]);
+    return REASONING_EFFORT_ORDER.filter((effort) => supported.has(effort));
+}
 
 const MODEL_OVERRIDES_SETTING_KEY = "litellm-connector.modelOverrides";
 
@@ -235,6 +245,17 @@ export function getEffectiveEfforts(
     }
 
     if (explicitEfforts !== undefined) {
+        // Explicit false metadata remains authoritative: an all-false response means
+        // LiteLLM has explicitly disabled every level. Partial true metadata is
+        // additive because LiteLLM can omit otherwise valid baseline levels.
+        if (explicitEfforts.length === 0) {
+            return [];
+        }
+
+        if (modelInfo?.supports_reasoning === true) {
+            return mergeReasoningEfforts(CANONICAL_REASONING_EFFORTS, explicitEfforts);
+        }
+
         return explicitEfforts;
     }
 
