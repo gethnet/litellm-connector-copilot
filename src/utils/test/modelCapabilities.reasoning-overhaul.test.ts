@@ -52,7 +52,7 @@ suite("modelCapabilities - Reasoning Overhaul", () => {
             assert.deepStrictEqual(result, ["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
         });
 
-        test("merges partial explicit efforts with the baseline picker ladder", () => {
+        test("preserves only explicitly supported effort fields", () => {
             const modelInfo: LiteLLMModelInfo = {
                 supports_reasoning: true,
                 supports_none_reasoning_effort: true,
@@ -67,7 +67,7 @@ suite("modelCapabilities - Reasoning Overhaul", () => {
 
             const result = getSupportedReasoningEfforts(modelInfo, "luna-model");
 
-            assert.deepStrictEqual(result, ["none", "low", "medium", "high", "xhigh"]);
+            assert.deepStrictEqual(result, ["none", "xhigh"]);
         });
 
         test("does not infer effort support from null fields", () => {

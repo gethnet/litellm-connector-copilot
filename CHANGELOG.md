@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.1] - 2026-07-16
+
+### 🧠 Reasoning Fixes
+
+* **🎛️ Explicit reasoning model-card overrides**: Enabled overrides now patch matching LiteLLM model metadata before capability detection. Existing fields are replaced, missing fields are added, and unspecified or related capability fields remain unchanged.
+* **🔒 Reasoning overrides are opt-in**: `litellm-connector.enableModelOverrides` now defaults to `false`. Enable it explicitly when LiteLLM reports incomplete or incorrect reasoning metadata.
+
+* **🛡️ Restore reasoning capability gates**: Reasoning effort options are no longer exposed when LiteLLM explicitly disables reasoning or all individual effort levels. This prevents unsupported reasoning controls from appearing in the model picker.
+* **🧩 Preserve explicit effort metadata**: Models now expose only the explicitly reported LiteLLM effort levels, including `minimal`, `xhigh`, and `max`, without inferring related effort fields. Explicit `none` support is also preserved.
+
+### 🧪 Tests
+
+* Added regression coverage for explicit reasoning disablement, gated field-level overrides, reasoning capability gates, and model-reported effort levels. (`src/config/test/modelOverrides.test.ts`, `src/utils/test/modelCapabilities.test.ts`, `src/utils/test/modelCapabilities.reasoning-overhaul.test.ts`)
+
 ## [2.2.0] - 2026-07-15
 
 ### 🐛 Fixes

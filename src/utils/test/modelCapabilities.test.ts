@@ -422,7 +422,7 @@ suite("modelCapabilities", () => {
             ]);
         });
 
-        test("keeps baseline efforts when LiteLLM reports a partial explicit set", () => {
+        test("keeps only explicit efforts when LiteLLM reports a partial set", () => {
             const modelInfo: LiteLLMModelInfo = {
                 supports_reasoning: true,
                 supports_none_reasoning_effort: true,
@@ -435,13 +435,7 @@ suite("modelCapabilities", () => {
                 supported_openai_params: ["reasoning_effort"],
             };
 
-            assert.deepStrictEqual(getSupportedReasoningEfforts(modelInfo, "luna-model"), [
-                "none",
-                "low",
-                "medium",
-                "high",
-                "xhigh",
-            ]);
+            assert.deepStrictEqual(getSupportedReasoningEfforts(modelInfo, "luna-model"), ["none", "xhigh"]);
         });
 
         test("returns the generic fallback ladder when no explicit fields are present", () => {
@@ -454,7 +448,7 @@ suite("modelCapabilities", () => {
             assert.deepStrictEqual(result, ["none", "low", "medium", "high"]);
         });
 
-        test("merges an explicitly supported extension with the generic fallback", () => {
+        test("does not merge an explicitly supported extension with the generic fallback", () => {
             const modelInfo: LiteLLMModelInfo = {
                 id: "test-model",
                 supports_reasoning: true,
@@ -464,7 +458,7 @@ suite("modelCapabilities", () => {
 
             const result = getSupportedReasoningEfforts(modelInfo, "test-model");
 
-            assert.deepStrictEqual(result, ["none", "low", "medium", "high", "xhigh"]);
+            assert.deepStrictEqual(result, ["xhigh"]);
         });
 
         test("recognizes supports_none_reasoning_effort without broadening the result", () => {
