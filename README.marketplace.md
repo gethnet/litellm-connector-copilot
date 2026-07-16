@@ -10,16 +10,15 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.1.9
+## 🆕 What's New in 2.2.1
 
-- 🛠️ **Capability-aware tool choice** — Omits `tool_choice` when LiteLLM model metadata explicitly says the parameter is unsupported, while preserving compatibility for models without explicit capability metadata.
-- ☁️ **Azure GPT-5.6 compatibility** — Prevents unsupported `tool_choice` fields from being sent in tool-enabled requests to affected Azure deployments.
+> Version 2.2.1 fixes reasoning capability detection so the model picker exposes only supported reasoning effort options.
 
-## Previous Release: 2.1.8
+- 🧠 **Reasoning capability gates** — Hides reasoning controls when LiteLLM explicitly disables reasoning or all effort levels.
+- 🧩 **Explicit effort support** — Uses model-reported levels such as `minimal`, `xhigh`, and `max` without inferring unspecified effort fields.
+- 🎛️ **Opt-in model-card overrides** — Correct incomplete LiteLLM reasoning metadata with explicit, field-level overrides.
 
-- 💭 Full Anthropic thinking content support (signatures, redacted thinking, display metadata)
-- 🔢 Token accounting fixes — reasoning tokens now flow correctly to telemetry
-- 📊 Reasoning effort object format (`{ effort, summary }`) for GPT-5.4+
+See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
 ---
 
@@ -92,12 +91,40 @@ Base URL + API key are configured through **VS Code's Language Models UI** (run 
 | `commitModelIdOverride` | `""` | Model ID for commit message generation |
 | `inactivityTimeout` | `60` | Seconds before stream is considered idle |
 | `disableCaching` | `false` | When enabled, bypass LiteLLM caching for models that advertise support for the `cache` parameter |
-| `enableModelOverrides` | `true` | Enable model override rules |
+| `enableModelOverrides` | `false` | Enable model-card override rules |
 | `displayPricingInPicker` | `true` | Show model pricing in picker |
 | `discoveryTimeoutMs` | `5000` | Timeout (ms) for model discovery |
 | `discoveryCacheTtlMs` | `60000` | Cache TTL (ms), 0 to disable |
 | `discoveryFireDebounceMs` | `250` | Debounce (ms) for change notifications |
 | `discoveryFireMinIntervalMs` | `2000` | Min interval (ms) between notifications |
+
+> Reasoning model-card overrides are disabled by default. Enable `enableModelOverrides` when LiteLLM reports incorrect or incomplete reasoning metadata. Overrides replace or add only the explicitly named LiteLLM fields; related fields are not inferred.
+
+### 🛠️ Help: Applying a Model Override
+
+Model overrides are disabled by default. To correct incomplete LiteLLM `/model/info` metadata:
+
+1. Open **Preferences: Open User Settings (JSON)** or **Preferences: Open Workspace Settings (JSON)**.
+2. Set `litellm-connector.enableModelOverrides` to `true`.
+3. Add a matching rule to `litellm-connector.modelOverrides`.
+4. Run **LiteLLM: Reload Models**.
+
+Use the raw LiteLLM `model_name` and exact snake_case model-card fields. Only explicitly defined fields are changed; related fields are not inferred.
+
+```json
+{
+   "litellm-connector.enableModelOverrides": true,
+   "litellm-connector.modelOverrides": [
+      {
+         "match": "^gpt-4\\.8$",
+         "supports_reasoning": true,
+         "supports_max_reasoning_effort": true
+      }
+   ]
+}
+```
+
+Define each desired effort explicitly, such as `supports_xhigh_reasoning_effort: true`. Setting one effort field does not enable `supports_reasoning` or any other effort field automatically.
 
 ### Advanced (JSON-Only)
 

@@ -95,16 +95,33 @@ export interface ModelCapabilityOverride {
 
 export type SupportedReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
+export type ReasoningModelInfoField =
+    | "supports_reasoning"
+    | "supports_none_reasoning_effort"
+    | "supports_minimal_reasoning_effort"
+    | "supports_low_reasoning_effort"
+    | "supports_medium_reasoning_effort"
+    | "supports_high_reasoning_effort"
+    | "supports_xhigh_reasoning_effort"
+    | "supports_max_reasoning_effort";
+
+export type ReasoningModelInfoPatch = Partial<Pick<LiteLLMModelInfo, ReasoningModelInfoField>>;
+
 export interface ModelOverride {
     /** Regex pattern to match model IDs */
     match: string;
-    /** Override for supports_reasoning */
-    supportsReasoning?: boolean | null;
-    /** Override for supported reasoning efforts */
-    reasoningEfforts?: SupportedReasoningEffort[];
+    /** Exact LiteLLM reasoning model-card fields to replace or append */
+    supports_reasoning?: boolean | null;
+    supports_none_reasoning_effort?: boolean | null;
+    supports_minimal_reasoning_effort?: boolean | null;
+    supports_low_reasoning_effort?: boolean | null;
+    supports_medium_reasoning_effort?: boolean | null;
+    supports_high_reasoning_effort?: boolean | null;
+    supports_xhigh_reasoning_effort?: boolean | null;
+    supports_max_reasoning_effort?: boolean | null;
     /** Default reasoning effort when reasoning is supported */
     defaultEffort?: SupportedReasoningEffort;
-    /** Force this override to be mandatory (ignore remote LiteLLM values) */
+    /** Force this override to be mandatory for request-time fallback selection */
     forceMandatory?: boolean;
     /** Custom tags to add to model */
     tags?: string[];
@@ -147,7 +164,7 @@ export interface LiteLLMConfig {
      * Enable/disable the model override system.
      * When enabled, merged user and bundled model override rules are applied.
      * When disabled, only LiteLLM /model/info derived capabilities are used.
-     * Default: true (backwards compatible).
+     * Default: false (opt-in).
      */
     enableModelOverrides?: boolean;
     /**

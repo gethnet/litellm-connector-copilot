@@ -2,6 +2,7 @@ import * as assert from "assert";
 import * as sinon from "sinon";
 import * as vscode from "vscode";
 import {
+    applyModelInfoOverrides,
     findOverride,
     getDefaultEffort,
     getEffectiveEfforts,
@@ -12,7 +13,7 @@ import {
 import type { LiteLLMModelInfo } from "../../types";
 import { Logger } from "../../utils/logger";
 
-const CANONICAL_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+const CANONICAL_REASONING_EFFORTS = ["none", "low", "medium", "high"] as const;
 
 suite("modelOverrides", () => {
     let getConfigurationStub: sinon.SinonStub;
@@ -61,8 +62,9 @@ suite("modelOverrides", () => {
         const userOverrides: ModelOverride[] = [
             {
                 match: "^[Gg][Pp][Tt].*",
-                supportsReasoning: true,
-                reasoningEfforts: ["none", "low"],
+                supports_reasoning: true,
+                supports_none_reasoning_effort: true,
+                supports_low_reasoning_effort: true,
                 defaultEffort: "none",
             },
         ];
@@ -73,16 +75,17 @@ suite("modelOverrides", () => {
 
         assert.ok(override, "user override should be matched first");
         assert.strictEqual(override?.defaultEffort, "none");
-        assert.deepStrictEqual(override?.reasoningEfforts, ["none", "low"]);
+        assert.strictEqual(override?.supports_none_reasoning_effort, true);
     });
 
     test("invalid user override is skipped with a warning and does not crash", async () => {
         const userOverrides: unknown[] = [
-            { match: "(", supportsReasoning: true },
+            { match: "(", supports_reasoning: true },
             {
                 match: ".*",
-                supportsReasoning: true,
-                reasoningEfforts: ["none", "low"],
+                supports_reasoning: true,
+                supports_none_reasoning_effort: true,
+                supports_low_reasoning_effort: true,
                 defaultEffort: "low",
             },
         ];
@@ -122,11 +125,33 @@ suite("modelOverrides", () => {
         assert.deepStrictEqual(unsupported, []);
     });
 
+    test("preserves partial explicit LiteLLM efforts without inferring siblings", () => {
+        getConfigurationStub.returns(buildWorkspaceConfiguration([]));
+        const modelInfo: LiteLLMModelInfo = {
+            supports_reasoning: true,
+            supports_none_reasoning_effort: true,
+            supports_minimal_reasoning_effort: null,
+            supports_low_reasoning_effort: null,
+            supports_medium_reasoning_effort: null,
+            supports_high_reasoning_effort: null,
+            supports_xhigh_reasoning_effort: true,
+            supports_max_reasoning_effort: null,
+        };
+
+        assert.deepStrictEqual(getEffectiveEfforts("luna-model", modelInfo), ["none", "xhigh"]);
+    });
+
     test("accepts all supported reasoning effort values in user overrides", () => {
         const userOverride: ModelOverride = {
             match: "^test-model$",
-            supportsReasoning: true,
-            reasoningEfforts: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+            supports_reasoning: true,
+            supports_none_reasoning_effort: true,
+            supports_minimal_reasoning_effort: true,
+            supports_low_reasoning_effort: true,
+            supports_medium_reasoning_effort: true,
+            supports_high_reasoning_effort: true,
+            supports_xhigh_reasoning_effort: true,
+            supports_max_reasoning_effort: true,
             defaultEffort: "max",
         };
         getConfigurationStub.returns(buildWorkspaceConfiguration([userOverride]));
@@ -134,7 +159,7 @@ suite("modelOverrides", () => {
         const override = findOverride("test-model");
 
         assert.ok(override);
-        assert.deepStrictEqual(override?.reasoningEfforts, userOverride.reasoningEfforts);
+        assert.strictEqual(override?.supports_max_reasoning_effort, true);
         assert.strictEqual(override?.defaultEffort, "max");
     });
 
@@ -169,7 +194,7 @@ suite("modelOverrides", () => {
     test("forceMandatory override returns values even when LiteLLM has data", async () => {
         const override: ModelOverride = {
             match: "^test-.*",
-            reasoningEfforts: ["high"],
+            supports_high_reasoning_effort: true,
             forceMandatory: true,
         };
         getConfigurationStub.returns(buildWorkspaceConfiguration([override]));
@@ -186,7 +211,7 @@ suite("modelOverrides", () => {
     test("non-mandatory override is ignored when LiteLLM has valid data", async () => {
         const override: ModelOverride = {
             match: "^test-.*",
-            reasoningEfforts: ["high"],
+            supports_high_reasoning_effort: true,
             forceMandatory: false,
         };
         getConfigurationStub.returns(buildWorkspaceConfiguration([override]));
@@ -198,15 +223,16 @@ suite("modelOverrides", () => {
         const result = getEffectiveEfforts("test-model", modelInfo);
         // If LiteLLM has valid data, returns enumeration. When supports_reasoning is true
         // but no effort flags are set, falls back to DEFAULT_REASONING_EFFORTS.
-        assert.deepStrictEqual(result, CANONICAL_REASONING_EFFORTS);
+        assert.deepStrictEqual(result, ["high"]);
     });
 
     test("findOverride returns undefined when enableModelOverrides is false", () => {
         const userOverrides: ModelOverride[] = [
             {
                 match: "^[Gg][Pp][Tt].*",
-                supportsReasoning: true,
-                reasoningEfforts: ["none", "low"],
+                supports_reasoning: true,
+                supports_none_reasoning_effort: true,
+                supports_low_reasoning_effort: true,
                 defaultEffort: "none",
             },
         ];
@@ -221,8 +247,8 @@ suite("modelOverrides", () => {
         const userOverrides: ModelOverride[] = [
             {
                 match: "^test-.*",
-                supportsReasoning: true,
-                reasoningEfforts: ["high"],
+                supports_reasoning: true,
+                supports_high_reasoning_effort: true,
                 defaultEffort: "high",
                 forceMandatory: true,
             },
@@ -241,7 +267,7 @@ suite("modelOverrides", () => {
         const userOverrides: ModelOverride[] = [
             {
                 match: "^test-.*",
-                supportsReasoning: true,
+                supports_reasoning: true,
                 defaultEffort: "high",
             },
         ];
@@ -252,5 +278,80 @@ suite("modelOverrides", () => {
         // Override defaultEffort of "high" should be ignored; falls through to model info path.
         // With supports_reasoning: true and no override, returns CANONICAL_DEFAULT_EFFORT ("medium").
         assert.strictEqual(result, "medium");
+    });
+
+    test("does not override LiteLLM reasoning fields when model overrides are disabled", () => {
+        const override = {
+            match: "^gpt-4\\.8$",
+            supports_reasoning: true,
+            supports_max_reasoning_effort: true,
+            defaultEffort: "max",
+        } as ModelOverride;
+
+        getConfigurationStub.returns(buildWorkspaceConfiguration([override], false));
+
+        const modelInfo: LiteLLMModelInfo = {
+            supports_reasoning: false,
+            supports_max_reasoning_effort: false,
+        };
+
+        assert.deepStrictEqual(applyModelInfoOverrides("gpt-4.8", modelInfo), modelInfo);
+    });
+
+    test("replaces only explicitly overridden reasoning fields", () => {
+        const override = {
+            match: "^gpt-4\\.8$",
+            supports_reasoning: true,
+            supports_max_reasoning_effort: true,
+        } as ModelOverride;
+
+        getConfigurationStub.returns(buildWorkspaceConfiguration([override]));
+
+        const modelInfo: LiteLLMModelInfo = {
+            supports_reasoning: false,
+            supports_max_reasoning_effort: false,
+            supports_xhigh_reasoning_effort: null,
+            supports_low_reasoning_effort: true,
+        };
+
+        const result = applyModelInfoOverrides("gpt-4.8", modelInfo);
+
+        assert.strictEqual(result?.supports_reasoning, true);
+        assert.strictEqual(result?.supports_max_reasoning_effort, true);
+        assert.strictEqual(result?.supports_xhigh_reasoning_effort, null);
+        assert.strictEqual(result?.supports_low_reasoning_effort, true);
+    });
+
+    test("adds explicitly overridden fields absent from LiteLLM model data", () => {
+        const override = {
+            match: "^gpt-4\\.8$",
+            supports_max_reasoning_effort: true,
+        } as ModelOverride;
+
+        getConfigurationStub.returns(buildWorkspaceConfiguration([override]));
+
+        const result = applyModelInfoOverrides("gpt-4.8", { supports_reasoning: true });
+
+        assert.strictEqual(result?.supports_max_reasoning_effort, true);
+        assert.strictEqual(result?.supports_reasoning, true);
+        assert.strictEqual(result?.supports_xhigh_reasoning_effort, undefined);
+    });
+
+    test("preserves null and does not infer sister reasoning fields", () => {
+        const override = {
+            match: "^gpt-4\\.8$",
+            supports_max_reasoning_effort: true,
+        } as ModelOverride;
+
+        getConfigurationStub.returns(buildWorkspaceConfiguration([override]));
+
+        const result = applyModelInfoOverrides("gpt-4.8", {
+            supports_reasoning: null,
+            supports_xhigh_reasoning_effort: null,
+        });
+
+        assert.strictEqual(result?.supports_reasoning, null);
+        assert.strictEqual(result?.supports_xhigh_reasoning_effort, null);
+        assert.strictEqual(result?.supports_max_reasoning_effort, true);
     });
 });

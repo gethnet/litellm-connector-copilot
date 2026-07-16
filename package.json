@@ -1,7 +1,7 @@
 {
 	"name": "litellm-connector-copilot",
 	"displayName": "LiteLLM Connector for Copilot",
-	"version": "2.2.0",
+	"version": "2.2.1",
 	"description": "An extension that integrates LiteLLM proxy into Copilot",
 	"categories": [
 		"AI",
@@ -190,8 +190,8 @@
 				},
 				"litellm-connector.enableModelOverrides": {
 					"type": "boolean",
-					"default": true,
-					"markdownDescription": "Enable/disable the model override system. When enabled, merged user and bundled model override rules are applied. When disabled, only LiteLLM `/model/info` derived capabilities are used."
+					"default": false,
+					"markdownDescription": "Enable model-card overrides for matching models. When disabled, LiteLLM `/model/info` data is used unchanged. When enabled, only explicitly configured override fields replace incoming LiteLLM values."
 				},
 				"litellm-connector.displayPricingInPicker": {
 					"type": "boolean",

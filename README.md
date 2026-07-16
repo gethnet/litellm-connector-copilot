@@ -8,20 +8,15 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.1.9
+## 🆕 What's New in 2.2.1
 
-> Version 2.1.9 improves tool-calling compatibility with LiteLLM models that explicitly do not support the `tool_choice` parameter.
+> Version 2.2.1 fixes reasoning capability detection so the model picker exposes only supported reasoning effort options.
 
-- 🛠️ **Capability-aware tool choice** — The connector now omits `tool_choice` when LiteLLM's model metadata does not list it as supported, while preserving the existing default for models without explicit capability metadata.
-- ☁️ **Azure GPT-5.6 compatibility** — Tool-enabled requests no longer send the unsupported `tool_choice` field to affected Azure deployments.
+- 🧠 **Reasoning capability gates** — Hides reasoning controls when LiteLLM explicitly disables reasoning or all effort levels.
+- 🧩 **Explicit effort support** — Uses model-reported levels such as `minimal`, `xhigh`, and `max` without inferring unspecified effort fields.
+- 🎛️ **Opt-in model-card overrides** — Correct incomplete LiteLLM reasoning metadata with explicit, field-level overrides.
 
-## Previous Release: 2.1.8
-
-> Version 2.1.8 delivers full Anthropic thinking content coverage, token accounting correctness fixes, and reasoning effort object format support for GPT-5.4+.
-
-- 💭 **Full Anthropic thinking/thinking content coverage** — Support for `signature`, `redacted_thinking` blocks, and `display` metadata preservation throughout streaming
-- 🔢 **Token accounting correctness** — Reasoning tokens now correctly flow through to telemetry (no more zeroing out)
-- 📊 **Reasoning effort object format** — Support for `{ effort: string; summary?: string }` enabling GPT-5.4+ and OpenAI Responses API summary control (`"auto" | "concise" | "detailed"`)
+See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
 ---
 
@@ -118,7 +113,7 @@ Generate structured, conventional commit messages from staged changes. Set `comm
 API keys stored safely in VS Code's encrypted `SecretStorage`. No plaintext secrets.
 
 ### 🧩 Model Override System
-Fine-tune reasoning capabilities for specific models via `litellm-connector.modelOverrides` and `litellm-connector.modelCapabilitiesOverrides`.
+Fine-tune model metadata for specific models via `litellm-connector.modelOverrides` and `litellm-connector.modelCapabilitiesOverrides`. Model-card overrides are disabled by default. See [Applying a Model Override](#-help-applying-a-model-override) for a complete example.
 
 ---
 
@@ -146,8 +141,8 @@ Base URL and API key are configured through **VS Code's Language Models provider
 | `litellm-connector.inactivityTimeout` | number | `60` | Seconds before connection is considered idle |
 | `litellm-connector.disableCaching` | boolean | `false` | When enabled, bypass LiteLLM caching for models that advertise support for the `cache` parameter |
 | `litellm-connector.disableQuotaToolRedaction` | boolean | `false` | Disable automatic tool removal on quota errors |
-| `litellm-connector.enableModelOverrides` | boolean | `true` | Master toggle for model override system |
-| `litellm-connector.modelOverrides` | array | `[]` | User-supplied regex-based override rules |
+| `litellm-connector.enableModelOverrides` | boolean | `false` | Master toggle for user and bundled model-card overrides |
+| `litellm-connector.modelOverrides` | array | `[]` | User-supplied regex-based field overrides; only explicitly defined fields replace LiteLLM data |
 | `litellm-connector.modelCapabilitiesOverrides` | object | `{}` | Override `toolCalling` / `imageInput` capabilities |
 | `litellm-connector.displayPricingInPicker` | boolean | `true` | Show model pricing in the model picker |
 | `litellm-connector.discoveryTimeoutMs` | number | `5000` | Timeout (ms) for `/model/info` discovery requests |
@@ -155,7 +150,35 @@ Base URL and API key are configured through **VS Code's Language Models provider
 | `litellm-connector.discoveryFireDebounceMs` | number | `250` | Debounce window (ms) for model-change notifications |
 | `litellm-connector.discoveryFireMinIntervalMs` | number | `2000` | Min interval (ms) between change notifications |
 
-> **Tip**: Most users won't need to touch these — the defaults work great! Caching bypass is opt-in; set `litellm-connector.disableCaching` to `true` only when you want to bypass LiteLLM caching for compatible models.
+> **Tip**: Most users won't need to touch these — the defaults work great! Caching bypass and model-card overrides are opt-in.
+
+### 🛠️ Help: Applying a Model Override
+
+Use a model override when LiteLLM's `/model/info` response is missing or incorrectly reports a model capability. Overrides are disabled by default and must be enabled explicitly.
+
+1. Open **Preferences: Open User Settings (JSON)** or **Preferences: Open Workspace Settings (JSON)**.
+2. Set `litellm-connector.enableModelOverrides` to `true`.
+3. Add a rule to `litellm-connector.modelOverrides`. Match the raw LiteLLM `model_name` with a regular expression.
+4. Run **LiteLLM: Reload Models**.
+
+For reasoning metadata, use LiteLLM's exact snake_case model-card field names. Only fields included in the matching rule are changed; omitted fields remain exactly as LiteLLM reported them.
+
+```json
+{
+	"litellm-connector.enableModelOverrides": true,
+	"litellm-connector.modelOverrides": [
+		{
+			"match": "^gpt-4\\.8$",
+			"supports_reasoning": true,
+			"supports_max_reasoning_effort": true
+		}
+	]
+}
+```
+
+In this example, `supports_reasoning` and `supports_max_reasoning_effort` are replaced or added for `gpt-4.8`. Other fields, such as `supports_xhigh_reasoning_effort`, are not inferred or changed. To explicitly disable a field, set it to `false`; to replace a `null` value, define the field in the override.
+
+The rule can also define `defaultEffort`, but it does not replace the LiteLLM field-level behavior. Use `supports_low_reasoning_effort`, `supports_medium_reasoning_effort`, `supports_high_reasoning_effort`, `supports_xhigh_reasoning_effort`, or `supports_max_reasoning_effort` explicitly when those levels should be available.
 
 ### ⚡ Advanced / Hidden Settings (JSON-Only)
 

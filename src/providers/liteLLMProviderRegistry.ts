@@ -75,6 +75,7 @@ import {
 } from "../utils/modelCapabilities";
 import { deriveGroupNameFromUrl } from "../utils";
 import { sha256HexAsync } from "../utils/discoveryHash";
+import { applyModelInfoOverrides } from "../config/modelOverrides";
 import type { LiteLLMConfig, LiteLLMModelInfo, LiteLLMModelInfoResponse } from "../types";
 import type { ConfigManager } from "../config/configManager";
 import type { BackendSession } from "./backendSession";
@@ -722,7 +723,7 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
         // disambiguates them. The `name` shown to the user in the model
         // picker stays as the raw model_name (no namespace leak).
         const modelId = routingIdentity.length > 0 ? `${routingIdentity}/${modelName}` : modelName;
-        let modelInfo = entry.model_info;
+        let modelInfo = applyModelInfoOverrides(modelName, entry.model_info);
         if (forceResponsesEndpoint && modelInfo?.mode === "chat") {
             modelInfo = { ...modelInfo, mode: "responses" as const };
         }

@@ -140,7 +140,7 @@ export class ConfigManager {
             ConfigManager.DISABLE_QUOTA_TOOL_REDACTION_KEY,
             false
         );
-        const enableModelOverrides = workspaceConfig.get<boolean>(ConfigManager.KEY_MODEL_OVERRIDES_ENABLE, true);
+        const enableModelOverrides = workspaceConfig.get<boolean>(ConfigManager.KEY_MODEL_OVERRIDES_ENABLE, false);
         // modelOverrides are loaded but the LiteLLMConfig.modelOverrides field was
         // removed in v2.2.0 (dead plumbing — the override system reads the workspace
         // setting directly via modelOverrides.ts findOverride).

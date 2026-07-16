@@ -184,17 +184,10 @@ const LITELLM_REASONING_EFFORT_MAPPING: Record<string, SupportedReasoningEffort>
 /**
  * Default supported reasoning efforts when model explicitly supports reasoning
  * but doesn't specify exact effort levels (supports_reasoning: true).
- * Uses a conservative set to avoid unsupported effort flags being exposed in the UI.
+ * This is the 2.1.9 fallback. Additional effort values are exposed only when
+ * LiteLLM explicitly reports their corresponding support field as true.
  */
-const DEFAULT_REASONING_EFFORTS: readonly SupportedReasoningEffort[] = [
-    "none",
-    "minimal",
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-    "max",
-];
+const DEFAULT_REASONING_EFFORTS: readonly SupportedReasoningEffort[] = ["none", "low", "medium", "high"];
 
 /**
  * Type definition for extended properties on LanguageModelChatInformation.
@@ -235,6 +228,12 @@ function hasReasoningSignal(modelInfo?: LiteLLMModelInfo): boolean {
     );
 }
 
+function hasExplicitlyDisabledReasoningEffort(modelInfo: LiteLLMModelInfo): boolean {
+    return Object.keys(LITELLM_REASONING_EFFORT_MAPPING).some(
+        (key) => modelInfo[key as keyof LiteLLMModelInfo] === false
+    );
+}
+
 /**
  * Check if a model explicitly supports the reasoning_effort parameter in its
  * OpenAI-compatible params list.
@@ -271,17 +270,16 @@ export function getSupportedReasoningEfforts(
         return [];
     }
 
-    // Explicit false means no reasoning support unless overrides force it
-    if (modelInfo?.supports_reasoning === false) {
+    // Explicit false means no reasoning support unless overrides force it.
+    if (modelInfo.supports_reasoning === false) {
         if (modelId) {
             const overrideEfforts = getEffectiveEfforts(modelId, modelInfo, config);
             if (overrideEfforts.length > 0) {
                 return overrideEfforts;
             }
         }
-        // Still check for explicit effort fields as some models may have them
         const explicitEfforts = extractExplicitReasoningEfforts(modelInfo);
-        if (explicitEfforts !== undefined) {
+        if (explicitEfforts.length > 0) {
             return explicitEfforts;
         }
         return [];
@@ -295,7 +293,11 @@ export function getSupportedReasoningEfforts(
     // treat it as unknown and do not block effort exposure.
     const paramStatus = reasoningEffortParamStatus(modelInfo);
     const explicitEfforts = extractExplicitReasoningEfforts(modelInfo);
-    if (paramStatus === false && explicitEfforts === undefined) {
+    if (explicitEfforts.length === 0 && hasExplicitlyDisabledReasoningEffort(modelInfo)) {
+        return [];
+    }
+
+    if (paramStatus === false && explicitEfforts.length === 0) {
         // reasoning_effort explicitly excluded and no fine-grained effort fields — hide picker
         return [];
     }
@@ -307,7 +309,7 @@ export function getSupportedReasoningEfforts(
         overrideEfforts = getEffectiveEfforts(modelId, modelInfo, config);
     }
 
-    if (explicitEfforts !== undefined) {
+    if (explicitEfforts.length > 0) {
         // If overrides provide a broader or different ladder, prefer them when non-empty
         if (overrideEfforts.length > 0) {
             return overrideEfforts;
@@ -331,37 +333,21 @@ export function getSupportedReasoningEfforts(
  * Extract reasoning efforts from explicit effort level fields in LiteLLM model info.
  * Example: supports_high_reasoning_effort: true → includes "high"
  */
-function extractExplicitReasoningEfforts(modelInfo?: LiteLLMModelInfo): SupportedReasoningEffort[] | undefined {
+function extractExplicitReasoningEfforts(modelInfo?: LiteLLMModelInfo): SupportedReasoningEffort[] {
     if (!modelInfo) {
-        return undefined;
+        return [];
     }
 
     const efforts = new Set<SupportedReasoningEffort>();
-    let hasExplicitField = false;
     for (const [key, effortValue] of Object.entries(LITELLM_REASONING_EFFORT_MAPPING)) {
         const value = modelInfo[key as keyof LiteLLMModelInfo];
-        if (value !== undefined && value !== null) {
-            hasExplicitField = true;
-        }
         if (value === true) {
             efforts.add(effortValue);
         }
     }
 
-    if (!hasExplicitField) {
-        return undefined;
-    }
-
-    const effortOrder: readonly SupportedReasoningEffort[] = [
-        "none",
-        "minimal",
-        "low",
-        "medium",
-        "high",
-        "xhigh",
-        "max",
-    ];
-    return effortOrder.filter((e) => efforts.has(e));
+    const effortOrder: SupportedReasoningEffort[] = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+    return effortOrder.filter((effort) => efforts.has(effort));
 }
 
 export function getDefaultReasoningEffort(
