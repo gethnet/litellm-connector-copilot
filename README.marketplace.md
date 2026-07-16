@@ -10,9 +10,9 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.1.1
+## 🆕 What's New in 2.2.1
 
-> Version 2.1.1 fixes reasoning capability detection so the model picker exposes only supported reasoning effort options.
+> Version 2.2.1 fixes reasoning capability detection so the model picker exposes only supported reasoning effort options.
 
 - 🧠 **Reasoning capability gates** — Hides reasoning controls when LiteLLM explicitly disables reasoning or all effort levels.
 - 🧩 **Explicit effort support** — Uses model-reported levels such as `minimal`, `xhigh`, and `max` without inferring unspecified effort fields.
