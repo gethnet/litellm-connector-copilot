@@ -125,7 +125,7 @@ suite("modelOverrides", () => {
         assert.deepStrictEqual(unsupported, []);
     });
 
-    test("preserves partial explicit LiteLLM efforts without inferring siblings", () => {
+    test("preserves partial explicit LiteLLM efforts with baseline defaults", () => {
         getConfigurationStub.returns(buildWorkspaceConfiguration([]));
         const modelInfo: LiteLLMModelInfo = {
             supports_reasoning: true,
@@ -138,7 +138,23 @@ suite("modelOverrides", () => {
             supports_max_reasoning_effort: null,
         };
 
-        assert.deepStrictEqual(getEffectiveEfforts("luna-model", modelInfo), ["none", "xhigh"]);
+        assert.deepStrictEqual(getEffectiveEfforts("luna-model", modelInfo), [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+        ]);
+    });
+
+    test("removes only the baseline effort explicitly marked false", () => {
+        getConfigurationStub.returns(buildWorkspaceConfiguration([]));
+        const modelInfo: LiteLLMModelInfo = {
+            supports_reasoning: true,
+            supports_low_reasoning_effort: false,
+        };
+
+        assert.deepStrictEqual(getEffectiveEfforts("test-model", modelInfo), ["none", "medium", "high"]);
     });
 
     test("accepts all supported reasoning effort values in user overrides", () => {
@@ -223,7 +239,7 @@ suite("modelOverrides", () => {
         const result = getEffectiveEfforts("test-model", modelInfo);
         // If LiteLLM has valid data, returns enumeration. When supports_reasoning is true
         // but no effort flags are set, falls back to DEFAULT_REASONING_EFFORTS.
-        assert.deepStrictEqual(result, ["high"]);
+        assert.deepStrictEqual(result, ["none", "low", "medium", "high"]);
     });
 
     test("findOverride returns undefined when enableModelOverrides is false", () => {

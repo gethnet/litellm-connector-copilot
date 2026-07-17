@@ -52,7 +52,7 @@ suite("modelCapabilities - Reasoning Overhaul", () => {
             assert.deepStrictEqual(result, ["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
         });
 
-        test("preserves only explicitly supported effort fields", () => {
+        test("preserves explicit extensions with baseline defaults", () => {
             const modelInfo: LiteLLMModelInfo = {
                 supports_reasoning: true,
                 supports_none_reasoning_effort: true,
@@ -67,7 +67,17 @@ suite("modelCapabilities - Reasoning Overhaul", () => {
 
             const result = getSupportedReasoningEfforts(modelInfo, "luna-model");
 
-            assert.deepStrictEqual(result, ["none", "xhigh"]);
+            assert.deepStrictEqual(result, ["none", "low", "medium", "high", "xhigh"]);
+        });
+
+        test("removes only the baseline effort explicitly marked false", () => {
+            const modelInfo: LiteLLMModelInfo = {
+                supports_reasoning: true,
+                supports_low_reasoning_effort: false,
+                supported_openai_params: ["reasoning_effort"],
+            };
+
+            assert.deepStrictEqual(getSupportedReasoningEfforts(modelInfo, "test-model"), ["none", "medium", "high"]);
         });
 
         test("does not infer effort support from null fields", () => {

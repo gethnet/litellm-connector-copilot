@@ -228,12 +228,6 @@ function hasReasoningSignal(modelInfo?: LiteLLMModelInfo): boolean {
     );
 }
 
-function hasExplicitlyDisabledReasoningEffort(modelInfo: LiteLLMModelInfo): boolean {
-    return Object.keys(LITELLM_REASONING_EFFORT_MAPPING).some(
-        (key) => modelInfo[key as keyof LiteLLMModelInfo] === false
-    );
-}
-
 /**
  * Check if a model explicitly supports the reasoning_effort parameter in its
  * OpenAI-compatible params list.
@@ -293,32 +287,17 @@ export function getSupportedReasoningEfforts(
     // treat it as unknown and do not block effort exposure.
     const paramStatus = reasoningEffortParamStatus(modelInfo);
     const explicitEfforts = extractExplicitReasoningEfforts(modelInfo);
-    if (explicitEfforts.length === 0 && hasExplicitlyDisabledReasoningEffort(modelInfo)) {
-        return [];
-    }
 
     if (paramStatus === false && explicitEfforts.length === 0) {
         // reasoning_effort explicitly excluded and no fine-grained effort fields — hide picker
         return [];
     }
 
-    // First priority: explicit effort level fields from LiteLLM
-    // Second priority: config overrides (may broaden or narrow explicit sets)
-    let overrideEfforts: readonly SupportedReasoningEffort[] = [];
     if (modelId) {
-        overrideEfforts = getEffectiveEfforts(modelId, modelInfo, config);
-    }
-
-    if (explicitEfforts.length > 0) {
-        // If overrides provide a broader or different ladder, prefer them when non-empty
-        if (overrideEfforts.length > 0) {
-            return overrideEfforts;
-        }
-        return explicitEfforts;
-    }
-
-    if (overrideEfforts.length > 0) {
-        return overrideEfforts;
+        // The shared helper applies per-effort semantics after the field-level
+        // model-card override: baseline null/absent values remain enabled,
+        // baseline false values are subtractive, and extended true values add support.
+        return getEffectiveEfforts(modelId, modelInfo, config);
     }
 
     // Third priority: Generic reasoning support flag

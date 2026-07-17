@@ -44,6 +44,36 @@ const REASONING_MODEL_INFO_FIELDS: readonly ReasoningModelInfoField[] = [
     "supports_max_reasoning_effort",
 ];
 
+const REASONING_EFFORT_ORDER: readonly SupportedReasoningEffort[] = [
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+];
+
+const REASONING_EFFORT_TO_MODEL_INFO_FIELD: Readonly<Record<SupportedReasoningEffort, ReasoningModelInfoField>> = {
+    none: "supports_none_reasoning_effort",
+    minimal: "supports_minimal_reasoning_effort",
+    low: "supports_low_reasoning_effort",
+    medium: "supports_medium_reasoning_effort",
+    high: "supports_high_reasoning_effort",
+    xhigh: "supports_xhigh_reasoning_effort",
+    max: "supports_max_reasoning_effort",
+};
+
+const EXTENDED_REASONING_EFFORTS: readonly SupportedReasoningEffort[] = ["minimal", "xhigh", "max"];
+
+function mergeReasoningEfforts(
+    baseline: readonly SupportedReasoningEffort[],
+    explicit: readonly SupportedReasoningEffort[]
+): SupportedReasoningEffort[] {
+    const supported = new Set<SupportedReasoningEffort>([...baseline, ...explicit]);
+    return REASONING_EFFORT_ORDER.filter((effort) => supported.has(effort));
+}
+
 let bundledOverridesCache: ModelOverride[] | undefined;
 
 function isSupportedReasoningEffort(value: unknown): value is SupportedReasoningEffort {
@@ -230,6 +260,11 @@ export function getEffectiveEfforts(
     const patchedModelInfo = applyModelInfoOverrides(modelId, modelInfo, config);
     const override = findOverride(modelId, config);
     if (forceMandatory && override?.forceMandatory) {
+        const mandatoryEfforts = getExplicitReasoningEfforts(patchedModelInfo);
+        if (mandatoryEfforts && mandatoryEfforts.length > 0) {
+            return mandatoryEfforts;
+        }
+
         return getEffectiveEffortsFromModelInfo({
             ...patchedModelInfo,
             supports_reasoning: true,
@@ -243,12 +278,24 @@ function getEffectiveEffortsFromModelInfo(modelInfo?: LiteLLMModelInfo): readonl
         return [];
     }
 
-    const explicitEfforts = getExplicitReasoningEfforts(modelInfo);
-    if (explicitEfforts !== undefined) {
-        return explicitEfforts;
+    if (modelInfo.supports_reasoning !== true) {
+        const explicitEfforts = getExplicitReasoningEfforts(modelInfo);
+        return explicitEfforts ?? [];
     }
 
-    return modelInfo.supports_reasoning === true ? [...CANONICAL_REASONING_EFFORTS] : [];
+    const supportedEfforts = CANONICAL_REASONING_EFFORTS.filter((effort) => {
+        const field = REASONING_EFFORT_TO_MODEL_INFO_FIELD[effort];
+        return modelInfo[field] !== false;
+    });
+
+    for (const effort of EXTENDED_REASONING_EFFORTS) {
+        const field = REASONING_EFFORT_TO_MODEL_INFO_FIELD[effort];
+        if (modelInfo[field] === true) {
+            supportedEfforts.push(effort);
+        }
+    }
+
+    return mergeReasoningEfforts([], supportedEfforts);
 }
 
 export function getDefaultEffort(
