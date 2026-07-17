@@ -10,13 +10,13 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.2.1
+## 🆕 What's New in 2.2.2
 
-> Version 2.2.1 fixes reasoning capability detection so the model picker exposes only supported reasoning effort options.
+> Version 2.2.2 corrects per-effort reasoning metadata handling so the model picker preserves defaults and applies explicit LiteLLM effort states correctly.
 
-- 🧠 **Reasoning capability gates** — Hides reasoning controls when LiteLLM explicitly disables reasoning or all effort levels.
-- 🧩 **Explicit effort support** — Uses model-reported levels such as `minimal`, `xhigh`, and `max` without inferring unspecified effort fields.
-- 🎛️ **Opt-in model-card overrides** — Correct incomplete LiteLLM reasoning metadata with explicit, field-level overrides.
+- 🧠 **Per-effort reasoning states** — Baseline `null` or absent fields retain the default effort, `false` removes only that effort, and `true` retains it.
+- 🧩 **Extended effort support** — Explicitly supported `minimal`, `xhigh`, and `max` values are added without replacing the baseline effort list.
+- 🎛️ **Field-specific model-card overrides** — Overrides continue to change only the exact LiteLLM fields they define.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 

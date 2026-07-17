@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.2] - 2026-07-17
+
+### 🧠 Reasoning Fixes
+
+* **✅ Correct per-effort reasoning metadata**: Reasoning picker values now follow LiteLLM's individual effort fields correctly. For the baseline efforts (`none`, `low`, `medium`, `high`), `null` or absent metadata retains the internal default, `false` removes only that effort, and `true` retains it. Extended efforts (`minimal`, `xhigh`, and `max`) are added only when LiteLLM explicitly reports them as supported.
+* **🧩 Preserve partial model metadata**: A model reporting partial reasoning metadata no longer loses the default baseline efforts. For example, `supports_xhigh_reasoning_effort: true` adds `xhigh` while retaining the applicable baseline options.
+* **🎛️ Keep overrides field-specific**: Enabled model-card overrides continue to modify only the explicitly named LiteLLM fields. Unspecified or related reasoning fields are not inferred or changed.
+
+### 🧪 Tests
+
+* Added regression coverage for baseline effort subtraction, null/absent defaults, additive extended efforts, partial LiteLLM metadata, and existing force-mandatory override behavior.
+
 ## [2.2.1] - 2026-07-16
 
 ### 🧠 Reasoning Fixes
