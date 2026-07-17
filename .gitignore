@@ -38,6 +38,11 @@ memory-profile-results.json
 !CONTRIBUTORS.md
 !README.marketplace.md
 !README.md
+!.github/agents/**/*.md
+!.github/instructions/**/*.md
+!.github/prompts/**/*.md
+!.github/schemas/**/*.md
+!.github/skills/**/*.md
 
 # Runtime data
 pids

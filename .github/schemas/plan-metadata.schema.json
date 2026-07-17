@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gethnet/litellm-connector-copilot/blob/main/.github/schemas/plan-metadata.schema.json",
+  "title": "Implementation Plan Metadata",
+  "description": "Metadata embedded in the YAML frontmatter of executable and archived implementation plans.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "title",
+    "plan_kind",
+    "status",
+    "created_at",
+    "description",
+    "areas",
+    "tags"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Version of this metadata contract. Increment only for incompatible schema changes.",
+      "const": 1
+    },
+    "id": {
+      "description": "Stable identifier that remains unchanged if the plan file is moved or renamed.",
+      "$ref": "#/$defs/slug"
+    },
+    "title": {
+      "description": "Human-readable plan title.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "plan_kind": {
+      "description": "Primary nature of the planned work.",
+      "enum": [
+        "feature",
+        "bug_fix",
+        "refactor",
+        "migration",
+        "maintenance",
+        "investigation",
+        "security",
+        "performance",
+        "documentation",
+        "testing"
+      ]
+    },
+    "status": {
+      "description": "Current lifecycle state. Directory placement should agree with this value.",
+      "enum": [
+        "proposed",
+        "pending",
+        "in_progress",
+        "blocked",
+        "completed",
+        "abandoned",
+        "superseded"
+      ]
+    },
+    "outcome": {
+      "description": "Final disposition. Omit while work is active.",
+      "enum": [
+        "implemented",
+        "partially_implemented",
+        "not_implemented",
+        "replaced"
+      ]
+    },
+    "description": {
+      "description": "Searchable one-sentence description of the intended user or system outcome. This name also aligns with VS Code prompt-file discovery metadata.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "created_at": {
+      "description": "Date on which the plan was first drafted.",
+      "$ref": "#/$defs/date"
+    },
+    "updated_at": {
+      "description": "Date of the most recent substantive plan revision.",
+      "$ref": "#/$defs/date"
+    },
+    "started_at": {
+      "description": "Date implementation began.",
+      "$ref": "#/$defs/date"
+    },
+    "completed_at": {
+      "description": "Date implementation or final disposition was completed.",
+      "$ref": "#/$defs/date"
+    },
+    "archived_at": {
+      "description": "Date the plan was moved into long-term archival storage.",
+      "$ref": "#/$defs/date"
+    },
+    "author": {
+      "description": "Person or agent that authored the plan.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "requester": {
+      "description": "Person or system that requested the work.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "areas": {
+      "description": "Stable architectural areas used for faceted searches, such as providers or telemetry.",
+      "$ref": "#/$defs/uniqueSlugs"
+    },
+    "tags": {
+      "description": "Flexible technical and product keywords used for full-text and topical searches.",
+      "$ref": "#/$defs/uniqueSlugs"
+    },
+    "affected_files": {
+      "description": "Important files or glob patterns expected to be changed by the plan.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "github": {
+      "description": "GitHub artifacts associated with the request and implementation.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "issues": {
+          "$ref": "#/$defs/positiveIntegers"
+        },
+        "pull_requests": {
+          "$ref": "#/$defs/positiveIntegers"
+        },
+        "discussions": {
+          "$ref": "#/$defs/positiveIntegers"
+        }
+      }
+    },
+    "implementation": {
+      "description": "Traceability data populated during or after implementation.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "commits": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "description": "Abbreviated or full Git commit hash.",
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{7,40}$"
+          }
+        },
+        "release_version": {
+          "description": "First extension release containing the implementation.",
+          "type": "string",
+          "pattern": "^v?\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$"
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "relationships": {
+      "description": "Links between this plan and other stable plan identifiers.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "depends_on": {
+          "$ref": "#/$defs/uniqueSlugs"
+        },
+        "supersedes": {
+          "$ref": "#/$defs/uniqueSlugs"
+        },
+        "superseded_by": {
+          "$ref": "#/$defs/slug"
+        },
+        "related": {
+          "$ref": "#/$defs/uniqueSlugs"
+        }
+      }
+    },
+    "validation": {
+      "description": "Final repository checks recorded when the plan reaches a terminal state.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "compile": {
+          "$ref": "#/$defs/checkResult"
+        },
+        "lint": {
+          "$ref": "#/$defs/checkResult"
+        },
+        "format": {
+          "$ref": "#/$defs/checkResult"
+        },
+        "test_coverage": {
+          "$ref": "#/$defs/checkResult"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "completed"
+          }
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "required": ["completed_at", "outcome"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": ["abandoned", "superseded"]
+          }
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "required": ["outcome"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "superseded"
+          }
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "required": ["relationships"],
+        "properties": {
+          "relationships": {
+            "required": ["superseded_by"]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "uniqueSlugs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/slug"
+      }
+    },
+    "positiveIntegers": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "checkResult": {
+      "enum": ["passed", "failed", "not_run", "not_applicable"]
+    }
+  },
+  "examples": [
+    {
+      "schema_version": 1,
+      "id": "restore-reasoning-gates",
+      "title": "Restore reasoning gates and expand explicit fields",
+      "plan_kind": "bug_fix",
+      "status": "completed",
+      "outcome": "implemented",
+      "description": "Restore conservative reasoning-effort gates while supporting additional explicit LiteLLM fields.",
+      "created_at": "2026-07-10",
+      "completed_at": "2026-07-16",
+      "areas": ["model-capabilities", "providers"],
+      "tags": ["reasoning-effort", "litellm", "regression"],
+      "github": {
+        "issues": [123],
+        "pull_requests": [124]
+      },
+      "implementation": {
+        "commits": ["abc123def456"],
+        "release_version": "2.2.0"
+      }
+    }
+  ]
+}

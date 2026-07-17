@@ -8,6 +8,33 @@ applyTo: "**/*.prompt.md,**/*.instructions.md,**/*.agent.md,**/*.plan.md"
 ## Core Principle
 **Plans are contracts for autonomous code generation.** The implementation agent must be able to execute the plan without asking questions, inferring context, or leaving work for the user.
 
+## Required Metadata Header
+
+Every plan MUST begin with YAML frontmatter conforming to `.github/schemas/plan-metadata.schema.json`. Use `.github/schemas/plan-metadata.md` for field guidance and lifecycle update examples.
+
+At minimum, create the plan with this header and replace every example value with plan-specific data:
+
+```yaml
+---
+schema_version: 1
+id: stable-kebab-case-plan-id
+title: Human-readable plan title
+plan_kind: feature
+status: pending
+description: One sentence describing the intended user or system outcome.
+created_at: "YYYY-MM-DD"
+areas:
+  - architectural-area
+tags:
+  - searchable-topic
+---
+```
+
+- Keep `id` stable when the plan is renamed or moved between lifecycle directories.
+- Omit optional fields that have no value; never write empty-string placeholders.
+- Update lifecycle, GitHub, implementation, validation, and relationship metadata as facts become available.
+- Keep using the `*.prompt.md` suffix so the plan remains an executable instruction contract for agents.
+
 ## Non-Negotiable Plan Requirements
 
 ### 1. Every Step Produces Code
@@ -90,6 +117,20 @@ describe('FeatureName', () => {
 ## Plan Structure Template
 
 ```markdown
+---
+schema_version: 1
+id: feature-or-fix-name
+title: Feature or fix name
+plan_kind: feature
+status: pending
+description: One sentence describing the intended user or system outcome.
+created_at: "YYYY-MM-DD"
+areas:
+  - architectural-area
+tags:
+  - searchable-topic
+---
+
 # Implementation Plan: [Feature/Fix Name]
 
 ## Context
