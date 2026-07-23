@@ -669,6 +669,14 @@ suite("LiteLLMProviderBase", () => {
             );
 
             assert.ok(models[0].configurationSchema, "schema should be attached for reasoning models");
+            const schema = models[0].configurationSchema as {
+                properties?: Record<string, { group?: string }>;
+            };
+            assert.strictEqual(
+                schema.properties?.reasoningEffort?.group,
+                "navigation",
+                "reasoning effort must remain a primary model-picker action"
+            );
         });
 
         test("returns [] when no configuration is provided (vendor-level call)", async () => {

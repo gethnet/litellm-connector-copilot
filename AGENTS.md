@@ -57,6 +57,10 @@ This document defines **repo-wide, tool-agnostic** expectations for automated co
 
 ## 3) Repo conventions
 
+### Brave Search MCP recovery
+- If a Brave Search MCP response returns an error mentioning `invoke`, wait briefly (1–2 seconds) and retry the same request once so the MCP server has time to start.
+- If the retry fails, progressively remove optional data fields from the query until the request succeeds, while preserving the essential search terms and required parameters.
+
 ### Communication artifacts (commit messages, PRs, issues, changelogs)
 - **Be clear and concise**: state *what* changed and *why* in as few words as possible.
 - **Use emojis for visual scanning**: include 1–2 relevant emojis at the start of titles (commit/PR/issue) to improve readability.
