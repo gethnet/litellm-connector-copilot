@@ -1,7 +1,7 @@
 {
 	"name": "litellm-connector-copilot",
 	"displayName": "LiteLLM Connector for Copilot",
-	"version": "2.2.3",
+	"version": "2.2.3-dev3",
 	"description": "An extension that integrates LiteLLM proxy into Copilot",
 	"categories": [
 		"AI",
@@ -92,6 +92,12 @@
 			{
 				"command": "litellm-connector.setLogLevel",
 				"title": "LiteLLM: Set Log Level"
+			},
+			{
+				"command": "litellm-connector.dev.resetReviewPrompt",
+				"title": "LiteLLM: Dev Reset Review Prompt",
+				"enablement": "litellm-connector.isDevBuild",
+				"category": "LiteLLM (Dev)"
 			}
 		],
 		"configuration": {
@@ -276,6 +282,12 @@
 					"command": "litellm-connector.generateCommitMessage",
 					"group": "navigation",
 					"when": "config.litellm-connector.commitModelIdOverride != ''"
+				}
+			],
+			"commandPalette": [
+				{
+					"command": "litellm-connector.dev.resetReviewPrompt",
+					"when": "litellm-connector.isDevBuild"
 				}
 			]
 		}

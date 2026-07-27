@@ -19,6 +19,7 @@ import { ConfigManager } from "../config/configManager";
 import { Logger } from "../utils/logger";
 import { LiteLLMTelemetry } from "../utils/telemetry";
 import type { TelemetryService } from "../telemetry/telemetryService";
+import type { ReviewPromptService } from "../engagement/reviewPromptService";
 import { getSupportedReasoningEfforts } from "../utils/modelCapabilities";
 import type { SupportedReasoningEffort } from "../types";
 import {
@@ -106,6 +107,7 @@ export abstract class LiteLLMProviderBase {
     private _usageOptOutModels = new Set<string>();
 
     protected _telemetryService?: TelemetryService;
+    protected _reviewPromptService?: ReviewPromptService;
 
     private _onModernConfigurationDetected?: () => void;
 
@@ -158,6 +160,14 @@ export abstract class LiteLLMProviderBase {
 
     public setTelemetryService(service: TelemetryService): void {
         this._telemetryService = service;
+    }
+
+    /**
+     * Supplies the activation-owned review prompt service. The base class only stores this
+     * optional dependency; chat protocol code decides which request outcomes count as turns.
+     */
+    public setReviewPromptService(service: ReviewPromptService): void {
+        this._reviewPromptService = service;
     }
 
     /**

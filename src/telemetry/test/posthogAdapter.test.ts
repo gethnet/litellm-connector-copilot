@@ -7,6 +7,7 @@ suite("PostHogAdapter (Node)", () => {
     let sandbox: sinon.SinonSandbox;
     let envCiaValue: string | undefined;
     let envMockValue: string | undefined;
+    let posthogCaptureStub: sinon.SinonStub;
     let posthogCaptureExceptionStub: sinon.SinonStub;
     let posthogIdentifyStub: sinon.SinonStub;
     let posthogIsFeatureEnabledStub: sinon.SinonStub;
@@ -20,6 +21,7 @@ suite("PostHogAdapter (Node)", () => {
         envMockValue = process.env.POSTHOG_MOCK;
         delete process.env.CI;
         delete process.env.POSTHOG_MOCK;
+        posthogCaptureStub = sandbox.stub(PostHog.prototype, "capture");
         posthogCaptureExceptionStub = sandbox.stub(PostHog.prototype, "captureException");
         posthogIdentifyStub = sandbox.stub(PostHog.prototype, "identify");
         posthogIsFeatureEnabledStub = sandbox.stub(PostHog.prototype, "isFeatureEnabled");
@@ -170,5 +172,26 @@ suite("PostHogAdapter (Node)", () => {
 
         await adapter.shutdown();
         assert.strictEqual(posthogShutdownStub.calledOnce, true);
+    });
+
+    test("does not forward review prompt telemetry while telemetry is disabled", () => {
+        const adapter = new PostHogAdapter();
+        adapter.initialize({
+            apiKey: "test-key",
+            host: "test-host",
+            enabled: false,
+        });
+
+        adapter.capture({
+            event: "review_prompt_choice",
+            properties: {
+                distinctId: "test-machine-id",
+                choice: "later",
+                install_date: 1764523200000,
+                successful_turn_count: 10,
+            },
+        });
+
+        assert.strictEqual(posthogCaptureStub.called, false);
     });
 });

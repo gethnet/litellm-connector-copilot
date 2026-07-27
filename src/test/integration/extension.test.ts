@@ -80,6 +80,8 @@ function stubTelemetryService(sandbox: sinon.SinonSandbox): {
     captureFeatureAdoption: sinon.SinonStub;
     captureFeatureUsageSnapshot: sinon.SinonStub;
     captureModernConfigStatus: sinon.SinonStub;
+    captureReviewPromptEligible: sinon.SinonStub;
+    captureReviewPromptChoice: sinon.SinonStub;
 } {
     return {
         captureException: sandbox.stub(TelemetryService.prototype, "captureException"),
@@ -87,6 +89,8 @@ function stubTelemetryService(sandbox: sinon.SinonSandbox): {
         captureFeatureAdoption: sandbox.stub(TelemetryService.prototype, "captureFeatureAdoption"),
         captureFeatureUsageSnapshot: sandbox.stub(TelemetryService.prototype, "captureFeatureUsageSnapshot"),
         captureModernConfigStatus: sandbox.stub(TelemetryService.prototype, "captureModernConfigStatus"),
+        captureReviewPromptEligible: sandbox.stub(TelemetryService.prototype, "captureReviewPromptEligible"),
+        captureReviewPromptChoice: sandbox.stub(TelemetryService.prototype, "captureReviewPromptChoice"),
     };
 }
 
@@ -735,5 +739,28 @@ suite("Extension Activation Unit Tests", () => {
             true,
             "migration rejections should be logged"
         );
+    });
+
+    test("activate initializes and injects the review prompt service without requiring global state", async () => {
+        const context = {
+            subscriptions: [],
+            secrets: createMockSecrets(),
+        } as unknown as vscode.ExtensionContext;
+        sandbox.stub(vscode.window, "createOutputChannel").returns(createMockOutputChannel());
+        sandbox.stub(vscode.extensions, "getExtension").returns({ packageJSON: { version: "1.2.3" } } as never);
+        sandbox.stub(vscode.window, "showInformationMessage").resolves(undefined);
+        sandbox.stub(vscode.lm, "registerLanguageModelChatProvider").returns({ dispose() {} } as vscode.Disposable);
+        sandbox.stub(vscode.commands, "registerCommand").returns({ dispose() {} } as vscode.Disposable);
+        const setReviewPromptService = sandbox.stub(providers.LiteLLMChatProvider.prototype, "setReviewPromptService");
+        sandbox.stub(TelemetryService.prototype, "captureExtensionActivated");
+        sandbox.stub(TelemetryService.prototype, "captureFeatureAdoption");
+        sandbox.stub(TelemetryService.prototype, "captureFeatureUsageSnapshot");
+        sandbox.stub(TelemetryService.prototype, "captureModernConfigStatus");
+
+        extension.activate(context);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        assert.strictEqual(setReviewPromptService.calledOnce, true);
+        assert.ok(context.subscriptions.length > 0);
     });
 });

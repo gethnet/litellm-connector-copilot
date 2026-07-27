@@ -900,6 +900,64 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         sinon.assert.calledWithMatch(telemetrySpy, sinon.match({ tokensIn: 12, tokensOut: 7 }));
     });
 
+    test("reports a chat start and one successful turn to the review prompt service", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const reviewPromptService: {
+            recordChatRequestStarted: sinon.SinonStub;
+            recordSuccessfulChatTurn: sinon.SinonStub;
+        } = {
+            recordChatRequestStarted: sandbox.stub(),
+            recordSuccessfulChatTurn: sandbox.stub().resolves(),
+        };
+        provider.setReviewPromptService(
+            reviewPromptService as unknown as import("../../engagement/reviewPromptService").ReviewPromptService
+        );
+        seedDiscoveredBackend(sandbox, provider, "model-review-prompt");
+
+        const encoder = new TextEncoder();
+        sandbox.stub(LiteLLMClient.prototype, "chat").resolves(
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'));
+                    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                    controller.close();
+                },
+            })
+        );
+
+        await provider.provideLanguageModelChatResponse(
+            {
+                id: "model-review-prompt",
+                name: "model-review-prompt",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1000,
+                maxOutputTokens: 1000,
+                capabilities: { toolCalling: true, imageInput: false },
+            },
+            [
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [new vscode.LanguageModelTextPart("hello")],
+                },
+            ],
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-api-key" },
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+            { report: () => undefined },
+            new vscode.CancellationTokenSource().token
+        );
+
+        assert.strictEqual(reviewPromptService.recordChatRequestStarted.calledOnce, true);
+        assert.strictEqual(reviewPromptService.recordSuccessfulChatTurn.calledOnce, true);
+    });
+
     test("merges partial usage frames to avoid dropping previously reported token details", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         sandbox

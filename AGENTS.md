@@ -342,6 +342,17 @@ The ingress pipeline is agnostic to endpoint choice:
 
 > ⚠️ **DO NOT use `npm run test`**, `npm run check`, or any other npm scripts — they may cause issues. Only run the commands listed above.
 
+### Dev-only commands (`-devN` builds)
+The extension surfaces a small set of developer-only commands when the installed package version ends with a `-devN` suffix (e.g. `2.2.3-dev1`). This is the only reliable dev-build signal because users install pre-compiled incremental updates rather than attaching a debugger.
+
+- Visibility is controlled by a `litellm-connector.isDevBuild` context key set during activation via `setDevBuildContextKey()` in `src/commands/devTools.ts`. The `commandPalette` menu `when` clause in `package.json` hides the commands on production builds.
+- The command handler always re-checks the live extension version at invocation time as a defense-in-depth guard against stale context keys after a hot-swap update.
+- `registerDevResetReviewPromptCommand()` always registers the handler; palette visibility is the `when` clause's responsibility, not conditional registration.
+
+| Command | Title | Purpose |
+| --- | --- | --- |
+| `litellm-connector.dev.resetReviewPrompt` | LiteLLM (Dev): Dev Reset Review Prompt | Clears `installDate`, `successfulTurns`, and `doNotAskAgain` `globalState` keys for the review prompt so the eligibility cycle can be re-tested without waiting for 10 successful turns + 5 minutes idle. |
+
 ### When to run what
 - Before implementing non-trivial logic: add or update the relevant tests first.
 - Before/after non-trivial edits: run `npm run compile` and `npm run test:coverage`.
