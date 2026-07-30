@@ -19,10 +19,22 @@ type ReviewPromptChoice = "review_or_rated" | "never_again" | "later";
 /**
  * Owns local-only review prompt eligibility. The service intentionally records only
  * coarse extension state in globalState and exposes no request content to telemetry or logs.
+ *
+ * Session-scoped suppression: "Maybe Later" (or a dismissed notification) suppresses
+ * further prompts for the remainder of the current VS Code session only. The session
+ * marker is read from `vscode.env.sessionId` and kept entirely in memory — it is never
+ * persisted to durable `globalState`. When the session changes (VS Code restart), the
+ * user is treated as if they had never deferred, so the eligibility cycle restarts.
  */
 export class ReviewPromptService implements vscode.Disposable {
     private idleTimer: NodeJS.Timeout | undefined;
     private initialized = false;
+    /**
+     * In-memory-only record of the session that last deferred the prompt. Stored as a
+     * field (not in durable `globalState`) so it evaporates on extension deactivation.
+     * When `vscode.env.sessionId` differs from this value, the deferral is cleared.
+     */
+    private deferredSessionId: string | undefined;
 
     public constructor(
         private readonly globalState: vscode.Memento | undefined,
@@ -48,10 +60,11 @@ export class ReviewPromptService implements vscode.Disposable {
     /** Clears the idle countdown immediately when a user begins a new chat request. */
     public recordChatRequestStarted(): void {
         this.clearIdleTimer();
-        // If the user is already eligible, restart the 5-minute idle timer from now
+        // If the user is already eligible and has not deferred this session, restart the 5-minute idle timer.
         if (
             this.initialized &&
             !this.isPermanentlyDismissed() &&
+            !this.isSessionDeferred() &&
             this.getSuccessfulTurnCount() >= MINIMUM_SUCCESSFUL_TURNS
         ) {
             this.scheduleIdlePrompt();
@@ -69,7 +82,7 @@ export class ReviewPromptService implements vscode.Disposable {
 
         const successfulTurnCount = this.getSuccessfulTurnCount() + 1;
         await this.globalState.update(SUCCESSFUL_TURNS_KEY, successfulTurnCount);
-        if (successfulTurnCount >= MINIMUM_SUCCESSFUL_TURNS) {
+        if (successfulTurnCount >= MINIMUM_SUCCESSFUL_TURNS && !this.isSessionDeferred()) {
             this.scheduleIdlePrompt();
         }
     }
@@ -108,6 +121,20 @@ export class ReviewPromptService implements vscode.Disposable {
 
     private isPermanentlyDismissed(): boolean {
         return this.globalState?.get<boolean>(DO_NOT_ASK_AGAIN_KEY, false) === true;
+    }
+
+    /**
+     * Returns true when the current VS Code session has already deferred the prompt via
+     * "Maybe Later" or dismissal. The deferral is kept in memory only (never durable), so a
+     * new session — even one that reuses a stale `sessionId` after a restart — clears it
+     * because the field is reset on construction. The check compares the live
+     * `vscode.env.sessionId` against the stored deferral marker.
+     */
+    private isSessionDeferred(): boolean {
+        if (this.deferredSessionId === undefined) {
+            return false;
+        }
+        return vscode.env.sessionId === this.deferredSessionId;
     }
 
     private scheduleIdlePrompt(): void {
@@ -159,8 +186,12 @@ export class ReviewPromptService implements vscode.Disposable {
             return;
         }
 
+        // "Maybe Later" or a dismissed (undefined) notification: suppress for the remainder of
+        // this VS Code session only. The deferral is stored in memory keyed by the current
+        // sessionId; it is NOT persisted to durable globalState, so a session change (restart)
+        // treats the user as if they had never deferred.
+        this.deferredSessionId = vscode.env.sessionId;
         this.recordChoice("later", installDate, successfulTurnCount);
-        this.scheduleIdlePrompt();
     }
 
     private recordChoice(choice: ReviewPromptChoice, installDate: number, successfulTurnCount: number): void {

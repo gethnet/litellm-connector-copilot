@@ -13,6 +13,7 @@ suite("ReviewPromptService", () => {
     let telemetryService: sinon.SinonStubbedInstance<TelemetryService>;
     let showInformationMessage: sinon.SinonStub;
     let openExternal: sinon.SinonStub;
+    let sessionIdStub: sinon.SinonStub;
     let service: ReviewPromptService;
 
     function createService(seed: Record<string, unknown> = {}): ReviewPromptService {
@@ -23,6 +24,7 @@ suite("ReviewPromptService", () => {
         } as unknown as sinon.SinonStubbedInstance<TelemetryService>;
         showInformationMessage = sandbox.stub(vscode.window, "showInformationMessage").resolves(undefined);
         openExternal = sandbox.stub(vscode.env, "openExternal").resolves(true);
+        sessionIdStub = sandbox.stub(vscode.env, "sessionId").get(() => "test-session-id");
         return new ReviewPromptService(globalState, telemetryService as unknown as TelemetryService);
     }
 
@@ -126,10 +128,9 @@ suite("ReviewPromptService", () => {
         });
     });
 
-    test("records later for Maybe Later and a dismissed notification without setting terminal opt-out", async () => {
+    test("suppresses further prompts for the remainder of the active session after Maybe Later", async () => {
         service = createService();
-        showInformationMessage.onFirstCall().resolves("Maybe Later");
-        showInformationMessage.onSecondCall().resolves(undefined);
+        showInformationMessage.resolves("Maybe Later");
         await service.initialize();
         await recordSuccessfulTurns(service, 10);
 
@@ -141,9 +142,40 @@ suite("ReviewPromptService", () => {
             successfulTurnCount: 10,
         });
 
+        // Further idle periods and chat turns in the SAME session must not re-prompt.
+        await recordSuccessfulTurns(service, 5);
+        await clock.tickAsync(5 * 60 * 1000);
+        assert.strictEqual(showInformationMessage.calledOnce, true);
+    });
+
+    test("dismissed notification also suppresses further prompts for the active session", async () => {
+        service = createService();
+        showInformationMessage.resolves(undefined);
+        await service.initialize();
+        await recordSuccessfulTurns(service, 10);
+
+        await clock.tickAsync(5 * 60 * 1000);
+        assert.strictEqual(telemetryService.captureReviewPromptChoice.firstCall.args[0].choice, "later");
+
+        await recordSuccessfulTurns(service, 5);
+        await clock.tickAsync(5 * 60 * 1000);
+        assert.strictEqual(showInformationMessage.calledOnce, true);
+    });
+
+    test("re-prompts after a session change even if the user previously chose Maybe Later", async () => {
+        service = createService();
+        showInformationMessage.resolves("Maybe Later");
+        await service.initialize();
+        await recordSuccessfulTurns(service, 10);
+
+        await clock.tickAsync(5 * 60 * 1000);
+        assert.strictEqual(showInformationMessage.calledOnce, true);
+
+        // Simulate a new VS Code session with a different sessionId.
+        sessionIdStub.get(() => "new-session-id");
+        await recordSuccessfulTurns(service, 5);
         await clock.tickAsync(5 * 60 * 1000);
         assert.strictEqual(showInformationMessage.calledTwice, true);
-        assert.strictEqual(telemetryService.captureReviewPromptChoice.secondCall.args[0].choice, "later");
     });
 
     test("does not initialize or schedule a prompt when global state is unavailable", async () => {
