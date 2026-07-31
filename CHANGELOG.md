@@ -4,10 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.2.3] - 2026-07-31
+
 ### 🚀 Features
 
 * **💬 Idle-time review prompt for engaged users**: After 10 successful chat turns and 5 minutes of idle time, the extension now offers a non-modal notification to leave a Marketplace review. Users can defer, permanently opt out, or accept to open the extension page. All state is stored in `globalState` (no remote flags or user-identifying telemetry). Telemetry events `review_prompt_eligible` and `review_prompt_choice` are emitted through the existing consent-aware adapter. (`src/engagement/reviewPromptService.ts`)
 * **🛠️ Dev-only review prompt reset command**: A new `litellm-connector.dev.resetReviewPrompt` command (visible in the Command Palette as **LiteLLM (Dev): Dev Reset Review Prompt**) clears all durable review-prompt state (`installDate`, `successfulTurns`, `doNotAskAgain`) for local testing. The command is gated on a `litellm-connector.isDevBuild` context key that is `true` only when the installed extension reports a `-devN` version suffix; production builds never surface the command and the handler re-checks the live version at invocation time as a defense-in-depth guard. (`src/commands/devTools.ts`, `package.json`)
+* **🔕 Session-scoped "Maybe Later" suppression**: Clicking "Maybe Later" or dismissing the review notification now suppresses further prompts for the remainder of the active VS Code session only. The deferral is tracked in memory via `vscode.env.sessionId` and is never persisted to durable `globalState`, so a restart treats the user as if they had never deferred and the eligibility cycle restarts. (`src/engagement/reviewPromptService.ts`)
+
+### 🐛 Fixes
+
+* **🛡️ Stop re-prompting after "Maybe Later" when a chat starts while the notification is displayed**: `showPromptIfEligible()` now re-checks session deferral at the display boundary as defense-in-depth. Previously, a 5-minute idle timer armed while the notification was already on screen (e.g. a chat started during the `await showInformationMessage()` window) could fire after the user deferred and re-prompt despite the "Maybe Later" choice. (`src/engagement/reviewPromptService.ts`)
 
 ### 🔧 Tweaks
 
@@ -16,6 +23,7 @@ All notable changes to this project will be documented in this file.
 ### 🧪 Tests
 
 * Added comprehensive TDD suite for review prompt service covering eligibility thresholds, idle timer cancellation, prompt choices (Leave a Review / Don't Ask Again / Maybe Later), persistent state, and disposal. (`src/engagement/test/reviewPromptService.test.ts`)
+* Added regression coverage for session-scoped suppression, dismissal behavior, re-prompting after a session change, and the "Maybe Later" race when a chat starts while the notification is displayed. (`src/engagement/test/reviewPromptService.test.ts`)
 * Added tests for review prompt telemetry event shapes and automatic enrichment in `TelemetryService`. (`src/telemetry/test/telemetryService.test.ts`)
 * Added PostHog adapter test verifying review prompt telemetry is suppressed when telemetry is disabled. (`src/telemetry/test/posthogAdapter.test.ts`)
 * Added chat provider test proving start and success hooks are called exactly once for a successful chat response. (`src/providers/test/chatProvider.test.ts`)
@@ -33,9 +41,9 @@ All notable changes to this project will be documented in this file.
 
 * **📦 New module: `src/engagement/`**: Dedicated directory for product engagement services, keeping review prompt logic outside providers and telemetry layers.
 * **📦 New module: `src/commands/devTools.ts`**: Houses dev-only command registration and the `litellm-connector.isDevBuild` context-key helper, separated from user-facing commands so the dev surface stays isolated.
-* **🧪 CI test isolation**: Memory profiler test is excluded from CI execution to prevent flaky test interactions with concurrent Mocha runs. (`.vscode-test.mjs`, commit `76e7298`)
-* **📦 Dependency update (pending merge)**: `@types/sinon` bumped from 21.0.1 to 22.0.0 (major) on the `dependabot/npm_and_yarn/types/sinon-22.0.0` branch. (`package.json`)
-* **🔧 Version bump**: `package.json` version updated to `2.2.3-dev3`.
+* **📦 Split provider base into focused helper modules**: Extracted call-time config resolution (`src/providers/base/callConfig.ts`), parameter filtering (`src/providers/base/parameterFiltering.ts`), and quota redaction (`src/providers/base/quotaRedaction.ts`) out of the monolithic `LiteLLMProviderBase` to keep the orchestrator thinner and easier to test.
+* **🧪 CI test isolation**: Memory profiler test is excluded from CI execution to prevent flaky test interactions with concurrent Mocha runs. (`.vscode-test.mjs`)
+* **🔧 Version bump**: `package.json` version updated to `2.2.3`.
 
 ## [2.2.2] - 2026-07-17
 
@@ -684,7 +692,7 @@ There have been a tremendous amount of backend work done with this update to mak
 
 ---
 
-[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v1.6.0...HEAD
+[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.2.3...HEAD
 [1.6.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.6.0
 [1.5.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.5.0
 [1.4.6]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.4.6

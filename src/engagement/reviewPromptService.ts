@@ -153,7 +153,11 @@ export class ReviewPromptService implements vscode.Disposable {
     }
 
     private async showPromptIfEligible(): Promise<void> {
-        if (!this.globalState || this.isPermanentlyDismissed()) {
+        // Re-check session deferral at the display boundary as defense-in-depth. A timer armed
+        // before the user deferred (e.g. a chat started while the notification was already on
+        // screen) can fire after `deferredSessionId` is set; the scheduling guards cannot close
+        // that race because `idleTimer` is already `undefined` once the callback is executing.
+        if (!this.globalState || this.isPermanentlyDismissed() || this.isSessionDeferred()) {
             return;
         }
 

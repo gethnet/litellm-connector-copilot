@@ -8,13 +8,12 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.2.2
+## 🆕 What's New in 2.2.3
 
-> Version 2.2.2 corrects per-effort reasoning metadata handling so the model picker preserves defaults and applies explicit LiteLLM effort states correctly.
+> Version 2.2.3 adds an idle-time Marketplace review prompt for engaged users and fixes a re-prompt race after "Maybe Later".
 
-- 🧠 **Per-effort reasoning states** — Baseline `null` or absent fields retain the default effort, `false` removes only that effort, and `true` retains it.
-- 🧩 **Extended effort support** — Explicitly supported `minimal`, `xhigh`, and `max` values are added without replacing the baseline effort list.
-- 🎛️ **Field-specific model-card overrides** — Overrides continue to change only the exact LiteLLM fields they define.
+- 💬 **Idle-time review prompt** — After 10 successful chat turns and 5 minutes of idle time, the extension offers a non-modal notification to leave a Marketplace review. Choose **Leave a Review**, **Maybe Later** (suppresses for the rest of the session), or **Don't Ask Again** (permanently opts out). All state is local; no user-identifying telemetry is sent.
+- 🔕 **Smarter "Maybe Later"** — Deferring the prompt now suppresses it for the remainder of the active VS Code session only (tracked in memory via `sessionId`), and a race that could re-prompt after "Maybe Later" when a chat started while the notification was displayed is now fixed.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 

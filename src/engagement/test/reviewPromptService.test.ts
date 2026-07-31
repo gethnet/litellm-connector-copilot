@@ -178,6 +178,37 @@ suite("ReviewPromptService", () => {
         assert.strictEqual(showInformationMessage.calledTwice, true);
     });
 
+    test("does not re-prompt when a new request is started while the prompt is displayed and the user then clicks Maybe Later", async () => {
+        service = createService();
+
+        // Hold the notification open so we can inject behavior while it is displayed.
+        let resolvePrompt: (value: string | undefined) => void = () => {};
+        const promptDisplayed = new Promise<string | undefined>((resolve) => {
+            resolvePrompt = resolve;
+        });
+        showInformationMessage.callsFake(() => promptDisplayed);
+
+        await service.initialize();
+        await recordSuccessfulTurns(service, 10);
+
+        // Fire the idle timer so the prompt is now displayed and awaiting user input.
+        await clock.tickAsync(5 * 60 * 1000);
+        assert.strictEqual(showInformationMessage.calledOnce, true);
+
+        // While the notification is displayed, the user begins a new chat. The scheduling
+        // guards see no session deferral yet (the user has not clicked anything), so a new
+        // 5-minute timer is armed. The race window being closed is the point of this test.
+        service.recordChatRequestStarted();
+
+        // User clicks "Maybe Later", setting the in-memory session deferral.
+        resolvePrompt("Maybe Later");
+        await clock.tickAsync(0);
+
+        // The timer armed during the displayed notification must not re-prompt.
+        await clock.tickAsync(5 * 60 * 1000);
+        assert.strictEqual(showInformationMessage.calledOnce, true);
+    });
+
     test("does not initialize or schedule a prompt when global state is unavailable", async () => {
         createService();
         service = new ReviewPromptService(undefined, telemetryService as unknown as TelemetryService);
