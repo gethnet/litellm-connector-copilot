@@ -164,6 +164,25 @@ export class TelemetryService implements vscode.Disposable {
         this.capture("extension_deactivated", { uptime_seconds: uptimeSeconds });
     }
 
+    captureReviewPromptEligible(props: { installDate: number; successfulTurnCount: number }): void {
+        this.capture("review_prompt_eligible", {
+            install_date: props.installDate,
+            successful_turn_count: props.successfulTurnCount,
+        });
+    }
+
+    captureReviewPromptChoice(props: {
+        choice: "review_or_rated" | "never_again" | "later";
+        installDate: number;
+        successfulTurnCount: number;
+    }): void {
+        this.capture("review_prompt_choice", {
+            choice: props.choice,
+            install_date: props.installDate,
+            successful_turn_count: props.successfulTurnCount,
+        });
+    }
+
     // Configuration
     captureConfigChanged(settingKey: string, source: string): void {
         this.capture("config_changed", { setting_key: settingKey, source });

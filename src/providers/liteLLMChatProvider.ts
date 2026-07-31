@@ -216,6 +216,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         this.resetStreamingState();
         const startTime = LiteLLMTelemetry.startTimer();
         const requestId = Math.random().toString(36).substring(7);
+        this._reviewPromptService?.recordChatRequestStarted();
 
         // Check if vscode has thinking part API available.
         // Even if we are not the V2 provider, we can safely report thinking parts if the type exists.
@@ -557,6 +558,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                         : undefined,
             };
             LiteLLMTelemetry.reportMetric(metric);
+            await this._reviewPromptService?.recordSuccessfulChatTurn();
             this.logFinalUsageEnvelope(requestId, modelToUse.id, caller, {
                 tokensIn: tokensInForTelemetry,
                 tokensOut,

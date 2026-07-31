@@ -17,8 +17,8 @@ import {
 import { countTokensForV2Messages } from "../adapters/tokenUtils";
 import { ConfigManager } from "../config/configManager";
 import { Logger } from "../utils/logger";
-import { LiteLLMTelemetry } from "../utils/telemetry";
 import type { TelemetryService } from "../telemetry/telemetryService";
+import type { ReviewPromptService } from "../engagement/reviewPromptService";
 import { getSupportedReasoningEfforts } from "../utils/modelCapabilities";
 import type { SupportedReasoningEffort } from "../types";
 import {
@@ -33,28 +33,19 @@ import { RequestBuilder } from "./base/requestBuilder";
 import { Transport } from "./base/transport";
 import type { RequestBuilderDeps, TransportDeps } from "./base/types";
 import { LiteLLMProviderRegistry } from "./liteLLMProviderRegistry";
+import {
+    detectQuotaToolRedaction as detectQuotaToolRedactionImpl,
+    sanitizeErrorTextForLogs as sanitizeErrorTextForLogsImpl,
+    collectMessageText as collectMessageTextImpl,
+    logRequestPayloadOnFailure as logRequestPayloadOnFailureImpl,
+} from "./base/quotaRedaction";
+import {
+    isParameterSupported as isParameterSupportedImpl,
+    stripUnsupportedParametersFromRequest as stripUnsupportedParametersFromRequestImpl,
+} from "./base/parameterFiltering";
+import { resolveCallTimeConfiguration } from "./base/callConfig";
 import { LRUCache } from "../utils/lruCache";
 import { AuditTrail } from "../observability/auditTrail";
-
-/**
- * Static fallback parameter limitations for known model families.
- * Used as fallback when model info (supported_openai_params) is unavailable.
- * These are prefix matches - if modelId includes the key, the limitation applies.
- */
-const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
-    "claude-3-5-sonnet": new Set(["temperature"]),
-    "claude-3-5-haiku": new Set(["temperature"]),
-    "claude-3-opus": new Set(["temperature"]),
-    "claude-3-sonnet": new Set(["temperature"]),
-    "claude-3-haiku": new Set(["temperature"]),
-    "claude-haiku-4-5": new Set(["temperature"]),
-    "gpt-5.1-codex": new Set(["temperature", "frequency_penalty", "presence_penalty"]),
-    "gpt-5.1-codex-mini": new Set(["temperature", "frequency_penalty", "presence_penalty"]),
-    "gpt-5.1-codex-max": new Set(["temperature", "frequency_penalty", "presence_penalty"]),
-    "codex-mini-latest": new Set(["temperature", "frequency_penalty", "presence_penalty"]),
-    "o1-": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
-    "gpt-5": new Set(["temperature", "top_p", "presence_penalty", "frequency_penalty"]),
-};
 
 /**
  * Shared orchestration base for all LiteLLM-backed VS Code language model providers.
@@ -106,6 +97,7 @@ export abstract class LiteLLMProviderBase {
     private _usageOptOutModels = new Set<string>();
 
     protected _telemetryService?: TelemetryService;
+    protected _reviewPromptService?: ReviewPromptService;
 
     private _onModernConfigurationDetected?: () => void;
 
@@ -158,6 +150,14 @@ export abstract class LiteLLMProviderBase {
 
     public setTelemetryService(service: TelemetryService): void {
         this._telemetryService = service;
+    }
+
+    /**
+     * Supplies the activation-owned review prompt service. The base class only stores this
+     * optional dependency; chat protocol code decides which request outcomes count as turns.
+     */
+    public setReviewPromptService(service: ReviewPromptService): void {
+        this._reviewPromptService = service;
     }
 
     /**
@@ -782,95 +782,24 @@ export abstract class LiteLLMProviderBase {
     /**
      * Resolves the per-group configuration for a response-time call.
      *
-     * Discovery-time call paths and the per-group config come from
-     * `options.configuration` (set by VS Code 1.120 at discovery time).
-     * Response-time paths in VS Code 1.120 do NOT pass the per-group config
-     * on `options.configuration` — the proposed-type definition for
-     * `ProvideLanguageModelChatResponseOptions` does not declare that field.
+     * Delegates to the pure {@link ../base/callConfig callConfig} module, which
+     * owns the `options.configuration` trust heuristic and the registry
+     * fallback. Kept as a private method (rather than called inline) so tests
+     * can exercise the resolution via the test-access seam.
      *
-     * As a fallback we consult the in-memory `LiteLLMProviderRegistry` keyed
-     * by the model id. The registry is populated by every successful
-     * discovery call, so a model that's been discovered in this session is
-     * routable. If neither channel has the model, the call is a
-     * configuration problem and the transport surfaces a visible error.
+     * See `resolveCallTimeConfiguration` for the full invariant documentation,
+     * including why an empty `options.configuration` object must NOT be
+     * trusted and how the workspace ergonomic toggles are merged onto both
+     * resolution paths.
      */
     private async getCallTimeConfiguration(
         options: vscode.ProvideLanguageModelChatResponseOptions,
         model: vscode.LanguageModelChatInformation
     ): Promise<Record<string, unknown> | undefined> {
-        const opt = options as vscode.ProvideLanguageModelChatResponseOptions & {
-            configuration?: Record<string, unknown>;
-        };
-        // The `options.configuration` field on the proposed-type
-        // `ProvideLanguageModelChatResponseOptions` is unreliable in VS Code
-        // 1.120+. Empirically: VS Code may pass an EMPTY configuration
-        // object (truthy, but no `baseUrl` or `apiKey`) for some calls,
-        // particularly for models that were picked from a group other
-        // than the one currently being routed. The wolfram group tends to
-        // not include `configuration` at all (so we fall back to the
-        // registry); the geth group tends to include an empty object
-        // (which previously short-circuited the registry fallback and
-        // produced a "No baseUrl provided" runtime error).
-        //
-        // We trust `options.configuration` ONLY when it has both a usable
-        // `baseUrl` (string, non-empty) and a usable `apiKey` (string,
-        // non-empty). Anything else falls through to the registry.
-        const optBaseUrl = typeof opt.configuration?.baseUrl === "string" ? opt.configuration.baseUrl.trim() : "";
-        const optApiKey = typeof opt.configuration?.apiKey === "string" ? opt.configuration.apiKey.trim() : "";
-
-        // Fetch workspace-config toggles once so both paths can merge them.
-        const cfg = await this._configManager.getConfig();
-
-        if (opt.configuration && optBaseUrl.length > 0 && optApiKey.length > 0) {
-            Logger.trace(
-                `getCallTimeConfiguration: HIT via options.configuration modelId="${model.id}" baseUrl="${optBaseUrl}"`
-            );
-            // Merge workspace-config ergonomic toggles onto the per-group
-            // configuration so the transport can read allowChatCompletionsFallback
-            // and disableCaching without a separate config fetch on the hot path.
-            return {
-                ...opt.configuration,
-                allowChatCompletionsFallback: cfg.allowChatCompletionsFallback,
-                disableCaching: cfg.disableCaching,
-            };
-        }
-        if (opt.configuration) {
-            // Object is present but malformed (empty / missing fields).
-            // This is the case we need to escape from — VS Code passed an
-            // empty object and we must not trust it.
-            Logger.trace(
-                `getCallTimeConfiguration: options.configuration present but invalid (empty baseUrl or apiKey) modelId="${model.id}"; falling back to registry`
-            );
-        } else {
-            Logger.trace(
-                `getCallTimeConfiguration: options.configuration missing; falling back to registry lookup for modelId="${model.id}" modelName="${model.name}"`
-            );
-        }
-        // No options.configuration at response time (the common case in VS
-        // Code 1.120+). Fall back to the in-memory registry. The model id
-        // VS Code hands back is the namespaced `<routing>/<raw>` form
-        // produced by `LiteLLMProviderRegistry.toVSCodeInfo`; the registry
-        // maps that id back to the {baseUrl, apiKey} of the backend that
-        // produced it. The request builder extracts the raw model name
-        // from `model.id` for `request.model`; the transport only needs
-        // baseUrl + apiKey.
-        const entry = this._registry.lookup(model.id);
-        if (entry) {
-            Logger.trace(`getCallTimeConfiguration: registry HIT modelId="${model.id}" -> baseUrl="${entry.baseUrl}"`);
-            // Same ergonomic-toggle merge as the options.configuration path above,
-            // so /responses fallback + disableCaching work regardless of which
-            // path resolved baseUrl/apiKey.
-            return {
-                baseUrl: entry.baseUrl,
-                apiKey: entry.apiKey,
-                allowChatCompletionsFallback: cfg.allowChatCompletionsFallback,
-                disableCaching: cfg.disableCaching,
-            };
-        }
-        Logger.warn(
-            `getCallTimeConfiguration: registry MISS modelId="${model.id}" modelName="${model.name}" — request will fail with configuration error`
-        );
-        return undefined;
+        return resolveCallTimeConfiguration(options, model, {
+            configManager: this._configManager,
+            registry: this._registry,
+        });
     }
 
     /**
@@ -897,56 +826,15 @@ export abstract class LiteLLMProviderBase {
     /**
      * Decides whether a given OpenAI parameter can be sent to a model.
      *
-     * Source of truth: the `supported_openai_params` array on the model's
-     * `LiteLLMModelInfo` (delivered by the registry). There is no probe
-     * cache here — the registry's per-model capability data is authoritative
-     * and re-validated on every discovery call, so a stale cache layer
-     * would only ever shadow correct information and (as observed in
-     * production) cause a model to silently drop parameters it actually
-     * supports.
+     * Delegates to the pure {@link ../base/parameterFiltering parameterFiltering}
+     * module. Source of truth: the `supported_openai_params` array on the
+     * model's `LiteLLMModelInfo` (delivered by the registry), with a static
+     * `KNOWN_PARAMETER_LIMITATIONS` fallback for known model families. There
+     * is no probe cache here — the registry's per-model capability data is
+     * authoritative and re-validated on every discovery call.
      */
     protected isParameterSupported(param: string, modelInfo: LiteLLMModelInfo | undefined, modelId?: string): boolean {
-        if (modelId) {
-            if (KNOWN_PARAMETER_LIMITATIONS[modelId]?.has(param)) {
-                return false;
-            }
-            for (const [knownModel, limitations] of Object.entries(KNOWN_PARAMETER_LIMITATIONS)) {
-                if (modelId.includes(knownModel) && limitations.has(param)) {
-                    return false;
-                }
-            }
-        }
-
-        if (modelInfo?.supported_openai_params) {
-            const supportedParams = modelInfo.supported_openai_params;
-            const normalizedParam = param.toLowerCase();
-            const isSupported = supportedParams.some((p) => p.toLowerCase() === normalizedParam);
-
-            if (supportedParams.length === 0) {
-                return false;
-            }
-
-            if (!isSupported) {
-                return !this.isRestrictableParam(param);
-            }
-            return true;
-        }
-
-        return true;
-    }
-
-    private isRestrictableParam(param: string): boolean {
-        const restrictableParams = new Set([
-            "temperature",
-            "top_p",
-            "presence_penalty",
-            "frequency_penalty",
-            "stop",
-            "reasoning_effort",
-            "tool_choice",
-            "cache",
-        ]);
-        return restrictableParams.has(param.toLowerCase());
+        return isParameterSupportedImpl(param, modelInfo, modelId);
     }
 
     protected stripUnsupportedParametersFromRequest(
@@ -954,34 +842,7 @@ export abstract class LiteLLMProviderBase {
         modelInfo: LiteLLMModelInfo | undefined,
         modelId?: string
     ): void {
-        const paramsToCheck = [
-            "temperature",
-            "stop",
-            "frequency_penalty",
-            "presence_penalty",
-            "top_p",
-            "no_cache",
-            "no-cache",
-            "tool_choice", // Added for GPT-5.6 Azure and similar models that don't support tool_choice
-        ];
-        for (const p of paramsToCheck) {
-            if (!this.isParameterSupported(p, modelInfo, modelId) && p in requestBody) {
-                delete requestBody[p];
-            }
-        }
-
-        // LiteLLM's cache bypass is carried only by extra_body.cache. It is
-        // retained when the model explicitly supports the cache parameter.
-        delete requestBody.cache;
-        if (requestBody.extra_body && typeof requestBody.extra_body === "object") {
-            const extraBody = requestBody.extra_body as Record<string, unknown>;
-            if (!this.isParameterSupported("cache", modelInfo, modelId)) {
-                delete extraBody.cache;
-            }
-            if (Object.keys(extraBody).length === 0) {
-                delete requestBody.extra_body;
-            }
-        }
+        stripUnsupportedParametersFromRequestImpl(requestBody, modelInfo, modelId);
     }
 
     protected detectQuotaToolRedaction(
@@ -995,242 +856,19 @@ export abstract class LiteLLMProviderBase {
         tools: readonly vscode.LanguageModelChatTool[];
         confidence: "none" | "low" | "high";
     } {
-        if (disableRedaction || !tools.length || !messages.length) {
-            return { tools, confidence: "none" };
-        }
-
-        const quotaMatch = this.findQuotaErrorInMessages(messages);
-        if (!quotaMatch) {
-            return { tools, confidence: "none" };
-        }
-
-        const { toolName, errorText, turnIndex, confidence } = quotaMatch;
-
-        // Low-confidence matches (e.g. a quota phrase mentioned in
-        // <reminderInstructions> or a user prompt about quotas) are logged
-        // at DEBUG and do NOT trigger redaction or telemetry. High-confidence
-        // matches (a real provider 429 in a tool result) keep the existing
-        // WARN + telemetry behavior.
-        if (confidence !== "high") {
-            // For low-confidence matches, only report as "low" if there's a
-            // redactable tool in the tools list. Otherwise, treat as "none"
-            // since there's nothing actionable.
-            const hasRedactableTool = tools.some((t) => LiteLLMProviderBase.REDACTABLE_TOOL_NAMES.includes(t.name));
-            const reportedConfidence = hasRedactableTool ? confidence : "none";
-            Logger.debug("Quota phrase detected in non-tool-result text; not redacting", {
-                toolName,
-                modelId,
-                requestId,
-                turnIndex,
-                confidence: reportedConfidence,
-            });
-            return { tools, confidence: reportedConfidence };
-        }
-
-        const toolNames = new Set(tools.map((tool) => tool.name));
-        if (!toolNames.has(toolName)) {
-            Logger.debug("Quota error detected, but tool not present", { toolName, requestId, modelId, turnIndex });
-            return { tools, confidence };
-        }
-
-        const filteredTools = tools.filter((tool) => tool.name !== toolName);
-        Logger.warn("Quota error detected; redacting tool for current turn", {
-            toolName,
-            errorText,
-            modelId,
-            requestId,
-            turnIndex,
-        });
-        LiteLLMTelemetry.reportMetric({
-            requestId,
-            model: modelId,
-            status: "failure",
-            error: `quota_exceeded:${toolName}`,
-            ...(caller && { caller }),
-        });
-
-        return { tools: filteredTools, confidence };
+        // Delegates to the pure quota-redaction module. The module owns the
+        // detector, the regex/constants, the message-text projections, and the
+        // Copilot-wrapper stripping; this thin wrapper preserves the protected
+        // method name the request builder binds against and tests cast to.
+        return detectQuotaToolRedactionImpl(messages, tools, requestId, modelId, disableRedaction, caller);
     }
 
-    /**
-     * Tools the detector knows how to redact. Kept narrow on purpose — the
-     * legacy detector only knew `insert_edit_into_file` and
-     * `replace_string_in_file`. Adding more here is a deliberate code change
-     * and must come with a test that exercises a real tool result for the new
-     * tool name (not just a substring match in prompt scaffolding).
-     */
-    private static readonly REDACTABLE_TOOL_NAMES: readonly string[] = [
-        "insert_edit_into_file",
-        "replace_string_in_file",
-    ] as const;
-
-    private static readonly QUOTA_PHRASE_REGEX =
-        /(\b429\b|rate\s*limit\s*exceeded|rate\s*limited|too\s*many\s*requests|insufficient\s*quota|quota\s*exceeded|exceeded\s*your\s*current\s*quota)/i;
-
-    /**
-     * Detects whether the conversation history contains a real provider-side
-     * quota error attached to a tool call we know how to redact.
-     *
-     * High-confidence match: a `LanguageModelToolResultPart` whose text
-     * contains a quota phrase AND whose `callId` resolves to one of the
-     * `REDACTABLE_TOOL_NAMES` tools (verified by walking the messages in
-     * reverse to find the matching `LanguageModelToolCallPart`).
-     *
-     * Low-confidence match: a quota phrase appearing in any other text
-     * content. This is returned for observability (DEBUG log, telemetry
-     * counter) but does NOT trigger redaction.
-     *
-     * None: no quota phrase anywhere in the message text.
-     */
-    private findQuotaErrorInMessages(messages: readonly LanguageModelChatRequestMessage[]):
-        | {
-              toolName: string;
-              errorText: string;
-              turnIndex: number;
-              confidence: "none" | "low" | "high";
-          }
-        | undefined {
-        // 1. Walk messages in reverse to find a tool result that contains a
-        //    quota phrase. The result's `callId` anchors the match.
-        for (let i = messages.length - 1; i >= 0; i--) {
-            const message = messages[i];
-            const toolResultHit = this.findQuotaInToolResults(message);
-            if (toolResultHit) {
-                const owningToolName = this.lookupToolNameForCallId(messages, toolResultHit.callId);
-                if (owningToolName && LiteLLMProviderBase.REDACTABLE_TOOL_NAMES.includes(owningToolName)) {
-                    return {
-                        toolName: owningToolName,
-                        errorText: this.sanitizeErrorTextForLogs(toolResultHit.text),
-                        turnIndex: i,
-                        confidence: "high",
-                    };
-                }
-                // Tool result is for a tool we don't redact. Treat as
-                // low-confidence (observability only) and keep walking.
-                return {
-                    toolName: owningToolName ?? toolResultHit.callId,
-                    errorText: this.sanitizeErrorTextForLogs(toolResultHit.text),
-                    turnIndex: i,
-                    confidence: "low",
-                };
-            }
-        }
-
-        // 2. No qualifying tool result. Look for a quota phrase in any
-        //    OTHER text content. Strip Copilot wrappers first so we never
-        //    match the scaffolding. Only report as "low" if we find BOTH
-        //    a quota phrase AND a tool name in the text (mimicking original
-        //    behavior). If only quota is found without a tool name, treat
-        //    as "none" since there's nothing to redact.
-        const toolRegex = /(insert_edit_into_file|replace_string_in_file)/i;
-        for (let i = messages.length - 1; i >= 0; i--) {
-            const message = messages[i];
-            const text = this.collectMessageText(message);
-            if (!text) {
-                continue;
-            }
-            const stripped = this.stripCopilotWrappers(text);
-            if (!stripped) {
-                continue;
-            }
-            if (!LiteLLMProviderBase.QUOTA_PHRASE_REGEX.test(stripped)) {
-                continue;
-            }
-            // Check if there's also a tool name in the text
-            const toolMatch = stripped.match(toolRegex);
-            if (!toolMatch) {
-                // Quota phrase found but no tool name - not actionable
-                continue;
-            }
-            return {
-                toolName: "",
-                errorText: this.sanitizeErrorTextForLogs(text),
-                turnIndex: i,
-                confidence: "low",
-            };
-        }
-
-        return undefined;
+    protected sanitizeErrorTextForLogs(text: string): string {
+        return sanitizeErrorTextForLogsImpl(text);
     }
 
-    /**
-     * Returns the first quota phrase match that lives inside a
-     * `LanguageModelToolResultPart` on this message, plus the `callId` of
-     * that tool result. Returns `undefined` if no tool result part contains
-     * a quota phrase.
-     */
-    private findQuotaInToolResults(
-        message: LanguageModelChatRequestMessage
-    ): { callId: string; text: string } | undefined {
-        const parts = message.content ?? [];
-        for (const part of parts) {
-            if (!(part instanceof vscode.LanguageModelToolResultPart)) {
-                continue;
-            }
-            const text = this.collectPartText(part.content);
-            if (!text) {
-                continue;
-            }
-            if (!LiteLLMProviderBase.QUOTA_PHRASE_REGEX.test(text)) {
-                continue;
-            }
-            return { callId: part.callId, text };
-        }
-        return undefined;
-    }
-
-    /**
-     * Walks messages in reverse to find the assistant turn that produced
-     * `callId` via a `LanguageModelToolCallPart` and returns the tool name
-     * declared there. Returns `undefined` if no matching tool call is found.
-     */
-    private lookupToolNameForCallId(
-        messages: readonly LanguageModelChatRequestMessage[],
-        callId: string
-    ): string | undefined {
-        for (let i = messages.length - 1; i >= 0; i--) {
-            const parts = messages[i].content ?? [];
-            for (const part of parts) {
-                if (part instanceof vscode.LanguageModelToolCallPart && part.callId === callId) {
-                    return part.name;
-                }
-            }
-        }
-        return undefined;
-    }
-
-    /**
-     * Text-only projection of a tool result's content array. Mirrors
-     * `collectMessageText` but operates on a single part's `content` field
-     * (which is itself an array of `LanguageModelTextPart`-shaped objects).
-     */
-    private collectPartText(content: readonly unknown[]): string {
-        let text = "";
-        for (const part of content) {
-            if (part instanceof vscode.LanguageModelTextPart) {
-                text += part.value;
-            } else if (typeof part === "string") {
-                text += part;
-            }
-        }
-        return text.trim();
-    }
-
-    private sanitizeErrorTextForLogs(text: string): string {
-        const trimmed = (text || "").trim();
-        if (!trimmed) {
-            return "";
-        }
-
-        const withoutCopilotContext = trimmed
-            .replace(/<context>[\s\S]*?<\/context>/gi, "<context>…</context>")
-            .replace(/<editorContext>[\s\S]*?<\/editorContext>/gi, "<editorContext>…</editorContext>")
-            .replace(
-                /<reminderInstructions>[\s\S]*?<\/reminderInstructions>/gi,
-                "<reminderInstructions>…</reminderInstructions>"
-            );
-
-        return withoutCopilotContext.length > 500 ? `${withoutCopilotContext.slice(0, 500)}…` : withoutCopilotContext;
+    protected collectMessageText(message: LanguageModelChatRequestMessage): string {
+        return collectMessageTextImpl(message);
     }
 
     protected logRequestPayloadOnFailure(
@@ -1243,102 +881,7 @@ export abstract class LiteLLMProviderBase {
             modelInfoMode?: string;
         }
     ): void {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        const sanitizedError = this.sanitizeErrorTextForLogs(errorMessage);
-        const payloadSummary = this.summarizeRequestPayloadForLogs(request);
-
-        Logger.trace(
-            `[request-failure] stage=${context.stage} model=${context.modelId} caller=${context.caller ?? "unknown"} mode=${context.modelInfoMode ?? "unknown"} error=${sanitizedError}`,
-            payloadSummary
-        );
-    }
-
-    private summarizeRequestPayloadForLogs(request: OpenAIChatCompletionRequest): Record<string, unknown> {
-        const summarizeMessages = (request.messages ?? []).map(
-            (message: { role?: string; content?: unknown; tool_calls?: unknown[]; tool_call_id?: string }) => {
-                const content = message.content;
-                const contentSummary =
-                    typeof content === "string"
-                        ? `text(${content.length})`
-                        : Array.isArray(content)
-                          ? `parts(${content.length})`
-                          : typeof content;
-
-                return {
-                    role: message.role,
-                    content: contentSummary,
-                    hasToolCalls: Array.isArray(message.tool_calls) && message.tool_calls.length > 0,
-                    toolCallId: message.tool_call_id,
-                };
-            }
-        );
-
-        const summarizeTools = (request.tools ?? []).map((tool) => ({
-            type: tool.type,
-            name: tool.function?.name,
-            hasDescription: typeof tool.function?.description === "string" && tool.function.description.length > 0,
-        }));
-
-        return {
-            model: request.model,
-            stream: request.stream,
-            max_tokens: request.max_tokens,
-            temperature: request.temperature,
-            top_p: request.top_p,
-            frequency_penalty: request.frequency_penalty,
-            presence_penalty: request.presence_penalty,
-            stop: request.stop,
-            reasoning_effort: request.reasoning_effort,
-            stream_options: request.stream_options,
-            tool_choice: request.tool_choice,
-            messageCount: request.messages?.length ?? 0,
-            messages: summarizeMessages,
-            toolCount: request.tools?.length ?? 0,
-            tools: summarizeTools,
-            hasExtraBody: typeof request.extra_body === "object" && request.extra_body !== null,
-        };
-    }
-
-    private collectMessageText(message: LanguageModelChatRequestMessage): string {
-        const parts = message.content ?? [];
-        let text = "";
-        for (const part of parts) {
-            if (part instanceof vscode.LanguageModelTextPart) {
-                text += part.value;
-            } else if (typeof part === "string") {
-                text += part;
-            }
-        }
-        return text.trim();
-    }
-
-    /**
-     * Strips Copilot-injected prompt scaffolding wrappers from `text` and
-     * returns the cleaned, trimmed result. This is the SAME list of wrappers
-     * the log sanitizer collapses, but applied *before* the quota regex runs
-     * so the detector never matches on prompt scaffolding.
-     *
-     * Why this lives here: Copilot Chat injects `<context>`, `<editorContext>`,
-     * `<reminderInstructions>`, and `<userRequest>` blocks into every user
-     * message. The `<reminderInstructions>` block routinely documents the
-     * exact tool-error handling rules that contain both the quota phrase
-     * and the `insert_edit_into_file` / `replace_string_in_file` tool names
-     * — a structural false positive for the legacy regex-pair detector.
-     *
-     * Invariant: this function is pure (no I/O, no side effects). The
-     * original `text` is not mutated.
-     */
-    private stripCopilotWrappers(text: string): string {
-        const trimmed = (text || "").trim();
-        if (!trimmed) {
-            return "";
-        }
-        return trimmed
-            .replace(/<context>[\s\S]*?<\/context>/gi, "")
-            .replace(/<editorContext>[\s\S]*?<\/editorContext>/gi, "")
-            .replace(/<reminderInstructions>[\s\S]*?<\/reminderInstructions>/gi, "")
-            .replace(/<userRequest>[\s\S]*?<\/userRequest>/gi, "")
-            .trim();
+        logRequestPayloadOnFailureImpl(request, error, context);
     }
 
     protected buildCapabilities(modelInfo: LiteLLMModelInfo | undefined): vscode.LanguageModelChatCapabilities {

@@ -6,7 +6,9 @@ import { defineConfig } from '@vscode/test-cli';
 // would skip our extension entirely. Switch back to "stable" once 1.120.0 ships.
 export default defineConfig({
   version: 'insiders',
-  files: 'out/**/*.test.js',
+  // The memory profile is a self-executing benchmark with its own npm script.
+  // Running it concurrently with Mocha mutates global fetch and makes retry tests flaky.
+  files: 'out/**/!(memoryProfile).test.js',
   mocha: {
     ui: 'tdd',
     timeout: 20000,

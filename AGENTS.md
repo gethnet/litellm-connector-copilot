@@ -121,7 +121,7 @@ This repository is a **VS Code extension**. Agents must follow these rules when 
 
 - **VS Code API**: Always target the `vscode` namespace.
 - **Proposed APIs**: Use `@vscode/dts` and keep `src/vscode.d.ts` current when relying on proposed types.
-- **Engine target**: `package.json` `engines.vscode` is `^1.120.0`. All provider code must assume the VS Code 1.120 Language Model API surface.
+- **Engine target**: `package.json` `engines.vscode` should be at or newer than `^1.125.0`. All provider code must assume the VS Code 1.120 or newer Language Model API surface.
 - **Configuration & Secrets (v1.120+, per-group configuration)**:
   - Language model provider configuration (base URL, API key, and any per-backend settings) is declared via the `languageModelChatProviders` contribution point in `package.json`
   - VS Code 1.120 supports **per-group configuration**: each configured provider group passes its own `options.configuration` into `provideLanguageModelChatInformation` and request methods. The provider must read configuration from `options.configuration` for every call rather than caching globally.
@@ -151,7 +151,7 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
 
 - **Chat Provider** (single, unified): `src/providers/liteLLMChatProvider.ts`
   - There is **one** chat provider class named `LiteLLMChatProvider`. Do **not** introduce or reintroduce version-suffixed siblings (`LiteLLMChatProviderV2`, `LiteLLMChatProviderV3`, etc.). The previous V1/V2/V3 split has been collapsed into this single implementation.
-  - Implements `vscode.LanguageModelChatProvider` against the VS Code 1.120 surface
+  - Implements `vscode.LanguageModelChatProvider` against the VS Code 1.120 or newer surface
   - Extends `LiteLLMProviderBase` and adds chat-protocol behavior only
   - Handles chat-specific streaming, tool call buffering, response part emission (text / thinking / data / tool calls), and message parsing
   - Reads per-group configuration from `options.configuration` on each call (no global config caching)
@@ -321,7 +321,7 @@ The ingress pipeline is agnostic to endpoint choice:
 ### External dependencies
 - **LiteLLM**: expects a compatible OpenAI-like proxy with `/chat/completions`, `/completions`, and/or `/responses` endpoints
 - **GitHub Copilot Chat**: this extension is a *provider* for the official Copilot Chat extension (chat provider)
-- **VS Code 1.120+** (declared in `package.json` `engines.vscode` as `^1.120.0`): required for:
+- **VS Code 1.125+** (declared in `package.json` `engines.vscode` as `^1.125.0`): required for:
   - `languageModelChatProviders` contribution point with **per-group configuration** schema
   - Stable `LanguageModelChatProvider` API used by the unified `LiteLLMChatProvider`
   - `LanguageModelTextCompletionProvider` proposed API (completions provider)
@@ -341,6 +341,17 @@ The ingress pipeline is agnostic to endpoint choice:
 - `npm run bump-version patch|minor|dev` — Version bumps
 
 > ⚠️ **DO NOT use `npm run test`**, `npm run check`, or any other npm scripts — they may cause issues. Only run the commands listed above.
+
+### Dev-only commands (`-devN` builds)
+The extension surfaces a small set of developer-only commands when the installed package version ends with a `-devN` suffix (e.g. `2.2.3-dev1`). This is the only reliable dev-build signal because users install pre-compiled incremental updates rather than attaching a debugger.
+
+- Visibility is controlled by a `litellm-connector.isDevBuild` context key set during activation via `setDevBuildContextKey()` in `src/commands/devTools.ts`. The `commandPalette` menu `when` clause in `package.json` hides the commands on production builds.
+- The command handler always re-checks the live extension version at invocation time as a defense-in-depth guard against stale context keys after a hot-swap update.
+- `registerDevResetReviewPromptCommand()` always registers the handler; palette visibility is the `when` clause's responsibility, not conditional registration.
+
+| Command | Title | Purpose |
+| --- | --- | --- |
+| `litellm-connector.dev.resetReviewPrompt` | LiteLLM (Dev): Dev Reset Review Prompt | Clears `installDate`, `successfulTurns`, and `doNotAskAgain` `globalState` keys for the review prompt so the eligibility cycle can be re-tested without waiting for 10 successful turns + 5 minutes idle. |
 
 ### When to run what
 - Before implementing non-trivial logic: add or update the relevant tests first.

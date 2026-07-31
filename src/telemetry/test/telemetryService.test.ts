@@ -501,6 +501,47 @@ suite("TelemetryService", () => {
         });
     });
 
+    suite("Review Prompt Telemetry", () => {
+        test("captures review prompt eligibility with snake_case properties", () => {
+            const mockContext = {
+                extension: { packageJSON: { version: "1.0.0" } },
+            } as unknown as vscode.ExtensionContext;
+            telemetryService.initialize(mockContext);
+
+            telemetryService.captureReviewPromptEligible({
+                installDate: 1764523200000,
+                successfulTurnCount: 10,
+            });
+
+            assert.strictEqual(adapterMock.capture.calledOnce, true);
+            const event = adapterMock.capture.firstCall.args[0];
+            assert.strictEqual(event.event, "review_prompt_eligible");
+            assert.strictEqual(event.properties.install_date, 1764523200000);
+            assert.strictEqual(event.properties.successful_turn_count, 10);
+            assert.strictEqual(event.properties.distinctId, "test-machine-id");
+        });
+
+        test("captures review prompt choices with snake_case properties", () => {
+            const mockContext = {
+                extension: { packageJSON: { version: "1.0.0" } },
+            } as unknown as vscode.ExtensionContext;
+            telemetryService.initialize(mockContext);
+
+            telemetryService.captureReviewPromptChoice({
+                choice: "review_or_rated",
+                installDate: 1764523200000,
+                successfulTurnCount: 10,
+            });
+
+            assert.strictEqual(adapterMock.capture.calledOnce, true);
+            const event = adapterMock.capture.firstCall.args[0];
+            assert.strictEqual(event.event, "review_prompt_choice");
+            assert.strictEqual(event.properties.choice, "review_or_rated");
+            assert.strictEqual(event.properties.install_date, 1764523200000);
+            assert.strictEqual(event.properties.successful_turn_count, 10);
+        });
+    });
+
     suite("Feature Adoption Tracking", () => {
         test("should capture feature_adoption events", () => {
             const mockContext = { packageJSON: { version: "1.0.0" } } as unknown as vscode.ExtensionContext;

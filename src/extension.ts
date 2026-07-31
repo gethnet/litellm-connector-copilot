@@ -9,6 +9,7 @@ import {
 } from "./commands/manageConfig";
 import { registerGenerateCommitMessageCommand } from "./commands/generateCommitMessage";
 import { registerSetLogLevelCommand } from "./commands/setLogLevel";
+import { registerDevResetReviewPromptCommand, setDevBuildContextKey } from "./commands/devTools";
 import { LiteLLMCommitMessageProvider } from "./providers/liteLLMCommitProvider";
 import { Logger } from "./utils/logger";
 import { StructuredLogger } from "./observability";
@@ -18,6 +19,7 @@ import { LiteLLMTelemetry } from "./utils/telemetry";
 import { setTelemetryService as setTokenUtilsTelemetryService } from "./adapters/tokenUtils";
 import { EffortFallbackCache } from "./utils/reasoningEffortFallback";
 import { LegacyConfigMigration } from "./config/legacyConfigMigration";
+import { ReviewPromptService } from "./engagement/reviewPromptService";
 
 // Store the config manager for cleanup on deactivation
 let configManagerInstance: ConfigManager | undefined;
@@ -174,6 +176,12 @@ export function activate(context: vscode.ExtensionContext): void {
     activeChatProviderInstance = activeProvider; // Store for cleanup on deactivation
     activeProvider.setTelemetryService(telemetryService);
 
+    const reviewPromptService = new ReviewPromptService(context.globalState, telemetryService);
+    context.subscriptions.push(reviewPromptService);
+    void reviewPromptService.initialize();
+
+    activeProvider.setReviewPromptService(reviewPromptService);
+
     const isOnModernConfigAtStartup = getModernConfigSessionFlag();
     telemetryService.captureModernConfigStatus({
         is_on_modern_config: isOnModernConfigAtStartup,
@@ -294,6 +302,14 @@ export function activate(context: vscode.ExtensionContext): void {
         context.subscriptions.push(registerReloadModelsCommand(activeProvider, telemetryService));
         context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider, telemetryService));
         context.subscriptions.push(registerSetLogLevelCommand());
+
+        // Dev-only reset-review-prompt command. The command is always registered
+        // so VS Code can execute it once the `commandPalette` `when` clause
+        // surfaces it. Visibility is controlled by the `litellm-connector.isDevBuild`
+        // context key (set below); the handler also re-checks the live version as
+        // a defense-in-depth guard against stale context after hot-swap updates.
+        context.subscriptions.push(registerDevResetReviewPromptCommand(reviewPromptService));
+        void setDevBuildContextKey(context);
         Logger.info("Config command registered.");
     } catch (cmdErr) {
         Logger.error("Failed to register commands", cmdErr);
