@@ -177,7 +177,12 @@ suite("Model Commands Unit Tests", () => {
                 {
                     id: "test-backend/azure_ai/gpt-5.6-mini",
                     name: "azure_ai/gpt-5.6-mini",
-                    tooltip: "Provider: azure_ai, Model: azure_ai/gpt-5.6-mini via Test Backend",
+                    tooltip: "$5.00/1M in · $15.00/1M out · Input limit: 128000 · Output limit: 4096",
+                    backendName: "Test Backend",
+                    inputCost: 5,
+                    outputCost: 15,
+                    maxInputTokens: 128000,
+                    maxOutputTokens: 4096,
                     isUserSelectable: true,
                 },
             ],
@@ -187,7 +192,7 @@ suite("Model Commands Unit Tests", () => {
         const quickPickStub = sandbox.stub(vscode.window, "showQuickPick");
         quickPickStub.resolves({
             label: "azure_ai/gpt-5.6-mini",
-            modelId: "test-backend/azure_ai/gpt-5.6-mini",
+            modelId: "litellm-connector/test-backend/azure_ai/gpt-5.6-mini",
         } as unknown as vscode.QuickPickItem);
 
         let handler: (() => Promise<void>) | undefined;
@@ -202,15 +207,20 @@ suite("Model Commands Unit Tests", () => {
         await handler?.();
 
         const quickPickItems = quickPickStub.firstCall.args[0] as vscode.QuickPickItem[];
-        assert.strictEqual(quickPickItems[0].label, "azure_ai/gpt-5.6-mini");
+        assert.strictEqual(quickPickItems[0].label, "Test Backend :: azure_ai/gpt-5.6-mini");
+        assert.strictEqual(quickPickItems[0].description, "litellm-connector/test-backend/azure_ai/gpt-5.6-mini");
+        assert.strictEqual(
+            quickPickItems[0].detail,
+            "$5.00/1M in · $15.00/1M out · Input limit: 128000 · Output limit: 4096"
+        );
         assert.strictEqual(
             (quickPickItems[0] as vscode.QuickPickItem & { modelId: string }).modelId,
-            "test-backend/azure_ai/gpt-5.6-mini"
+            "litellm-connector/test-backend/azure_ai/gpt-5.6-mini"
         );
         assert.strictEqual(infoStub.calledOnce, true);
         assert.ok(
             String(infoStub.firstCall.args[0]).includes(
-                "Copied fully qualified model id: test-backend/azure_ai/gpt-5.6-mini"
+                "Copied fully qualified model id: litellm-connector/test-backend/azure_ai/gpt-5.6-mini"
             ),
             "Information message should announce the copied fully qualified model id"
         );

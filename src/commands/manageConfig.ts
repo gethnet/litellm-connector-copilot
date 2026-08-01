@@ -4,6 +4,14 @@ import type { LiteLLMChatProvider } from "../providers";
 import type { TelemetryService } from "../telemetry/telemetryService";
 import { Logger } from "../utils/logger";
 
+type ModelQuickPickItem = vscode.QuickPickItem & { modelId: string };
+
+const MODEL_SELECTOR = "litellm-connector/";
+
+function toSelectableModelId(modelId: string): string {
+    return modelId.startsWith(MODEL_SELECTOR) ? modelId : `${MODEL_SELECTOR}${modelId}`;
+}
+
 function createConfigHandler(
     _configManager: ConfigManager,
     _provider?: LiteLLMChatProvider,
@@ -105,22 +113,28 @@ export function registerShowModelsCommand(
             return;
         }
 
-        type ModelQuickPickItem = vscode.QuickPickItem & { modelId: string };
-
-        // Show a quick pick list with user-facing backend:model label.
-        // Copy the internal routable model id to the clipboard.
+        // Keep the picker to the requested two-line layout. The model group and
+        // friendly name are the primary label; the complete ID is the secondary
+        // description. Existing model tooltip data remains in `detail` so the
+        // picker can surface provider pricing and limits without rebuilding it.
         const picked = await vscode.window.showQuickPick(
             models
                 .slice()
                 .sort((a: vscode.LanguageModelChatInformation, b: vscode.LanguageModelChatInformation) =>
                     a.id.localeCompare(b.id)
                 )
-                .map((m) => ({
-                    label: m.name,
-                    description: m.name !== m.id ? m.name : undefined,
-                    detail: m.tooltip,
-                    modelId: m.id,
-                })) as ModelQuickPickItem[],
+                .map((m) => {
+                    const selectableModelId = toSelectableModelId(m.id);
+                    return {
+                        label: `${
+                            (m as vscode.LanguageModelChatInformation & { backendName?: string }).backendName ??
+                            "LiteLLM"
+                        } :: ${m.name}`,
+                        description: selectableModelId,
+                        detail: m.tooltip,
+                        modelId: selectableModelId,
+                    };
+                }) as ModelQuickPickItem[],
             {
                 title: "LiteLLM: Available Models",
                 placeHolder: "Select a model to copy its fully qualified id to the clipboard",

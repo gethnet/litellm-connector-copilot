@@ -10,12 +10,13 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.2.3
+## 🆕 What's New in 2.3.0
 
-> Version 2.2.3 adds an idle-time Marketplace review prompt for engaged users and fixes a re-prompt race after "Maybe Later".
+> Version 2.3.0 restores a readable model-ID picker for configuring LiteLLM models in VS Code BYOK settings.
 
-- 💬 **Idle-time review prompt** — After 10 successful chat turns and 5 minutes of idle time, the extension offers a non-modal notification to leave a Marketplace review. Choose **Leave a Review**, **Maybe Later** (suppresses for the rest of the session), or **Don't Ask Again** (permanently opts out). All state is local; no user-identifying telemetry is sent.
-- 🔕 **Smarter "Maybe Later"** — Deferring the prompt now suppresses it for the remainder of the active VS Code session only (tracked in memory via `sessionId`), and a race that could re-prompt after "Maybe Later" when a chat started while the notification was displayed is now fixed.
+- 📋 **Copy complete model IDs** — Use **LiteLLM: Show Available Models** to copy the exact `litellm-connector/<group>/<model>` selector required by VS Code BYOK settings.
+- 🧭 **Readability-focused picker** — Models show as `<group> :: <display name>` with the full selectable ID on the secondary line and provider metadata in the details.
+- 🔄 **Reliable discovery snapshot** — The picker is populated from successful per-group discovery without changing response-time routing behavior.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 

@@ -803,6 +803,7 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             id: modelId,
             name: modelName,
             vendor: modelInfo?.litellm_provider ?? "litellm",
+            backendName: detailBase,
             tooltip: `Provider: ${modelInfo?.litellm_provider ?? "litellm"}, Model: ${modelName} via ${detailBase}`,
             detail,
             description: modelInfo?.litellm_provider ?? "",
@@ -856,6 +857,13 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             if (pricingTooltip) {
                 (info as { tooltip?: string }).tooltip = `${info.tooltip}\n${pricingTooltip}`;
             }
+
+            // Keep the picker row focused on identity. Pricing and exact token
+            // limits belong in the model tooltip/detail instead of being
+            // reformatted into the QuickPick's primary label.
+            (info as { tooltip?: string }).tooltip =
+                `${info.tooltip}\nLimits: input ${derived.maxInputTokens.toLocaleString()} tokens, ` +
+                `output ${derived.maxOutputTokens.toLocaleString()} tokens`;
         }
 
         return info;
