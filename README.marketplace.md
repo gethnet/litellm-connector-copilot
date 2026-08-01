@@ -46,8 +46,9 @@ See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 ## ✅ Requirements
 
 - 🖥️ **VS Code 1.120+**
-- 🤖 **GitHub Copilot** (Free Individual plan works)
 - 🌐 A **LiteLLM proxy URL** and **API key**
+
+> **No Copilot subscription required.** BYOK models work without a GitHub login or Copilot plan — including air-gapped scenarios. See [Using BYOK Without Copilot](#-using-byok-without-copilot) to redirect the Copilot-backed utility models to your LiteLLM models.
 
 ---
 
@@ -76,6 +77,63 @@ See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 1. Run **LiteLLM: Manage Configuration** and verify Base URL + API key
 2. Run **LiteLLM: Reload Models** to force refresh
 3. If stuck: Remove LiteLLM provider groups via **LiteLLM: Manage Configuration** → VS Code's Language Models UI, then re-add
+
+---
+
+## 🚫 Using BYOK Without Copilot
+
+**BYOK models work without signing into a GitHub account or a Copilot plan**, including fully air-gapped scenarios. Your LiteLLM Connector models appear in the Chat model picker and work for chat and agent workflows with no Copilot subscription required.
+
+A few Copilot-backed features stop working without a login because their defaults point at Copilot models. You can redirect **all** of them to your LiteLLM Connector models so the full chat experience keeps working offline.
+
+> ⚠️ **Keep `chat.byokUtilityModelDefault` set to `GitHub Copilot`.** This setting governs how BYOK models are surfaced. Changing it can prevent your BYOK models from appearing in the picker.
+
+### Settings that take a fully qualified model name
+
+A fully qualified model name is `litellm-connector/<provider-group>/<model>`, matching the identifier shown in the Chat model picker.
+
+| Setting | What it controls |
+|---------|------------------|
+| `github.copilot.selectedCompletionModel` | Inline completions model |
+| `github.copilot.chat.workspace.preferredEmbeddingsModel` | Semantic search embeddings |
+| `github.copilot.chat.instantApply.shortContextModelName` | Instant Apply short-context model |
+
+### Settings that use a model dropdown
+
+These settings present a dropdown of every available model (including your BYOK models). Pick the LiteLLM Connector model you want from the list.
+
+| Setting | What it controls |
+|---------|------------------|
+| `chat.utilityModel` | Background utility model (chat titles, rename suggestions) |
+| `chat.utilitySmallModel` | Lightweight utility model (commit messages, summaries) |
+
+### Example `settings.json`
+
+```jsonc
+{
+  // Keep this as "GitHub Copilot" so BYOK models are surfaced correctly.
+  "chat.byokUtilityModelDefault": "GitHub Copilot",
+
+  // Redirect Copilot-backed features to LiteLLM Connector models.
+  "github.copilot.selectedCompletionModel": "litellm-connector/<group>/<model>",
+  "github.copilot.chat.workspace.preferredEmbeddingsModel": "litellm-connector/<group>/<embedding-model>",
+  "github.copilot.chat.instantApply.shortContextModelName": "litellm-connector/<group>/<model>",
+
+  // Pick these from the model dropdown in Settings UI.
+  "chat.utilityModel": "litellm-connector/<group>/<model>",
+  "chat.utilitySmallModel": "litellm-connector/<group>/<small-model>"
+}
+```
+
+Replace `<group>` with your provider group name and the model placeholders with models from your LiteLLM proxy. Reload the window (`Developer: Reload Window`) for changes to take effect.
+
+### Copy a fully qualified model name
+
+After configuring a provider, run **LiteLLM: Reload Models**, then run **LiteLLM: Show Available Models**. Select a model to copy its fully qualified ID to the clipboard for use in VS Code BYOK settings.
+
+The picker shows a friendly model name but copies the complete model ID, including the provider-group namespace. Use the copied value for settings such as `github.copilot.selectedCompletionModel`, `chat.utilityModel`, and `chat.utilitySmallModel`.
+
+> **Enterprise note:** For Copilot Business or Enterprise, organization administrators can control BYOK availability through Copilot policy settings.
 
 ---
 
@@ -154,8 +212,9 @@ These aren't in Settings UI — add to `settings.json` if needed:
 
 ## 🧩 Notes
 
-- This extension is a **provider** for GitHub Copilot Chat
-- Requires the **GitHub Copilot Chat** extension
+- This extension is a **language model provider** for VS Code Chat
+- Works **with or without** GitHub Copilot (BYOK models work without a Copilot subscription)
+- VS Code Chat (formerly Copilot Chat) is built into VS Code 1.120+
 
 ---
 

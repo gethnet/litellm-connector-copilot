@@ -48,11 +48,12 @@ Your support keeps this project alive and improving! ❤️
 ### Prerequisites
 
 - ✅ **VS Code 1.120+** (required)
-- ✅ **GitHub Copilot Individual** subscription (Free or Paid Individual plans work)
 - 🌐 A **LiteLLM proxy** running somewhere (locally or in the cloud)
 - 🔑 Your **Base URL** and **API Key**
 
 > **New to LiteLLM?** Check out [their documentation](https://docs.litellm.ai) to learn how to set up a proxy that can route to any model provider.
+
+> **No Copilot subscription required.** BYOK models work **without signing into a GitHub account or a Copilot plan** — including fully air-gapped scenarios with local models. See [Using BYOK Without Copilot](#-using-byok-without-copilot) for how to replace the Copilot-backed utility models.
 
 ### Quick Setup
 
@@ -123,6 +124,64 @@ Fine-tune model metadata for specific models via `litellm-connector.modelOverrid
 - **Organizations** running private LLMs behind firewalls
 - **AI enthusiasts** testing new models as they're released
 - **Researchers** comparing model performance on real code
+
+---
+
+## 🚫 Using BYOK Without Copilot
+
+**BYOK models work without signing into a GitHub account or a Copilot plan**, including fully air-gapped scenarios. Your LiteLLM Connector models will appear in the Chat model picker and work for chat and agent workflows with no Copilot subscription required.
+
+A few Copilot-backed features stop working without a login because their defaults point at Copilot models. You can redirect **all** of them to your LiteLLM Connector models so the full chat experience keeps working offline.
+
+> ⚠️ **Keep `chat.byokUtilityModelDefault` set to `GitHub Copilot`.** This setting governs how BYOK models are surfaced. Changing it can prevent your BYOK models from appearing in the picker.
+
+### Settings that take a fully qualified model name
+
+A fully qualified model name is `litellm-connector/<provider-group>/<model>`, matching the identifier shown in the Chat model picker. For example: `litellm-connector/azure_ai/text-embedding-3-small`.
+
+| Setting | What it controls | Example value |
+|---------|------------------|---------------|
+| `github.copilot.selectedCompletionModel` | Inline completions model | `litellm-connector/<group>/<model>` |
+| `github.copilot.chat.workspace.preferredEmbeddingsModel` | Semantic search embeddings | `litellm-connector/<group>/<embedding-model>` |
+| `github.copilot.chat.instantApply.shortContextModelName` | Instant Apply short-context model | `litellm-connector/<group>/<model>` |
+
+### Settings that use a model dropdown
+
+These settings present a dropdown of every available model (including your BYOK models). Pick the LiteLLM Connector model you want from the list.
+
+| Setting | What it controls |
+|---------|------------------|
+| `chat.utilityModel` | Background utility model (chat titles, rename suggestions, etc.) |
+| `chat.utilitySmallModel` | Lightweight utility model (commit messages, summaries) |
+
+### Example `settings.json`
+
+```jsonc
+{
+  // Keep this as "GitHub Copilot" so BYOK models are surfaced correctly.
+  "chat.byokUtilityModelDefault": "GitHub Copilot",
+
+  // Redirect Copilot-backed features to LiteLLM Connector models.
+  // Use the fully qualified name from the Chat model picker.
+  "github.copilot.selectedCompletionModel": "litellm-connector/<group>/<model>",
+  "github.copilot.chat.workspace.preferredEmbeddingsModel": "litellm-connector/<group>/<embedding-model>",
+  "github.copilot.chat.instantApply.shortContextModelName": "litellm-connector/<group>/<model>",
+
+  // Pick these from the model dropdown in Settings UI.
+  "chat.utilityModel": "litellm-connector/<group>/<model>",
+  "chat.utilitySmallModel": "litellm-connector/<group>/<small-model>"
+}
+```
+
+Replace `<group>` with your configured provider group name and `<model>` / `<embedding-model>` / `<small-model>` with the model names from your LiteLLM proxy. After saving, reload the window (`Developer: Reload Window`) for the changes to take effect.
+
+### Copy a fully qualified model name
+
+Run **LiteLLM: Show Available Models** from the Command Palette after configuring a provider and running **LiteLLM: Reload Models**. Select a model to copy its fully qualified ID to the clipboard.
+
+The copied ID is the complete model ID shown by discovery, including the provider-group namespace. Use that value in settings such as `github.copilot.selectedCompletionModel`, `chat.utilityModel`, or `chat.utilitySmallModel`. The picker displays a friendly model name, but copies the complete routable ID.
+
+> **Enterprise note:** For Copilot Business or Enterprise, organization administrators can control BYOK availability through Copilot policy settings. If your admin has disabled BYOK, these models will not appear even after configuration.
 
 ---
 

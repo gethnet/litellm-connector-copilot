@@ -15,6 +15,7 @@
         "npx vscode-test": true,
         "npx tsc": true,
         "npx prettier": true,
-        "tee": true
+        "tee": true,
+        "git switch": true
     }
 }

@@ -365,6 +365,18 @@ The extension surfaces a small set of developer-only commands when the installed
 - Validate both behavior and implementation presence: passing tests alone are not enough if the requested file edits did not land.
 - When reporting completion, ensure the repository state reflects the requested changes and the final file contents match the intended outcome.
 
+### Stale pull request policy
+VS Code ships weekly, so PRs that go unanswered can rot quickly. The `Stale PR Cleanup` workflow (`.github/workflows/stale.yml`) runs daily and:
+- marks a PR `stale` after **21 days** of inactivity (posts a warning comment), then
+- auto-closes it **7 days** later if no further activity occurs.
+
+Any comment, push, or review resets the timer and removes the `stale` label. Exemptions (apply any one label):
+- `chore:dependencies` — Dependabot / dependency-bump PRs
+- `exemption:pr-stale` — manual maintainer override
+- Draft PRs are exempt by default (explicitly WIP).
+
+Closing a stale PR is not a rejection; it can be reopened or resubmitted when updated. Contributors should read `.github/CONTRIBUTING.md` for the full policy.
+
 ## 6) Updating existing code
 
 Any code you edit must be brought up to these standards:

@@ -100,7 +100,7 @@ export function registerShowModelsCommand(
         const models = provider.getLastKnownModels();
         if (!models.length) {
             vscode.window.showInformationMessage(
-                "No cached models yet. Run 'LiteLLM: Reload Models' (or open the provider settings) to fetch models from LiteLLM."
+                "No models are available yet. Configure a LiteLLM provider with 'LiteLLM: Manage Configuration', then run 'LiteLLM: Reload Models' before opening this picker."
             );
             return;
         }
@@ -122,8 +122,8 @@ export function registerShowModelsCommand(
                     modelId: m.id,
                 })) as ModelQuickPickItem[],
             {
-                title: "LiteLLM: Available Models (cached)",
-                placeHolder: "Select a model to copy its id to clipboard",
+                title: "LiteLLM: Available Models",
+                placeHolder: "Select a model to copy its fully qualified id to the clipboard",
                 matchOnDescription: true,
                 matchOnDetail: true,
             }
@@ -134,7 +134,7 @@ export function registerShowModelsCommand(
         }
 
         await vscode.env.clipboard.writeText(picked.modelId);
-        vscode.window.showInformationMessage(`Copied model id: ${picked.modelId}`);
+        vscode.window.showInformationMessage(`Copied fully qualified model id: ${picked.modelId}`);
     });
 }
 

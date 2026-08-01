@@ -222,16 +222,14 @@ export abstract class LiteLLMProviderBase {
     }
 
     /**
-     * Returns an empty array.
+     * Returns a defensive copy of the latest successful discovery view for
+     * display-only commands such as "LiteLLM: Show Available Models".
      *
-     * Stateless design: there is no model-list cache. The last-known-models
-     * view is gone because there is no list to be "last known" — every
-     * discovery call is a fresh fetch. This method is retained for
-     * backward compatibility with the public API surface; callers that
-     * need a model list should trigger a discovery and use the result.
+     * This is not a request-routing cache. Response-time routing continues to
+     * resolve the backend through per-call configuration and registry.lookup().
      */
     public getLastKnownModels(): LanguageModelChatInformation[] {
-        return [];
+        return this._registry.getDisplayedModels();
     }
 
     /**

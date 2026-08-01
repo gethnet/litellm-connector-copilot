@@ -1,0 +1,11 @@
+{
+    "hooks": {
+        "PreToolUse": [
+            {
+                "type": "command",
+                "command": "./scripts/block-bump-on-main.sh",
+                "timeout": 15
+            }
+        ]
+    }
+}

@@ -657,6 +657,32 @@ suite("LiteLLMProviderBase", () => {
             assert.strictEqual(models1[0].id, models2[0].id, "model id is stable across calls");
         });
 
+        test("exposes fully qualified ids from successful discovery to the model picker", async () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const configManager = access(provider)._configManager;
+            const mockSession = makeMockSession();
+            const getModelInfo = mockSession.client.getModelInfo as sinon.SinonStub;
+            getModelInfo.resolves({
+                data: [
+                    {
+                        model_name: "azure_ai/gpt-5.6-mini",
+                        model_info: { litellm_provider: "azure" },
+                    },
+                ],
+            });
+            sandbox.stub(configManager, "convertProviderConfiguration").returns(mockSession);
+
+            await provider.discoverModels(
+                { silent: true, configuration: config },
+                new vscode.CancellationTokenSource().token
+            );
+
+            const displayedModels = provider.getLastKnownModels();
+            assert.strictEqual(displayedModels.length, 1);
+            assert.strictEqual(displayedModels[0].id, "localhost:4000/azure_ai/gpt-5.6-mini");
+            assert.strictEqual(displayedModels[0].name, "azure_ai/gpt-5.6-mini");
+        });
+
         test("attaches reasoning configuration schema when supported", async () => {
             const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
             const configManager = access(provider)._configManager;
