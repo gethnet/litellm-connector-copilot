@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-08-01
+
+### 🚀 Features
+
+* **📋 Restore fully qualified model-ID picker copying**: The available-model picker now exposes discovered LiteLLM models for copying into VS Code BYOK settings, including the required `litellm-connector/` selector prefix.
+* **🧭 Improve model picker readability**: Models are presented as `<group> :: <display name>` with the complete selectable ID on the secondary line, while provider pricing and token limits remain in the model details.
+
+### 🧹 Chores
+
+* **🛡️ Add stale pull request cleanup**: Repository automation now marks inactive pull requests stale after 21 days and closes them after an additional 7 days, with documented exemptions.
+* **📚 Clarify BYOK release guidance**: Release and contributor documentation now covers provider-group configuration, model selection, development-version workflows, and the release process.
+
+### 🧪 Tests
+
+* Added regression coverage for successful per-group discovery snapshots, fully qualified model-ID copying, selector-prefix normalization, and readable picker fields.
+
 ## [2.2.3] - 2026-07-31
 
 ### 🚀 Features
@@ -692,7 +708,8 @@ There have been a tremendous amount of backend work done with this update to mak
 
 ---
 
-[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.2.3...HEAD
+[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.3.0...HEAD
+[2.3.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.3.0
 [1.6.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.6.0
 [1.5.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.5.0
 [1.4.6]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.4.6

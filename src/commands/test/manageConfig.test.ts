@@ -163,21 +163,26 @@ suite("Model Commands Unit Tests", () => {
         await handler?.();
 
         assert.strictEqual(infoStub.calledOnce, true);
-        assert.ok(String(infoStub.firstCall.args[0]).includes("No cached models"));
+        assert.ok(String(infoStub.firstCall.args[0]).includes("No models are available yet"));
     });
 
     test("showModels: quick pick copies model id", async () => {
         // The `vscode.env.clipboard.writeText` property is non-configurable in the
         // extension host test environment, so we cannot stub it directly. Instead we
-        // assert the user-visible side-effect: the "Copied model id:" information
+        // assert the user-visible side-effect: the "Copied fully qualified model id:" information
         // message includes the model id the user selected. The clipboard write itself
         // is exercised manually in development.
         const provider = {
             getLastKnownModels: () => [
                 {
-                    id: "backend/model",
-                    name: "backend/model",
-                    tooltip: "t",
+                    id: "test-backend/azure_ai/gpt-5.6-mini",
+                    name: "azure_ai/gpt-5.6-mini",
+                    tooltip: "$5.00/1M in · $15.00/1M out · Input limit: 128000 · Output limit: 4096",
+                    backendName: "Test Backend",
+                    inputCost: 5,
+                    outputCost: 15,
+                    maxInputTokens: 128000,
+                    maxOutputTokens: 4096,
                     isUserSelectable: true,
                 },
             ],
@@ -185,7 +190,10 @@ suite("Model Commands Unit Tests", () => {
 
         const infoStub = sandbox.stub(vscode.window, "showInformationMessage");
         const quickPickStub = sandbox.stub(vscode.window, "showQuickPick");
-        quickPickStub.resolves({ modelId: "backend/model" } as unknown as vscode.QuickPickItem);
+        quickPickStub.resolves({
+            label: "azure_ai/gpt-5.6-mini",
+            modelId: "litellm-connector/test-backend/azure_ai/gpt-5.6-mini",
+        } as unknown as vscode.QuickPickItem);
 
         let handler: (() => Promise<void>) | undefined;
         sandbox.stub(vscode.commands, "registerCommand").callsFake((id, cb) => {
@@ -198,10 +206,23 @@ suite("Model Commands Unit Tests", () => {
         registerShowModelsCommand(provider);
         await handler?.();
 
+        const quickPickItems = quickPickStub.firstCall.args[0] as vscode.QuickPickItem[];
+        assert.strictEqual(quickPickItems[0].label, "Test Backend :: azure_ai/gpt-5.6-mini");
+        assert.strictEqual(quickPickItems[0].description, "litellm-connector/test-backend/azure_ai/gpt-5.6-mini");
+        assert.strictEqual(
+            quickPickItems[0].detail,
+            "$5.00/1M in · $15.00/1M out · Input limit: 128000 · Output limit: 4096"
+        );
+        assert.strictEqual(
+            (quickPickItems[0] as vscode.QuickPickItem & { modelId: string }).modelId,
+            "litellm-connector/test-backend/azure_ai/gpt-5.6-mini"
+        );
         assert.strictEqual(infoStub.calledOnce, true);
         assert.ok(
-            String(infoStub.firstCall.args[0]).includes("Copied model id: backend/model"),
-            "Information message should announce the copied model id"
+            String(infoStub.firstCall.args[0]).includes(
+                "Copied fully qualified model id: litellm-connector/test-backend/azure_ai/gpt-5.6-mini"
+            ),
+            "Information message should announce the copied fully qualified model id"
         );
     });
 });

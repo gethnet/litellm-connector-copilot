@@ -1,4 +1,4 @@
-import * as vscode from "vscode";
+import type * as vscode from "vscode";
 import { Logger } from "../../utils/logger";
 import type { ConfigManager } from "../../config/configManager";
 import type { LiteLLMProviderRegistry } from "../liteLLMProviderRegistry";

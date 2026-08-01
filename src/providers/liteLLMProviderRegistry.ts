@@ -180,6 +180,13 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
     private readonly modelsByBackend = new Map<string, LanguageModelChatInformation[]>();
 
     /**
+     * Last successful discovery view used only by the explicit "Show Available Models"
+     * command. Request routing MUST continue to use `entries` and per-call configuration;
+     * this snapshot is only a convenience view for copying namespaced model IDs.
+     */
+    private displayedModels: LanguageModelChatInformation[] = [];
+
+    /**
      * Tracks parameters that were auto-stripped after a failed request so callers
      * can proactively omit them on subsequent calls. Single source of truth for
      * dynamically-learned parameter limits.
@@ -396,6 +403,23 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
     }
 
     /**
+     * Returns a defensive copy of the latest successful model discovery view.
+     * This is not a routing cache. Callers may use the IDs for display or copying,
+     * but response-time routing must continue through lookup().
+     */
+    public getDisplayedModels(): LanguageModelChatInformation[] {
+        return this.displayedModels.slice();
+    }
+
+    private mergeDisplayedModels(models: readonly LanguageModelChatInformation[]): void {
+        const byId = new Map(this.displayedModels.map((model) => [model.id, model]));
+        for (const model of models) {
+            byId.set(model.id, model);
+        }
+        this.displayedModels = [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
+    }
+
+    /**
      * Wipes every routing entry and every per-backend model list. Call on
      * user-initiated model reload so the next discovery pass starts from a
      * clean slate. Does NOT touch the per-model capability caches; call
@@ -404,6 +428,7 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
     public clear(): void {
         this.entries.clear();
         this.modelsByBackend.clear();
+        this.displayedModels = [];
         this.discoveryResponseCache.clear();
     }
 
@@ -557,6 +582,10 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             );
             if (session.apiKey) {
                 this.setModelsForBackend(baseUrl, session.apiKey, routingIdentity, models);
+                // Keep the command-facing view synchronized with successful discovery without
+                // making it part of response-time routing. Merge because VS Code may discover
+                // multiple configured provider groups independently.
+                this.mergeDisplayedModels(models);
             } else {
                 Logger.trace(
                     `LiteLLMProviderRegistry.discoverModels: skipping registry write (no session/apiKey) baseUrl="${baseUrl}" modelCount=${models.length}`
@@ -774,6 +803,7 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             id: modelId,
             name: modelName,
             vendor: modelInfo?.litellm_provider ?? "litellm",
+            backendName: detailBase,
             tooltip: `Provider: ${modelInfo?.litellm_provider ?? "litellm"}, Model: ${modelName} via ${detailBase}`,
             detail,
             description: modelInfo?.litellm_provider ?? "",
@@ -827,6 +857,13 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             if (pricingTooltip) {
                 (info as { tooltip?: string }).tooltip = `${info.tooltip}\n${pricingTooltip}`;
             }
+
+            // Keep the picker row focused on identity. Pricing and exact token
+            // limits belong in the model tooltip/detail instead of being
+            // reformatted into the QuickPick's primary label.
+            (info as { tooltip?: string }).tooltip =
+                `${info.tooltip}\nLimits: input ${derived.maxInputTokens.toLocaleString()} tokens, ` +
+                `output ${derived.maxOutputTokens.toLocaleString()} tokens`;
         }
 
         return info;

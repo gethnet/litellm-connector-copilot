@@ -1,0 +1,69 @@
+name: Stale PR Cleanup
+# Closes pull requests that have had no activity for 21 days, with a 7-day
+# warning before closure. VS Code ships weekly, so PRs can rot quickly when
+# contributors don't respond to review feedback.
+#
+# Exemption labels (apply any one to keep a PR open indefinitely):
+#   - chore:dependencies    (Dependabot / dependency bumps)
+#   - exemption:pr-stale    (manual maintainer override)
+#
+# Issues are intentionally left untouched (days-before-issue-* set to -1).
+# Schedule: daily at 01:30 UTC, off-peak for the GitHub Actions cron pool.
+
+on:
+  schedule:
+    - cron: "30 1 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+  pull-requests: write
+  contents: read
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Mark and close stale pull requests
+        uses: actions/stale@v11
+        with:
+          # --- PR stale/close timing (user policy: 21 + 7) ---
+          days-before-stale: -1
+          days-before-close: -1
+          days-before-pr-stale: 21
+          days-before-pr-close: 7
+
+          # Issues are not managed by this workflow.
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+
+          # --- Stale warning (applied after 21 days idle) ---
+          stale-pr-message: |
+            📛 This pull request is **stale** because it has had no activity for 21 days.
+
+            VS Code releases weekly, so PRs can fall out of sync quickly. This PR will be **closed in 7 days** if no further activity occurs.
+
+            - **To keep it open:** push an update, leave a comment, or remove the `stale` label.
+            - **After closure:** you can reopen the PR once it's updated and ready for review.
+
+            If you need more time, ask a maintainer to apply the `exemption:pr-stale` label.
+          stale-pr-label: "stale"
+
+          # --- Closure notice (applied after 7 more days idle) ---
+          close-pr-message: |
+            🔒 This pull request was **closed** because it remained stale for 7 days with no activity.
+
+            This is not a reflection on the contribution — VS Code moves fast and stale branches often no longer apply cleanly. When you're ready, reopen the PR (or open a fresh one) with updated changes and it will be re-reviewed.
+
+          # --- Exemptions: any PR carrying one of these labels is skipped ---
+          exempt-pr-labels: "chore:dependencies,exemption:pr-stale"
+
+          # Draft PRs are explicitly WIP; leave them alone.
+          exempt-draft-pr: true
+
+          # Any comment or push removes the stale label and restarts the timer.
+          remove-stale-when-updated: true
+
+          # Keep API usage within GitHub rate limits; this repo has a small PR volume.
+          operations-per-run: 30

@@ -20,6 +20,11 @@ body:
         - #13
         - #22
 
+  - type: markdown
+    attributes:
+      value: |
+        > ℹ️ **Stale PR policy:** PRs with no activity for 21 days are marked `stale` and auto-closed after 7 more days. Any comment or push resets the timer. Apply `exemption:pr-stale` if you need more time. See [CONTRIBUTING.md](../blob/main/.github/CONTRIBUTING.md).
+
   - type: checkboxes
     id: benchmarks
     attributes:
