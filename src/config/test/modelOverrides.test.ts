@@ -11,6 +11,7 @@ import {
     type ModelOverride,
 } from "../modelOverrides";
 import type { LiteLLMModelInfo } from "../../types";
+import { deriveCapabilitiesFromModelInfo } from "../../utils/modelCapabilities";
 import { Logger } from "../../utils/logger";
 
 const CANONICAL_REASONING_EFFORTS = ["none", "low", "medium", "high"] as const;
@@ -369,5 +370,152 @@ suite("modelOverrides", () => {
         assert.strictEqual(result?.supports_reasoning, null);
         assert.strictEqual(result?.supports_xhigh_reasoning_effort, null);
         assert.strictEqual(result?.supports_max_reasoning_effort, true);
+    });
+
+    test("replaces only explicitly overridden mode and token card fields", () => {
+        const override = {
+            match: "^grok-4\\.5$",
+            mode: "chat",
+            max_output_tokens: 128000,
+        } as ModelOverride;
+
+        getConfigurationStub.returns(buildWorkspaceConfiguration([override]));
+
+        const modelInfo: LiteLLMModelInfo = {
+            mode: "responses",
+            max_input_tokens: 500000,
+            max_output_tokens: 500000,
+            max_tokens: 500000,
+            context_window_tokens: 500000,
+            supports_function_calling: true,
+        };
+
+        const result = applyModelInfoOverrides("grok-4.5", modelInfo);
+
+        assert.strictEqual(result?.mode, "chat");
+        assert.strictEqual(result?.max_output_tokens, 128000);
+        assert.strictEqual(result?.max_input_tokens, 500000);
+        assert.strictEqual(result?.max_tokens, 500000);
+        assert.strictEqual(result?.context_window_tokens, 500000);
+        assert.strictEqual(result?.supports_function_calling, true);
+    });
+
+    test("can override total-window token fields when explicitly set", () => {
+        const override = {
+            match: "^shared-window-model$",
+            max_input_tokens: 200000,
+            max_tokens: 200000,
+            context_window_tokens: 200000,
+            max_output_tokens: 32000,
+        } as ModelOverride;
+
+        getConfigurationStub.returns(buildWorkspaceConfiguration([override]));
+
+        const result = applyModelInfoOverrides("shared-window-model", {
+            max_input_tokens: 1000,
+            max_tokens: 1000,
+            context_window_tokens: 1000,
+            max_output_tokens: 1000,
+        });
+
+        assert.strictEqual(result?.max_input_tokens, 200000);
+        assert.strictEqual(result?.max_tokens, 200000);
+        assert.strictEqual(result?.context_window_tokens, 200000);
+        assert.strictEqual(result?.max_output_tokens, 32000);
+    });
+
+    test("does not apply mode or token overrides when enableModelOverrides is false", () => {
+        const override = {
+            match: "^gpt-5\\.3-codex$",
+            mode: "chat",
+            max_output_tokens: 64000,
+        } as ModelOverride;
+
+        getConfigurationStub.returns(buildWorkspaceConfiguration([override], false));
+
+        const modelInfo: LiteLLMModelInfo = {
+            mode: "responses",
+            max_input_tokens: 272000,
+            max_output_tokens: 128000,
+        };
+
+        assert.deepStrictEqual(applyModelInfoOverrides("gpt-5.3-codex", modelInfo), modelInfo);
+    });
+
+    test("loads valid mode and positive token override fields from user config", () => {
+        const userOverrides: unknown[] = [
+            {
+                match: "^codex$",
+                mode: "chat",
+                max_input_tokens: 272000,
+                max_output_tokens: 128000,
+                max_tokens: 400000,
+                context_window_tokens: 400000,
+            },
+            {
+                match: "^bad-mode$",
+                mode: "embedding",
+                max_output_tokens: 1000,
+            },
+            {
+                match: "^bad-tokens$",
+                max_output_tokens: 0,
+                max_input_tokens: -5,
+            },
+        ];
+
+        getConfigurationStub.returns(buildWorkspaceConfiguration(userOverrides));
+
+        const overrides = loadUserOverrides();
+
+        assert.strictEqual(overrides.length, 3);
+        assert.strictEqual(overrides[0].mode, "chat");
+        assert.strictEqual(overrides[0].max_input_tokens, 272000);
+        assert.strictEqual(overrides[0].max_output_tokens, 128000);
+        assert.strictEqual(overrides[0].max_tokens, 400000);
+        assert.strictEqual(overrides[0].context_window_tokens, 400000);
+        assert.strictEqual(overrides[1].mode, undefined, "invalid mode values are dropped");
+        assert.strictEqual(overrides[1].max_output_tokens, 1000);
+        assert.strictEqual(overrides[2].max_output_tokens, undefined, "non-positive tokens are dropped");
+        assert.strictEqual(overrides[2].max_input_tokens, undefined);
+        assert.ok(loggerWarnStub.called, "invalid mode/token values should warn");
+    });
+
+    test("mode and token overrides feed derived prompt budget for equal-limit cards", () => {
+        const override = {
+            match: "^grok-4\\.5$",
+            max_output_tokens: 128000,
+        } as ModelOverride;
+        getConfigurationStub.returns(buildWorkspaceConfiguration([override]));
+
+        const upstream: LiteLLMModelInfo = {
+            mode: "chat",
+            max_input_tokens: 500000,
+            max_output_tokens: 500000,
+        };
+
+        const patched = applyModelInfoOverrides("grok-4.5", upstream);
+        const derived = deriveCapabilitiesFromModelInfo("grok-4.5", patched);
+
+        assert.strictEqual(patched?.max_output_tokens, 128000);
+        assert.strictEqual(derived.maxOutputTokens, 128000);
+        assert.strictEqual(derived.maxInputTokens, 372000);
+        assert.strictEqual(derived.rawContextWindow, 500000);
+    });
+
+    test("mode override is visible on cached model info used for endpoint selection", () => {
+        const override = {
+            match: "^gpt-5\\.3-codex$",
+            mode: "chat",
+        } as ModelOverride;
+        getConfigurationStub.returns(buildWorkspaceConfiguration([override]));
+
+        const result = applyModelInfoOverrides("gpt-5.3-codex", {
+            mode: "responses",
+            max_input_tokens: 272000,
+            max_output_tokens: 128000,
+        });
+
+        assert.strictEqual(result?.mode, "chat");
     });
 });

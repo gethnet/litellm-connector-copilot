@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
 import type {
     LiteLLMModelInfo,
+    LiteLLMModelMode,
+    ModelCardInfoPatch,
     ModelOverride,
     ReasoningModelInfoField,
     ReasoningModelInfoPatch,
@@ -105,13 +107,25 @@ export function toStringArray(value: unknown): string[] | undefined {
     return items.length > 0 ? items : undefined;
 }
 
+function isLiteLLMModelMode(value: unknown): value is LiteLLMModelMode {
+    return value === "chat" || value === "responses" || value === "completions";
+}
+
+/**
+ * Accept only finite positive numbers for token-limit overrides.
+ * Zero/negative/NaN values are rejected so bad settings cannot collapse budgets.
+ */
+function toPositiveTokenCount(value: unknown): number | undefined {
+    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
 function validateOverride(entry: unknown, source: string): ModelOverride | undefined {
     if (!entry || typeof entry !== "object") {
         Logger.warn(`[modelOverrides] Skipping invalid override from ${source}: not an object`);
         return undefined;
     }
 
-    const candidate = entry as Partial<ModelOverride>;
+    const candidate = entry as Partial<ModelOverride> & Record<string, unknown>;
 
     if (!candidate.match || typeof candidate.match !== "string") {
         Logger.warn(`[modelOverrides] Skipping invalid override from ${source}: missing match`);
@@ -130,6 +144,42 @@ function validateOverride(entry: unknown, source: string): ModelOverride | undef
             ? candidate.defaultEffort
             : undefined;
 
+    let mode: LiteLLMModelMode | undefined;
+    if (candidate.mode !== undefined) {
+        if (isLiteLLMModelMode(candidate.mode)) {
+            mode = candidate.mode;
+        } else {
+            Logger.warn(
+                `[modelOverrides] Ignoring invalid mode from ${source} for match ${candidate.match}: ${String(candidate.mode)}`
+            );
+        }
+    }
+
+    const maxInputTokens = toPositiveTokenCount(candidate.max_input_tokens);
+    if (candidate.max_input_tokens !== undefined && maxInputTokens === undefined) {
+        Logger.warn(
+            `[modelOverrides] Ignoring invalid max_input_tokens from ${source} for match ${candidate.match}: ${String(candidate.max_input_tokens)}`
+        );
+    }
+    const maxOutputTokens = toPositiveTokenCount(candidate.max_output_tokens);
+    if (candidate.max_output_tokens !== undefined && maxOutputTokens === undefined) {
+        Logger.warn(
+            `[modelOverrides] Ignoring invalid max_output_tokens from ${source} for match ${candidate.match}: ${String(candidate.max_output_tokens)}`
+        );
+    }
+    const maxTokens = toPositiveTokenCount(candidate.max_tokens);
+    if (candidate.max_tokens !== undefined && maxTokens === undefined) {
+        Logger.warn(
+            `[modelOverrides] Ignoring invalid max_tokens from ${source} for match ${candidate.match}: ${String(candidate.max_tokens)}`
+        );
+    }
+    const contextWindowTokens = toPositiveTokenCount(candidate.context_window_tokens);
+    if (candidate.context_window_tokens !== undefined && contextWindowTokens === undefined) {
+        Logger.warn(
+            `[modelOverrides] Ignoring invalid context_window_tokens from ${source} for match ${candidate.match}: ${String(candidate.context_window_tokens)}`
+        );
+    }
+
     return {
         match: candidate.match,
         supports_reasoning: candidate.supports_reasoning,
@@ -140,11 +190,16 @@ function validateOverride(entry: unknown, source: string): ModelOverride | undef
         supports_high_reasoning_effort: candidate.supports_high_reasoning_effort,
         supports_xhigh_reasoning_effort: candidate.supports_xhigh_reasoning_effort,
         supports_max_reasoning_effort: candidate.supports_max_reasoning_effort,
+        mode,
+        max_input_tokens: maxInputTokens,
+        max_output_tokens: maxOutputTokens,
+        max_tokens: maxTokens,
+        context_window_tokens: contextWindowTokens,
         defaultEffort,
         forceMandatory: candidate.forceMandatory === true,
         tags: toStringArray(candidate.tags),
         supportedOpenaiParams: toStringArray(candidate.supportedOpenaiParams),
-        notes: candidate.notes,
+        notes: typeof candidate.notes === "string" ? candidate.notes : undefined,
     };
 }
 
@@ -222,15 +277,44 @@ export function applyModelInfoOverrides(
         return modelInfo;
     }
 
-    const patch: ReasoningModelInfoPatch = {};
+    // Only explicitly configured fields replace LiteLLM values. Omitted fields
+    // stay exactly as the gateway reported them (reasoning, mode, and token limits).
+    const reasoningPatch: ReasoningModelInfoPatch = {};
     for (const field of REASONING_MODEL_INFO_FIELDS) {
         const value = override[field];
         if (value !== undefined) {
-            patch[field] = value;
+            reasoningPatch[field] = value;
         }
     }
 
-    return Object.keys(patch).length > 0 ? { ...modelInfo, ...patch } : modelInfo;
+    const cardPatch: ModelCardInfoPatch = {};
+    if (override.mode !== undefined) {
+        cardPatch.mode = override.mode;
+    }
+    if (override.max_input_tokens !== undefined) {
+        cardPatch.max_input_tokens = override.max_input_tokens;
+    }
+    if (override.max_output_tokens !== undefined) {
+        cardPatch.max_output_tokens = override.max_output_tokens;
+    }
+    if (override.max_tokens !== undefined) {
+        cardPatch.max_tokens = override.max_tokens;
+    }
+    if (override.context_window_tokens !== undefined) {
+        cardPatch.context_window_tokens = override.context_window_tokens;
+    }
+
+    const hasReasoningPatch = Object.keys(reasoningPatch).length > 0;
+    const hasCardPatch = Object.keys(cardPatch).length > 0;
+    if (!hasReasoningPatch && !hasCardPatch) {
+        return modelInfo;
+    }
+
+    return {
+        ...modelInfo,
+        ...reasoningPatch,
+        ...cardPatch,
+    };
 }
 
 function getExplicitReasoningEfforts(modelInfo?: LiteLLMModelInfo): SupportedReasoningEffort[] | undefined {
@@ -329,4 +413,5 @@ export function getDefaultEffort(
 }
 
 export { CANONICAL_REASONING_EFFORTS, CANONICAL_DEFAULT_EFFORT };
-export type { ModelOverride } from "../types";
+/** Re-export for tests and callers that import override types from this module. */
+export type { ModelOverride };

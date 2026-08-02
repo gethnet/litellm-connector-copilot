@@ -122,35 +122,91 @@
 				"litellm-connector.modelOverrides": {
 					"type": "array",
 					"default": [],
-					"description": "User-supplied model overrides for reasoning capabilities. Merged on top of bundled overrides (user entries take precedence on regex match). Each entry: { match: string (regex), supportsReasoning?: boolean|null, reasoningEfforts?: string[], defaultEffort?: string, notes?: string }.",
+					"markdownDescription": "User-supplied model-card overrides (opt-in via `litellm-connector.enableModelOverrides`). Only explicitly set fields replace LiteLLM `/model/info` values. Supports reasoning flags, endpoint `mode`, and raw token-limit fields. Match the raw LiteLLM `model_name` with a regex.",
 					"items": {
 						"type": "object",
 						"properties": {
 							"match": {
 								"type": "string",
-								"description": "Regex pattern matched against the model id."
+								"description": "Regex pattern matched against the raw LiteLLM model_name."
 							},
-							"supportsReasoning": {
+							"supports_reasoning": {
 								"type": [
 									"boolean",
 									"null"
 								],
-								"description": "Override reasoning support. null = inherit from proxy."
+								"description": "Override LiteLLM supports_reasoning. null is stored as-is when set."
 							},
-							"reasoningEfforts": {
-								"type": "array",
-								"items": {
-									"type": "string",
-									"enum": [
-										"none",
-										"minimal",
-										"low",
-										"medium",
-										"high",
-										"xhigh",
-										"max"
-									]
-								}
+							"supports_none_reasoning_effort": {
+								"type": [
+									"boolean",
+									"null"
+								]
+							},
+							"supports_minimal_reasoning_effort": {
+								"type": [
+									"boolean",
+									"null"
+								]
+							},
+							"supports_low_reasoning_effort": {
+								"type": [
+									"boolean",
+									"null"
+								]
+							},
+							"supports_medium_reasoning_effort": {
+								"type": [
+									"boolean",
+									"null"
+								]
+							},
+							"supports_high_reasoning_effort": {
+								"type": [
+									"boolean",
+									"null"
+								]
+							},
+							"supports_xhigh_reasoning_effort": {
+								"type": [
+									"boolean",
+									"null"
+								]
+							},
+							"supports_max_reasoning_effort": {
+								"type": [
+									"boolean",
+									"null"
+								]
+							},
+							"mode": {
+								"type": "string",
+								"enum": [
+									"chat",
+									"responses",
+									"completions"
+								],
+								"description": "Override LiteLLM model_info.mode used for endpoint selection. Workspace forceResponsesEndpoint still forces chat → responses after overrides."
+							},
+							"max_input_tokens": {
+								"type": "number",
+								"minimum": 1,
+								"description": "Override LiteLLM max_input_tokens (used as the preferred total-window candidate during capability derivation)."
+							},
+							"max_output_tokens": {
+								"type": "number",
+								"minimum": 1,
+								"description": "Override LiteLLM max_output_tokens (output cap and prompt-budget subtraction)."
+							},
+							"max_tokens": {
+								"type": "number",
+								"minimum": 1,
+								"description": "Override LiteLLM max_tokens total-window fallback field."
+							},
+							"context_window_tokens": {
+								"type": "number",
+								"minimum": 1,
+								"description": "Override LiteLLM context_window_tokens total-window candidate."
 							},
 							"defaultEffort": {
 								"type": "string",
@@ -163,6 +219,10 @@
 									"xhigh",
 									"max"
 								]
+							},
+							"forceMandatory": {
+								"type": "boolean",
+								"description": "When true, override reasoning efforts can force request-time fallback selection even if LiteLLM already reports data."
 							},
 							"notes": {
 								"type": "string"
