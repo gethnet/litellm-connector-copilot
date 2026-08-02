@@ -304,17 +304,25 @@ export function applyModelInfoOverrides(
         cardPatch.context_window_tokens = override.context_window_tokens;
     }
 
+    // Full replace when present: callers must supply the complete desired list.
+    // This is the previously-dead `supportedOpenaiParams` plumbing.
+    const hasSupportedParamsOverride = override.supportedOpenaiParams !== undefined;
+
     const hasReasoningPatch = Object.keys(reasoningPatch).length > 0;
     const hasCardPatch = Object.keys(cardPatch).length > 0;
-    if (!hasReasoningPatch && !hasCardPatch) {
+    if (!hasReasoningPatch && !hasCardPatch && !hasSupportedParamsOverride) {
         return modelInfo;
     }
 
-    return {
+    const patched: LiteLLMModelInfo = {
         ...modelInfo,
         ...reasoningPatch,
         ...cardPatch,
     };
+    if (hasSupportedParamsOverride) {
+        patched.supported_openai_params = override.supportedOpenaiParams;
+    }
+    return patched;
 }
 
 function getExplicitReasoningEfforts(modelInfo?: LiteLLMModelInfo): SupportedReasoningEffort[] | undefined {

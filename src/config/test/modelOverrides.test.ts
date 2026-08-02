@@ -518,4 +518,73 @@ suite("modelOverrides", () => {
 
         assert.strictEqual(result?.mode, "chat");
     });
+
+    test("supportedOpenaiParams fully replaces supported_openai_params when set", () => {
+        const override = {
+            match: "^some-model$",
+            supportedOpenaiParams: ["temperature", "top_p", "tools", "tool_choice", "stream"],
+        } as ModelOverride;
+        getConfigurationStub.returns(buildWorkspaceConfiguration([override]));
+
+        const result = applyModelInfoOverrides("some-model", {
+            supported_openai_params: ["stream", "max_tokens", "frequency_penalty"],
+            supports_function_calling: true,
+        });
+
+        assert.deepStrictEqual(result?.supported_openai_params, [
+            "temperature",
+            "top_p",
+            "tools",
+            "tool_choice",
+            "stream",
+        ]);
+        assert.strictEqual(result?.supports_function_calling, true);
+    });
+
+    test("omitted supportedOpenaiParams leaves LiteLLM supported_openai_params unchanged", () => {
+        const override = {
+            match: "^some-model$",
+            mode: "chat",
+        } as ModelOverride;
+        getConfigurationStub.returns(buildWorkspaceConfiguration([override]));
+
+        const upstream: LiteLLMModelInfo = {
+            mode: "responses",
+            supported_openai_params: ["temperature", "stream"],
+        };
+        const result = applyModelInfoOverrides("some-model", upstream);
+
+        assert.strictEqual(result?.mode, "chat");
+        assert.deepStrictEqual(result?.supported_openai_params, ["temperature", "stream"]);
+    });
+
+    test("does not apply supportedOpenaiParams when enableModelOverrides is false", () => {
+        const override = {
+            match: "^gpt-5$",
+            supportedOpenaiParams: ["temperature", "stream"],
+        } as ModelOverride;
+        getConfigurationStub.returns(buildWorkspaceConfiguration([override], false));
+
+        const modelInfo: LiteLLMModelInfo = {
+            supported_openai_params: ["stream"],
+        };
+
+        assert.deepStrictEqual(applyModelInfoOverrides("gpt-5", modelInfo), modelInfo);
+    });
+
+    test("supportedOpenaiParams-only override still patches model info", () => {
+        const override = {
+            match: "^params-only$",
+            supportedOpenaiParams: ["temperature", "stream"],
+        } as ModelOverride;
+        getConfigurationStub.returns(buildWorkspaceConfiguration([override]));
+
+        const result = applyModelInfoOverrides("params-only", {
+            mode: "chat",
+            supported_openai_params: ["stream"],
+        });
+
+        assert.deepStrictEqual(result?.supported_openai_params, ["temperature", "stream"]);
+        assert.strictEqual(result?.mode, "chat");
+    });
 });

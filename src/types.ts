@@ -151,7 +151,11 @@ export interface ModelOverride {
     forceMandatory?: boolean;
     /** Custom tags to add to model */
     tags?: string[];
-    /** Override for supported_openai_params */
+    /**
+     * Full replacement for LiteLLM `supported_openai_params` when set.
+     * Applied at discovery time; the list is authoritative for request param
+     * filtering and wins over static `KNOWN_PARAMETER_LIMITATIONS`.
+     */
     supportedOpenaiParams?: string[];
     /** Additional notes about this override */
     notes?: string;

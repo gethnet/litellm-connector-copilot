@@ -213,7 +213,7 @@ Base URL and API key are configured through **VS Code's Language Models provider
 
 ### 🛠️ Help: Applying a Model Override
 
-Use a model override when LiteLLM's `/model/info` response is missing or incorrectly reports model-card fields (reasoning flags, endpoint `mode`, or token limits). Overrides are disabled by default and must be enabled explicitly.
+Use a model override when LiteLLM's `/model/info` response is missing or incorrectly reports model-card fields (reasoning flags, endpoint `mode`, token limits, or `supported_openai_params`). Overrides are disabled by default and must be enabled explicitly.
 
 1. Open **Preferences: Open User Settings (JSON)** or **Preferences: Open Workspace Settings (JSON)**.
 2. Set `litellm-connector.enableModelOverrides` to `true`.
@@ -240,6 +240,11 @@ Only fields included in the matching rule are changed; omitted fields remain exa
 			"match": "^grok-4\\.5$",
 			"max_output_tokens": 128000,
 			"notes": "Equal in/out limits collapse prompt budget; lower output reserve"
+		},
+		{
+			"match": "^gpt-5\\.4$",
+			"supportedOpenaiParams": ["temperature", "top_p", "tools", "tool_choice", "stream"],
+			"notes": "Full replace of supported_openai_params; list is authoritative"
 		}
 	]
 }
@@ -248,6 +253,8 @@ Only fields included in the matching rule are changed; omitted fields remain exa
 In the first example, `supports_reasoning` and `supports_max_reasoning_effort` are replaced or added for `gpt-4.8`. Other fields, such as `supports_xhigh_reasoning_effort`, are not inferred or changed. To explicitly disable a field, set it to `false`; to replace a `null` value, define the field in the override.
 
 The second example corrects endpoint routing by setting `mode` to `chat`, `responses`, or `completions`. The third example patches raw LiteLLM token fields (`max_output_tokens`, and optionally `max_input_tokens` / `max_tokens` / `context_window_tokens`) before the connector derives VS Code prompt/output budgets.
+
+The fourth example sets `supportedOpenaiParams` to the **complete** desired `supported_openai_params` list (full replace, not a merge). When present, that list drives request parameter filtering and wins over static family denylists such as the built-in `gpt-5` temperature strip. Omit the field entirely to keep LiteLLM's reported list unchanged.
 
 The rule can also define `defaultEffort`, but it does not replace the LiteLLM field-level behavior. Use `supports_low_reasoning_effort`, `supports_medium_reasoning_effort`, `supports_high_reasoning_effort`, `supports_xhigh_reasoning_effort`, or `supports_max_reasoning_effort` explicitly when those levels should be available.
 

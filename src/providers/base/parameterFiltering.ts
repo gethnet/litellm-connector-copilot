@@ -41,39 +41,27 @@ const RESTRICTABLE_PARAMS: ReadonlySet<string> = new Set([
  * Decides whether a given OpenAI parameter can be sent to a model.
  *
  * Source of truth: the `supported_openai_params` array on the model's
- * `LiteLLMModelInfo` (delivered by the registry). There is no probe
- * cache here — the registry's per-model capability data is authoritative
- * and re-validated on every discovery call, so a stale cache layer
- * would only ever shadow correct information and (as observed in
- * production) cause a model to silently drop parameters it actually
- * supports.
+ * `LiteLLMModelInfo` (from discovery, including opt-in modelOverrides).
+ * There is no probe cache here — the registry's per-model capability data
+ * is authoritative and re-validated on every discovery call.
  *
  * Resolution order:
- * 1. Exact-id `KNOWN_PARAMETER_LIMITATIONS` match → unsupported.
- * 2. Prefix `KNOWN_PARAMETER_LIMITATIONS` match → unsupported.
- * 3. `modelInfo.supported_openai_params` present:
+ * 1. `modelInfo.supported_openai_params` present (including user overrides):
  *      - empty array → unsupported (model reports "supports nothing").
  *      - param listed → supported.
  *      - param absent and restrictable → unsupported.
  *      - param absent and non-restrictable → supported (lenient).
- * 4. No model info at all → supported (assume openai-compatible default).
+ *    Explicit model-info lists win over static family denylists so corrected
+ *    gateway cards / `supportedOpenaiParams` overrides can re-enable params.
+ * 2. Exact-id `KNOWN_PARAMETER_LIMITATIONS` match → unsupported.
+ * 3. Prefix `KNOWN_PARAMETER_LIMITATIONS` match → unsupported.
+ * 4. No model-info list and no static match → supported (openai-compatible default).
  */
 export function isParameterSupported(
     param: string,
     modelInfo: LiteLLMModelInfo | undefined,
     modelId?: string
 ): boolean {
-    if (modelId) {
-        if (KNOWN_PARAMETER_LIMITATIONS[modelId]?.has(param)) {
-            return false;
-        }
-        for (const [knownModel, limitations] of Object.entries(KNOWN_PARAMETER_LIMITATIONS)) {
-            if (modelId.includes(knownModel) && limitations.has(param)) {
-                return false;
-            }
-        }
-    }
-
     if (modelInfo?.supported_openai_params) {
         const supportedParams = modelInfo.supported_openai_params;
         const normalizedParam = param.toLowerCase();
@@ -87,6 +75,17 @@ export function isParameterSupported(
             return !isRestrictableParam(param);
         }
         return true;
+    }
+
+    if (modelId) {
+        if (KNOWN_PARAMETER_LIMITATIONS[modelId]?.has(param)) {
+            return false;
+        }
+        for (const [knownModel, limitations] of Object.entries(KNOWN_PARAMETER_LIMITATIONS)) {
+            if (modelId.includes(knownModel) && limitations.has(param)) {
+                return false;
+            }
+        }
     }
 
     return true;

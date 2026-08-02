@@ -122,7 +122,7 @@
 				"litellm-connector.modelOverrides": {
 					"type": "array",
 					"default": [],
-					"markdownDescription": "User-supplied model-card overrides (opt-in via `litellm-connector.enableModelOverrides`). Only explicitly set fields replace LiteLLM `/model/info` values. Supports reasoning flags, endpoint `mode`, and raw token-limit fields. Match the raw LiteLLM `model_name` with a regex.",
+					"markdownDescription": "User-supplied model-card overrides (opt-in via `litellm-connector.enableModelOverrides`). Only explicitly set fields replace LiteLLM `/model/info` values. Supports reasoning flags, endpoint `mode`, raw token-limit fields, and `supportedOpenaiParams` (full list replace). Match the raw LiteLLM `model_name` with a regex.",
 					"items": {
 						"type": "object",
 						"properties": {
@@ -223,6 +223,13 @@
 							"forceMandatory": {
 								"type": "boolean",
 								"description": "When true, override reasoning efforts can force request-time fallback selection even if LiteLLM already reports data."
+							},
+							"supportedOpenaiParams": {
+								"type": "array",
+								"items": {
+									"type": "string"
+								},
+								"description": "Full replacement for LiteLLM supported_openai_params. When set, this complete list is used for request parameter filtering and wins over static family denylists."
 							},
 							"notes": {
 								"type": "string"
