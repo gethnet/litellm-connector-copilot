@@ -1,0 +1,25 @@
+{
+    "projectName": "litellm-connector-copilot",
+    "projectOwner": "gethnet",
+    "repoType": "github",
+    "repoHost": "https://github.com",
+    "files": ["README.md", "CONTRIBUTORS.md"],
+    "imageSize": 100,
+    "commit": true,
+    "commitConvention": "gitmoji",
+    "commitType": "docs",
+    "commitMessage": "🔄 docs: update contributors",
+    "contributorsSortAlphabetically": true,
+    "contributorsPerLine": 6,
+    "badgeTemplate": "[![All Contributors](https://img.shields.io/badge/all_contributors-<%= contributors.length %>-orange.svg?style=flat-square)](#-contributors)",
+    "skipCi": true,
+    "contributors": [
+        {
+            "login": "amwdrizz",
+            "name": "amwdrizz",
+            "avatar_url": "https://avatars.githubusercontent.com/u/amwdrizz?v=4",
+            "profile": "https://github.com/amwdrizz",
+            "contributions": ["code", "ideas", "doc", "infra", "maintenance"]
+        }
+    ]
+}
