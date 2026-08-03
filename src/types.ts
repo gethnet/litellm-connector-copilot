@@ -107,6 +107,18 @@ export type ReasoningModelInfoField =
 
 export type ReasoningModelInfoPatch = Partial<Pick<LiteLLMModelInfo, ReasoningModelInfoField>>;
 
+/** Endpoint mode values accepted on LiteLLM model cards / overrides. */
+export type LiteLLMModelMode = "chat" | "responses" | "completions";
+
+/**
+ * Raw LiteLLM model-card fields that modelOverrides may patch besides reasoning flags.
+ * These are applied at discovery time before capability derivation and endpoint routing.
+ */
+export type ModelCardOverrideField =
+    "mode" | "max_input_tokens" | "max_output_tokens" | "max_tokens" | "context_window_tokens";
+
+export type ModelCardInfoPatch = Partial<Pick<LiteLLMModelInfo, ModelCardOverrideField>>;
+
 export interface ModelOverride {
     /** Regex pattern to match model IDs */
     match: string;
@@ -119,13 +131,33 @@ export interface ModelOverride {
     supports_high_reasoning_effort?: boolean | null;
     supports_xhigh_reasoning_effort?: boolean | null;
     supports_max_reasoning_effort?: boolean | null;
+    /**
+     * Override LiteLLM `model_info.mode` used for endpoint selection
+     * (`/chat/completions` vs `/responses` vs completions).
+     * Note: workspace `forceResponsesEndpoint` still forces chat → responses after overrides.
+     */
+    mode?: LiteLLMModelMode;
+    /**
+     * Raw LiteLLM token-limit fields. Patched onto the model card before
+     * `deriveCapabilitiesFromModelInfo` computes VS Code maxInput/maxOutput.
+     */
+    max_input_tokens?: number;
+    max_output_tokens?: number;
+    max_tokens?: number;
+    context_window_tokens?: number;
     /** Default reasoning effort when reasoning is supported */
     defaultEffort?: SupportedReasoningEffort;
     /** Force this override to be mandatory for request-time fallback selection */
     forceMandatory?: boolean;
     /** Custom tags to add to model */
     tags?: string[];
-    /** Override for supported_openai_params */
+    /**
+     * Full replacement for LiteLLM `supported_openai_params` when set.
+     * Applied at discovery time; the list is authoritative for request param
+     * filtering and wins over static `KNOWN_PARAMETER_LIMITATIONS`.
+     * An empty array means "supports no parameters"; omit the field to keep
+     * LiteLLM's reported list unchanged.
+     */
     supportedOpenaiParams?: string[];
     /** Additional notes about this override */
     notes?: string;

@@ -53,6 +53,32 @@ suite("Parameter Validation from supported_openai_params", () => {
         assert.strictEqual(result, false);
     });
 
+    test("supported_openai_params wins over KNOWN_PARAMETER_LIMITATIONS for gpt-5 family", () => {
+        const modelInfo: LiteLLMModelInfo = {
+            // Explicit list (including user modelOverrides) is authoritative.
+            supported_openai_params: ["temperature", "stream", "tools", "tool_choice"],
+        };
+
+        assert.strictEqual(
+            provider.testIsParameterSupported("temperature", modelInfo, "gpt-5.4"),
+            true,
+            "explicit supported list should re-enable temperature despite gpt-5 denylist"
+        );
+        assert.strictEqual(
+            provider.testIsParameterSupported("top_p", modelInfo, "gpt-5.4"),
+            false,
+            "restrictable params absent from explicit list stay unsupported"
+        );
+    });
+
+    test("static gpt-5 denylist still applies when supported_openai_params is absent", () => {
+        assert.strictEqual(provider.testIsParameterSupported("temperature", undefined, "gpt-5.4"), false);
+        assert.strictEqual(
+            provider.testIsParameterSupported("temperature", { supports_function_calling: true }, "gpt-5.4"),
+            false
+        );
+    });
+
     test("handles null supported_openai_params as undefined", () => {
         const modelInfo: LiteLLMModelInfo = {
             supported_openai_params: null, // null should be treated as undefined
