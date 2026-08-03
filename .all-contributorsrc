@@ -20,6 +20,14 @@
             "avatar_url": "https://avatars.githubusercontent.com/u/amwdrizz?v=4",
             "profile": "https://github.com/amwdrizz",
             "contributions": ["code", "ideas", "doc", "infra", "maintenance"]
+        },
+        {
+            "login": "FPA-DavidTai",
+            "name": "David Tai",
+            "avatar_url": "https://avatars.githubusercontent.com/u/60372864?v=4",
+            "profile": "https://github.com/FPA-DavidTai",
+            "contributions": ["code"]
         }
     ]
 }
+
