@@ -541,6 +541,20 @@ suite("modelOverrides", () => {
         assert.strictEqual(result?.supports_function_calling, true);
     });
 
+    test("empty supportedOpenaiParams replaces supported_openai_params with an empty list", () => {
+        const override = {
+            match: "^some-model$",
+            supportedOpenaiParams: [],
+        } as ModelOverride;
+        getConfigurationStub.returns(buildWorkspaceConfiguration([override]));
+
+        const result = applyModelInfoOverrides("some-model", {
+            supported_openai_params: ["temperature", "stream"],
+        });
+
+        assert.deepStrictEqual(result?.supported_openai_params, []);
+    });
+
     test("omitted supportedOpenaiParams leaves LiteLLM supported_openai_params unchanged", () => {
         const override = {
             match: "^some-model$",

@@ -91,13 +91,12 @@ function isSupportedReasoningEffort(value: unknown): value is SupportedReasoning
 }
 
 /**
- * Coerce an unknown value to a `string[]` of trimmed, non-empty entries.
+ * Coerce an unknown value to a non-empty `string[]`.
  * Returns `undefined` when the input is not an array or contains no strings.
  *
- * Used to safely validate user-supplied override fields (`tags`,
- * `supportedOpenaiParams`) without tripping `no-unsafe-*` lints. `Array.isArray`
- * on its own narrows `unknown` to `any[]`, which is why the runtime check is
- * paired here with an explicit `unknown[]` filter.
+ * Used for override fields where an empty list is not meaningful (`tags`).
+ * `Array.isArray` on its own narrows `unknown` to `any[]`, which is why the
+ * runtime check is paired here with an explicit `unknown[]` filter.
  */
 export function toStringArray(value: unknown): string[] | undefined {
     if (!Array.isArray(value)) {
@@ -105,6 +104,15 @@ export function toStringArray(value: unknown): string[] | undefined {
     }
     const items = (value as unknown[]).filter((v): v is string => typeof v === "string");
     return items.length > 0 ? items : undefined;
+}
+
+/**
+ * Coerce `supportedOpenaiParams` while preserving full-replace semantics.
+ * A literal empty array stays empty ("supports no parameters"); omitted or
+ * invalid values become `undefined` so upstream LiteLLM data is left alone.
+ */
+function toSupportedOpenaiParams(value: unknown): string[] | undefined {
+    return Array.isArray(value) && value.length === 0 ? [] : toStringArray(value);
 }
 
 function isLiteLLMModelMode(value: unknown): value is LiteLLMModelMode {
@@ -198,7 +206,7 @@ function validateOverride(entry: unknown, source: string): ModelOverride | undef
         defaultEffort,
         forceMandatory: candidate.forceMandatory === true,
         tags: toStringArray(candidate.tags),
-        supportedOpenaiParams: toStringArray(candidate.supportedOpenaiParams),
+        supportedOpenaiParams: toSupportedOpenaiParams(candidate.supportedOpenaiParams),
         notes: typeof candidate.notes === "string" ? candidate.notes : undefined,
     };
 }

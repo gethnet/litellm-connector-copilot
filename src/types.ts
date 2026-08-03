@@ -155,6 +155,8 @@ export interface ModelOverride {
      * Full replacement for LiteLLM `supported_openai_params` when set.
      * Applied at discovery time; the list is authoritative for request param
      * filtering and wins over static `KNOWN_PARAMETER_LIMITATIONS`.
+     * An empty array means "supports no parameters"; omit the field to keep
+     * LiteLLM's reported list unchanged.
      */
     supportedOpenaiParams?: string[];
     /** Additional notes about this override */

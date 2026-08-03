@@ -224,37 +224,38 @@ Only fields included in the matching rule are changed; omitted fields remain exa
 
 ```json
 {
-	"litellm-connector.enableModelOverrides": true,
-	"litellm-connector.modelOverrides": [
-		{
-			"match": "^gpt-4\\.8$",
-			"supports_reasoning": true,
-			"supports_max_reasoning_effort": true
-		},
-		{
-			"match": "^gpt-5\\.3-codex$",
-			"mode": "chat",
-			"notes": "Gateway advertises responses; route chat via /chat/completions"
-		},
-		{
-			"match": "^grok-4\\.5$",
-			"max_output_tokens": 128000,
-			"notes": "Equal in/out limits collapse prompt budget; lower output reserve"
-		},
-		{
-			"match": "^gpt-5\\.4$",
-			"supportedOpenaiParams": ["temperature", "top_p", "tools", "tool_choice", "stream"],
-			"notes": "Full replace of supported_openai_params; list is authoritative"
-		}
-	]
+  "litellm-connector.enableModelOverrides": true,
+  "litellm-connector.modelOverrides": [
+    {
+      "match": "^claude-opus-4-8$",
+      "supports_none_reasoning_effort": false,
+      "notes": "Gateway advertises none effort; model only accepts low/medium/high"
+    },
+    {
+      "match": "^gpt-5\\.3-codex$",
+      "mode": "chat",
+      "notes": "Gateway advertises responses; route chat via /chat/completions"
+    },
+    {
+      "match": "^grok-4\\.5$",
+      "supports_none_reasoning_effort": false,
+      "max_output_tokens": 128000,
+      "notes": "Equal in/out limits collapse prompt budget; hide unsupported none effort"
+    },
+    {
+      "match": "^gpt-5\\.4$",
+      "supportedOpenaiParams": ["temperature", "top_p", "tools", "tool_choice", "stream"],
+      "notes": "Full replace of supported_openai_params; list is authoritative"
+    }
+  ]
 }
 ```
 
-In the first example, `supports_reasoning` and `supports_max_reasoning_effort` are replaced or added for `gpt-4.8`. Other fields, such as `supports_xhigh_reasoning_effort`, are not inferred or changed. To explicitly disable a field, set it to `false`; to replace a `null` value, define the field in the override.
+In the first example, only `supports_none_reasoning_effort` is corrected for `claude-opus-4-8`. Other fields stay exactly as LiteLLM reported them. To explicitly disable a field, set it to `false`; to replace a `null` value, define the field in the override.
 
-The second example corrects endpoint routing by setting `mode` to `chat`, `responses`, or `completions`. The third example patches raw LiteLLM token fields (`max_output_tokens`, and optionally `max_input_tokens` / `max_tokens` / `context_window_tokens`) before the connector derives VS Code prompt/output budgets.
+The second example corrects endpoint routing by setting `mode` to `chat`, `responses`, or `completions`. The third example patches raw LiteLLM token fields (`max_output_tokens`, and optionally `max_input_tokens` / `max_tokens` / `context_window_tokens`) before the connector derives VS Code prompt/output budgets, and also hides unsupported `none` effort.
 
-The fourth example sets `supportedOpenaiParams` to the **complete** desired `supported_openai_params` list (full replace, not a merge). When present, that list drives request parameter filtering and wins over static family denylists such as the built-in `gpt-5` temperature strip. Omit the field entirely to keep LiteLLM's reported list unchanged.
+The fourth example sets `supportedOpenaiParams` to the **complete** desired `supported_openai_params` list (full replace, not a merge). When present, that list drives request parameter filtering and wins over static family denylists such as the built-in `gpt-5` temperature strip. An empty list explicitly reports that no parameters are supported; omit the field entirely to keep LiteLLM's reported list unchanged.
 
 The rule can also define `defaultEffort`, but it does not replace the LiteLLM field-level behavior. Use `supports_low_reasoning_effort`, `supports_medium_reasoning_effort`, `supports_high_reasoning_effort`, `supports_xhigh_reasoning_effort`, or `supports_max_reasoning_effort` explicitly when those levels should be available.
 
