@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-08-03
+
+### 🚀 Features
+
+* **🧩 Expand `modelOverrides` for mode, tokens, and params (#124)**: Opt-in `modelOverrides` now let self-hosted LiteLLM gateways with incomplete `/model/info` cards patch additional metadata fields at discovery time — `mode`, `max_input_tokens`, `max_output_tokens`, `max_tokens`, and `context_window_tokens`. The previously parsed `supportedOpenaiParams` is now actually applied as a full-list replacement onto `supported_openai_params`, and an explicit `supported_openai_params` value wins over static family denylists in parameter filtering. Requires `enableModelOverrides: true`; `forceResponsesEndpoint` still forces `chat` → `responses` after overrides. Settings schema and README examples updated; `modelOverrides.json` remains empty (no bundled cards). Closes #123. Thanks to @FPA-DavidTai for the contribution! (`src/config/modelOverrides.ts`, `src/providers/base/parameterFiltering.ts`, `src/types.ts`, `README.md`, `package.json`)
+
+### 👥 Community
+
+* **✨ Add All Contributors recognition (#125)**: Adopted the [All Contributors](https://allcontributors.org/) specification to acknowledge contributions across code, docs, ideas, and reviews. Added `.all-contributorsrc`, expanded `CONTRIBUTORS.md`, and added a contributors section to the README with automation scripts wired into `package.json`.
+* **🙌 Welcome new contributor**: Added [@FPA-DavidTai](https://github.com/FPA-DavidTai) to the contributor roster for the `modelOverrides` expansion work.
+
+### 🧪 Tests
+
+* Added coverage for expanded `modelOverrides` behavior — mode/token overrides, `supported_openai_params` full-list replacement, and explicit-params precedence over family denylists. (`src/config/test/modelOverrides.test.ts`, `src/providers/test/parameterValidation.test.ts`)
+
+### 🧹 Chores
+
+* **🔧 Version bump**: `package.json` version updated to `2.4.0`.
+
 ## [2.3.0] - 2026-08-01
 
 ### 🚀 Features
