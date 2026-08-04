@@ -10,13 +10,12 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.3.0
+## 🆕 What's New in 2.4.1
 
-> Version 2.3.0 restores a readable model-ID picker for configuring LiteLLM models in VS Code BYOK settings.
+> Version 2.4.1 fixes commit-message model selection when the configured model ID includes the connector vendor prefix.
 
-- 📋 **Copy complete model IDs** — Use **LiteLLM: Show Available Models** to copy the exact `litellm-connector/<group>/<model>` selector required by VS Code BYOK settings.
-- 🧭 **Readability-focused picker** — Models show as `<group> :: <display name>` with the full selectable ID on the secondary line and provider metadata in the details.
-- 🔄 **Reliable discovery snapshot** — The picker is populated from successful per-group discovery without changing response-time routing behavior.
+- ✍️ **Reliable commit model selection** — `commitModelIdOverride` accepts the complete model-picker ID, including the `litellm-connector/` prefix, and normalizes it automatically for SCM commit generation.
+- 🔎 **Namespaced model resolution** — Commit generation resolves configured models from the discovered backend registry, including models whose LiteLLM names contain nested slashes.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
@@ -146,7 +145,7 @@ Base URL + API key are configured through **VS Code's Language Models UI** (run 
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `commitModelIdOverride` | `""` | Model ID for commit message generation |
+| `commitModelIdOverride` | `""` | Model ID for commit message generation. Accepts the complete `litellm-connector/<group>/<model>` value copied from the model picker; the vendor prefix is normalized automatically. |
 | `inactivityTimeout` | `60` | Seconds before stream is considered idle |
 | `disableCaching` | `false` | When enabled, bypass LiteLLM caching for models that advertise support for the `cache` parameter |
 | `enableModelOverrides` | `false` | Enable model-card override rules |

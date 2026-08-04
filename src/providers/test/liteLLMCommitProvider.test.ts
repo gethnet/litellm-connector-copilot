@@ -436,6 +436,36 @@ suite("LiteLLMCommitMessageProvider", () => {
 
             tokenSource.dispose();
         });
+
+        test("should resolve a model when the override has the vendor prefix", async () => {
+            const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
+            const internals = accessInternals(provider);
+            const modelId = "test-backend/azure_ai/gpt-4o";
+
+            sandbox.stub(internals, "registryEntries").returns([
+                [
+                    modelId,
+                    {
+                        baseUrl: "http://localhost:4000",
+                        apiKey: "test-api-key",
+                        rawModelName: "azure_ai/gpt-4o",
+                    },
+                ],
+            ]);
+
+            const tokenSource = new vscode.CancellationTokenSource();
+            const result = await (
+                internals as unknown as {
+                    resolveCommitModel: (
+                        config: { commitModelIdOverride?: string },
+                        token: vscode.CancellationToken
+                    ) => Promise<vscode.LanguageModelChatInformation | undefined>;
+                }
+            ).resolveCommitModel({ commitModelIdOverride: `litellm-connector/${modelId}` }, tokenSource.token);
+
+            assert.strictEqual(result?.id, modelId);
+            tokenSource.dispose();
+        });
     });
 
     suite("extractTextFromStream", () => {

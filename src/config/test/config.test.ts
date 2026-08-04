@@ -188,6 +188,29 @@ suite("ConfigManager Unit Tests", () => {
         assert.strictEqual(cfg.modelIdOverride, undefined);
     });
 
+    test("getConfig strips the vendor prefix from model ID overrides", async () => {
+        settingsMap.set(
+            "litellm-connector.commitModelIdOverride",
+            "litellm-connector/my-backend/azure_ai/gpt-5.4-mini"
+        );
+        settingsMap.set("litellm-connector.modelIdOverride", "litellm-connector/gpt-4o");
+
+        const cfg = await configManager.getConfig();
+
+        assert.strictEqual(cfg.commitModelIdOverride, "my-backend/azure_ai/gpt-5.4-mini");
+        assert.strictEqual(cfg.modelIdOverride, "gpt-4o");
+    });
+
+    test("getConfig preserves non-prefixed model IDs and treats whitespace as unset", async () => {
+        settingsMap.set("litellm-connector.commitModelIdOverride", "  azure_ai/gpt-5.4-mini  ");
+        settingsMap.set("litellm-connector.modelIdOverride", "   ");
+
+        const cfg = await configManager.getConfig();
+
+        assert.strictEqual(cfg.commitModelIdOverride, "azure_ai/gpt-5.4-mini");
+        assert.strictEqual(cfg.modelIdOverride, undefined);
+    });
+
     test("reportFeatureToggles is a no-op without telemetry service", async () => {
         const manager = new ConfigManager(mockSecrets);
         // This should not throw

@@ -8,13 +8,12 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.3.0
+## 🆕 What's New in 2.4.1
 
-> Version 2.3.0 restores a readable model-ID picker for configuring LiteLLM models in VS Code BYOK settings.
+> Version 2.4.1 fixes commit-message model selection when the configured model ID includes the connector vendor prefix.
 
-- 📋 **Copy complete model IDs** — Use **LiteLLM: Show Available Models** to copy the exact `litellm-connector/<group>/<model>` selector required by VS Code BYOK settings.
-- 🧭 **Readability-focused picker** — Models show as `<group> :: <display name>` with the full selectable ID on the secondary line and provider metadata in the details.
-- 🔄 **Reliable discovery snapshot** — The picker is populated from successful per-group discovery without changing response-time routing behavior.
+- ✍️ **Reliable commit model selection** — `litellm-connector.commitModelIdOverride` accepts the complete model-picker ID, including the `litellm-connector/` prefix, and normalizes it automatically for SCM commit generation.
+- 🔎 **Namespaced model resolution** — Commit generation resolves configured models from the discovered backend registry, including models whose LiteLLM names contain nested slashes.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
@@ -196,7 +195,7 @@ Base URL and API key are configured through **VS Code's Language Models provider
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `litellm-connector.commitModelIdOverride` | string | `""` | Model ID for git commit message generation |
+| `litellm-connector.commitModelIdOverride` | string | `""` | Model ID for git commit message generation. Accepts the complete `litellm-connector/<group>/<model>` value copied from the model picker; the vendor prefix is normalized automatically. |
 | `litellm-connector.inactivityTimeout` | number | `60` | Seconds before connection is considered idle |
 | `litellm-connector.disableCaching` | boolean | `false` | When enabled, bypass LiteLLM caching for models that advertise support for the `cache` parameter |
 | `litellm-connector.disableQuotaToolRedaction` | boolean | `false` | Disable automatic tool removal on quota errors |
