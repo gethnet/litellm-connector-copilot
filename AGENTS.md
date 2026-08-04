@@ -68,6 +68,30 @@ This document defines **repo-wide, tool-agnostic** expectations for automated co
 - **Prefer outcome-focused wording**: describe user impact (e.g. “prevents hard failure”, “reduces false redactions”).
 - **Avoid noise**: no walls of text; prefer short summaries and bullet points for PR descriptions and changelog entries.
 
+### GitHub Label Conventions
+Use consistently scoped labels following the `<category>:<status>` pattern. This ensures labels are self-documenting and easy to filter.
+
+**Allowed Label Prefixes:**
+- `priority:*` — Urgency level (critical, high, medium, low)
+- `status:*` — Lifecycle state (backlog, done, in-progress, ready, new, pending-pr)
+- `type:*` — Issue type (bug, chore, documentation, enhancement, feature, spike, task)
+- `workflow:*` — Process state (design, duplicate, good-first-issue, invalid, needs-input, wontfix, changes-requested)
+- `chore:*` — Maintenance type (dependencies, github-actions)
+- `exemption:*` — Policy exemptions (pr-stale)
+
+**Single-Word Labels (limited usage):**
+- `help wanted` — When external contribution is desired
+- `review-needed` — When PR needs review
+- `tool-calls` — When issue relates to tool call handling
+- `commit-message` — When issue relates to commit message generation
+
+**Labels to AVOID Creating:**
+- Non-prefixed labels that don't clearly indicate category (e.g., "investigation", "performance")
+- Duplicate labels that replicate an already-scoped label (e.g., "bug" when "type:bug" exists)
+- Underscored prefixes (e.g., "high_priority" instead of "priority:high")
+
+**When creating issues, use the existing scoped labels. Do NOT create new labels without first checking `gh label list` and following the `<category>:<status>` pattern.**
+
 ### File structure guidance
 Group by responsibility and keep folder placement intuitive to a first-time reader:
 - `src/providers/`: Language Model provider implementations

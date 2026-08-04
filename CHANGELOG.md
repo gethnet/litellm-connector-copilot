@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### 🐛 Fixes
+
+* **✍️ Normalize commit model IDs**: `commitModelIdOverride` now strips the `litellm-connector/` vendor prefix when reading the setting, so IDs copied directly from the model picker work with SCM commit-message generation. Commit model resolution now enumerates discovered backend models and supports namespaced LiteLLM model names. Fixes #127. (`src/config/configManager.ts`, `src/providers/liteLLMCommitProvider.ts`)
+
+### 🧪 Tests
+
+* Added regression coverage for prefixed and unprefixed model ID settings and commit model resolution across namespaced registry entries.
+
 ## [2.4.0] - 2026-08-03
 
 ### 🚀 Features

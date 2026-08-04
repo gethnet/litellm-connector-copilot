@@ -217,9 +217,8 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
         // lookup and tag-based fallback work without a model-list cache. The
         // registry is the only place we have any model→backend knowledge at
         // this call site.
-        const registry = this._registry;
         const models: vscode.LanguageModelChatInformation[] = [];
-        for (const [id, entry] of this.registryEntries(registry)) {
+        for (const [id, entry] of this.registryEntries(this._registry)) {
             models.push({
                 id,
                 name: id,
@@ -233,9 +232,12 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
             });
         }
 
-        if (config.commitModelIdOverride) {
-            Logger.trace(`Returning model data ${config.commitModelIdOverride}`);
-            return models.find((m) => m.id === config.commitModelIdOverride);
+        const normalizedOverride = config.commitModelIdOverride?.trim().replace(/^litellm-connector\//, "");
+        if (normalizedOverride) {
+            Logger.trace(`Returning model data ${normalizedOverride}`);
+            return models.find(
+                (model) => model.id === normalizedOverride || model.id.endsWith(`/${normalizedOverride}`)
+            );
         }
 
         // Prefer models explicitly tagged for SCM generation. The registry
@@ -251,15 +253,15 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
      */
     private *registryEntries(registry: {
         findBackendForRawName(rawName: string): { baseUrl: string; apiKey: string; rawModelName: string } | undefined;
+        getAllModels(): vscode.LanguageModelChatInformation[];
+        lookup(
+            id: string
+        ): { baseUrl: string; apiKey: string; rawModelName: string; routingIdentity: string } | undefined;
     }): Iterable<[string, { baseUrl: string; apiKey: string; rawModelName: string }]> {
-        // The registry doesn't expose iteration. We rely on VS Code's picker
-        // to surface models to the user; commit-model resolution from a
-        // non-chat call site is a known limitation. This generator is here
-        // to keep the resolver's control flow simple.
-        for (const id of []) {
-            const entry = registry.findBackendForRawName(id);
+        for (const model of registry.getAllModels()) {
+            const entry = registry.lookup(model.id);
             if (entry) {
-                yield [id, entry];
+                yield [model.id, entry];
             }
         }
     }

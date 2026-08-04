@@ -21,6 +21,27 @@ export class ConfigManager {
     private static readonly DISCOVERY_CACHE_TTL_MS_KEY = "litellm-connector.discoveryCacheTtlMs";
     private static readonly DISCOVERY_FIRE_DEBOUNCE_MS_KEY = "litellm-connector.discoveryFireDebounceMs";
     private static readonly DISCOVERY_FIRE_MIN_INTERVAL_MS_KEY = "litellm-connector.discoveryFireMinIntervalMs";
+    private static readonly MODEL_ID_VENDOR_PREFIX = "litellm-connector/";
+
+    /**
+     * Normalize IDs persisted by the model picker before they reach VS Code's
+     * model-selection API, which expects the provider's namespaced model ID.
+     */
+    private static normalizeModelId(modelId: string | undefined): string | undefined {
+        const trimmed = modelId?.trim() ?? "";
+        if (trimmed.length === 0) {
+            return undefined;
+        }
+
+        if (trimmed.startsWith(ConfigManager.MODEL_ID_VENDOR_PREFIX)) {
+            Logger.trace(
+                `ConfigManager.normalizeModelId: stripped vendor prefix from "${modelId}" -> "${trimmed.slice(ConfigManager.MODEL_ID_VENDOR_PREFIX.length)}"`
+            );
+            return trimmed.slice(ConfigManager.MODEL_ID_VENDOR_PREFIX.length);
+        }
+
+        return trimmed;
+    }
 
     // Discovery config defaults and bounds
     private static readonly DEFAULT_DISCOVERY_TIMEOUT_MS = 5_000;
@@ -182,10 +203,12 @@ export class ConfigManager {
             }
         }
 
-        const modelIdOverride = workspaceConfig.get<string>(ConfigManager.MODEL_ID_OVERRIDE_KEY, "").trim();
-        const scmGitCompletionsModelId = workspaceConfig
-            .get<string>(ConfigManager.SCM_COMMIT_MSG_MODEL_ID_KEY, "")
-            .trim();
+        const modelIdOverride = ConfigManager.normalizeModelId(
+            workspaceConfig.get<string>(ConfigManager.MODEL_ID_OVERRIDE_KEY, "")
+        );
+        const scmGitCompletionsModelId = ConfigManager.normalizeModelId(
+            workspaceConfig.get<string>(ConfigManager.SCM_COMMIT_MSG_MODEL_ID_KEY, "")
+        );
         const forceResponsesEndpoint = workspaceConfig.get<boolean>(ConfigManager.FORCE_RESPONSES_ENDPOINT_KEY, false);
         const allowChatCompletionsFallback = workspaceConfig.get<boolean>(
             ConfigManager.ALLOW_CHAT_COMPLETIONS_FALLBACK_KEY,
@@ -218,8 +241,8 @@ export class ConfigManager {
             disableQuotaToolRedaction,
             enableModelOverrides,
             modelCapabilitiesOverrides,
-            modelIdOverride: modelIdOverride.length > 0 ? modelIdOverride : undefined,
-            commitModelIdOverride: `${scmGitCompletionsModelId}`,
+            modelIdOverride,
+            commitModelIdOverride: scmGitCompletionsModelId,
             forceResponsesEndpoint,
             allowChatCompletionsFallback,
             displayPricingInPicker,
