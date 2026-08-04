@@ -10,9 +10,9 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.4.1-dev1
+## 🆕 What's New in 2.4.1
 
-> Version 2.4.1-dev1 fixes commit-message model selection when the configured model ID includes the connector vendor prefix.
+> Version 2.4.1 fixes commit-message model selection when the configured model ID includes the connector vendor prefix.
 
 - ✍️ **Reliable commit model selection** — `commitModelIdOverride` accepts the complete model-picker ID, including the `litellm-connector/` prefix, and normalizes it automatically for SCM commit generation.
 - 🔎 **Namespaced model resolution** — Commit generation resolves configured models from the discovered backend registry, including models whose LiteLLM names contain nested slashes.
