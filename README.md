@@ -8,12 +8,12 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.4.1
+## 🆕 What's New in 2.5.0
 
-> Version 2.4.1 fixes commit-message model selection when the configured model ID includes the connector vendor prefix.
+> Version 2.5.0 enables third-party LM consumers to distinguish models across multiple LiteLLM backends.
 
-- ✍️ **Reliable commit model selection** — `litellm-connector.commitModelIdOverride` accepts the complete model-picker ID, including the `litellm-connector/` prefix, and normalizes it automatically for SCM commit generation.
-- 🔎 **Namespaced model resolution** — Commit generation resolves configured models from the discovered backend registry, including models whose LiteLLM names contain nested slashes.
+- 🔍 **Third-party consumer support** — The `family` field now carries the backend display name, allowing third-party extensions like Cline to render distinguishing labels like `openai - example` instead of duplicate `openai - openai` rows.
+- 🔧 **Group name propagation fix** — User-supplied group names from VS Code's group picker now correctly propagate to the model metadata.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 

@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-08-08
+
+### 🚀 Features
+
+* **🔍 Third-party LM consumer support**: The `family` field on `LanguageModelChatInformation` now carries the backend display name instead of the upstream `litellm_provider`. This enables third-party extensions like Cline that call `vscode.lm.selectChatModels()` to distinguish models from different LiteLLM backends — they display as `openai - example` instead of duplicate `openai - openai` rows. The native VS Code picker grouping via `(vendor, groupName)` is unchanged. (`src/providers/liteLLMProviderRegistry.ts`)
+
+### 🐛 Fixes
+
+* **🔧 Group name propagation**: Fixed a bug where user-supplied group names (from VS Code 1.120's group picker) were not propagated to `session.backendName` during model discovery. This caused the `family` field to always use the derived hostname instead of the user-entered label. (`src/providers/liteLLMProviderRegistry.ts`)
+
+### 🧪 Tests
+
+* Added regression coverage for the new `family` field semantics across three scenarios: hostname-derived backends (e.g., `example`), port-bearing URLs (e.g., `localhost:4000`), and user-supplied group names (e.g., `Staging Proxy`). (`src/providers/test/liteLLMProviderBase.modelDisplay.test.ts`)
+
+### 🧹 Chores
+
+* **🔧 Version bump**: `package.json` version updated to `2.5.0-dev1`.
+
 ## [2.4.1] - 2026-08-04
 
 ### 🐛 Fixes

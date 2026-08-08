@@ -542,7 +542,10 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             const urlHostname = deriveGroupNameFromUrl(configuredBaseUrl).trim();
             const displayLabel = options.groupName ?? (urlHostname.length > 0 ? urlHostname : undefined) ?? "LiteLLM";
 
-            const session = this.resolveBackendForCall(options.configuration, urlHostname || displayLabel);
+            // Pass the user-supplied groupName through to convertProviderConfiguration
+            // so it becomes session.backendName and propagates to family. When undefined,
+            // convertProviderConfiguration derives backendName from the URL hostname.
+            const session = this.resolveBackendForCall(options.configuration, options.groupName);
             if (!session) {
                 const baseUrlMissing =
                     typeof options.configuration.baseUrl !== "string" || options.configuration.baseUrl.trim() === "";
@@ -733,7 +736,10 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
                 id: "unknown",
                 name: "unknown",
                 vendor: entry.model_info?.litellm_provider ?? "litellm",
-                family: entry.model_info?.litellm_provider ?? "litellm",
+                // Mirror the happy-path family semantics so the (filtered-out) fallback
+                // is internally consistent. This value never reaches the picker because
+                // isUserSelectable:false filters it out in discoverFromSession().
+                family: backendName || "LiteLLM",
                 version: "1.0",
                 maxInputTokens: 0,
                 maxOutputTokens: 0,
@@ -807,7 +813,13 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             tooltip: `Provider: ${modelInfo?.litellm_provider ?? "litellm"}, Model: ${modelName} via ${detailBase}`,
             detail,
             description: modelInfo?.litellm_provider ?? "",
-            family: modelInfo?.litellm_provider ?? "litellm",
+            // family carries the backend display name (not litellm_provider) so
+            // third-party LM consumers that only see {id,name,vendor,family,version}
+            // — e.g. Cline, which renders "{vendor} - {family}" — can distinguish
+            // models across multiple LiteLLM backends. vendor stays as
+            // litellm_provider to preserve the native picker's (vendor, groupName)
+            // grouping. See /memories/repo/third-party-lm-consumer-display.md.
+            family: detailBase,
             version: "1.0",
             maxInputTokens: derived.maxInputTokens,
             maxOutputTokens: derived.maxOutputTokens,

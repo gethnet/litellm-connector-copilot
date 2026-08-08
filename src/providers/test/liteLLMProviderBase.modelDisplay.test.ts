@@ -67,6 +67,10 @@ suite("LiteLLM model display", () => {
         assert.strictEqual(models[0].id, "example/gpt-4o");
         assert.strictEqual(models[0].name, "gpt-4o");
         assert.strictEqual((models[0] as unknown as { vendor: string }).vendor, "openai");
+        // NEW: family now carries the backend display name so third-party
+        // consumers (Cline et al.) that only see vendor/family can distinguish
+        // backends. vendor stays as litellm_provider for native picker grouping.
+        assert.strictEqual(models[0].family, "example");
         assert.strictEqual((models[0] as unknown as { isUserSelectable?: boolean }).isUserSelectable, true);
 
         // Picker grouping driver: the upstream chat picker (`ModelPickerWidget`
@@ -432,5 +436,94 @@ suite("LiteLLM model display", () => {
             0,
             "the unknown-model fallback is not user-selectable and must be filtered before reaching VS Code"
         );
+    });
+
+    test("family mirrors the backend display name (distinguishable for third-party LM consumers)", async () => {
+        const mockSecrets: vscode.SecretStorage = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            onDidChange: (_listener: unknown) => ({ dispose() {} }),
+        } as unknown as vscode.SecretStorage;
+
+        const provider = new LiteLLMChatProvider(mockSecrets, "test-agent");
+        const token = new vscode.CancellationTokenSource().token;
+
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({
+            data: [
+                {
+                    model_name: "gpt-4o",
+                    model_info: {
+                        key: "localhost:4000/gpt-4o",
+                        litellm_provider: "openai",
+                        mode: "responses",
+                        rawContextWindow: 8192,
+                        maxOutputTokens: 4096,
+                    },
+                },
+            ],
+        });
+
+        const models = await provider.discoverModels(
+            {
+                silent: true,
+                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-key" },
+            },
+            token
+        );
+
+        assert.strictEqual(models.length, 1);
+        // family = backend display name (hostname:port) — the field third-party
+        // consumers (Cline, etc.) read to tell backends apart. deriveGroupNameFromUrl
+        // keeps the non-default port, so "http://localhost:4000" -> "localhost:4000".
+        assert.strictEqual(models[0].family, "localhost:4000");
+        // vendor stays as the upstream litellm_provider so the native picker's
+        // (vendor, groupName) grouping is preserved.
+        assert.strictEqual((models[0] as unknown as { vendor: string }).vendor, "openai");
+        // The backend display name is also surfaced via detail/tooltip (unchanged).
+        assert.strictEqual((models[0] as unknown as { detail: string }).detail, "localhost:4000");
+    });
+
+    test("family mirrors a user-supplied group name when present", async () => {
+        const mockSecrets: vscode.SecretStorage = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            onDidChange: (_listener: unknown) => ({ dispose() {} }),
+        } as unknown as vscode.SecretStorage;
+
+        const provider = new LiteLLMChatProvider(mockSecrets, "test-agent");
+        const token = new vscode.CancellationTokenSource().token;
+
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({
+            data: [
+                {
+                    model_name: "gpt-4o",
+                    model_info: {
+                        key: "localhost:4000/gpt-4o",
+                        litellm_provider: "openai",
+                        mode: "responses",
+                        rawContextWindow: 8192,
+                        maxOutputTokens: 4096,
+                    },
+                },
+            ],
+        });
+
+        const models = await provider.discoverModels(
+            {
+                silent: true,
+                // groupName is surfaced by VS Code 1.120's group picker; when
+                // present it takes precedence over the hostname-derived label.
+                groupName: "Staging Proxy",
+                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-key" },
+            },
+            token
+        );
+
+        assert.strictEqual(models.length, 1);
+        // The user-entered group name becomes backendName, which becomes family.
+        assert.strictEqual(models[0].family, "Staging Proxy");
+        assert.strictEqual((models[0] as unknown as { vendor: string }).vendor, "openai");
     });
 });
