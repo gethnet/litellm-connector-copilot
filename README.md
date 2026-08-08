@@ -10,9 +10,9 @@
 
 ## 🆕 What's New in 2.5.0
 
-> Version 2.5.0 enables third-party LM consumers to distinguish models across multiple LiteLLM backends.
+> Version 2.5.0 makes LiteLLM models visible to third-party LM consumers like Cline.
 
-- 🔍 **Third-party consumer support** — The `family` field now carries the backend display name, allowing third-party extensions like Cline to render distinguishing labels like `openai - example` instead of duplicate `openai - openai` rows.
+- 🔍 **Distinguishable third-party display** — Models visible in third-party extensions (Cline, etc.) now render unique labels including both the backend and model name. Labels look like `litellm-connector - llmapi.wolfram.com/gpt-4o` instead of duplicate `openai - openai` rows.
 - 🔧 **Group name propagation fix** — User-supplied group names from VS Code's group picker now correctly propagate to the model metadata.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.

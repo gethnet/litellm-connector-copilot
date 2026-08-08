@@ -813,13 +813,16 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             tooltip: `Provider: ${modelInfo?.litellm_provider ?? "litellm"}, Model: ${modelName} via ${detailBase}`,
             detail,
             description: modelInfo?.litellm_provider ?? "",
-            // family carries the backend display name (not litellm_provider) so
-            // third-party LM consumers that only see {id,name,vendor,family,version}
-            // — e.g. Cline, which renders "{vendor} - {family}" — can distinguish
-            // models across multiple LiteLLM backends. vendor stays as
-            // litellm_provider to preserve the native picker's (vendor, groupName)
-            // grouping. See /memories/repo/third-party-lm-consumer-display.md.
-            family: detailBase,
+            // family carries "<backendName>/<modelName>" so third-party LM
+            // consumers that only see {id,name,vendor,family,version} — e.g.
+            // Cline, which renders "{vendor} - {family}" — can distinguish
+            // both backends AND individual models within them. Backend-only
+            // display (e.g. "llmapi.wolfram.com" shared by all of a gateway's
+            // models) collapses 4+ models into indistinguishable rows; the
+            // embedded modelName is what makes each row unique for the user.
+            // vendor stays as litellm_provider to preserve the native
+            // picker's (vendor, groupName) grouping.
+            family: `${detailBase}/${modelName}`,
             version: "1.0",
             maxInputTokens: derived.maxInputTokens,
             maxOutputTokens: derived.maxOutputTokens,

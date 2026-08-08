@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 
 ### 🚀 Features
 
-* **🔍 Third-party LM consumer support**: The `family` field on `LanguageModelChatInformation` now carries the backend display name instead of the upstream `litellm_provider`. This enables third-party extensions like Cline that call `vscode.lm.selectChatModels()` to distinguish models from different LiteLLM backends — they display as `openai - example` instead of duplicate `openai - openai` rows. The native VS Code picker grouping via `(vendor, groupName)` is unchanged. (`src/providers/liteLLMProviderRegistry.ts`)
+* **🔍 Distinguishable third-party consumer display**: The `family` field on `LanguageModelChatInformation` now carries `<backendName>/<modelName>` (e.g., `llmapi.wolfram.com/gpt-4o`) instead of the upstream `litellm_provider`. This enables third-party extensions like Cline that call `vscode.lm.selectChatModels()` to render distinct labels for both backends and individual models — instead of duplicate `openai - openai` rows that hide both the backend and the model. Cline labels now show `litellm-connector - llmapi.wolfram.com/gpt-4o`. The native VS Code picker grouping via `(vendor, groupName)` is unchanged. (`src/providers/liteLLMProviderRegistry.ts`)
 
 ### 🐛 Fixes
 
@@ -16,7 +16,7 @@ All notable changes to this project will be documented in this file.
 
 ### 🧪 Tests
 
-* Added regression coverage for the new `family` field semantics across three scenarios: hostname-derived backends (e.g., `example`), port-bearing URLs (e.g., `localhost:4000`), and user-supplied group names (e.g., `Staging Proxy`). (`src/providers/test/liteLLMProviderBase.modelDisplay.test.ts`)
+* Added regression coverage for the new `family` field semantics across three scenarios: hostname-derived backends (e.g., `example/gpt-4o`), port-bearing URLs (e.g., `localhost:4000/gpt-4o`), and user-supplied group names (e.g., `Staging Proxy/gpt-4o`). (`src/providers/test/liteLLMProviderBase.modelDisplay.test.ts`)
 
 ### 🧹 Chores
 

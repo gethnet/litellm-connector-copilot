@@ -67,10 +67,11 @@ suite("LiteLLM model display", () => {
         assert.strictEqual(models[0].id, "example/gpt-4o");
         assert.strictEqual(models[0].name, "gpt-4o");
         assert.strictEqual((models[0] as unknown as { vendor: string }).vendor, "openai");
-        // NEW: family now carries the backend display name so third-party
+        // NEW: family now carries "<backendName>/<modelName>" so third-party
         // consumers (Cline et al.) that only see vendor/family can distinguish
-        // backends. vendor stays as litellm_provider for native picker grouping.
-        assert.strictEqual(models[0].family, "example");
+        // BOTH backends AND individual models within them. vendor stays as
+        // litellm_provider for native picker grouping.
+        assert.strictEqual(models[0].family, "example/gpt-4o");
         assert.strictEqual((models[0] as unknown as { isUserSelectable?: boolean }).isUserSelectable, true);
 
         // Picker grouping driver: the upstream chat picker (`ModelPickerWidget`
@@ -473,10 +474,11 @@ suite("LiteLLM model display", () => {
         );
 
         assert.strictEqual(models.length, 1);
-        // family = backend display name (hostname:port) — the field third-party
-        // consumers (Cline, etc.) read to tell backends apart. deriveGroupNameFromUrl
-        // keeps the non-default port, so "http://localhost:4000" -> "localhost:4000".
-        assert.strictEqual(models[0].family, "localhost:4000");
+        // family = "<backendName>/<modelName>" — embeds both the backend hostname
+        // AND the model name so third-party consumers (Cline, etc.) display each
+        // model uniquely. deriveGroupNameFromUrl keeps the non-default port,
+        // so "http://localhost:4000" -> "localhost:4000".
+        assert.strictEqual(models[0].family, "localhost:4000/gpt-4o");
         // vendor stays as the upstream litellm_provider so the native picker's
         // (vendor, groupName) grouping is preserved.
         assert.strictEqual((models[0] as unknown as { vendor: string }).vendor, "openai");
@@ -522,8 +524,9 @@ suite("LiteLLM model display", () => {
         );
 
         assert.strictEqual(models.length, 1);
-        // The user-entered group name becomes backendName, which becomes family.
-        assert.strictEqual(models[0].family, "Staging Proxy");
+        // The user-entered group name becomes backendName; combined with model name
+        // to make the family value uniquely labeled.
+        assert.strictEqual(models[0].family, "Staging Proxy/gpt-4o");
         assert.strictEqual((models[0] as unknown as { vendor: string }).vendor, "openai");
     });
 });
