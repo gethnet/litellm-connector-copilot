@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-08-19
+
+### 🚀 Features
+
+* **🧩 Configure model-aware inline completion endpoints**: LiteLLM provider groups can now expose an optional OpenAI-compatible FIM endpoint, preserving configured paths such as `/v1`; discovered models publish the resolved endpoint for downstream VS Code inline-completion support. (`package.json`, `src/providers/liteLLMProviderRegistry.ts`)
+* **🎯 Support model-specific completion routing**: Model overrides can provide `completionsUrl`, taking precedence over the group endpoint before falling back to the configured LiteLLM group URL plus `/completions`. (`src/config/modelOverrides.ts`, `src/providers/base/completionsUrl.ts`)
+
+### 🧪 Tests
+
+* Added coverage for endpoint derivation, `/v1` path preservation, URL precedence, and invalid URL fallback. (`src/providers/base/completionsUrl.test.ts`)
+
+### 🧹 Chores
+
+* **🚀 Promote release version**: Promoted the package version to `2.5.1`. (`package.json`)
+
 ## [2.5.0] - 2026-08-19
 
 ### 🚀 Features
@@ -768,7 +783,7 @@ There have been a tremendous amount of backend work done with this update to mak
 
 ---
 
-[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.0...HEAD
+[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.1...HEAD
 [2.5.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.0
 [2.3.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.3.0
 [1.6.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.6.0

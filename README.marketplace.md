@@ -10,14 +10,13 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.5.0
+## 🆕 What's New in 2.5.1
 
-> Version 2.5.0 improves model identity and metadata in the VS Code picker and third-party LM consumers.
+> Version 2.5.1 prepares LiteLLM models for model-aware OpenAI-compatible inline completion routing.
 
-- 🔍 **Distinct model labels** — Third-party extensions can now distinguish models by backend and model name instead of showing duplicate provider labels.
-- 🔧 **Accurate group names** — User-defined provider-group names now flow through to discovered model metadata.
-- 🧭 **Richer picker context** — Model-picker metadata can show upstream provider and pricing information while preserving compact display behavior.
-- 🛠️ **Explicit capability configuration** — Administrators can provide tool-calling, image-input, and edit-tool hints when model cards are incomplete.
+- 🧩 **Configurable FIM endpoints** — Provider groups can expose full OpenAI-compatible inline completion endpoints while preserving paths such as `/v1`.
+- 🎯 **Model-specific routing** — Per-model `completionsUrl` overrides take priority over group-level configuration and derived LiteLLM endpoints.
+- 🧪 **Safer endpoint resolution** — Endpoint derivation, path preservation, precedence, and invalid URL fallback are covered by focused tests.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
