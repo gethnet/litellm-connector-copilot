@@ -119,6 +119,12 @@ function isLiteLLMModelMode(value: unknown): value is LiteLLMModelMode {
     return value === "chat" || value === "responses" || value === "completions";
 }
 
+function toHttpUrl(value: unknown): string | undefined {
+    return typeof value === "string" && /^https?:\/\//i.test(value.trim())
+        ? value.trim().replace(/\/+$/, "")
+        : undefined;
+}
+
 /**
  * Accept only finite positive numbers for token-limit overrides.
  * Zero/negative/NaN values are rejected so bad settings cannot collapse budgets.
@@ -199,6 +205,7 @@ function validateOverride(entry: unknown, source: string): ModelOverride | undef
         supports_xhigh_reasoning_effort: candidate.supports_xhigh_reasoning_effort,
         supports_max_reasoning_effort: candidate.supports_max_reasoning_effort,
         mode,
+        completionsUrl: toHttpUrl(candidate.completionsUrl),
         max_input_tokens: maxInputTokens,
         max_output_tokens: maxOutputTokens,
         max_tokens: maxTokens,
@@ -329,7 +336,7 @@ export function applyModelInfoOverrides(
 
     const hasReasoningPatch = Object.keys(reasoningPatch).length > 0;
     const hasCardPatch = Object.keys(cardPatch).length > 0;
-    if (!hasReasoningPatch && !hasCardPatch && !hasSupportedParamsOverride) {
+    if (!hasReasoningPatch && !hasCardPatch && !hasSupportedParamsOverride && override.completionsUrl === undefined) {
         return modelInfo;
     }
 
@@ -340,6 +347,9 @@ export function applyModelInfoOverrides(
     };
     if (hasSupportedParamsOverride) {
         patched.supported_openai_params = override.supportedOpenaiParams;
+    }
+    if (override.completionsUrl !== undefined) {
+        patched.completionsUrl = override.completionsUrl;
     }
     return patched;
 }

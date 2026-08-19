@@ -161,6 +161,8 @@ export interface ModelOverride {
      * Note: workspace `forceResponsesEndpoint` still forces chat → responses after overrides.
      */
     mode?: LiteLLMModelMode;
+    /** Full OpenAI-compatible FIM endpoint for inline completions. */
+    completionsUrl?: string;
     /**
      * Raw LiteLLM token-limit fields. Patched onto the model card before
      * `deriveCapabilitiesFromModelInfo` computes VS Code maxInput/maxOutput.
@@ -306,6 +308,9 @@ export interface LiteLLMModelInfo {
     blocked?: boolean;
     litellm_provider?: string;
     mode?: string;
+    /** Optional model-specific OpenAI-compatible FIM endpoint. */
+    completionsUrl?: string;
+    completions_url?: string;
     supports_system_messages?: boolean | null;
     supports_response_schema?: boolean;
     supports_vision?: boolean;

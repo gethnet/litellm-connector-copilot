@@ -18,7 +18,7 @@ Follow this workflow exactly:
 
 3. Promote the version.
    - Strip the `-devN` suffix by editing `package.json` directly (e.g. `2.3.0-dev4` → `2.3.0`). Do NOT run `npm run bump-version` — the base version was already chosen when the dev cycle started; this step only removes the pre-release suffix.
-   - Sync `package-lock.json`: update the top-level `version` and the `packages[""].version` fields to match.
+   - Do not modify or synchronize `package-lock.json`; lock files are generated on demand by npm and are not part of this workflow.
 
 4. Update [CHANGELOG.md](../../CHANGELOG.md).
    - Promote the `## [Unreleased]` section to `## [<version>] - <today's date>`.
@@ -38,7 +38,7 @@ Follow this workflow exactly:
    - `npm run test:coverage`
 
 7. Verify version consistency.
-   - `package.json`, `package-lock.json`, the CHANGELOG heading, and both README "What's New" headings must all show the same `<version>` with no `-devN` remnants anywhere. Search the repo for the old dev version string to be sure.
+   - Verify `package.json`, the CHANGELOG heading, and both README "What's New" headings show the same `<version>` with no `-devN` remnants anywhere. Do not require `package-lock.json` to match. Search the repo for the old dev version string to be sure.
 
 8. Commit and open the release PR.
    - Commit all release-prep changes with an emoji-prefixed, outcome-focused message (e.g. `🚀 Release v<version> — <short highlight>`), then push the branch.

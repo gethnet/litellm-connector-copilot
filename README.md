@@ -193,6 +193,8 @@ The copied ID is the complete model ID shown by discovery, including the provide
 
 Base URL and API key are configured through **VS Code's Language Models provider-group UI**. Run **LiteLLM: Manage Configuration** or open Settings → Language Models.
 
+The optional **Inline Completions URL** is a full OpenAI-compatible FIM `/completions` endpoint. If omitted, the connector derives it by appending `/completions` to the configured provider-group URL: `/v1` is preserved when present and is not added when absent. A model-specific `completionsUrl` override takes precedence over the group value. Models without a resolved endpoint remain chat-only for inline suggestions.
+
 ### Workspace Settings
 
 | Setting | Type | Default | Description |

@@ -88,6 +88,7 @@ import {
     formatPricingForDetail,
     formatPricingForTooltip,
 } from "../utils/pricingCalculator";
+import { resolveCompletionsUrl } from "./base/completionsUrl";
 
 /**
  * Cached result from a /model/info discovery call.
@@ -131,6 +132,7 @@ export interface RegistryEntry {
     readonly rawModelName: string;
     /** The routing identity (the part before the first `/` in the id). */
     readonly routingIdentity: string;
+    readonly completionsUrl?: string;
 }
 
 /**
@@ -498,11 +500,15 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
         );
         this.modelsByBackend.set(baseUrl, models);
         for (const model of models) {
+            const modelWithCompletionUrl = model as LanguageModelChatInformation & { completionsUrl?: string };
             this.entries.set(model.id, {
                 baseUrl,
                 apiKey,
                 rawModelName: this.extractRawName(model.id),
                 routingIdentity,
+                ...(modelWithCompletionUrl.completionsUrl
+                    ? { completionsUrl: modelWithCompletionUrl.completionsUrl }
+                    : {}),
             });
         }
         Logger.trace(
@@ -689,6 +695,7 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
                     { url: session.baseUrl, apiKey: session.apiKey },
                     displayLabel,
                     routingIdentity,
+                    session.completionsUrl,
                     config.forceResponsesEndpoint,
                     config.modelCapabilitiesOverrides,
                     config.displayPricingInPicker !== false
@@ -723,6 +730,7 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
         backend: { url?: string; apiKey?: string } | undefined,
         displayLabel: string,
         routingIdentity: string,
+        groupCompletionsUrl?: string,
         forceResponsesEndpoint?: boolean,
         modelCapabilitiesOverrides?: LiteLLMConfig["modelCapabilitiesOverrides"],
         displayPricingInPicker = true
@@ -771,7 +779,12 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
 
         const capabilityOverrides = modelCapabilitiesOverrides?.[modelId] ?? modelCapabilitiesOverrides?.[modelName];
         const capabilities = capabilitiesToVSCode(derived, capabilityOverrides);
-        const tags = getDerivedModelTags(modelId, derived, {}, capabilityOverrides);
+        const completionsUrl = resolveCompletionsUrl(
+            backend?.url,
+            modelInfo?.completionsUrl ?? modelInfo?.completions_url ?? activeModelOverride?.completionsUrl,
+            groupCompletionsUrl
+        );
+        const tags = getDerivedModelTags(modelId, derived, {}, capabilityOverrides, completionsUrl !== undefined);
         const supportedEfforts = getSupportedReasoningEfforts(modelInfo, modelId);
         const reasoningSchema = buildReasoningEffortConfigurationSchema(supportedEfforts, modelId, modelInfo);
 
@@ -853,6 +866,7 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             tags,
             isUserSelectable: true,
             isBYOK: true,
+            ...(completionsUrl ? { completionsUrl } : {}),
             ...(statusIcon ? { statusIcon } : {}),
             ...(hasWarnings ? { warningText } : {}),
             infoText,
