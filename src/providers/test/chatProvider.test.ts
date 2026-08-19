@@ -648,6 +648,82 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         assert.strictEqual(textParts.map((p) => p.value).join(""), "Hello");
     });
 
+    test("preserves redacted thinking metadata when includeEncryptedThinking is requested", async () => {
+        const vscodeWithThinking = vscode as unknown as {
+            LanguageModelThinkingPart?: new (
+                value: string | string[],
+                id?: string,
+                metadata?: Record<string, unknown>
+            ) => vscode.LanguageModelResponsePart;
+        };
+        if (!vscodeWithThinking.LanguageModelThinkingPart) {
+            return;
+        }
+
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        seedDiscoveredBackend(sandbox, provider, "model-1");
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(
+                    encoder.encode(
+                        'data: {"type":"response.content_block_start","block":{"type":"thinking","redacted":true,"redacted_data":"opaque-redacted-thinking"}}\n\n'
+                    )
+                );
+                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                controller.close();
+            },
+        });
+        sandbox.stub(LiteLLMClient.prototype, "chat").resolves(stream);
+
+        const reported: vscode.LanguageModelResponsePart[] = [];
+        await provider.provideLanguageModelChatResponse(
+            {
+                id: "model-1",
+                name: "model-1",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1000,
+                maxOutputTokens: 1000,
+                capabilities: { toolCalling: true, imageInput: false },
+            },
+            [
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [new vscode.LanguageModelTextPart("Continue safely.")],
+                },
+            ],
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+                includeEncryptedThinking: true,
+                configuration: {
+                    baseUrl: "http://localhost:4000",
+                    apiKey: "test-api-key",
+                } as unknown as Record<string, unknown>,
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+            { report: (part: vscode.LanguageModelResponsePart) => reported.push(part) },
+            new vscode.CancellationTokenSource().token
+        );
+
+        const thinkingPart = reported.find((part) => {
+            const candidate = part as unknown as { metadata?: Record<string, unknown> };
+            return candidate.metadata?.redactedData === "opaque-redacted-thinking";
+        });
+        assert.ok(thinkingPart, "expected a thinking part carrying opaque redacted metadata");
+        const candidate = thinkingPart as unknown as {
+            value?: string | string[];
+            metadata?: Record<string, unknown>;
+        };
+        assert.strictEqual(candidate.value, "");
+        assert.strictEqual(candidate.metadata?.redactedData, "opaque-redacted-thinking");
+        assert.strictEqual(candidate.metadata?.display, "omitted");
+    });
+
     test("provideLanguageModelChatResponse emits usage data part via StreamTokenCapture after streaming", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
 

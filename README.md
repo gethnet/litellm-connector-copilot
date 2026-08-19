@@ -8,12 +8,14 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.4.1
+## 🆕 What's New in 2.5.0
 
-> Version 2.4.1 fixes commit-message model selection when the configured model ID includes the connector vendor prefix.
+> Version 2.5.0 makes LiteLLM model metadata clearer and more useful across VS Code and third-party LM consumers.
 
-- ✍️ **Reliable commit model selection** — `litellm-connector.commitModelIdOverride` accepts the complete model-picker ID, including the `litellm-connector/` prefix, and normalizes it automatically for SCM commit generation.
-- 🔎 **Namespaced model resolution** — Commit generation resolves configured models from the discovered backend registry, including models whose LiteLLM names contain nested slashes.
+- 🔍 **Distinguishable third-party display** — Models visible in third-party extensions (Cline, etc.) now render unique labels including both the configured backend name and model name instead of duplicate provider rows.
+- 🔧 **Group name propagation fix** — User-supplied group names from VS Code's group picker now correctly propagate to the model metadata.
+- 🧭 **Clearer model-picker metadata** — Picker information can identify the upstream provider and expose pricing details without obscuring the model's route.
+- 🛠️ **Explicit capability hints** — Model capability overrides support tool calling, image input, and explicitly configured edit-tool strategies.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
@@ -201,7 +203,7 @@ Base URL and API key are configured through **VS Code's Language Models provider
 | `litellm-connector.disableQuotaToolRedaction` | boolean | `false` | Disable automatic tool removal on quota errors |
 | `litellm-connector.enableModelOverrides` | boolean | `false` | Master toggle for user and bundled model-card overrides |
 | `litellm-connector.modelOverrides` | array | `[]` | User-supplied regex-based field overrides; only explicitly defined fields replace LiteLLM data |
-| `litellm-connector.modelCapabilitiesOverrides` | object | `{}` | Override `toolCalling` / `imageInput` capabilities |
+| `litellm-connector.modelCapabilitiesOverrides` | object | `{}` | Enable `toolCalling`, `imageInput`, and explicit edit-tool hints for a model |
 | `litellm-connector.displayPricingInPicker` | boolean | `true` | Show model pricing in the model picker |
 | `litellm-connector.discoveryTimeoutMs` | number | `5000` | Timeout (ms) for `/model/info` discovery requests |
 | `litellm-connector.discoveryCacheTtlMs` | number | `60000` | TTL (ms) for cached discovery responses. Set 0 to disable |
@@ -209,6 +211,28 @@ Base URL and API key are configured through **VS Code's Language Models provider
 | `litellm-connector.discoveryFireMinIntervalMs` | number | `2000` | Min interval (ms) between change notifications |
 
 > **Tip**: Most users won't need to touch these — the defaults work great! Caching bypass and model-card overrides are opt-in.
+
+### Model-picker metadata
+
+The extension preserves its existing picker density rules: with multiple configured LiteLLM backends, the pinned model picker remains compact; with one backend, the picker can show fuller backend and pricing context. Pricing continues to use per-million-token values rounded to two decimal places, such as `$1.00`.
+
+The picker shows neutral route information through `infoText`, using the model's reported `provider` when available, then `litellm_provider`, and finally `litellm`. When `/model/info` supplies input or output pricing, the extension emits VS Code's numeric cost multiplier alongside its existing pricing fields.
+
+`warningText` is intentionally conditional. It appears only when a configured model override is active or when LiteLLM reports `blocked: true` for the model. Ordinary models do not receive a warning banner. A blocked model also receives a blocked status icon when supported by the host.
+
+Capability flags such as reasoning and tool support are not represented as status icons. Non-blocked provider logos are not emitted unless a verified local provider icon asset is available. The extension never marks itself as the default model, restricts models to a session type, requires a second authorization flow, or invents promotions.
+
+To supply an edit-tool hint when LiteLLM does not report it, configure it explicitly. The allowed values are `find-replace`, `multi-find-replace`, `apply-patch`, and `code-rewrite`; unknown values are ignored.
+
+```json
+{
+  "litellm-connector.modelCapabilitiesOverrides": {
+    "coder-model": "toolCalling,apply-patch,multi-find-replace"
+  }
+}
+```
+
+Omit edit-tool values to let VS Code choose its default editing strategy. The extension does not infer edit-tool support from model names or providers.
 
 ### 🛠️ Help: Applying a Model Override
 

@@ -260,6 +260,14 @@ suite("modelOverrides", () => {
         assert.strictEqual(override, undefined, "should return undefined when overrides are disabled");
     });
 
+    test("findOverride returns the active override only when overrides are enabled", () => {
+        const disabledConfig = buildWorkspaceConfiguration([{ match: "gpt-4o", notes: "override" }], false);
+        assert.strictEqual(findOverride("gpt-4o", disabledConfig), undefined);
+
+        const enabledConfig = buildWorkspaceConfiguration([{ match: "gpt-4o", notes: "override" }]);
+        assert.deepStrictEqual(findOverride("gpt-4o", enabledConfig)?.notes, "override");
+    });
+
     test("getEffectiveEfforts ignores overrides when enableModelOverrides is false", () => {
         const userOverrides: ModelOverride[] = [
             {

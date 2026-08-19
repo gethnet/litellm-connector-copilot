@@ -7,6 +7,7 @@ import type {
     OpenAIFunctionToolDef,
     OpenAIToolCall,
     OpenAIChatMessageContentItem,
+    OpenAIThinkingBlock,
 } from "./types";
 import { Logger } from "./utils/logger";
 
@@ -292,6 +293,65 @@ function sanitizeSchema(input: unknown, propName?: string): Record<string, unkno
     return schema;
 }
 
+interface ThinkingInputPart {
+    value?: unknown;
+    metadata?: unknown;
+}
+
+interface ThinkingMetadata {
+    encrypted_content?: unknown;
+    signature?: unknown;
+    redactedData?: unknown;
+}
+
+/**
+ * Returns the transport-safe representation of a VS Code thinking part.
+ *
+ * The host may provide visible text plus an opaque encrypted state, or only
+ * opaque redacted data. A bare thought has no portable OpenAI chat-completions
+ * representation, so it is intentionally omitted rather than leaked into
+ * normal assistant content. The `/responses` adapter owns conversion of the
+ * returned blocks into LiteLLM reasoning input items.
+ */
+function extractOpaqueThinkingBlock(part: unknown): OpenAIThinkingBlock | undefined {
+    if (!part || typeof part !== "object") {
+        return undefined;
+    }
+
+    const candidate = part as ThinkingInputPart;
+    if (!candidate.metadata || typeof candidate.metadata !== "object") {
+        return undefined;
+    }
+
+    const metadata = candidate.metadata as ThinkingMetadata;
+    const redactedData = metadata.redactedData;
+    if (typeof redactedData === "string" && redactedData.length > 0) {
+        return { data: redactedData };
+    }
+
+    const encryptedContent = metadata.encrypted_content;
+    const signature = metadata.signature;
+    const opaqueState =
+        typeof encryptedContent === "string" && encryptedContent.length > 0
+            ? encryptedContent
+            : typeof signature === "string" && signature.length > 0
+              ? signature
+              : undefined;
+    if (!opaqueState) {
+        return undefined;
+    }
+
+    const value = candidate.value;
+    const thinking =
+        typeof value === "string"
+            ? value
+            : Array.isArray(value) && value.every((entry) => typeof entry === "string")
+              ? value.join("")
+              : undefined;
+
+    return thinking ? { thinking, signature: opaqueState } : { signature: opaqueState };
+}
+
 /**
  * Convert VS Code chat request messages into OpenAI-compatible message objects.
  * @param messages The VS Code chat messages to convert.
@@ -309,6 +369,7 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
         const contentItems: OpenAIChatMessageContentItem[] = [];
         const toolCalls: OpenAIToolCall[] = [];
         const toolResults: { callId: string; content: string }[] = [];
+        const thinkingBlocks: OpenAIThinkingBlock[] = [];
 
         for (const part of m.content ?? []) {
             if (part instanceof vscode.LanguageModelTextPart) {
@@ -365,13 +426,23 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                 );
                 const content = collectToolResultText(part as { content?: readonly unknown[] });
                 toolResults.push({ callId, content });
+            } else {
+                const thinkingBlock = extractOpaqueThinkingBlock(part);
+                if (thinkingBlock) {
+                    thinkingBlocks.push(thinkingBlock);
+                }
             }
         }
 
         let emittedAssistantToolCall = false;
         if (toolCalls.length > 0) {
             const messageContent = buildMessageContent(textParts, contentItems);
-            out.push({ role: "assistant", content: messageContent || undefined, tool_calls: toolCalls });
+            out.push({
+                role: "assistant",
+                content: messageContent || undefined,
+                tool_calls: toolCalls,
+                ...(thinkingBlocks.length > 0 ? { thinking_blocks: thinkingBlocks } : {}),
+            });
             emittedAssistantToolCall = true;
         }
 
@@ -380,11 +451,17 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
         }
 
         const text = textParts.join("");
-        if (text || contentItems.length > 0) {
+        if (text || contentItems.length > 0 || thinkingBlocks.length > 0) {
             if (role === "system" || role === "user" || (role === "assistant" && !emittedAssistantToolCall)) {
                 const messageContent = buildMessageContent(textParts, contentItems);
-                if (messageContent) {
-                    out.push({ role: role || "user", content: messageContent });
+                if (messageContent || (role === "assistant" && thinkingBlocks.length > 0)) {
+                    out.push({
+                        role: role || "user",
+                        content: messageContent,
+                        ...(role === "assistant" && thinkingBlocks.length > 0
+                            ? { thinking_blocks: thinkingBlocks }
+                            : {}),
+                    });
                 }
             }
         }

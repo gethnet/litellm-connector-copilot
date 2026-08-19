@@ -39,6 +39,73 @@ suite("Message Normalization", () => {
             const out = convertMessages(messages as unknown as vscode.LanguageModelChatRequestMessage[]);
             assert.strictEqual(out[0].role, "assistant");
         });
+
+        test("preserves signed thinking as an assistant thinking block", () => {
+            const messages = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    content: [
+                        new vscode.LanguageModelTextPart("I will continue from the prior response."),
+                        {
+                            value: "I need to retain the prior reasoning summary.",
+                            id: "thought-1",
+                            metadata: { encrypted_content: "signed-thinking-state" },
+                        },
+                    ],
+                },
+            ];
+
+            const out = convertMessages(messages as unknown as vscode.LanguageModelChatRequestMessage[]);
+
+            assert.strictEqual(out.length, 1);
+            assert.strictEqual(out[0].role, "assistant");
+            assert.strictEqual(out[0].content, "I will continue from the prior response.");
+            assert.deepStrictEqual(out[0].thinking_blocks, [
+                {
+                    thinking: "I need to retain the prior reasoning summary.",
+                    signature: "signed-thinking-state",
+                },
+            ]);
+        });
+
+        test("preserves redacted thinking as opaque data without visible content", () => {
+            const messages = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    content: [
+                        {
+                            value: "",
+                            metadata: { redactedData: "opaque-redacted-thinking" },
+                        },
+                    ],
+                },
+            ];
+
+            const out = convertMessages(messages as unknown as vscode.LanguageModelChatRequestMessage[]);
+
+            assert.strictEqual(out.length, 1);
+            assert.strictEqual(out[0].role, "assistant");
+            assert.strictEqual(out[0].content, undefined);
+            assert.deepStrictEqual(out[0].thinking_blocks, [{ data: "opaque-redacted-thinking" }]);
+        });
+
+        test("drops bare thinking text that has no opaque continuity state", () => {
+            const messages = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    content: [
+                        {
+                            value: "Do not expose this thought as normal assistant content.",
+                            metadata: { display: "summarized" },
+                        },
+                    ],
+                },
+            ];
+
+            const out = convertMessages(messages as unknown as vscode.LanguageModelChatRequestMessage[]);
+
+            assert.deepStrictEqual(out, []);
+        });
     });
 
     suite("normalizeMessagesForV2Pipeline", () => {

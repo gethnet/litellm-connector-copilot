@@ -75,13 +75,14 @@ import {
 } from "../utils/modelCapabilities";
 import { deriveGroupNameFromUrl } from "../utils";
 import { sha256HexAsync } from "../utils/discoveryHash";
-import { applyModelInfoOverrides } from "../config/modelOverrides";
-import type { LiteLLMConfig, LiteLLMModelInfo, LiteLLMModelInfoResponse } from "../types";
+import { applyModelInfoOverrides, getActiveModelOverride } from "../config/modelOverrides";
+import type { LiteLLMConfig, LiteLLMModelInfo, LiteLLMModelInfoResponse, ModelOverride } from "../types";
 import type { ConfigManager } from "../config/configManager";
 import type { BackendSession } from "./backendSession";
 import { sharedDiscoveryBackoff } from "./base/discoveryBackoff";
 import { DebouncedEmitter } from "./base/debouncedEmitter";
 import {
+    deriveMultiplierNumeric,
     derivePriceCategory,
     extractPricing,
     formatPricingForDetail,
@@ -542,7 +543,10 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             const urlHostname = deriveGroupNameFromUrl(configuredBaseUrl).trim();
             const displayLabel = options.groupName ?? (urlHostname.length > 0 ? urlHostname : undefined) ?? "LiteLLM";
 
-            const session = this.resolveBackendForCall(options.configuration, urlHostname || displayLabel);
+            // Pass the user-supplied groupName through to convertProviderConfiguration
+            // so it becomes session.backendName and propagates to family. When undefined,
+            // convertProviderConfiguration derives backendName from the URL hostname.
+            const session = this.resolveBackendForCall(options.configuration, options.groupName);
             if (!session) {
                 const baseUrlMissing =
                     typeof options.configuration.baseUrl !== "string" || options.configuration.baseUrl.trim() === "";
@@ -733,7 +737,10 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
                 id: "unknown",
                 name: "unknown",
                 vendor: entry.model_info?.litellm_provider ?? "litellm",
-                family: entry.model_info?.litellm_provider ?? "litellm",
+                // Mirror the happy-path family semantics so the (filtered-out) fallback
+                // is internally consistent. This value never reaches the picker because
+                // isUserSelectable:false filters it out in discoverFromSession().
+                family: backendName || "LiteLLM",
                 version: "1.0",
                 maxInputTokens: 0,
                 maxOutputTokens: 0,
@@ -752,6 +759,7 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
         // disambiguates them. The `name` shown to the user in the model
         // picker stays as the raw model_name (no namespace leak).
         const modelId = routingIdentity.length > 0 ? `${routingIdentity}/${modelName}` : modelName;
+        const activeModelOverride: ModelOverride | undefined = getActiveModelOverride(modelName);
         let modelInfo = applyModelInfoOverrides(modelName, entry.model_info);
         if (forceResponsesEndpoint && modelInfo?.mode === "chat") {
             modelInfo = { ...modelInfo, mode: "responses" as const };
@@ -780,6 +788,22 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
         // Default category remains derived picker category (string) for safety.
         const category = derivePickerCategory(derived);
 
+        const providerName: string =
+            modelInfo?.provider ?? entry.litellm_params?.provider ?? modelInfo?.litellm_provider ?? "litellm";
+        const blocked: boolean = modelInfo?.blocked === true || entry.litellm_params?.blocked === true;
+        const statusIcon = blocked ? new vscode.ThemeIcon("circle-slash") : undefined;
+        const warningText: Record<string, string> = {};
+        if (activeModelOverride) {
+            warningText.model_override = "A configured model override is active for this model.";
+        }
+        if (blocked) {
+            warningText.model_blocked = "This model is blocked by the LiteLLM backend.";
+        }
+        const hasWarnings = Object.keys(warningText).length > 0;
+        const infoText = {
+            routing: `Routes via LiteLLM → ${providerName} (${detailBase}).`,
+        };
+
         const toNumberPerMillion = (value?: number): number | undefined =>
             value !== undefined ? value * 1_000_000 : undefined;
 
@@ -799,21 +823,39 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             longContextCacheCost?: number;
             longContextCacheWriteCost?: number;
             priceCategory?: string;
+            multiplierNumeric?: number;
+            statusIcon?: vscode.ThemeIcon;
+            warningText?: Record<string, string>;
+            infoText?: Record<string, string>;
+            isBYOK?: boolean;
         } = {
             id: modelId,
             name: modelName,
-            vendor: modelInfo?.litellm_provider ?? "litellm",
+            vendor: providerName,
             backendName: detailBase,
-            tooltip: `Provider: ${modelInfo?.litellm_provider ?? "litellm"}, Model: ${modelName} via ${detailBase}`,
+            tooltip: `Provider: ${providerName}, Model: ${modelName} via ${detailBase}`,
             detail,
-            description: modelInfo?.litellm_provider ?? "",
-            family: modelInfo?.litellm_provider ?? "litellm",
+            description: providerName,
+            // family carries "<backendName>/<modelName>" so third-party LM
+            // consumers that only see {id,name,vendor,family,version} — e.g.
+            // Cline, which renders "{vendor} - {family}" — can distinguish
+            // both backends AND individual models within them. Backend-only
+            // display (e.g. "gateway.example.com" shared by all of a gateway's
+            // models) collapses 4+ models into indistinguishable rows; the
+            // embedded modelName is what makes each row unique for the user.
+            // vendor stays as litellm_provider to preserve the native
+            // picker's (vendor, groupName) grouping.
+            family: `${detailBase}/${modelName}`,
             version: "1.0",
             maxInputTokens: derived.maxInputTokens,
             maxOutputTokens: derived.maxOutputTokens,
             capabilities,
             tags,
             isUserSelectable: true,
+            isBYOK: true,
+            ...(statusIcon ? { statusIcon } : {}),
+            ...(hasWarnings ? { warningText } : {}),
+            infoText,
             // The picker reads this field via `getCategoryLabel(category)` and
             // crashes with `TypeError: a.charAt is not a function` when the
             // value is not a string. The picker recognizes the three literals
@@ -851,6 +893,10 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             (info as { cacheCost?: number }).cacheCost = round(cacheCost);
             (info as { cacheWriteCost?: number }).cacheWriteCost = round(cacheWriteCost);
             (info as { priceCategory?: string }).priceCategory = derivePriceCategory(pricing);
+            const multiplierNumeric = deriveMultiplierNumeric(pricing);
+            if (multiplierNumeric !== undefined) {
+                (info as { multiplierNumeric?: number }).multiplierNumeric = multiplierNumeric;
+            }
 
             // Tooltip: append pricing breakdown
             const pricingTooltip = formatPricingForTooltip(pricing);

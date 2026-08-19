@@ -163,6 +163,22 @@ export function calculateRequestCost(input: CostCalculationInput): RequestCost {
     return { inputCost: round(inputCost), outputCost: round(outputCost), totalCost: round(totalCost) };
 }
 
+/**
+ * Returns the largest known input/output price per million tokens.
+ * Cache pricing is intentionally excluded because it is conditional on cache behavior.
+ */
+export function deriveMultiplierNumeric(pricing: ModelPricing | undefined): number | undefined {
+    if (!pricing) {
+        return undefined;
+    }
+
+    const costsPerMillion = [pricing.inputCostPerToken, pricing.outputCostPerToken]
+        .filter((value): value is number => value !== undefined)
+        .map((value) => value * 1_000_000);
+
+    return costsPerMillion.length > 0 ? Math.max(...costsPerMillion) : undefined;
+}
+
 export function derivePriceCategory(pricing: ModelPricing | undefined): string | undefined {
     if (!pricing) {
         return undefined;

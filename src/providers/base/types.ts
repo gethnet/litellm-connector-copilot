@@ -35,7 +35,7 @@ export interface RequestBuilderDeps {
     usageOptOutModels: Set<string>;
     /**
      * Strips the routing prefix from a model id to recover the raw
-     * LiteLLM model name (e.g. `wolfram.com/azure_ai/gpt-5.4-mini` →
+     * LiteLLM model name (e.g. `provider.example.com/azure_ai/gpt-5.4-mini` →
      * `azure_ai/gpt-5.4-mini`). Used for `request.model` in the
      * OpenAI-compatible body and for capability/parameter lookups that
      * are keyed on the raw model family.

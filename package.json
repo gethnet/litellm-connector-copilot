@@ -1,7 +1,7 @@
 {
 	"name": "litellm-connector-copilot",
 	"displayName": "LiteLLM Connector for Copilot",
-	"version": "2.4.1",
+	"version": "2.5.0",
 	"description": "An extension that integrates LiteLLM proxy into Copilot",
 	"categories": [
 		"AI",
@@ -245,7 +245,7 @@
 				"litellm-connector.modelCapabilitiesOverrides": {
 					"type": "object",
 					"default": {},
-					"description": "Override model capabilities (toolCalling, imageInput) reported to VS Code. Key is the Model ID (e.g. 'gpt-4o'), value is a comma-separated list of capabilities to ENABLE (e.g. 'toolCalling,imageInput').",
+					"description": "Override model capabilities reported to VS Code. Each value is a comma-separated list of enabled capabilities: toolCalling, imageInput, find-replace, multi-find-replace, apply-patch, or code-rewrite. Edit-tool values are emitted only when explicitly configured.",
 					"additionalProperties": {
 						"type": "string"
 					}
@@ -382,8 +382,8 @@
 		"mocha-junit-reporter": "^2.2.1",
 		"mocha-multi-reporters": "^1.5.0",
 		"ovsx": "^1.0.2",
-		"posthog-js": "^1.409.0",
-		"posthog-node": "^5.47.0",
+		"posthog-js": "^1.417.0",
+		"posthog-node": "^5.49.0",
 		"prettier": "^3.8.4",
 		"rimraf": "^6.0.1",
 		"serve": "^14.2.6",
@@ -420,5 +420,8 @@
 	],
 	"sponsor": {
 		"url": "https://buymeacoffee.com/amwdrizz"
+	},
+	"allowScripts": {
+		"@vscode/vsce-sign@2.0.9": true
 	}
 }

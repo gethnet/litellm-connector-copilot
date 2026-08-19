@@ -235,6 +235,60 @@ suite("Responses Adapter Unit Tests", () => {
         assert.strictEqual(input[1].type, "function_call");
     });
 
+    test("transformToResponsesFormat preserves signed assistant thinking as reasoning input", () => {
+        const body = transformToResponsesFormat({
+            model: "reasoning-model",
+            messages: [
+                {
+                    role: "assistant",
+                    content: "I will continue the task.",
+                    thinking_blocks: [
+                        {
+                            thinking: "I need the earlier reasoning summary.",
+                            signature: "signed-thinking-state",
+                        },
+                    ],
+                },
+            ],
+        });
+
+        assert.deepStrictEqual(body.input, [
+            {
+                type: "message",
+                role: "assistant",
+                content: "I will continue the task.",
+            },
+            {
+                type: "reasoning",
+                id: "reasoning_1",
+                summary: [{ type: "summary_text", text: "I need the earlier reasoning summary." }],
+                encrypted_content: "signed-thinking-state",
+            },
+        ]);
+    });
+
+    test("transformToResponsesFormat preserves redacted thinking without exposing opaque data", () => {
+        const body = transformToResponsesFormat({
+            model: "reasoning-model",
+            messages: [
+                {
+                    role: "assistant",
+                    thinking_blocks: [{ data: "opaque-redacted-thinking" }],
+                },
+            ],
+        });
+
+        assert.deepStrictEqual(body.input, [
+            {
+                type: "reasoning",
+                id: "reasoning_0",
+                summary: [],
+                encrypted_content: "opaque-redacted-thinking",
+            },
+        ]);
+        assert.ok(!JSON.stringify(body.input).includes('"thinking":"opaque-redacted-thinking"'));
+    });
+
     test("transformToResponsesFormat synthesizes name from tool definitions", () => {
         const body = transformToResponsesFormat({
             model: "m",
