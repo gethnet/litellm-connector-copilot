@@ -5,6 +5,7 @@ import { LiteLLMClient } from "../adapters/litellmClient";
 import type { BackendSession } from "../providers/backendSession";
 import { Logger } from "../utils/logger";
 import { deriveGroupNameFromUrl } from "../utils";
+import { deriveCompletionsUrl } from "../providers/base/completionsUrl";
 
 const EDIT_TOOL_VALUES = new Set<VSCodeEditTool>(["find-replace", "multi-find-replace", "apply-patch", "code-rewrite"]);
 
@@ -299,6 +300,10 @@ export class ConfigManager {
     ): BackendSession | undefined {
         const baseUrl = typeof configuration.baseUrl === "string" ? configuration.baseUrl.trim() : "";
         const apiKey = typeof configuration.apiKey === "string" ? configuration.apiKey.trim() : "";
+        const completionsUrl =
+            typeof configuration.completionsUrl === "string"
+                ? configuration.completionsUrl.trim()
+                : deriveCompletionsUrl(baseUrl);
 
         if (!baseUrl || !/^https?:\/\//i.test(baseUrl)) {
             Logger.warn(
@@ -324,6 +329,7 @@ export class ConfigManager {
             backendName,
             baseUrl,
             apiKey,
+            ...(completionsUrl ? { completionsUrl } : {}),
             client: new LiteLLMClient({ url: baseUrl, key: apiKey }, userAgent),
         };
     }

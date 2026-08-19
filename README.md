@@ -8,14 +8,13 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.5.0
+## 🆕 What's New in 2.5.1
 
-> Version 2.5.0 makes LiteLLM model metadata clearer and more useful across VS Code and third-party LM consumers.
+> Version 2.5.1 prepares LiteLLM models for model-aware OpenAI-compatible inline completion routing.
 
-- 🔍 **Distinguishable third-party display** — Models visible in third-party extensions (Cline, etc.) now render unique labels including both the configured backend name and model name instead of duplicate provider rows.
-- 🔧 **Group name propagation fix** — User-supplied group names from VS Code's group picker now correctly propagate to the model metadata.
-- 🧭 **Clearer model-picker metadata** — Picker information can identify the upstream provider and expose pricing details without obscuring the model's route.
-- 🛠️ **Explicit capability hints** — Model capability overrides support tool calling, image input, and explicitly configured edit-tool strategies.
+- 🧩 **Configurable FIM endpoints** — Provider groups can expose full OpenAI-compatible inline completion endpoints while preserving paths such as `/v1`.
+- 🎯 **Model-specific routing** — Per-model `completionsUrl` overrides take priority over group-level configuration and derived LiteLLM endpoints.
+- 🧪 **Safer endpoint resolution** — Endpoint derivation, path preservation, precedence, and invalid URL fallback are covered by focused tests.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
@@ -192,6 +191,8 @@ The copied ID is the complete model ID shown by discovery, including the provide
 ### Provider Connection (via VS Code Language Models UI)
 
 Base URL and API key are configured through **VS Code's Language Models provider-group UI**. Run **LiteLLM: Manage Configuration** or open Settings → Language Models.
+
+The optional **Inline Completions URL** is a full OpenAI-compatible FIM `/completions` endpoint. If omitted, the connector derives it by appending `/completions` to the configured provider-group URL: `/v1` is preserved when present and is not added when absent. A model-specific `completionsUrl` override takes precedence over the group value. Models without a resolved endpoint remain chat-only for inline suggestions.
 
 ### Workspace Settings
 

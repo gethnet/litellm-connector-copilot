@@ -124,7 +124,8 @@ export function getModelTags(
     modelId: string,
     derived: DerivedModelCapabilities,
     overrides?: Record<string, string[]>,
-    capabilityOverrides?: ModelCapabilityOverride
+    capabilityOverrides?: ModelCapabilityOverride,
+    hasCompletionsEndpoint = true
 ): string[] {
     const tags = new Set<string>();
 
@@ -155,7 +156,10 @@ export function getModelTags(
         tags.add("pdf");
     }
 
-    if (derived.supportsStreaming) {
+    // Preserve the utility's historical default for callers that only derive
+    // model tags. Provider discovery passes `false` explicitly when a model
+    // lacks an OpenAI-compatible FIM endpoint.
+    if (derived.supportsStreaming && hasCompletionsEndpoint !== false) {
         tags.add("inline-completions");
         tags.add("terminal-chat");
     }

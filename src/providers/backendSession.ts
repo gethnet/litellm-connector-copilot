@@ -12,6 +12,8 @@ export interface BackendSession {
     readonly baseUrl: string;
     /** API key for authentication (undefined if not required) */
     readonly apiKey: string | undefined;
+    /** Optional full OpenAI-compatible FIM endpoint for this provider group. */
+    readonly completionsUrl?: string;
     /** HTTP client for making requests */
     readonly client: LiteLLMClient;
 }

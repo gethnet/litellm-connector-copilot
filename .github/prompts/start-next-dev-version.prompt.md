@@ -38,7 +38,7 @@ Follow this workflow exactly:
    - Run `npm run bump-version <variant> dev` (always include the trailing `dev` so the new cycle starts as a `-dev1` pre-release, unless the user explicitly asked for a non-dev version).
    - Note: the script is `bump-version` (hyphen), not `bump:version`.
    - Verify the new version in [package.json](../../package.json) matches the expected result and includes a `-devN` suffix when `dev` was requested.
-   - If `package-lock.json` did not update automatically, sync it by updating its top-level `version` fields to match.
+   - Do not modify or synchronize `package-lock.json`; lock files are generated on demand by npm and are not part of this workflow.
 
 6. Validate and summarize.
    - Confirm the branch name, old version, and new version.
