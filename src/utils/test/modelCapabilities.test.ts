@@ -162,6 +162,68 @@ suite("modelCapabilities", () => {
             assert.strictEqual(caps.toolCalling, true);
             assert.strictEqual(caps.imageInput, true);
         });
+
+        test("exposes only recognized explicit edit tools", () => {
+            const derived: DerivedModelCapabilities = {
+                supportsTools: false,
+                supportsVision: false,
+                supportsStreaming: true,
+                supportsReasoning: false,
+                supportsPdf: false,
+                supportsAudioInput: false,
+                supportsAudioOutput: false,
+                supportsComputerUse: false,
+                supportsFunctionCalling: false,
+                supportsToolChoice: false,
+                supportsSystemMessages: false,
+                supportsResponseSchema: false,
+                supportsPromptCaching: false,
+                supportsWebSearch: false,
+                supportsUrlContext: false,
+                supportsReasoningEffort: false,
+                supportsThinking: false,
+                endpointMode: "chat",
+                maxInputTokens: 100000,
+                maxOutputTokens: 16000,
+                rawContextWindow: 128000,
+            };
+
+            const capabilities = capabilitiesToVSCode(derived, {
+                editTools: ["apply-patch", "find-replace", "not-a-vscode-edit-tool"],
+            } as unknown as ModelCapabilityOverride);
+
+            assert.deepStrictEqual(capabilities.editTools, ["apply-patch", "find-replace"]);
+        });
+
+        test("omits editTools when no explicit override is configured", () => {
+            const derived: DerivedModelCapabilities = {
+                supportsTools: true,
+                supportsVision: false,
+                supportsStreaming: true,
+                supportsReasoning: false,
+                supportsPdf: false,
+                supportsAudioInput: false,
+                supportsAudioOutput: false,
+                supportsComputerUse: false,
+                supportsFunctionCalling: true,
+                supportsToolChoice: true,
+                supportsSystemMessages: false,
+                supportsResponseSchema: false,
+                supportsPromptCaching: false,
+                supportsWebSearch: false,
+                supportsUrlContext: false,
+                supportsReasoningEffort: false,
+                supportsThinking: false,
+                endpointMode: "chat",
+                maxInputTokens: 100000,
+                maxOutputTokens: 16000,
+                rawContextWindow: 128000,
+            };
+
+            const capabilities = capabilitiesToVSCode(derived);
+
+            assert.strictEqual(capabilities.editTools, undefined);
+        });
     });
 
     suite("getModelTags with capability overrides", () => {

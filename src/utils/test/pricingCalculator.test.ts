@@ -5,6 +5,7 @@ import {
     formatPricingForTooltip,
     calculateRequestCost,
     derivePriceCategory,
+    deriveMultiplierNumeric,
 } from "../pricingCalculator";
 import type { LiteLLMModelInfo } from "../../types";
 
@@ -222,6 +223,32 @@ suite("pricingCalculator", () => {
             assert.ok(formatted.includes("Output: $0.0050/1M tokens"), `got: ${formatted}`);
             assert.ok(formatted.includes("Cache read: $0.0050/1M tokens"), `got: ${formatted}`);
             assert.ok(formatted.includes("Cache write: $0.1250/1M tokens"), `got: ${formatted}`);
+        });
+    });
+
+    suite("deriveMultiplierNumeric", () => {
+        test("returns the highest known input or output cost per million tokens", () => {
+            const multiplier = deriveMultiplierNumeric({
+                inputCostPerToken: 0.000001,
+                outputCostPerToken: 0.000005,
+                cacheReadCostPerToken: 0.0000001,
+            });
+
+            assert.strictEqual(multiplier, 5);
+        });
+
+        test("returns the known input cost when output pricing is absent", () => {
+            const multiplier = deriveMultiplierNumeric({ inputCostPerToken: 0.0000025 });
+
+            assert.strictEqual(multiplier, 2.5);
+        });
+
+        test("returns undefined when no input or output pricing exists", () => {
+            assert.strictEqual(deriveMultiplierNumeric(undefined), undefined);
+            assert.strictEqual(
+                deriveMultiplierNumeric({ cacheReadCostPerToken: 0.0000001, cacheCreationCostPerToken: 0.000001 }),
+                undefined
+            );
         });
     });
 

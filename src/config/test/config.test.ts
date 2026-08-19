@@ -104,6 +104,22 @@ suite("ConfigManager Unit Tests", () => {
         });
     });
 
+    test("getConfig reads recognized edit tool overrides without inferring them", async () => {
+        settingsMap.set("litellm-connector.modelCapabilitiesOverrides", {
+            "coder-model": "tools,apply-patch,multi-find-replace,unknown-tool",
+            "chat-model": "unknown-tool",
+        });
+
+        const cfg = await configManager.getConfig();
+
+        assert.deepStrictEqual(cfg.modelCapabilitiesOverrides, {
+            "coder-model": {
+                toolCalling: true,
+                editTools: ["apply-patch", "multi-find-replace"],
+            },
+        });
+    });
+
     test("getConfig returns empty object for modelCapabilitiesOverrides when not set", async () => {
         const manager = new ConfigManager(mockSecrets);
         const cfg = await manager.getConfig();

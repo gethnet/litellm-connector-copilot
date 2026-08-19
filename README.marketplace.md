@@ -10,12 +10,14 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.4.1
+## 🆕 What's New in 2.5.0
 
-> Version 2.4.1 fixes commit-message model selection when the configured model ID includes the connector vendor prefix.
+> Version 2.5.0 improves model identity and metadata in the VS Code picker and third-party LM consumers.
 
-- ✍️ **Reliable commit model selection** — `commitModelIdOverride` accepts the complete model-picker ID, including the `litellm-connector/` prefix, and normalizes it automatically for SCM commit generation.
-- 🔎 **Namespaced model resolution** — Commit generation resolves configured models from the discovered backend registry, including models whose LiteLLM names contain nested slashes.
+- 🔍 **Distinct model labels** — Third-party extensions can now distinguish models by backend and model name instead of showing duplicate provider labels.
+- 🔧 **Accurate group names** — User-defined provider-group names now flow through to discovered model metadata.
+- 🧭 **Richer picker context** — Model-picker metadata can show upstream provider and pricing information while preserving compact display behavior.
+- 🛠️ **Explicit capability configuration** — Administrators can provide tool-calling, image-input, and edit-tool hints when model cards are incomplete.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 

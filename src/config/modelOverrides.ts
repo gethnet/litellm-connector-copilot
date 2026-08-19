@@ -271,6 +271,17 @@ export function findOverride(modelId: string, config?: vscode.WorkspaceConfigura
     return undefined;
 }
 
+/**
+ * Returns the enabled override matching a model so discovery can explain
+ * model-card differences without reimplementing override matching rules.
+ */
+export function getActiveModelOverride(
+    modelId: string,
+    config?: vscode.WorkspaceConfiguration
+): ModelOverride | undefined {
+    return findOverride(modelId, config);
+}
+
 export function applyModelInfoOverrides(
     modelId: string,
     modelInfo: LiteLLMModelInfo | undefined,

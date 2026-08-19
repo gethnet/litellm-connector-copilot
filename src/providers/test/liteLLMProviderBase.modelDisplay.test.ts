@@ -4,6 +4,7 @@ import * as sinon from "sinon";
 
 import { LiteLLMChatProvider } from "../";
 import { LiteLLMClient } from "../../adapters/litellmClient";
+import type { LiteLLMConfig } from "../../types";
 
 /**
  * Tests for the user-facing model display properties in the single-provider
@@ -164,6 +165,9 @@ suite("LiteLLM model display", () => {
             priceCategory?: string;
             category?: string;
             detail?: string;
+            multiplierNumeric?: number;
+            warningText?: Record<string, string>;
+            infoText?: Record<string, string>;
         };
 
         // Per-1M scaling expectations
@@ -176,9 +180,287 @@ suite("LiteLLM model display", () => {
         // Pricing label uses compact detail formatter ($X/1M inp • $Y/1M out)
         assert.strictEqual(info.pricing, "$1.00/1M inp • $5.00/1M out");
         assert.strictEqual(info.detail, "example • $1.00/1M inp • $5.00/1M out");
+        assert.strictEqual(info.multiplierNumeric, 5);
+        assert.strictEqual(info.warningText, undefined);
 
         // Category must remain a string to avoid picker crash
         assert.strictEqual(typeof info.category, "string");
+    });
+
+    test("emits factual optional picker metadata for a priced reasoning model", async () => {
+        const mockSecrets = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            onDidChange: (_listener: unknown) => ({ dispose() {} }),
+        } as unknown as vscode.SecretStorage;
+        const provider = new LiteLLMChatProvider(mockSecrets, "test-agent");
+
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({
+            data: [
+                {
+                    model_name: "reasoning-coder",
+                    model_info: {
+                        key: "example/reasoning-coder",
+                        litellm_provider: "anthropic",
+                        mode: "responses",
+                        max_input_tokens: 128000,
+                        max_output_tokens: 16000,
+                        supports_reasoning: true,
+                        supports_function_calling: true,
+                        input_cost_per_token: 0.000003,
+                        output_cost_per_token: 0.000015,
+                    },
+                },
+            ],
+        });
+
+        const models = await provider.discoverModels(
+            {
+                silent: true,
+                configuration: { baseUrl: "https://proxy.example.com", apiKey: "test-key" },
+            },
+            new vscode.CancellationTokenSource().token
+        );
+        const info = models[0] as unknown as {
+            isBYOK?: boolean;
+            multiplierNumeric?: number;
+            statusIcon?: vscode.ThemeIcon;
+            warningText?: Record<string, string>;
+            infoText?: Record<string, string>;
+            requiresAuthorization?: unknown;
+            isDefault?: unknown;
+            targetChatSessionType?: unknown;
+            promo?: unknown;
+        };
+
+        assert.strictEqual(info.isBYOK, true);
+        assert.strictEqual(info.multiplierNumeric, 15);
+        assert.strictEqual(info.statusIcon, undefined);
+        assert.strictEqual(info.warningText, undefined);
+        assert.deepStrictEqual(info.infoText, {
+            routing: "Routes via LiteLLM → anthropic (proxy.example.com).",
+        });
+        assert.strictEqual(info.requiresAuthorization, undefined);
+        assert.strictEqual(info.isDefault, undefined);
+        assert.strictEqual(info.targetChatSessionType, undefined);
+        assert.strictEqual(info.promo, undefined);
+    });
+
+    test("uses a tools icon and omits price metadata when only tool capability is known", async () => {
+        const mockSecrets = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            onDidChange: (_listener: unknown) => ({ dispose() {} }),
+        } as unknown as vscode.SecretStorage;
+        const provider = new LiteLLMChatProvider(mockSecrets, "test-agent");
+
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({
+            data: [
+                {
+                    model_name: "tool-model",
+                    model_info: {
+                        key: "example/tool-model",
+                        litellm_provider: "openai",
+                        mode: "chat",
+                        max_input_tokens: 32000,
+                        max_output_tokens: 4096,
+                        supports_function_calling: true,
+                    },
+                },
+            ],
+        });
+
+        const models = await provider.discoverModels(
+            {
+                silent: true,
+                configuration: { baseUrl: "https://proxy.example.com", apiKey: "test-key" },
+            },
+            new vscode.CancellationTokenSource().token
+        );
+        const info = models[0] as unknown as { multiplierNumeric?: number; statusIcon?: vscode.ThemeIcon };
+
+        assert.strictEqual(info.statusIcon, undefined);
+        assert.strictEqual(info.multiplierNumeric, undefined);
+    });
+
+    test("emits separate warnings for an active override and a LiteLLM-blocked model", async () => {
+        const mockSecrets: vscode.SecretStorage = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            onDidChange: (_listener: unknown) => ({ dispose() {} }),
+        } as unknown as vscode.SecretStorage;
+        const provider = new LiteLLMChatProvider(mockSecrets, "test-agent");
+        const providerInternals = provider as unknown as {
+            _configManager: { getConfig: () => Promise<unknown> };
+        };
+
+        sandbox.stub(providerInternals._configManager, "getConfig").resolves({
+            enableModelOverrides: true,
+            modelCapabilitiesOverrides: {},
+            displayPricingInPicker: true,
+            discoveryCacheTtlMs: 0,
+        });
+        sandbox.stub(vscode.workspace, "getConfiguration").callsFake(() => {
+            return {
+                get: <T>(key: string, defaultValue?: T): T => {
+                    if (key === "litellm-connector.enableModelOverrides") {
+                        return true as T;
+                    }
+                    if (key === "litellm-connector.modelOverrides") {
+                        return [{ match: "^blocked-model$", notes: "test override" }] as T;
+                    }
+                    return defaultValue as T;
+                },
+            } as vscode.WorkspaceConfiguration;
+        });
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({
+            data: [
+                {
+                    model_name: "blocked-model",
+                    litellm_params: { provider: "azure", blocked: true },
+                    model_info: {
+                        key: "example/blocked-model",
+                        provider: "anthropic",
+                        litellm_provider: "openai",
+                        mode: "chat",
+                        max_input_tokens: 32000,
+                        max_output_tokens: 4096,
+                    },
+                },
+                {
+                    model_name: "card-blocked-model",
+                    model_info: {
+                        provider: "anthropic",
+                        mode: "chat",
+                        blocked: true,
+                        max_input_tokens: 32000,
+                        max_output_tokens: 4096,
+                    },
+                },
+            ],
+        });
+
+        const models = await provider.discoverModels(
+            {
+                silent: true,
+                configuration: { baseUrl: "https://proxy.example.com", apiKey: "test-key" },
+            },
+            new vscode.CancellationTokenSource().token
+        );
+        const info = models[0] as unknown as {
+            vendor?: string;
+            warningText?: Record<string, string>;
+            infoText?: Record<string, string>;
+            statusIcon?: vscode.ThemeIcon;
+        };
+
+        assert.strictEqual(info.vendor, "anthropic");
+        assert.deepStrictEqual(info.warningText, {
+            model_override: "A configured model override is active for this model.",
+            model_blocked: "This model is blocked by the LiteLLM backend.",
+        });
+        assert.deepStrictEqual(info.infoText, {
+            routing: "Routes via LiteLLM → anthropic (proxy.example.com).",
+        });
+        assert.strictEqual(info.statusIcon?.id, "circle-slash");
+
+        const cardBlockedInfo = models[1] as unknown as {
+            warningText?: Record<string, string>;
+            statusIcon?: vscode.ThemeIcon;
+        };
+        assert.deepStrictEqual(cardBlockedInfo.warningText, {
+            model_blocked: "This model is blocked by the LiteLLM backend.",
+        });
+        assert.strictEqual(cardBlockedInfo.statusIcon?.id, "circle-slash");
+    });
+
+    test("omits warning and status icon for an ordinary model and prefers provider over litellm_provider", async () => {
+        const mockSecrets: vscode.SecretStorage = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            onDidChange: (_listener: unknown) => ({ dispose() {} }),
+        } as unknown as vscode.SecretStorage;
+        const provider = new LiteLLMChatProvider(mockSecrets, "test-agent");
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({
+            data: [
+                {
+                    model_name: "ordinary-model",
+                    model_info: {
+                        provider: "openai-compatible",
+                        litellm_provider: "openai",
+                        mode: "chat",
+                        max_input_tokens: 32000,
+                        max_output_tokens: 4096,
+                    },
+                },
+            ],
+        });
+
+        const models = await provider.discoverModels(
+            {
+                silent: true,
+                configuration: { baseUrl: "https://proxy.example.com", apiKey: "test-key" },
+            },
+            new vscode.CancellationTokenSource().token
+        );
+        const info = models[0] as unknown as {
+            vendor?: string;
+            warningText?: Record<string, string>;
+            statusIcon?: vscode.ThemeIcon;
+        };
+
+        assert.strictEqual(info.vendor, "openai-compatible");
+        assert.strictEqual(info.warningText, undefined);
+        assert.strictEqual(info.statusIcon, undefined);
+    });
+
+    test("passes configured edit tools through discovery without guessing a default", async () => {
+        const mockSecrets = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            onDidChange: (_listener: unknown) => ({ dispose() {} }),
+        } as unknown as vscode.SecretStorage;
+        const provider = new LiteLLMChatProvider(mockSecrets, "test-agent");
+        const providerInternals = provider as unknown as {
+            _configManager: { getConfig: () => Promise<LiteLLMConfig> };
+        };
+        sandbox.stub(providerInternals._configManager, "getConfig").resolves({
+            displayPricingInPicker: true,
+            discoveryCacheTtlMs: 0,
+            modelCapabilitiesOverrides: {
+                "coder-model": { editTools: ["apply-patch", "find-replace"] },
+            },
+        } as LiteLLMConfig);
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({
+            data: [
+                {
+                    model_name: "coder-model",
+                    model_info: {
+                        key: "example/coder-model",
+                        litellm_provider: "openai",
+                        mode: "chat",
+                        max_input_tokens: 32000,
+                        max_output_tokens: 4096,
+                    },
+                },
+            ],
+        });
+
+        const models = await provider.discoverModels(
+            {
+                silent: true,
+                configuration: { baseUrl: "https://proxy.example.com", apiKey: "test-key" },
+            },
+            new vscode.CancellationTokenSource().token
+        );
+        const capabilities = models[0].capabilities as unknown as { editTools?: string[] };
+
+        assert.deepStrictEqual(capabilities.editTools, ["apply-patch", "find-replace"]);
     });
 
     test("adds cache indicator to detail string for models with prompt caching support", async () => {

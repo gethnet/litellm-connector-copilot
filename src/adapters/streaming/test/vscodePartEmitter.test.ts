@@ -169,4 +169,48 @@ suite("vscodePartEmitter", () => {
         assert.ok(reported[0] instanceof vscode.LanguageModelDataPart);
         assert.strictEqual((reported[0] as vscode.LanguageModelDataPart).mimeType, "usage");
     });
+
+    test("preserves thinking value, id, and opaque metadata when VS Code supports thinking parts", () => {
+        const vscodeWithThinking = vscode as unknown as {
+            LanguageModelThinkingPart?: new (
+                value: string | string[],
+                id?: string,
+                metadata?: Record<string, unknown>
+            ) => vscode.LanguageModelResponsePart;
+        };
+        if (!vscodeWithThinking.LanguageModelThinkingPart) {
+            return;
+        }
+
+        const reported: vscode.LanguageModelResponsePart[] = [];
+        const progress = {
+            report: (part: vscode.LanguageModelResponsePart) => reported.push(part),
+        } as vscode.Progress<vscode.LanguageModelResponsePart>;
+        const metadata = {
+            encrypted_content: "signed-thinking-state",
+            display: "omitted",
+        };
+
+        emitV2PartsToVSCode(
+            [
+                {
+                    type: "thinking",
+                    value: "A visible thought summary.",
+                    id: "thought-1",
+                    metadata,
+                },
+            ],
+            progress
+        );
+
+        assert.strictEqual(reported.length, 1);
+        const part = reported[0] as unknown as {
+            value?: string | string[];
+            id?: string;
+            metadata?: Record<string, unknown>;
+        };
+        assert.strictEqual(part.value, "A visible thought summary.");
+        assert.strictEqual(part.id, "thought-1");
+        assert.deepStrictEqual(part.metadata, metadata);
+    });
 });

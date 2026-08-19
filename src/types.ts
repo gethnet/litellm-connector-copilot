@@ -27,6 +27,19 @@ export interface OpenAIChatMessageContentItem {
 }
 
 /**
+ * Opaque reasoning continuity from a prior assistant turn.
+ *
+ * A signature is a model-verifiable encrypted state paired with optional
+ * visible summary text. `data` represents a fully redacted block and MUST
+ * never be surfaced as ordinary assistant content.
+ */
+export interface OpenAIThinkingBlock {
+    thinking?: string;
+    signature?: string;
+    data?: string;
+}
+
+/**
  * OpenAI-style chat message used for router requests.
  */
 export interface OpenAIChatMessage {
@@ -35,6 +48,12 @@ export interface OpenAIChatMessage {
     name?: string;
     tool_calls?: OpenAIToolCall[];
     tool_call_id?: string;
+    /**
+     * Assistant-only opaque thinking continuity. The `/responses` adapter
+     * turns these blocks into reasoning input items; `/chat/completions`
+     * deliberately ignores them because it has no portable equivalent.
+     */
+    thinking_blocks?: OpenAIThinkingBlock[];
 }
 
 /**
@@ -82,6 +101,9 @@ export interface OpenAIUsagePayload {
  * Capability overrides for a single model.
  * Undefined fields are left at their auto-derived values.
  */
+/** VS Code edit-tool identifiers recognized by the proposed chat-provider API. */
+export type VSCodeEditTool = "find-replace" | "multi-find-replace" | "apply-patch" | "code-rewrite";
+
 export interface ModelCapabilityOverride {
     /** Override the toolCalling capability reported to VS Code. */
     toolCalling?: boolean;
@@ -91,6 +113,8 @@ export interface ModelCapabilityOverride {
     reasoning?: boolean;
     /** Override the pdf input capability (surfaced as tag). */
     pdfInput?: boolean;
+    /** Explicit preferred VS Code editing tools; omitted when no preference is configured. */
+    editTools?: VSCodeEditTool[];
 }
 
 export type SupportedReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -167,6 +191,10 @@ export interface ModelOverride {
  * LiteLLM model configuration parameters.
  */
 export interface LiteLLMParams {
+    /** Provider reported for this model route, when supplied by LiteLLM. */
+    provider?: string;
+    /** True when LiteLLM has blocked this model route. */
+    blocked?: boolean;
     custom_llm_provider?: string;
     litellm_credential_name?: string;
     use_in_pass_through?: boolean;
@@ -272,6 +300,10 @@ export interface LiteLLMModelInfo {
     max_input_tokens?: number;
     max_output_tokens?: number;
     context_window_tokens?: number;
+    /** Provider reported by the model card; takes precedence over litellm_provider. */
+    provider?: string;
+    /** True when LiteLLM has blocked this model. */
+    blocked?: boolean;
     litellm_provider?: string;
     mode?: string;
     supports_system_messages?: boolean | null;
@@ -326,6 +358,7 @@ export interface LiteLLMModelEntry {
 export interface LiteLLMModelInfoResponse {
     data: {
         model_name?: string;
+        litellm_params?: LiteLLMParams;
         model_info?: LiteLLMModelInfo;
     }[];
 }

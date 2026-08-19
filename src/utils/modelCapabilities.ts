@@ -109,10 +109,14 @@ export function capabilitiesToVSCode(
     derived: DerivedModelCapabilities,
     overrides?: ModelCapabilityOverride
 ): vscode.LanguageModelChatCapabilities {
+    const editTools = overrides?.editTools?.filter((tool) =>
+        (["find-replace", "multi-find-replace", "apply-patch", "code-rewrite"] as const).includes(tool)
+    );
     return {
-        // VS Code currently supports these two main ones
+        // VS Code currently supports these two main ones.
         toolCalling: overrides?.toolCalling ?? derived.supportsTools,
         imageInput: overrides?.imageInput ?? derived.supportsVision,
+        ...(editTools && editTools.length > 0 ? { editTools } : {}),
     };
 }
 

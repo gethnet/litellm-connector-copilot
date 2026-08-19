@@ -610,8 +610,8 @@ suite("Utility Unit Tests", () => {
 
         suite("deriveGroupNameFromUrl", () => {
             test("returns hostname from https URL", () => {
-                const result = deriveGroupNameFromUrl("https://llm-kit.geth.cc");
-                assert.strictEqual(result, "llm-kit.geth.cc");
+                const result = deriveGroupNameFromUrl("https://gateway.example.com");
+                assert.strictEqual(result, "gateway.example.com");
             });
 
             test("returns hostname from http URL with port", () => {

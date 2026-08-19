@@ -36,14 +36,14 @@ suite("ConfigManager", () => {
         } as unknown as vscode.SecretStorage;
 
         const manager = new ConfigManager(secrets);
-        const session = manager.convertProviderConfiguration("llmapi.wolfram.com", {
-            baseUrl: "https://llmapi.wolfram.com",
+        const session = manager.convertProviderConfiguration("gateway.example.com", {
+            baseUrl: "https://gateway.example.com",
             apiKey: "sk-test",
             providerName: "should-be-ignored",
         });
 
         assert.ok(session);
-        assert.strictEqual(session?.backendName, "llmapi.wolfram.com");
+        assert.strictEqual(session?.backendName, "gateway.example.com");
     });
 
     test("getConfig no longer exposes legacy url/key/backends", async () => {

@@ -4,11 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [2.5.0] - 2026-08-08
+## [2.5.0] - 2026-08-19
 
 ### 🚀 Features
 
-* **🔍 Distinguishable third-party consumer display**: The `family` field on `LanguageModelChatInformation` now carries `<backendName>/<modelName>` (e.g., `llmapi.wolfram.com/gpt-4o`) instead of the upstream `litellm_provider`. This enables third-party extensions like Cline that call `vscode.lm.selectChatModels()` to render distinct labels for both backends and individual models — instead of duplicate `openai - openai` rows that hide both the backend and the model. Cline labels now show `litellm-connector - llmapi.wolfram.com/gpt-4o`. The native VS Code picker grouping via `(vendor, groupName)` is unchanged. (`src/providers/liteLLMProviderRegistry.ts`)
+* **🔍 Distinguishable third-party consumer display**: The `family` field on `LanguageModelChatInformation` now carries `<backendName>/<modelName>` instead of the upstream `litellm_provider`. This enables third-party extensions like Cline that call `vscode.lm.selectChatModels()` to render distinct labels for both backends and individual models — instead of duplicate provider rows that hide the backend and model. The native VS Code picker grouping via `(vendor, groupName)` is unchanged. (`src/providers/liteLLMProviderRegistry.ts`)
 
 ### 🐛 Fixes
 
@@ -18,9 +18,18 @@ All notable changes to this project will be documented in this file.
 
 * Added regression coverage for the new `family` field semantics across three scenarios: hostname-derived backends (e.g., `example/gpt-4o`), port-bearing URLs (e.g., `localhost:4000/gpt-4o`), and user-supplied group names (e.g., `Staging Proxy/gpt-4o`). (`src/providers/test/liteLLMProviderBase.modelDisplay.test.ts`)
 
+### 🧠 Reasoning continuity
+
+* **🔐 Preserve encrypted thinking state**: Assistant thinking summaries, signatures, and redacted reasoning state are preserved across turns and translated to LiteLLM Responses reasoning input without exposing opaque data as ordinary assistant text. (`src/utils.ts`, `src/adapters/responsesAdapter.ts`)
+
+### 🧭 Model metadata
+
+* **🧾 Improve picker context**: Model discovery now exposes neutral provider route information, conditional override or blocked-model warnings, blocked status icons when supported, and numeric pricing multipliers while preserving existing pricing labels. (`src/providers/liteLLMProviderRegistry.ts`, `src/utils/pricingCalculator.ts`)
+* **🛠️ Add explicit edit-tool hints**: Model capability overrides now accept `find-replace`, `multi-find-replace`, `apply-patch`, and `code-rewrite`; unknown values are ignored and edit-tool support is never inferred from model names. (`src/config/configManager.ts`, `src/types.ts`)
+
 ### 🧹 Chores
 
-* **🔧 Version bump**: `package.json` version updated to `2.5.0-dev1`.
+* **🚀 Promote release version**: Promoted the package and lockfile metadata to `2.5.0` for the stable release. (`package.json`, `package-lock.json`)
 
 ## [2.4.1] - 2026-08-04
 
@@ -759,7 +768,8 @@ There have been a tremendous amount of backend work done with this update to mak
 
 ---
 
-[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.3.0...HEAD
+[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.0...HEAD
+[2.5.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.0
 [2.3.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.3.0
 [1.6.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.6.0
 [1.5.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.5.0

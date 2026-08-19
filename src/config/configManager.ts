@@ -1,10 +1,33 @@
 import * as vscode from "vscode";
-import type { LiteLLMConfig } from "../types";
+import type { LiteLLMConfig, ModelCapabilityOverride, VSCodeEditTool } from "../types";
 import type { TelemetryService } from "../telemetry/telemetryService";
 import { LiteLLMClient } from "../adapters/litellmClient";
 import type { BackendSession } from "../providers/backendSession";
 import { Logger } from "../utils/logger";
 import { deriveGroupNameFromUrl } from "../utils";
+
+const EDIT_TOOL_VALUES = new Set<VSCodeEditTool>(["find-replace", "multi-find-replace", "apply-patch", "code-rewrite"]);
+
+function parseCapabilityOverride(value: string | string[]): ModelCapabilityOverride | undefined {
+    const values = (Array.isArray(value) ? value.map(String) : value.split(","))
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+    const override: ModelCapabilityOverride = {};
+
+    if (values.some((entry) => entry.toLowerCase() === "toolcalling" || entry.toLowerCase() === "tools")) {
+        override.toolCalling = true;
+    }
+    if (values.some((entry) => entry.toLowerCase() === "imageinput" || entry.toLowerCase() === "vision")) {
+        override.imageInput = true;
+    }
+
+    const editTools = values.filter((entry): entry is VSCodeEditTool => EDIT_TOOL_VALUES.has(entry as VSCodeEditTool));
+    if (editTools.length > 0) {
+        override.editTools = editTools;
+    }
+
+    return Object.keys(override).length > 0 ? override : undefined;
+}
 
 export class ConfigManager {
     private static readonly INACTIVITY_TIMEOUT_KEY = "litellm-connector.inactivityTimeout";
@@ -171,34 +194,16 @@ export class ConfigManager {
             {}
         );
 
-        const modelCapabilitiesOverrides: Record<string, { toolCalling?: boolean; imageInput?: boolean }> = {};
+        const modelCapabilitiesOverrides: Record<string, ModelCapabilityOverride> = {};
         if (
             modelCapabilitiesOverridesRaw &&
             typeof modelCapabilitiesOverridesRaw === "object" &&
             !Array.isArray(modelCapabilitiesOverridesRaw)
         ) {
             for (const [modelId, value] of Object.entries(modelCapabilitiesOverridesRaw)) {
-                let caps: string[] = [];
-                if (Array.isArray(value)) {
-                    caps = value.map(String);
-                } else if (typeof value === "string") {
-                    caps = value
-                        .split(",")
-                        .map((c) => c.trim())
-                        .filter((c) => c.length > 0);
-                }
-
-                if (caps.length > 0) {
-                    const entry: { toolCalling?: boolean; imageInput?: boolean } = {};
-                    if (caps.some((c) => c.toLowerCase() === "toolcalling" || c.toLowerCase() === "tools")) {
-                        entry.toolCalling = true;
-                    }
-                    if (caps.some((c) => c.toLowerCase() === "imageinput" || c.toLowerCase() === "vision")) {
-                        entry.imageInput = true;
-                    }
-                    if (Object.keys(entry).length > 0) {
-                        modelCapabilitiesOverrides[modelId] = entry;
-                    }
+                const override = parseCapabilityOverride(value);
+                if (override) {
+                    modelCapabilitiesOverrides[modelId] = override;
                 }
             }
         }
