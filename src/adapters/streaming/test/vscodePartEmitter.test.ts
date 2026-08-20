@@ -215,44 +215,26 @@ suite("vscodePartEmitter", () => {
     });
 
     test("falls back to *-wrapped text when LanguageModelThinkingPart is unavailable", () => {
-        const vscodeMutable = vscode as unknown as Record<string, unknown>;
-        const original = vscodeMutable.LanguageModelThinkingPart;
-        delete vscodeMutable.LanguageModelThinkingPart;
-        try {
-            const reported: vscode.LanguageModelResponsePart[] = [];
-            const progress = {
-                report: (part: vscode.LanguageModelResponsePart) => reported.push(part),
-            } as vscode.Progress<vscode.LanguageModelResponsePart>;
+        const reported: vscode.LanguageModelResponsePart[] = [];
+        const progress = {
+            report: (part: vscode.LanguageModelResponsePart) => reported.push(part),
+        } as vscode.Progress<vscode.LanguageModelResponsePart>;
 
-            emitV2PartsToVSCode([{ type: "thinking", value: "hidden reasoning" }], progress);
+        emitV2PartsToVSCode([{ type: "thinking", value: "hidden reasoning" }], progress, null);
 
-            assert.strictEqual(reported.length, 1, "thinking must not be silently dropped");
-            assert.ok(reported[0] instanceof vscode.LanguageModelTextPart);
-            assert.strictEqual((reported[0] as vscode.LanguageModelTextPart).value, "*hidden reasoning*");
-        } finally {
-            if (original !== undefined) {
-                vscodeMutable.LanguageModelThinkingPart = original;
-            }
-        }
+        assert.strictEqual(reported.length, 1, "thinking must not be silently dropped");
+        assert.ok(reported[0] instanceof vscode.LanguageModelTextPart);
+        assert.strictEqual((reported[0] as vscode.LanguageModelTextPart).value, "*hidden reasoning*");
     });
 
     test("skips fallback emission for metadata-only thinking parts when ThinkingPart is unavailable", () => {
-        const vscodeMutable = vscode as unknown as Record<string, unknown>;
-        const original = vscodeMutable.LanguageModelThinkingPart;
-        delete vscodeMutable.LanguageModelThinkingPart;
-        try {
-            const reported: vscode.LanguageModelResponsePart[] = [];
-            const progress = {
-                report: (part: vscode.LanguageModelResponsePart) => reported.push(part),
-            } as vscode.Progress<vscode.LanguageModelResponsePart>;
+        const reported: vscode.LanguageModelResponsePart[] = [];
+        const progress = {
+            report: (part: vscode.LanguageModelResponsePart) => reported.push(part),
+        } as vscode.Progress<vscode.LanguageModelResponsePart>;
 
-            emitV2PartsToVSCode([{ type: "thinking", value: "", metadata: { signature: "sig" } }], progress);
+        emitV2PartsToVSCode([{ type: "thinking", value: "", metadata: { signature: "sig" } }], progress, null);
 
-            assert.strictEqual(reported.length, 0, "empty-value signature parts have no text to fall back to");
-        } finally {
-            if (original !== undefined) {
-                vscodeMutable.LanguageModelThinkingPart = original;
-            }
-        }
+        assert.strictEqual(reported.length, 0, "empty-value signature parts have no text to fall back to");
     });
 });

@@ -4,9 +4,21 @@ import { isCacheControlMimeType } from "../../utils";
 import { StructuredLogger } from "../../observability/structuredLogger";
 import type { EmittedPart } from "./liteLLMStreamInterpreter";
 
+type ThinkingPartConstructor = new (
+    value: string | string[],
+    id?: string,
+    metadata?: Record<string, unknown>
+) => vscode.LanguageModelResponsePart;
+
+function getThinkingPartConstructor(): ThinkingPartConstructor | undefined {
+    return (vscode as unknown as Record<string, unknown>).LanguageModelThinkingPart as
+        ThinkingPartConstructor | undefined;
+}
+
 export function emitV2PartsToVSCode(
     parts: EmittedPart[],
-    progress: vscode.Progress<vscode.LanguageModelResponsePart | vscode.LanguageModelDataPart>
+    progress: vscode.Progress<vscode.LanguageModelResponsePart | vscode.LanguageModelDataPart>,
+    thinkingPartConstructor: ThinkingPartConstructor | null | undefined = getThinkingPartConstructor()
 ): void {
     Logger.trace(`[vscodePartEmitter] Emitting ${parts.length} parts to VS Code`);
     StructuredLogger.trace("vscode.emit_parts_start", {
@@ -90,9 +102,7 @@ export function emitV2PartsToVSCode(
                 break;
             }
             case "thinking": {
-                const ThinkingPart = (vscode as unknown as Record<string, unknown>).LanguageModelThinkingPart as
-                    | (new (value: string | string[], id?: string, metadata?: Record<string, unknown>) => unknown)
-                    | undefined;
+                const ThinkingPart = thinkingPartConstructor;
                 if (ThinkingPart) {
                     const thinkingValue = typeof part.value === "string" ? part.value : String(part.value ?? "");
                     Logger.trace(`[vscodePartEmitter] Part #${idx}: thinking, ${thinkingValue.length} chars`);
