@@ -115,6 +115,22 @@ suite("Parameter Validation from supported_openai_params", () => {
         assert.strictEqual(result, true);
     });
 
+    test("thinking is restrictable and requires explicit support", () => {
+        const modelInfo: LiteLLMModelInfo = {
+            supported_openai_params: ["reasoning_effort", "stream"],
+        };
+
+        assert.strictEqual(provider.testIsParameterSupported("thinking", modelInfo, "claude-opus-5"), false);
+    });
+
+    test("thinking is supported when listed in supported_openai_params", () => {
+        const modelInfo: LiteLLMModelInfo = {
+            supported_openai_params: ["reasoning_effort", "thinking", "stream"],
+        };
+
+        assert.strictEqual(provider.testIsParameterSupported("thinking", modelInfo, "claude-opus-5"), true);
+    });
+
     test("keeps reasoning_effort restricted when explicit effort metadata exists but the parameter is absent", () => {
         const modelInfo: LiteLLMModelInfo = {
             supports_reasoning: true,

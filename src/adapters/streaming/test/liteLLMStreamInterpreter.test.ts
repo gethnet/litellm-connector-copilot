@@ -200,6 +200,88 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
         }
     });
 
+    test("emits signature metadata from chat delta thinking_blocks without duplicating text", () => {
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent(
+            {
+                choices: [
+                    {
+                        delta: {
+                            reasoning_content: "visible thought",
+                            thinking_blocks: [
+                                {
+                                    type: "thinking",
+                                    thinking: "visible thought",
+                                    signature: "sig-abc123",
+                                },
+                            ],
+                        },
+                    },
+                ],
+            },
+            state
+        );
+
+        const thinkingParts = parts.filter((p) => p.type === "thinking");
+        assert.strictEqual(thinkingParts.length, 2);
+        const textPart = thinkingParts.find((p) => p.type === "thinking" && p.value === "visible thought");
+        const sigPart = thinkingParts.find((p) => p.type === "thinking" && p.metadata?.signature === "sig-abc123");
+        assert.ok(textPart, "expected visible thinking text part");
+        assert.ok(sigPart, "expected signature-bearing thinking part");
+        if (sigPart && sigPart.type === "thinking") {
+            assert.strictEqual(sigPart.value, "", "signature part must not repeat visible text");
+        }
+    });
+
+    test("emits redacted thinking_blocks from chat deltas as opaque redactedData metadata", () => {
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent(
+            {
+                choices: [
+                    {
+                        delta: {
+                            thinking_blocks: [{ type: "redacted_thinking", data: "opaque-blob-xyz" }],
+                        },
+                    },
+                ],
+            },
+            state
+        );
+
+        const thinking = parts.find((p) => p.type === "thinking");
+        assert.ok(thinking, "expected a thinking part for the redacted block");
+        if (thinking && thinking.type === "thinking") {
+            assert.strictEqual(thinking.value, "");
+            assert.strictEqual(thinking.metadata?.redactedData, "opaque-blob-xyz");
+            assert.strictEqual(thinking.metadata?.display, "omitted");
+        }
+    });
+
+    test("ignores malformed thinking_blocks entries in chat deltas", () => {
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent(
+            {
+                choices: [
+                    {
+                        delta: {
+                            thinking_blocks: [null, 42, { type: "thinking" }, { type: "thinking", signature: "" }],
+                        },
+                    },
+                ],
+            },
+            state
+        );
+
+        assert.strictEqual(
+            parts.filter((p) => p.type === "thinking").length,
+            0,
+            "entries without a non-empty signature or data must be skipped"
+        );
+    });
+
     test("should flush /responses tool calls on output_item.done when no completed frame", () => {
         const state = createInitialStreamingState();
 

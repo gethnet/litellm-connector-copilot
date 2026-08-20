@@ -486,17 +486,39 @@ suite("Responses Adapter Unit Tests", () => {
         assert.strictEqual(body.input.length, 0);
     });
 
-    test("transformToResponsesFormat propagates reasoning_effort verbatim", () => {
-        // We deliberately use a single canonical request shape across endpoints.
-        // LiteLLM accepts the flat `reasoning_effort` key on /responses just as it
-        // does on /chat/completions, so the adapter passes it through unchanged
-        // rather than translating into a nested `reasoning: { effort }` shape.
+    test("transformToResponsesFormat emits native reasoning for a selected effort", () => {
         const body = transformToResponsesFormat({
-            model: "m",
+            model: "gpt-5.6",
             messages: [{ role: "user", content: "hi" }],
             reasoning_effort: "high",
         });
         assert.strictEqual(body.reasoning_effort, "high");
+        assert.deepStrictEqual(body.reasoning, { effort: "high" });
+    });
+
+    test("transformToResponsesFormat preserves explicit adaptive Claude fields", () => {
+        const body = transformToResponsesFormat({
+            model: "claude-opus-5",
+            messages: [{ role: "user", content: "hi" }],
+            reasoning_effort: "high",
+            thinking: { type: "adaptive" },
+            output_config: { effort: "high" },
+        });
+
+        assert.deepStrictEqual(body.thinking, { type: "adaptive" });
+        assert.deepStrictEqual(body.output_config, { effort: "high" });
+        assert.strictEqual(body.reasoning, undefined);
+    });
+
+    test("transformToResponsesFormat omits native reasoning for none", () => {
+        const body = transformToResponsesFormat({
+            model: "gpt-5.6",
+            messages: [{ role: "user", content: "hi" }],
+            reasoning_effort: "none",
+        });
+
+        assert.strictEqual(body.reasoning_effort, "none");
+        assert.strictEqual(body.reasoning, undefined);
     });
 
     test("transformToResponsesFormat omits reasoning_effort when source request did not set it", () => {

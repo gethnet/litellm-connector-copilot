@@ -106,9 +106,21 @@ export function emitV2PartsToVSCode(
                         preview: thinkingValue.substring(0, 100),
                     });
                 } else {
-                    Logger.warn(
-                        `[vscodePartEmitter] Part #${idx}: thinking part skipped (LanguageModelThinkingPart not available)`
-                    );
+                    const fallbackValue = typeof part.value === "string" ? part.value : String(part.value ?? "");
+                    if (fallbackValue.length > 0) {
+                        Logger.warn(
+                            `[vscodePartEmitter] Part #${idx}: ThinkingPart unavailable — emitting *text* fallback (${fallbackValue.length} chars)`
+                        );
+                        progress.report(new vscode.LanguageModelTextPart(`*${fallbackValue}*`));
+                        StructuredLogger.debug("vscode.thinking_part_fallback_emitted", {
+                            partIndex: idx,
+                            length: fallbackValue.length,
+                        });
+                    } else {
+                        Logger.warn(
+                            `[vscodePartEmitter] Part #${idx}: metadata-only thinking part skipped (ThinkingPart unavailable)`
+                        );
+                    }
                 }
                 break;
             }

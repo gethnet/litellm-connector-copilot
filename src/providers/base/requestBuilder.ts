@@ -10,6 +10,7 @@ import { trimMessagesToFitBudget, trimV2MessagesForBudget } from "../../adapters
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, OpenAIFunctionToolDef } from "../../types";
 import type { RequestBuilderDeps } from "./types";
 import type { V2ChatMessage } from "../v2Types";
+import { resolveChatReasoningTransport } from "./reasoningTransport";
 
 export class RequestBuilder {
     private readonly configManager: RequestBuilderDeps["configManager"];
@@ -78,6 +79,12 @@ export class RequestBuilder {
         validateRequest(messagesToUse);
 
         const reasoningEffort = this.getReasoningEffort(options, model, modelInfo);
+        const reasoningTransport = resolveChatReasoningTransport(
+            reasoningEffort,
+            rawModelId,
+            modelInfo,
+            this.isParameterSupported
+        );
         const mo = (options.modelOptions as Record<string, unknown>) ?? {};
 
         const requestBody: OpenAIChatCompletionRequest = {
@@ -88,9 +95,7 @@ export class RequestBuilder {
                 typeof mo.max_tokens === "number"
                     ? Math.min(mo.max_tokens, model.maxOutputTokens)
                     : model.maxOutputTokens,
-            ...(this.isParameterSupported("reasoning_effort", modelInfo, rawModelId) && reasoningEffort
-                ? { reasoning_effort: reasoningEffort }
-                : {}),
+            ...reasoningTransport,
         };
 
         if (!this.usageOptOutModels.has(rawModelId)) {
@@ -165,6 +170,12 @@ export class RequestBuilder {
         validateV2Messages(trimmedMessages);
 
         const reasoningEffort = this.getReasoningEffort(options, model, modelInfo);
+        const reasoningTransport = resolveChatReasoningTransport(
+            reasoningEffort,
+            rawModelId,
+            modelInfo,
+            this.isParameterSupported
+        );
         const mo = (options.modelOptions as Record<string, unknown>) ?? {};
 
         const requestBody: OpenAIChatCompletionRequest = {
@@ -175,9 +186,7 @@ export class RequestBuilder {
                 typeof options.modelOptions?.max_tokens === "number"
                     ? Math.min(options.modelOptions.max_tokens, model.maxOutputTokens)
                     : model.maxOutputTokens,
-            ...(this.isParameterSupported("reasoning_effort", modelInfo, rawModelId) && reasoningEffort
-                ? { reasoning_effort: reasoningEffort }
-                : {}),
+            ...reasoningTransport,
         };
 
         if (this.isParameterSupported("temperature", modelInfo, rawModelId)) {

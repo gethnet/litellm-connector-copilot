@@ -113,6 +113,8 @@ export class Transport {
             endpoint: modelInfo?.mode,
             requestModel: request.model,
             reasoning_effort: (request as { reasoning_effort?: string }).reasoning_effort,
+            has_thinking: (request as { thinking?: unknown }).thinking !== undefined,
+            has_output_config: (request as { output_config?: unknown }).output_config !== undefined,
             max_tokens: request.max_tokens,
             temperature: request.temperature,
             top_p: request.top_p,

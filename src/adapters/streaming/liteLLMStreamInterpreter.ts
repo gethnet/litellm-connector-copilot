@@ -362,6 +362,37 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
             });
         }
 
+        // LiteLLM's chat endpoint sends visible Anthropic thinking through
+        // reasoning_content and the continuity metadata through thinking_blocks.
+        // Emit metadata-only parts here so the visible text is not duplicated.
+        if (Array.isArray(delta?.thinking_blocks)) {
+            for (const rawBlock of delta.thinking_blocks) {
+                if (!rawBlock || typeof rawBlock !== "object") {
+                    continue;
+                }
+                const block = rawBlock as { type?: unknown; signature?: unknown; data?: unknown };
+                if (block.type === "redacted_thinking" && typeof block.data === "string" && block.data.length > 0) {
+                    thinkingParts.push({
+                        type: "thinking",
+                        value: "",
+                        metadata: { redactedData: block.data, display: "omitted" },
+                    });
+                    StructuredLogger.trace("stream.chat_redacted_thinking_block", {
+                        dataLength: block.data.length,
+                    });
+                } else if (typeof block.signature === "string" && block.signature.length > 0) {
+                    thinkingParts.push({
+                        type: "thinking",
+                        value: "",
+                        metadata: { signature: block.signature },
+                    });
+                    StructuredLogger.trace("stream.chat_thinking_block_signature", {
+                        signatureLength: block.signature.length,
+                    });
+                }
+            }
+        }
+
         const deltaContent = typeof delta?.content === "string" && delta.content ? delta.content : undefined;
         const contentForParsing = mergeReasoningIntoContent
             ? `${reasoningContent ?? ""}${deltaContent ?? ""}`

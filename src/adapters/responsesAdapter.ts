@@ -8,6 +8,13 @@ import type {
 import { normalizeToolCallId } from "../utils";
 import { Logger } from "../utils/logger";
 
+function getResponsesReasoningEffort(effort: OpenAIChatCompletionRequest["reasoning_effort"]): string | undefined {
+    if (typeof effort === "string") {
+        return effort === "none" ? undefined : effort;
+    }
+    return effort?.effort === "none" ? undefined : effort?.effort;
+}
+
 /**
  * Transform a chat/completions request body to the responses API format.
  * The responses API uses "input" (array format) instead of "messages".
@@ -248,10 +255,17 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
         frequency_penalty: requestBody.frequency_penalty,
         presence_penalty: requestBody.presence_penalty,
         stop: requestBody.stop,
-        // LiteLLM /responses also accepts the flat `reasoning_effort` key. We pass it
-        // through unchanged so reasoning effort works identically across endpoints
-        // and the connector keeps a single canonical request shape.
+        // Preserve the flat compatibility field while also using the endpoint-native
+        // shape. Explicit Claude adaptive fields take precedence over `reasoning`.
         reasoning_effort: requestBody.reasoning_effort,
+        reasoning: requestBody.thinking
+            ? undefined
+            : (() => {
+                  const effort = getResponsesReasoningEffort(requestBody.reasoning_effort);
+                  return effort ? { effort } : undefined;
+              })(),
+        thinking: requestBody.thinking,
+        output_config: requestBody.output_config,
         stream_options: requestBody.stream_options,
         extra_body: requestBody.extra_body,
     };

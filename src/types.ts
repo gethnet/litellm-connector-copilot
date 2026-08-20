@@ -119,6 +119,24 @@ export interface ModelCapabilityOverride {
 
 export type SupportedReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
+export interface LiteLLMAdaptiveThinking {
+    type: "adaptive";
+}
+
+export interface LiteLLMReasoningOutputConfig {
+    effort: string;
+}
+
+export interface LiteLLMResponsesReasoning {
+    effort: string;
+}
+
+export interface ChatReasoningTransportFields {
+    reasoning_effort?: OpenAIChatCompletionRequest["reasoning_effort"];
+    thinking?: LiteLLMAdaptiveThinking;
+    output_config?: LiteLLMReasoningOutputConfig;
+}
+
 export type ReasoningModelInfoField =
     | "supports_reasoning"
     | "supports_none_reasoning_effort"
@@ -326,6 +344,8 @@ export interface LiteLLMModelInfo {
     supports_web_search?: boolean | null;
     supports_url_context?: boolean | null;
     supports_reasoning?: boolean | null;
+    /** LiteLLM capability signal for Claude's adaptive thinking transport. */
+    supports_adaptive_thinking?: boolean | null;
     supports_computer_use?: boolean | null;
     // Pricing fields (per-token costs, USD). Optional; absent when backend does not return pricing.
     input_cost_per_token?: number | null;
@@ -420,6 +440,9 @@ export interface OpenAIChatCompletionRequest {
      * the model picker or modelOptions override.
      */
     reasoning_effort?: string | { effort: string; summary?: string };
+    /** Native adaptive-thinking fields forwarded by LiteLLM for affected Claude routes. */
+    thinking?: LiteLLMAdaptiveThinking;
+    output_config?: LiteLLMReasoningOutputConfig;
     /**
      * LiteLLM passthrough body.
      * Used for features like caching controls.
@@ -459,6 +482,10 @@ export interface LiteLLMResponsesRequest {
      * details.
      */
     reasoning_effort?: string | { effort: string; summary?: string };
+    /** Endpoint-native reasoning shape used when no explicit provider-native thinking is present. */
+    reasoning?: LiteLLMResponsesReasoning;
+    thinking?: LiteLLMAdaptiveThinking;
+    output_config?: LiteLLMReasoningOutputConfig;
     stream_options?: { include_usage?: boolean };
     /**
      * LiteLLM passthrough body.

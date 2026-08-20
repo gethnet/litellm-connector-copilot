@@ -33,6 +33,7 @@ const RESTRICTABLE_PARAMS: ReadonlySet<string> = new Set([
     "frequency_penalty",
     "stop",
     "reasoning_effort",
+    "thinking",
     "tool_choice",
     "cache",
 ]);

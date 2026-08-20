@@ -214,6 +214,84 @@ suite("RequestBuilder", () => {
         assert.strictEqual(request.reasoning_effort, "none");
     });
 
+    test("buildOpenAIChatRequest emits adaptive fields for an affected Claude route", async () => {
+        configManager.getConfig.resolves({});
+        const adaptiveBuilder = new RequestBuilder({
+            configManager,
+            getReasoningEffort: () => "high",
+            detectQuotaToolRedaction: (messages, tools) => ({ tools, confidence: "none" as const }),
+            stripUnsupportedParametersFromRequest: () => {},
+            isParameterSupported: (parameter, modelInfo) =>
+                modelInfo?.supported_openai_params?.includes(parameter) === true,
+            getTelemetryOptions: () => ({ caller: "test", justification: undefined, modelConfiguration: {} }),
+            usageOptOutModels: new Set(),
+            extractRawModelName: (id: string) => id,
+        });
+        const model = {
+            id: "vertex_ai/claude-opus-4-8",
+            maxInputTokens: 100_000,
+            maxOutputTokens: 8_192,
+        } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("hi")],
+                name: undefined,
+            },
+        ];
+
+        const request = await adaptiveBuilder.buildOpenAIChatRequest(
+            messages,
+            model,
+            { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions,
+            { supported_openai_params: ["reasoning_effort", "thinking"] },
+            "test"
+        );
+
+        assert.strictEqual(request.reasoning_effort, "high");
+        assert.deepStrictEqual(request.thinking, { type: "adaptive" });
+        assert.deepStrictEqual(request.output_config, { effort: "high" });
+    });
+
+    test("buildOpenAIChatRequest keeps Opus 4.7 on flat reasoning_effort", async () => {
+        configManager.getConfig.resolves({});
+        const standardBuilder = new RequestBuilder({
+            configManager,
+            getReasoningEffort: () => "high",
+            detectQuotaToolRedaction: (messages, tools) => ({ tools, confidence: "none" as const }),
+            stripUnsupportedParametersFromRequest: () => {},
+            isParameterSupported: (parameter, modelInfo) =>
+                modelInfo?.supported_openai_params?.includes(parameter) === true,
+            getTelemetryOptions: () => ({ caller: "test", justification: undefined, modelConfiguration: {} }),
+            usageOptOutModels: new Set(),
+            extractRawModelName: (id: string) => id,
+        });
+        const model = {
+            id: "anthropic/claude-opus-4-7",
+            maxInputTokens: 100_000,
+            maxOutputTokens: 8_192,
+        } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("hi")],
+                name: undefined,
+            },
+        ];
+
+        const request = await standardBuilder.buildOpenAIChatRequest(
+            messages,
+            model,
+            { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions,
+            { supported_openai_params: ["reasoning_effort", "thinking"] },
+            "test"
+        );
+
+        assert.strictEqual(request.reasoning_effort, "high");
+        assert.strictEqual(request.thinking, undefined);
+        assert.strictEqual(request.output_config, undefined);
+    });
+
     test("buildV2ChatRequest omits none when reasoning_effort is unsupported", async () => {
         configManager.getConfig.resolves({});
         const noneBuilder = new RequestBuilder({
