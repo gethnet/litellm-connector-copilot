@@ -150,7 +150,7 @@ Base URL + API key are configured through **VS Code's Language Models UI** (run 
 | `inactivityTimeout` | `60` | Seconds before stream is considered idle |
 | `disableCaching` | `false` | When enabled, bypass LiteLLM caching for models that advertise support for the `cache` parameter |
 | `enableModelOverrides` | `false` | Enable model-card override rules |
-| `displayPricingInPicker` | `true` | Show model pricing in picker |
+| `displayPricingInPicker` | `true` | Show model pricing in picker details, hovers, and cost metadata; native model-name rows remain price-free |
 | `discoveryTimeoutMs` | `5000` | Timeout (ms) for model discovery |
 | `discoveryCacheTtlMs` | `60000` | Cache TTL (ms), 0 to disable |
 | `discoveryFireDebounceMs` | `250` | Debounce (ms) for change notifications |

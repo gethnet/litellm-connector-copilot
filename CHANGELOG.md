@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### 🐛 Fixes
+
+* **🧼 Keep native model rows price-free**: Removed inline pricing from the VS Code model dropdown while retaining pricing in picker details, hovers, cost metadata, and extension-owned model pickers. (`src/providers/liteLLMProviderRegistry.ts`)
+
 ## [2.5.1] - 2026-08-19
 
 ### 🚀 Features

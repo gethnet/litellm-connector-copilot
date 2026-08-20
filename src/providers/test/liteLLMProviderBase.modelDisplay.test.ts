@@ -166,6 +166,7 @@ suite("LiteLLM model display", () => {
             category?: string;
             detail?: string;
             multiplierNumeric?: number;
+            tooltip?: string;
             warningText?: Record<string, string>;
             infoText?: Record<string, string>;
         };
@@ -177,9 +178,20 @@ suite("LiteLLM model display", () => {
         assert.strictEqual(info.cacheWriteCost, 1.25); // $0.00000125 * 1_000_000
         assert.strictEqual(info.priceCategory, "low");
 
-        // Pricing label uses compact detail formatter ($X/1M inp • $Y/1M out)
-        assert.strictEqual(info.pricing, "$1.00/1M inp • $5.00/1M out");
+        // VS Code renders `pricing` inline in its native model dropdown. Keep that
+        // row focused on the model identity while preserving pricing in every other
+        // picker surface and native cost metadata.
+        assert.strictEqual(info.pricing, undefined);
         assert.strictEqual(info.detail, "example • $1.00/1M inp • $5.00/1M out");
+        assert.strictEqual(
+            info.tooltip,
+            "Provider: openai, Model: priced-model via example\n" +
+                "Input: $1.00/1M tokens\n" +
+                "Output: $5.00/1M tokens\n" +
+                "Cache read: $0.10/1M tokens\n" +
+                "Cache write: $1.25/1M tokens\n" +
+                "Limits: input 4,096 tokens, output 4,096 tokens"
+        );
         assert.strictEqual(info.multiplierNumeric, 5);
         assert.strictEqual(info.warningText, undefined);
 

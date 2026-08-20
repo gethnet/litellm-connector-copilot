@@ -1,7 +1,7 @@
 {
 	"name": "litellm-connector-copilot",
 	"displayName": "LiteLLM Connector for Copilot",
-	"version": "2.5.1",
+	"version": "2.5.2-dev1",
 	"description": "An extension that integrates LiteLLM proxy into Copilot",
 	"categories": [
 		"AI",
@@ -276,7 +276,7 @@
 				"litellm-connector.displayPricingInPicker": {
 					"type": "boolean",
 					"default": true,
-					"description": "Show model pricing in the model picker when available."
+					"description": "Show model pricing in picker details, hovers, and cost metadata when available; prices are not shown inline with native model names."
 				},
 				"litellm-connector.discoveryTimeoutMs": {
 					"type": "number",
