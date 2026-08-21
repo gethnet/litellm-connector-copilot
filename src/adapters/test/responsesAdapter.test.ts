@@ -244,6 +244,7 @@ suite("Responses Adapter Unit Tests", () => {
                     content: "I will continue the task.",
                     thinking_blocks: [
                         {
+                            type: "thinking",
                             thinking: "I need the earlier reasoning summary.",
                             signature: "signed-thinking-state",
                         },
@@ -273,7 +274,7 @@ suite("Responses Adapter Unit Tests", () => {
             messages: [
                 {
                     role: "assistant",
-                    thinking_blocks: [{ data: "opaque-redacted-thinking" }],
+                    thinking_blocks: [{ type: "redacted_thinking", data: "opaque-redacted-thinking" }],
                 },
             ],
         });

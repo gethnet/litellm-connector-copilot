@@ -10,6 +10,8 @@ import { createTelemetryMocks } from "../../test/utils/telemetryMock";
 import { getModelTags } from "../../utils/modelCapabilities";
 import type { DerivedModelCapabilities } from "../../utils/modelCapabilities";
 import type { BackendSession } from "../backendSession";
+import { convertMessages } from "../../utils";
+import { createInitialStreamingState, interpretStreamEvent } from "../../adapters/streaming/liteLLMStreamInterpreter";
 
 function createDerived(overrides: Partial<DerivedModelCapabilities> = {}): DerivedModelCapabilities {
     return {
@@ -215,6 +217,23 @@ suite("LiteLLMProviderBase", () => {
 
                 const recordRequest = request as unknown as Record<string, unknown>;
                 assert.strictEqual(recordRequest.reasoning_effort, "high");
+            });
+
+            test("removes adaptive native fields when effort becomes none", () => {
+                const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+                const request: OpenAIChatCompletionRequest = {
+                    model: "claude-opus-5",
+                    messages: [],
+                    reasoning_effort: "high",
+                    thinking: { type: "adaptive" },
+                    output_config: { effort: "high" },
+                };
+
+                access(provider).applyReasoningEffort(request, "none");
+
+                assert.strictEqual(request.reasoning_effort, "none");
+                assert.strictEqual(request.thinking, undefined);
+                assert.strictEqual(request.output_config, undefined);
             });
         });
 
@@ -598,6 +617,332 @@ suite("LiteLLMProviderBase", () => {
             );
 
             assert.ok(capturedRequests[0].reasoning_effort !== "high", "should have downgraded before first send");
+        });
+
+        test("retries once without thinking_blocks on a model-switch continuity rejection", async () => {
+            const provider = setupProvider();
+            const baseConfig = { baseUrl: "https://wolfram.example", apiKey: "k" };
+            seedBackendForCall(sandbox, provider, baseConfig, {
+                backendName: "wolfram",
+                baseUrl: "https://wolfram.example",
+                apiKey: "k",
+                client: {} as never,
+            });
+            const requests: OpenAIChatCompletionRequest[] = [];
+            const sendStub = sandbox
+                .stub(access(provider)._transport, "sendRequestToLiteLLM")
+                .callsFake(async (request) => {
+                    requests.push(request);
+                    if (requests.length === 1) {
+                        throw apiError("Invalid `signature` in `thinking` block", 400);
+                    }
+                    return new ReadableStream();
+                });
+            const request: OpenAIChatCompletionRequest = {
+                model: "claude-opus-5",
+                stream: true,
+                reasoning_effort: "high",
+                thinking: { type: "adaptive" },
+                output_config: { effort: "high" },
+                messages: [
+                    {
+                        role: "assistant",
+                        content: "answer",
+                        thinking_blocks: [
+                            {
+                                type: "thinking",
+                                thinking: "prior reasoning",
+                                signature: "old-model-signature",
+                            },
+                        ],
+                    },
+                ],
+            };
+
+            const stream = await access(provider).sendRequestWithRetry(
+                request,
+                [],
+                model,
+                { configuration: baseConfig } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                { report: () => {} } as vscode.Progress<vscode.LanguageModelResponsePart>,
+                new vscode.CancellationTokenSource().token,
+                "test"
+            );
+
+            assert.ok(stream);
+            sinon.assert.calledTwice(sendStub);
+            assert.ok(requests[0].messages[0].thinking_blocks, "first attempt must retain continuity");
+            assert.strictEqual("thinking_blocks" in requests[1].messages[0], false);
+            assert.strictEqual(requests[1].reasoning_effort, "high");
+            assert.deepStrictEqual(requests[1].thinking, { type: "adaptive" });
+            assert.deepStrictEqual(requests[1].output_config, { effort: "high" });
+        });
+
+        test("does not continuity-retry an authentication failure", async () => {
+            const provider = setupProvider();
+            const baseConfig = { baseUrl: "https://wolfram.example", apiKey: "k" };
+            seedBackendForCall(sandbox, provider, baseConfig, {
+                backendName: "wolfram",
+                baseUrl: "https://wolfram.example",
+                apiKey: "k",
+                client: {} as never,
+            });
+            const sendStub = sandbox
+                .stub(access(provider)._transport, "sendRequestToLiteLLM")
+                .rejects(apiError("thinking_blocks request used an invalid api key", 401));
+
+            await assert.rejects(() =>
+                access(provider).sendRequestWithRetry(
+                    {
+                        model: "claude-opus-5",
+                        messages: [
+                            {
+                                role: "assistant",
+                                thinking_blocks: [{ type: "thinking", thinking: "thought", signature: "sig" }],
+                            },
+                        ],
+                    },
+                    [],
+                    model,
+                    { configuration: baseConfig } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                    { report: () => {} } as vscode.Progress<vscode.LanguageModelResponsePart>,
+                    new vscode.CancellationTokenSource().token,
+                    "test"
+                )
+            );
+
+            sinon.assert.calledOnce(sendStub);
+        });
+
+        test("keeps adaptive output_config synchronized during effort fallback", async () => {
+            const provider = setupProvider();
+            const baseConfig = { baseUrl: "https://wolfram.example", apiKey: "k" };
+            seedBackendForCall(sandbox, provider, baseConfig, {
+                backendName: "wolfram",
+                baseUrl: "https://wolfram.example",
+                apiKey: "k",
+                client: {} as never,
+            });
+            const requests: OpenAIChatCompletionRequest[] = [];
+            sandbox.stub(access(provider)._transport, "sendRequestToLiteLLM").callsFake(async (request) => {
+                requests.push({
+                    ...request,
+                    output_config: request.output_config ? { ...request.output_config } : undefined,
+                });
+                if (requests.length === 1) {
+                    throw apiError("reasoning_effort parameter is not supported", 400);
+                }
+                return new ReadableStream();
+            });
+
+            await access(provider).sendRequestWithRetry(
+                {
+                    model: "claude-opus-5",
+                    messages: [{ role: "user", content: "hi" }],
+                    reasoning_effort: "high",
+                    thinking: { type: "adaptive" },
+                    output_config: { effort: "high" },
+                },
+                [],
+                model,
+                { configuration: baseConfig } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                { report: () => {} } as vscode.Progress<vscode.LanguageModelResponsePart>,
+                new vscode.CancellationTokenSource().token,
+                "test"
+            );
+
+            assert.strictEqual(requests[1].reasoning_effort, "medium");
+            assert.deepStrictEqual(requests[1].thinking, { type: "adaptive" });
+            assert.deepStrictEqual(requests[1].output_config, { effort: "medium" });
+        });
+
+        test("composes include-usage and continuity retries without restoring either field", async () => {
+            const provider = setupProvider();
+            const baseConfig = { baseUrl: "https://wolfram.example", apiKey: "k" };
+            seedBackendForCall(sandbox, provider, baseConfig, {
+                backendName: "wolfram",
+                baseUrl: "https://wolfram.example",
+                apiKey: "k",
+                client: {} as never,
+            });
+            const sent: OpenAIChatCompletionRequest[] = [];
+            sandbox.stub(access(provider)._transport, "sendRequestToLiteLLM").callsFake(async (request) => {
+                sent.push(request);
+                if (sent.length === 1) {
+                    throw apiError("stream_options.include_usage is not supported", 400);
+                }
+                if (sent.length === 2) {
+                    throw apiError("Invalid `signature` in `thinking` block", 400);
+                }
+                return new ReadableStream();
+            });
+
+            await access(provider).sendRequestWithRetry(
+                {
+                    model: "claude-opus-5",
+                    stream: true,
+                    stream_options: { include_usage: true },
+                    messages: [
+                        {
+                            role: "assistant",
+                            thinking_blocks: [
+                                { type: "thinking", thinking: "prior reasoning", signature: "old-signature" },
+                            ],
+                        },
+                    ],
+                },
+                [],
+                model,
+                { configuration: baseConfig } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                { report: () => {} } as vscode.Progress<vscode.LanguageModelResponsePart>,
+                new vscode.CancellationTokenSource().token,
+                "test"
+            );
+
+            assert.strictEqual(sent.length, 3);
+            assert.strictEqual(sent[2].stream_options, undefined);
+            assert.strictEqual("thinking_blocks" in sent[2].messages[0], false);
+        });
+
+        test("keeps continuity stripped when overflow rebuilding recreates the request", async () => {
+            const provider = setupProvider();
+            const baseConfig = { baseUrl: "https://wolfram.example", apiKey: "k" };
+            seedBackendForCall(sandbox, provider, baseConfig, {
+                backendName: "wolfram",
+                baseUrl: "https://wolfram.example",
+                apiKey: "k",
+                client: {} as never,
+            });
+            const history = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    content: [new vscode.LanguageModelTextPart("answer")],
+                    name: undefined,
+                },
+            ];
+            const requestWithContinuity = (): OpenAIChatCompletionRequest => ({
+                model: "claude-opus-5",
+                stream: true,
+                max_tokens: 100,
+                messages: [
+                    {
+                        role: "assistant",
+                        content: "answer",
+                        thinking_blocks: [
+                            { type: "thinking", thinking: "prior reasoning", signature: "old-signature" },
+                        ],
+                    },
+                ],
+            });
+            sandbox.stub(access(provider), "buildOpenAIChatRequest").resolves(requestWithContinuity());
+            const sent: OpenAIChatCompletionRequest[] = [];
+            sandbox.stub(access(provider)._transport, "sendRequestToLiteLLM").callsFake(async (candidate) => {
+                sent.push(candidate);
+                if (sent.length === 1) {
+                    throw apiError("Invalid `signature` in `thinking` block", 400);
+                }
+                if (sent.length === 2) {
+                    throw new Error("context length exceeded");
+                }
+                return new ReadableStream();
+            });
+
+            await access(provider).sendRequestWithRetry(
+                requestWithContinuity(),
+                history as unknown as vscode.LanguageModelChatRequestMessage[],
+                model,
+                { configuration: baseConfig } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                { report: () => {} } as vscode.Progress<vscode.LanguageModelResponsePart>,
+                new vscode.CancellationTokenSource().token,
+                "test",
+                { mode: "chat", max_input_tokens: 1000 } as unknown as LiteLLMModelInfo
+            );
+
+            assert.strictEqual(sent.length, 3);
+            assert.ok(sent[0].messages[0].thinking_blocks);
+            assert.strictEqual("thinking_blocks" in sent[1].messages[0], false);
+            assert.strictEqual("thinking_blocks" in sent[2].messages[0], false);
+        });
+
+        test("round-trips streamed continuity and recovers after switching models", async () => {
+            const provider = setupProvider();
+            const baseConfig = { baseUrl: "https://proxy.example", apiKey: "k" };
+            seedBackendForCall(sandbox, provider, baseConfig, {
+                backendName: "proxy",
+                baseUrl: "https://proxy.example",
+                apiKey: "k",
+                client: {} as never,
+            });
+            // Use the real stream interpreter to produce the split shape:
+            // visible reasoning_content text followed by a signature-only
+            // thinking_blocks metadata entry. convertMessages must recombine
+            // these into a complete { type, thinking, signature } block.
+            const emitted = interpretStreamEvent(
+                {
+                    choices: [
+                        {
+                            delta: {
+                                reasoning_content: "Reasoning produced by the first model.",
+                                thinking_blocks: [
+                                    {
+                                        type: "thinking",
+                                        thinking: "Reasoning produced by the first model.",
+                                        signature: "signature-from-first-model",
+                                    },
+                                ],
+                            },
+                        },
+                    ],
+                },
+                createInitialStreamingState()
+            );
+            const history = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    content: emitted,
+                },
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    content: [new vscode.LanguageModelTextPart("Continue after switching models.")],
+                },
+            ] as unknown as vscode.LanguageModelChatRequestMessage[];
+            const messages = convertMessages(history);
+
+            assert.deepStrictEqual(messages[0].thinking_blocks, [
+                {
+                    type: "thinking",
+                    thinking: "Reasoning produced by the first model.",
+                    signature: "signature-from-first-model",
+                },
+            ]);
+
+            const sent: OpenAIChatCompletionRequest[] = [];
+            sandbox.stub(access(provider)._transport, "sendRequestToLiteLLM").callsFake(async (request) => {
+                sent.push(request);
+                if (sent.length === 1) {
+                    throw apiError("Invalid `signature` in `thinking` block", 400);
+                }
+                return new ReadableStream();
+            });
+
+            await access(provider).sendRequestWithRetry(
+                {
+                    model: "azure_ai/claude-haiku-4-5",
+                    messages,
+                    stream: true,
+                    reasoning_effort: "high",
+                },
+                history,
+                model,
+                { configuration: baseConfig } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                { report: () => {} } as vscode.Progress<vscode.LanguageModelResponsePart>,
+                new vscode.CancellationTokenSource().token,
+                "chat"
+            );
+
+            assert.ok(sent[0].messages[0].thinking_blocks, "first attempt must preserve continuity");
+            assert.strictEqual("thinking_blocks" in sent[1].messages[0], false);
+            assert.strictEqual(sent[1].reasoning_effort, "high");
         });
     });
 

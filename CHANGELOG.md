@@ -7,6 +7,26 @@ All notable changes to this project will be documented in this file.
 ### 🐛 Fixes
 
 * **🧼 Keep native model rows price-free**: Removed inline pricing from the VS Code model dropdown while retaining pricing in picker details, hovers, cost metadata, and extension-owned model pickers. (`src/providers/liteLLMProviderRegistry.ts`)
+* **🧠 Fix thinking-block replay across model switches**: Switching models mid-session no longer hard-fails when the previous model's reasoning continuity is replayed. Serialized thinking blocks were missing Anthropic's required `type` discriminant and, for the real streaming shape, could emit a signature with no `thinking` text — either defect made the next model reject the whole turn. Blocks are now always complete wire objects. (`src/types.ts`, `src/utils.ts`)
+* **🔗 Recombine split streaming reasoning**: LiteLLM's chat endpoint streams visible reasoning text and its signature as separate parts. Message normalization now pairs adjacent thinking text with the signature that follows it, producing one complete `{ type, thinking, signature }` block. Pairing is strictly adjacent — any text, data, tool-call, or tool-result part clears unpaired text so a later signature cannot bind to the wrong block. Orphaned signatures are omitted instead of serialized invalidly. (`src/utils.ts`)
+* **♻️ Recover once from continuity rejection**: A recognized HTTP 400 that specifically rejects prior-turn continuity now triggers exactly one retry with message-level `thinking_blocks` removed. Valid continuity is always attempted first — nothing is stripped based on model names or capability guesses. Authentication, authorization, quota, cancellation, context overflow, 5xx, and network failures are excluded so the retry cannot mask unrelated errors. (`src/providers/base/thinkingBlockRetry.ts`, `src/providers/liteLLMProviderBase.ts`)
+* **🔒 Keep redaction durable across overflow rebuilds**: Context-overflow retries rebuild the request from the original VS Code history, which previously restored continuity that had just been rejected. The rebuilt request now re-strips continuity when a redaction is already in effect. (`src/providers/liteLLMProviderBase.ts`)
+* **🎚️ Keep adaptive reasoning fields coherent**: During reasoning-effort fallback, `reasoning_effort` and `output_config.effort` now stay synchronized, and adaptive `thinking`/`output_config` are dropped together when effort becomes absent or `none`. Adaptive fields are never created on a non-adaptive request. (`src/providers/liteLLMProviderBase.ts`)
+
+### 🛡️ Preserved behavior
+
+* Continuity redaction removes only message-level `thinking_blocks`; top-level `reasoning_effort`, adaptive `thinking`, `output_config`, tools, `stream_options`, and `extra_body` are retained. Responses-routed requests keep endpoint-native `reasoning: { effort }`, and the existing `/responses` → `/chat/completions` fallback routing and retry count are unchanged. (`src/adapters/responsesAdapter.ts`, `src/providers/base/transport.ts`)
+
+### 🧪 Tests
+
+* Added regression coverage for complete block serialization, streamed text/signature recombination, adjacency boundaries, and orphan omission. (`src/utils/test/messageNormalization.test.ts`)
+* Added unit coverage for continuity detection, redaction immutability, and narrow HTTP 400 error classification. (`src/providers/base/test/thinkingBlockRetry.test.ts`)
+* Added live-path coverage for the one-shot continuity retry, unrelated-failure exclusion, composed include-usage + continuity retries, overflow persistence, adaptive effort synchronization, and an end-to-end stream-to-model-switch round trip using the real stream interpreter. (`src/providers/test/liteLLMProviderBase.test.ts`)
+* Added coverage proving the configured endpoint fallback preserves native reasoning and continuity across both attempts. (`src/providers/base/test/transport.fallback.test.ts`)
+
+### 🧹 Chores
+
+* **🧯 Tighten thinking-block typing**: `OpenAIThinkingBlock` is now a discriminated union, making a type-less or signature-only normal block unrepresentable. The Responses adapter narrows by `type` instead of optional-field casts, with identical emitted wire behavior. (`src/types.ts`, `src/adapters/responsesAdapter.ts`)
 
 ## [2.5.1] - 2026-08-19
 

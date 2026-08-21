@@ -10,6 +10,7 @@ import type { OpenAIChatCompletionRequest, LiteLLMModelInfo } from "../../../typ
 // and can be programmed to fail the first call with a 500-shaped error.
 class FakeLiteLLMClient {
     public calls: string[] = [];
+    public readonly requests: OpenAIChatCompletionRequest[] = [];
     public failFirstResponsesWith500 = false;
     public firstCallFailed = false;
     public readonly disableCaching?: boolean;
@@ -28,6 +29,7 @@ class FakeLiteLLMClient {
         _modelInfo?: LiteLLMModelInfo
     ): Promise<ReadableStream<Uint8Array>> {
         this.calls.push(mode ?? "undefined");
+        this.requests.push(_request);
         if (this.failFirstResponsesWith500 && !this.firstCallFailed && mode === "responses") {
             this.firstCallFailed = true;
             throw new Error(
@@ -149,5 +151,48 @@ suite("Transport /responses -> /chat/completions fallback", () => {
             /400 Bad Request/
         );
         assert.deepStrictEqual(fake.calls, ["responses"]);
+    });
+
+    test("configured /responses -> chat fallback preserves native reasoning and continuity", async () => {
+        const fake = new FakeLiteLLMClient({ url: "https://x", key: "k" }, "test-ua");
+        fake.failFirstResponsesWith500 = true;
+        const transport = new Transport(makeDeps(fake));
+
+        const request: OpenAIChatCompletionRequest = {
+            model: "claude-opus-5",
+            messages: [
+                {
+                    role: "assistant",
+                    thinking_blocks: [{ type: "thinking", thinking: "prior reasoning", signature: "valid-signature" }],
+                },
+            ],
+            reasoning_effort: "high",
+            thinking: { type: "adaptive" },
+            output_config: { effort: "high" },
+            stream: true,
+        };
+
+        const stream = await transport.sendRequestToLiteLLM(
+            request,
+            { report: () => {} } as unknown as vscode.Progress<vscode.LanguageModelResponsePart>,
+            new vscode.CancellationTokenSource().token,
+            "tools",
+            responsesModelInfo,
+            { baseUrl: "https://x", apiKey: "k", allowChatCompletionsFallback: true }
+        );
+        void stream;
+
+        // Exactly two endpoint attempts: /responses fails with 5xx, falls back to /chat.
+        assert.deepStrictEqual(fake.calls, ["responses", "chat"]);
+        assert.strictEqual(fake.requests.length, 2);
+        // Native reasoning fields and message continuity must survive the
+        // configured endpoint fallback unchanged — transport routing must not
+        // strip or alter request-shape fields.
+        for (const sent of fake.requests) {
+            assert.strictEqual(sent.reasoning_effort, "high");
+            assert.deepStrictEqual(sent.thinking, { type: "adaptive" });
+            assert.deepStrictEqual(sent.output_config, { effort: "high" });
+            assert.ok(sent.messages[0].thinking_blocks);
+        }
     });
 });

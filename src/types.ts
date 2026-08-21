@@ -27,17 +27,23 @@ export interface OpenAIChatMessageContentItem {
 }
 
 /**
- * Opaque reasoning continuity from a prior assistant turn.
+ * Complete Anthropic-native reasoning continuity from a prior assistant turn.
  *
- * A signature is a model-verifiable encrypted state paired with optional
- * visible summary text. `data` represents a fully redacted block and MUST
- * never be surfaced as ordinary assistant content.
+ * Normal blocks require a non-empty `thinking` summary paired with the
+ * model-verifiable `signature`. Redacted blocks carry only opaque `data`
+ * that MUST never be surfaced as ordinary assistant content. The `type`
+ * discriminant is required by Anthropic input and is always present.
  */
-export interface OpenAIThinkingBlock {
-    thinking?: string;
-    signature?: string;
-    data?: string;
-}
+export type OpenAIThinkingBlock =
+    | {
+          type: "thinking";
+          thinking: string;
+          signature: string;
+      }
+    | {
+          type: "redacted_thinking";
+          data: string;
+      };
 
 /**
  * OpenAI-style chat message used for router requests.
@@ -49,9 +55,10 @@ export interface OpenAIChatMessage {
     tool_calls?: OpenAIToolCall[];
     tool_call_id?: string;
     /**
-     * Assistant-only opaque thinking continuity. The `/responses` adapter
-     * turns these blocks into reasoning input items; `/chat/completions`
-     * deliberately ignores them because it has no portable equivalent.
+     * Assistant-only opaque thinking continuity. LiteLLM may translate these
+     * blocks into Anthropic-native message content on `/chat/completions`,
+     * while the `/responses` adapter converts them into reasoning input items.
+     * Every block must therefore be a complete discriminated wire object.
      */
     thinking_blocks?: OpenAIThinkingBlock[];
 }

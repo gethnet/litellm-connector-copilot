@@ -32,6 +32,11 @@ import type { BackendSession } from "./backendSession";
 import { RequestBuilder } from "./base/requestBuilder";
 import { Transport } from "./base/transport";
 import type { RequestBuilderDeps, TransportDeps } from "./base/types";
+import {
+    isThinkingBlockRetryableError,
+    requestHasThinkingBlocks,
+    stripThinkingBlocksFromRequest,
+} from "./base/thinkingBlockRetry";
 import { LiteLLMProviderRegistry } from "./liteLLMProviderRegistry";
 import {
     detectQuotaToolRedaction as detectQuotaToolRedactionImpl,
@@ -568,36 +573,50 @@ export abstract class LiteLLMProviderBase {
         caller?: string,
         modelInfo?: LiteLLMModelInfo
     ): Promise<ReadableStream<Uint8Array>> {
-        const modelId = request.model;
-        Logger.debug(`[sendRequestWithRetry] modelId: ${modelId}, reasoning_effort: ${request.reasoning_effort}`);
-        const originalEffort = (request as { reasoning_effort?: SupportedReasoningEffort }).reasoning_effort;
+        // `currentRequest` is the live request shape mutated across retries. It
+        // starts as the caller's request but is replaced (never the same
+        // reference) when continuity is redacted, so the caller's original
+        // message array and fields remain untouched. All in-method reads and
+        // the usage/reasoning/continuity retries operate on `currentRequest`.
+        let currentRequest = request;
+        const modelId = currentRequest.model;
+        Logger.debug(
+            `[sendRequestWithRetry] modelId: ${modelId}, reasoning_effort: ${currentRequest.reasoning_effort}`
+        );
+        const originalEffort = (currentRequest as { reasoning_effort?: SupportedReasoningEffort }).reasoning_effort;
         let effectiveEffort = this._effortFallbackCache.getEffectiveEffort(modelId, originalEffort);
         Logger.debug(`[sendRequestWithRetry] originalEffort: ${originalEffort}, effectiveEffort: ${effectiveEffort}`);
-        this.applyReasoningEffort(request, effectiveEffort);
+        this.applyReasoningEffort(currentRequest, effectiveEffort);
 
         const notificationKeyEffort = originalEffort ?? effectiveEffort;
         let attempts = 0;
         let lastError: unknown;
         let usageRetryAttempted = false;
+        // One-shot continuity retry: set when prior-turn thinking_blocks are
+        // redacted after a model-switch rejection. Bounded separately from the
+        // reasoning-effort `attempts` counter so each compatibility retry is
+        // independently capped at one.
+        let thinkingBlocksRetryAttempted = false;
 
         const clearUsageFlag = () => {
-            delete (request as { stream_options?: { include_usage?: boolean } }).stream_options;
+            delete currentRequest.stream_options;
         };
 
         while (attempts < 6) {
             try {
                 return await this.sendOnceWithOverflow(
-                    request,
+                    currentRequest,
                     messages,
                     model,
                     options,
                     progress,
                     token,
                     caller,
-                    modelInfo
+                    modelInfo,
+                    thinkingBlocksRetryAttempted
                 );
             } catch (err) {
-                this.logRequestPayloadOnFailure(request, err, {
+                this.logRequestPayloadOnFailure(currentRequest, err, {
                     stage: "sendRequestWithRetry",
                     modelId: model.id,
                     caller,
@@ -616,6 +635,24 @@ export abstract class LiteLLMProviderBase {
                         );
                         continue;
                     }
+                }
+
+                // Continuity retry: redact prior-turn thinking_blocks once when a
+                // model-switch HTTP 400 specifically rejects that continuity.
+                // This is a separate, one-time compatibility retry that does not
+                // consume the reasoning-effort `attempts` budget. Native
+                // reasoning fields are preserved by stripThinkingBlocksFromRequest.
+                if (
+                    !thinkingBlocksRetryAttempted &&
+                    requestHasThinkingBlocks(currentRequest) &&
+                    isThinkingBlockRetryableError(err)
+                ) {
+                    thinkingBlocksRetryAttempted = true;
+                    currentRequest = stripThinkingBlocksFromRequest(currentRequest);
+                    Logger.warn(
+                        `[sendRequestWithRetry] Retrying once without prior-turn thinking_blocks after model continuity rejection for ${model.id}`
+                    );
+                    continue;
                 }
 
                 Logger.debug(`[sendRequestWithRetry] Caught error, checking isReasoningError...`);
@@ -640,7 +677,7 @@ export abstract class LiteLLMProviderBase {
 
                 const previous = effectiveEffort;
                 effectiveEffort = nextEffort;
-                this.applyReasoningEffort(request, effectiveEffort);
+                this.applyReasoningEffort(currentRequest, effectiveEffort);
 
                 if (notificationKeyEffort && previous && previous !== effectiveEffort) {
                     this.notifyReasoningFallback(modelId, notificationKeyEffort, effectiveEffort);
@@ -691,8 +728,13 @@ export abstract class LiteLLMProviderBase {
         summary?: "auto" | "concise" | "detailed"
     ): void {
         if (!effort) {
-            const requestRecord = request as unknown as Record<string, unknown>;
-            delete requestRecord.reasoning_effort;
+            delete request.reasoning_effort;
+            // Removing effort also invalidates adaptive Claude reasoning, whose
+            // `thinking` and `output_config.effort` must always agree with
+            // `reasoning_effort`. Drop them together so a partially-downgraded
+            // request never sends an incoherent adaptive shape.
+            delete request.thinking;
+            delete request.output_config;
             return;
         }
         // Object form is used by `gpt-5.4+` callers (and the OpenAI Responses API
@@ -700,6 +742,22 @@ export abstract class LiteLLMProviderBase {
         // reasoning text. The OpenAI Chat Completions spec still accepts the
         // legacy string form; both are forwarded to LiteLLM unchanged.
         request.reasoning_effort = summary ? { effort, summary } : effort;
+
+        // `none` is a valid wire value but signals no reasoning, so the adaptive
+        // Claude native fields must not be sent alongside it.
+        if (effort === "none") {
+            delete request.thinking;
+            delete request.output_config;
+            return;
+        }
+
+        // Keep an already-adaptive request coherent: when the existing fallback
+        // changes effort, `output_config.effort` must agree. This never creates
+        // adaptive fields on a non-adaptive request; it only updates an existing
+        // adaptive `output_config` so the two fields stay synchronized.
+        if (request.thinking?.type === "adaptive") {
+            request.output_config = { effort };
+        }
     }
 
     private notifyReasoningFallback(
@@ -726,7 +784,11 @@ export abstract class LiteLLMProviderBase {
         progress: vscode.Progress<vscode.LanguageModelResponsePart>,
         token: vscode.CancellationToken,
         caller?: string,
-        modelInfo?: LiteLLMModelInfo
+        modelInfo?: LiteLLMModelInfo,
+        // When true, overflow rebuilding re-strips thinking_blocks so a prior
+        // continuity redaction survives the rebuild and is not restored from
+        // the original VS Code history.
+        stripThinkingBlocksForRetry = false
     ): Promise<ReadableStream<Uint8Array>> {
         try {
             return await this.sendRequestToLiteLLM(
@@ -747,13 +809,19 @@ export abstract class LiteLLMProviderBase {
             const toolConfig = convertTools(options);
             const hardBudget = Math.max(1, model.maxInputTokens - estimateToolTokens(toolConfig.tools));
             const trimmedMessages = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo, hardBudget);
-            const retrimmedRequest = await this.buildOpenAIChatRequest(
+            const rebuiltRequest = await this.buildOpenAIChatRequest(
                 trimmedMessages,
                 model,
                 options,
                 modelInfo,
                 caller
             );
+            // If continuity was already redacted on the outer retry, the rebuilt
+            // request (which re-reads the original history) would reintroduce
+            // thinking_blocks. Re-strip so the rejected continuity stays gone.
+            const retrimmedRequest = stripThinkingBlocksForRetry
+                ? stripThinkingBlocksFromRequest(rebuiltRequest)
+                : rebuiltRequest;
 
             try {
                 return await this.sendRequestToLiteLLM(
