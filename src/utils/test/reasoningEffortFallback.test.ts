@@ -102,6 +102,28 @@ suite("reasoningEffortFallback", () => {
 
             assert.strictEqual(isReasoningError(error), true);
         });
+
+        test("returns true for thinking and output_config compatibility 4xx", () => {
+            assert.strictEqual(
+                isReasoningError(buildError({ status: 400, message: "Unsupported parameter: 'thinking'" })),
+                true
+            );
+            assert.strictEqual(
+                isReasoningError(buildError({ status: 400, message: "unknown parameter output_config.effort" })),
+                true
+            );
+        });
+
+        test("returns false for thinking-block signature continuity 4xx", () => {
+            assert.strictEqual(
+                isReasoningError(buildError({ status: 400, message: "Invalid `signature` in `thinking` block" })),
+                false
+            );
+            assert.strictEqual(
+                isReasoningError(buildError({ status: 400, message: "thinking_blocks are not valid for this model" })),
+                false
+            );
+        });
     });
 
     test("clear resets cached failures", () => {

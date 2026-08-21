@@ -1,10 +1,12 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
+import * as sinon from "sinon";
 import { Transport } from "../transport";
 import type { TransportDeps } from "../types";
 import type { ConfigManager } from "../../../config/configManager";
 import type { LiteLLMClient } from "../../../adapters/litellmClient";
 import type { OpenAIChatCompletionRequest, LiteLLMModelInfo } from "../../../types";
+import { StructuredLogger } from "../../../observability/structuredLogger";
 
 // Test seam: a fake LiteLLMClient that records the `mode` passed to chat()
 // and can be programmed to fail the first call with a 500-shaped error.
@@ -194,5 +196,41 @@ suite("Transport /responses -> /chat/completions fallback", () => {
             assert.deepStrictEqual(sent.output_config, { effort: "high" });
             assert.ok(sent.messages[0].thinking_blocks);
         }
+    });
+
+    test("logs sanitized adaptive representation without payloads", async () => {
+        const fake = new FakeLiteLLMClient({ url: "https://x", key: "k" }, "test-ua");
+        const transport = new Transport(makeDeps(fake));
+        const infoStub = sinon.stub(StructuredLogger, "info");
+
+        try {
+            await transport.sendRequestToLiteLLM(
+                {
+                    model: "claude-opus-5",
+                    messages: [{ role: "user", content: "secret prompt" }],
+                    thinking: { type: "adaptive", display: "summarized" },
+                    output_config: { effort: "medium" },
+                    stream: true,
+                } as OpenAIChatCompletionRequest,
+                { report: () => {} } as unknown as vscode.Progress<vscode.LanguageModelResponsePart>,
+                new vscode.CancellationTokenSource().token,
+                "chat",
+                chatModelInfo,
+                { baseUrl: "https://x", apiKey: "k" }
+            );
+        } finally {
+            infoStub.restore();
+        }
+
+        const start = infoStub
+            .getCalls()
+            .map((call) => ({ event: call.args[0], data: call.args[1] as Record<string, unknown> }))
+            .find((entry) => entry.event === "transport.http_request_start");
+        assert.ok(start);
+        assert.strictEqual(start.data.reasoning_representation, "adaptive");
+        assert.strictEqual(start.data.reasoning_effort, "medium");
+        assert.strictEqual(start.data.thinking_display, "summarized");
+        assert.strictEqual(start.data.has_thinking, true);
+        assert.strictEqual(JSON.stringify(start.data).includes("secret prompt"), false);
     });
 });

@@ -37,6 +37,11 @@ import {
     requestHasThinkingBlocks,
     stripThinkingBlocksFromRequest,
 } from "./base/thinkingBlockRetry";
+import {
+    applyReasoningRetryState,
+    readReasoningRetryState,
+    replaceReasoningRetryState,
+} from "./base/reasoningRetryState";
 import { LiteLLMProviderRegistry } from "./liteLLMProviderRegistry";
 import {
     detectQuotaToolRedaction as detectQuotaToolRedactionImpl,
@@ -580,13 +585,14 @@ export abstract class LiteLLMProviderBase {
         // the usage/reasoning/continuity retries operate on `currentRequest`.
         let currentRequest = request;
         const modelId = currentRequest.model;
+        const reasoningState = readReasoningRetryState(currentRequest);
+        const originalEffort = reasoningState.kind === "absent" ? undefined : reasoningState.effort;
         Logger.debug(
-            `[sendRequestWithRetry] modelId: ${modelId}, reasoning_effort: ${currentRequest.reasoning_effort}`
+            `[sendRequestWithRetry] modelId: ${modelId}, reasoningKind: ${reasoningState.kind}, reasoning_effort: ${currentRequest.reasoning_effort}`
         );
-        const originalEffort = (currentRequest as { reasoning_effort?: SupportedReasoningEffort }).reasoning_effort;
         let effectiveEffort = this._effortFallbackCache.getEffectiveEffort(modelId, originalEffort);
         Logger.debug(`[sendRequestWithRetry] originalEffort: ${originalEffort}, effectiveEffort: ${effectiveEffort}`);
-        this.applyReasoningEffort(currentRequest, effectiveEffort);
+        applyReasoningRetryState(currentRequest, reasoningState, effectiveEffort);
 
         const notificationKeyEffort = originalEffort ?? effectiveEffort;
         let attempts = 0;
@@ -677,7 +683,7 @@ export abstract class LiteLLMProviderBase {
 
                 const previous = effectiveEffort;
                 effectiveEffort = nextEffort;
-                this.applyReasoningEffort(currentRequest, effectiveEffort);
+                applyReasoningRetryState(currentRequest, reasoningState, effectiveEffort);
 
                 if (notificationKeyEffort && previous && previous !== effectiveEffort) {
                     this.notifyReasoningFallback(modelId, notificationKeyEffort, effectiveEffort);
@@ -727,37 +733,16 @@ export abstract class LiteLLMProviderBase {
         effort: SupportedReasoningEffort | undefined,
         summary?: "auto" | "concise" | "detailed"
     ): void {
-        if (!effort) {
-            delete request.reasoning_effort;
-            // Removing effort also invalidates adaptive Claude reasoning, whose
-            // `thinking` and `output_config.effort` must always agree with
-            // `reasoning_effort`. Drop them together so a partially-downgraded
-            // request never sends an incoherent adaptive shape.
-            delete request.thinking;
-            delete request.output_config;
-            return;
-        }
-        // Object form is used by `gpt-5.4+` callers (and the OpenAI Responses API
-        // in general) to control whether summary text is returned alongside the
-        // reasoning text. The OpenAI Chat Completions spec still accepts the
-        // legacy string form; both are forwarded to LiteLLM unchanged.
-        request.reasoning_effort = summary ? { effort, summary } : effort;
-
-        // `none` is a valid wire value but signals no reasoning, so the adaptive
-        // Claude native fields must not be sent alongside it.
-        if (effort === "none") {
-            delete request.thinking;
-            delete request.output_config;
-            return;
-        }
-
-        // Keep an already-adaptive request coherent: when the existing fallback
-        // changes effort, `output_config.effort` must agree. This never creates
-        // adaptive fields on a non-adaptive request; it only updates an existing
-        // adaptive `output_config` so the two fields stay synchronized.
-        if (request.thinking?.type === "adaptive") {
-            request.output_config = { effort };
-        }
+        const current = readReasoningRetryState(request);
+        const state =
+            current.kind !== "absent"
+                ? current
+                : !effort
+                  ? current
+                  : effort === "none"
+                    ? { kind: "none" as const, effort: "none" as const }
+                    : { kind: "flat" as const, effort, summary };
+        applyReasoningRetryState(request, state, effort);
     }
 
     private notifyReasoningFallback(
@@ -822,6 +807,9 @@ export abstract class LiteLLMProviderBase {
             const retrimmedRequest = stripThinkingBlocksForRetry
                 ? stripThinkingBlocksFromRequest(rebuiltRequest)
                 : rebuiltRequest;
+            // Overflow rebuilds from the original picker options, so re-stamp
+            // the live retry representation instead of restoring picker effort.
+            replaceReasoningRetryState(retrimmedRequest, readReasoningRetryState(request));
 
             try {
                 return await this.sendRequestToLiteLLM(

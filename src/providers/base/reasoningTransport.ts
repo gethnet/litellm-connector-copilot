@@ -30,9 +30,14 @@ function shouldUseAdaptiveThinking(
 
 /**
  * Resolves transport-only reasoning fields for a chat-shaped LiteLLM request.
- * Flat `reasoning_effort` remains the compatibility baseline. Native adaptive
- * fields require advertised `thinking` support and an explicit capability or
- * a confirmed affected Claude family.
+ * Flat `reasoning_effort` remains the compatibility baseline for Grok/GPT and
+ * for picker `none`. Native adaptive fields require advertised `thinking`
+ * support and an explicit capability or a confirmed affected Claude family.
+ *
+ * When adaptive extras are emitted, omit `reasoning_effort`. LiteLLM's
+ * Anthropic mapper overwrites `thinking` with `{ type: "adaptive" }` and
+ * drops `display`. `display: "summarized"` is required so newer Claude
+ * returns thinking text / `reasoning_tokens` instead of omitted blocks.
  */
 export function resolveChatReasoningTransport(
     effort: string | undefined,
@@ -44,17 +49,12 @@ export function resolveChatReasoningTransport(
         return {};
     }
 
-    const fields: ChatReasoningTransportFields = supportsParameter("reasoning_effort", modelInfo, modelId)
-        ? { reasoning_effort: effort }
-        : {};
-
-    if (effort === "none" || !shouldUseAdaptiveThinking(modelId, modelInfo, supportsParameter)) {
-        return fields;
+    if (effort !== "none" && shouldUseAdaptiveThinking(modelId, modelInfo, supportsParameter)) {
+        return {
+            thinking: { type: "adaptive", display: "summarized" },
+            output_config: { effort },
+        };
     }
 
-    return {
-        ...fields,
-        thinking: { type: "adaptive" },
-        output_config: { effort },
-    };
+    return supportsParameter("reasoning_effort", modelInfo, modelId) ? { reasoning_effort: effort } : {};
 }

@@ -178,6 +178,41 @@ suite("LiteLLM Client Unit Tests", () => {
         assert.strictEqual(secondCallHeaders["Cache-Control"], undefined);
     });
 
+    test("chat strips thinking and output_config together on a native-field 400", async () => {
+        const client = new LiteLLMClient(config, userAgent);
+        const errorResponse = {
+            ok: false,
+            status: 400,
+            statusText: "Bad Request",
+            text: async () => "Unsupported parameter: 'thinking'",
+            clone: function () {
+                return this;
+            },
+        };
+        const successResponse = {
+            ok: true,
+            status: 200,
+            body: new ReadableStream(),
+        };
+        const fetchStub = sandbox.stub(global, "fetch");
+        fetchStub.onCall(0).resolves(errorResponse as unknown as Response);
+        fetchStub.onCall(1).resolves(successResponse as unknown as Response);
+
+        await client.chat({
+            model: "claude-opus-5",
+            messages: [],
+            thinking: { type: "adaptive", display: "summarized" },
+            output_config: { effort: "medium" },
+        });
+
+        const retryBody = JSON.parse((fetchStub.getCall(1).args[1] as RequestInit).body as string) as Record<
+            string,
+            unknown
+        >;
+        assert.strictEqual("thinking" in retryBody, false);
+        assert.strictEqual("output_config" in retryBody, false);
+    });
+
     test("chat retries by stripping specific parameter mentioned in error", async () => {
         const client = new LiteLLMClient(config, userAgent);
 
