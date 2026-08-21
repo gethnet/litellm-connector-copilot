@@ -305,6 +305,29 @@ interface ThinkingMetadata {
 }
 
 /**
+ * Extracts visible thinking text from a part's `value` field.
+ *
+ * The stream interpreter emits visible reasoning as one or more adjacent
+ * `thinking` parts whose `value` is a string (or array of string chunks).
+ * Returns the joined text when non-empty, otherwise `undefined` so callers
+ * can decide whether a later signature can bind to earlier text.
+ */
+function extractThinkingText(part: unknown): string | undefined {
+    if (!part || typeof part !== "object") {
+        return undefined;
+    }
+    const value = (part as ThinkingInputPart).value;
+    if (typeof value === "string") {
+        return value.length > 0 ? value : undefined;
+    }
+    if (Array.isArray(value) && value.every((entry) => typeof entry === "string")) {
+        const joined = value.join("");
+        return joined.length > 0 ? joined : undefined;
+    }
+    return undefined;
+}
+
+/**
  * Returns the transport-safe representation of a VS Code thinking part.
  *
  * The host may provide visible text plus an opaque encrypted state, or only
@@ -312,8 +335,16 @@ interface ThinkingMetadata {
  * representation, so it is intentionally omitted rather than leaked into
  * normal assistant content. The `/responses` adapter owns conversion of the
  * returned blocks into LiteLLM reasoning input items.
+ *
+ * Streaming splits a single Anthropic thinking block across adjacent parts:
+ * visible `reasoning_content` deltas (text) followed by a metadata-only part
+ * carrying the `signature`. `precedingThinkingText` lets the signature part
+ * bind back to the immediately preceding visible text so the reconstructed
+ * block is a complete `{ type, thinking, signature }` wire object. If no
+ * text can be paired with a signature, the block is omitted rather than
+ * serialized invalidly.
  */
-function extractOpaqueThinkingBlock(part: unknown): OpenAIThinkingBlock | undefined {
+function extractOpaqueThinkingBlock(part: unknown, precedingThinkingText: string): OpenAIThinkingBlock | undefined {
     if (!part || typeof part !== "object") {
         return undefined;
     }
@@ -326,7 +357,7 @@ function extractOpaqueThinkingBlock(part: unknown): OpenAIThinkingBlock | undefi
     const metadata = candidate.metadata as ThinkingMetadata;
     const redactedData = metadata.redactedData;
     if (typeof redactedData === "string" && redactedData.length > 0) {
-        return { data: redactedData };
+        return { type: "redacted_thinking", data: redactedData };
     }
 
     const encryptedContent = metadata.encrypted_content;
@@ -341,15 +372,8 @@ function extractOpaqueThinkingBlock(part: unknown): OpenAIThinkingBlock | undefi
         return undefined;
     }
 
-    const value = candidate.value;
-    const thinking =
-        typeof value === "string"
-            ? value
-            : Array.isArray(value) && value.every((entry) => typeof entry === "string")
-              ? value.join("")
-              : undefined;
-
-    return thinking ? { thinking, signature: opaqueState } : { signature: opaqueState };
+    const thinking = extractThinkingText(part) ?? precedingThinkingText;
+    return thinking.length > 0 ? { type: "thinking", thinking, signature: opaqueState } : undefined;
 }
 
 /**
@@ -370,11 +394,19 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
         const toolCalls: OpenAIToolCall[] = [];
         const toolResults: { callId: string; content: string }[] = [];
         const thinkingBlocks: OpenAIThinkingBlock[] = [];
+        // Streaming splits a thinking block into adjacent visible-text deltas
+        // followed by a signature metadata part. This accumulator binds a
+        // signature back to the immediately preceding visible text only; any
+        // non-thinking part resets it so a later signature cannot bind to the
+        // wrong block. It is message-local and never becomes assistant content.
+        let pendingThinkingText = "";
 
         for (const part of m.content ?? []) {
             if (part instanceof vscode.LanguageModelTextPart) {
+                pendingThinkingText = "";
                 textParts.push(part.value);
             } else if (part instanceof vscode.LanguageModelDataPart) {
+                pendingThinkingText = "";
                 // Handle image and other data parts
                 if (isCacheControlMimeType(part.mimeType)) {
                     // Drop cache_control metadata unconditionally (see
@@ -408,6 +440,7 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                     textParts.push(textStr);
                 }
             } else if (part instanceof vscode.LanguageModelToolCallPart) {
+                pendingThinkingText = "";
                 const id = normalizeToolCallId(
                     part.callId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
                 );
@@ -420,6 +453,7 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                 }
                 toolCalls.push({ id, type: "function", function: { name: part.name, arguments: args } });
             } else if (isToolResultPart(part)) {
+                pendingThinkingText = "";
                 const callId = normalizeToolCallId((part as { callId?: string }).callId ?? "");
                 Logger.trace(
                     `[convertMessages] Tool result: (orig: ${(part as { callId?: string }).callId}, norm: ${callId})`
@@ -427,9 +461,16 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                 const content = collectToolResultText(part as { content?: readonly unknown[] });
                 toolResults.push({ callId, content });
             } else {
-                const thinkingBlock = extractOpaqueThinkingBlock(part);
+                const thinkingBlock = extractOpaqueThinkingBlock(part, pendingThinkingText);
                 if (thinkingBlock) {
                     thinkingBlocks.push(thinkingBlock);
+                    pendingThinkingText = "";
+                    continue;
+                }
+
+                const thinkingText = extractThinkingText(part);
+                if (thinkingText) {
+                    pendingThinkingText += thinkingText;
                 }
             }
         }

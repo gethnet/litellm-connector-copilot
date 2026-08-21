@@ -62,6 +62,7 @@ suite("Message Normalization", () => {
             assert.strictEqual(out[0].content, "I will continue from the prior response.");
             assert.deepStrictEqual(out[0].thinking_blocks, [
                 {
+                    type: "thinking",
                     thinking: "I need to retain the prior reasoning summary.",
                     signature: "signed-thinking-state",
                 },
@@ -86,7 +87,9 @@ suite("Message Normalization", () => {
             assert.strictEqual(out.length, 1);
             assert.strictEqual(out[0].role, "assistant");
             assert.strictEqual(out[0].content, undefined);
-            assert.deepStrictEqual(out[0].thinking_blocks, [{ data: "opaque-redacted-thinking" }]);
+            assert.deepStrictEqual(out[0].thinking_blocks, [
+                { type: "redacted_thinking", data: "opaque-redacted-thinking" },
+            ]);
         });
 
         test("drops bare thinking text that has no opaque continuity state", () => {
@@ -105,6 +108,84 @@ suite("Message Normalization", () => {
             const out = convertMessages(messages as unknown as vscode.LanguageModelChatRequestMessage[]);
 
             assert.deepStrictEqual(out, []);
+        });
+
+        test("recombines adjacent streamed thinking text with its following signature", () => {
+            const messages = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    content: [
+                        { value: "first reasoning chunk " },
+                        { value: "second reasoning chunk" },
+                        { value: "", metadata: { signature: "signed-thinking-state" } },
+                        new vscode.LanguageModelTextPart("Visible answer"),
+                    ],
+                },
+            ];
+
+            const out = convertMessages(messages as unknown as vscode.LanguageModelChatRequestMessage[]);
+
+            assert.strictEqual(out.length, 1);
+            assert.strictEqual(out[0].content, "Visible answer");
+            assert.deepStrictEqual(out[0].thinking_blocks, [
+                {
+                    type: "thinking",
+                    thinking: "first reasoning chunk second reasoning chunk",
+                    signature: "signed-thinking-state",
+                },
+            ]);
+        });
+
+        test("omits a signature-only block instead of serializing an invalid native block", () => {
+            const messages = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    content: [{ value: "", metadata: { signature: "orphaned-signature" } }],
+                },
+            ];
+
+            const out = convertMessages(messages as unknown as vscode.LanguageModelChatRequestMessage[]);
+
+            assert.deepStrictEqual(out, []);
+        });
+
+        test("does not pair thinking text across an ordinary text boundary", () => {
+            const messages = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    content: [
+                        { value: "old thought" },
+                        new vscode.LanguageModelTextPart("Visible answer"),
+                        { value: "", metadata: { signature: "later-signature" } },
+                    ],
+                },
+            ];
+
+            const out = convertMessages(messages as unknown as vscode.LanguageModelChatRequestMessage[]);
+
+            assert.strictEqual(out[0].content, "Visible answer");
+            assert.strictEqual(out[0].thinking_blocks, undefined);
+        });
+
+        test("recombines multiple adjacent thinking blocks independently", () => {
+            const messages = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    content: [
+                        { value: "first thought" },
+                        { value: "", metadata: { signature: "first-signature" } },
+                        { value: "second thought" },
+                        { value: "", metadata: { signature: "second-signature" } },
+                    ],
+                },
+            ];
+
+            const out = convertMessages(messages as unknown as vscode.LanguageModelChatRequestMessage[]);
+
+            assert.deepStrictEqual(out[0].thinking_blocks, [
+                { type: "thinking", thinking: "first thought", signature: "first-signature" },
+                { type: "thinking", thinking: "second thought", signature: "second-signature" },
+            ]);
         });
     });
 

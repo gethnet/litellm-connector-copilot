@@ -826,7 +826,6 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             tags?: string[];
             detail?: string;
             tooltip?: string;
-            pricing?: string;
             inputCost?: number;
             outputCost?: number;
             cacheCost?: number;
@@ -901,7 +900,9 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             const round = (value?: number): number | undefined =>
                 value !== undefined ? Number.parseFloat(value.toFixed(2)) : undefined;
 
-            (info as { pricing?: string }).pricing = formatPricingForDetail(pricing);
+            // `pricing` is rendered inline with the native VS Code model name.
+            // Keep prices in numeric metadata, hover content, and extension-owned
+            // picker details without assigning that inline display label.
             (info as { inputCost?: number }).inputCost = round(inputCost);
             (info as { outputCost?: number }).outputCost = round(outputCost);
             (info as { cacheCost?: number }).cacheCost = round(cacheCost);

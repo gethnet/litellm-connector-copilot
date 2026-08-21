@@ -8,13 +8,14 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.5.1
+## 🆕 What's New in 2.5.2
 
-> Version 2.5.1 prepares LiteLLM models for model-aware OpenAI-compatible inline completion routing.
+> Version 2.5.2 makes reasoning continuity reliable when streaming and switching models.
 
-- 🧩 **Configurable FIM endpoints** — Provider groups can expose full OpenAI-compatible inline completion endpoints while preserving paths such as `/v1`.
-- 🎯 **Model-specific routing** — Per-model `completionsUrl` overrides take priority over group-level configuration and derived LiteLLM endpoints.
-- 🧪 **Safer endpoint resolution** — Endpoint derivation, path preservation, precedence, and invalid URL fallback are covered by focused tests.
+- 🧠 **Reliable model switching** — Thinking blocks are serialized completely and replay safely across model changes.
+- ♻️ **Resilient continuity recovery** — A narrowly classified continuity rejection retries once without invalid prior-turn thinking blocks.
+- 🎚️ **Consistent adaptive reasoning** — Reasoning effort and provider-specific adaptive fields remain synchronized during fallback.
+- 🧼 **Cleaner native model rows** — Pricing stays available in details and metadata without cluttering the VS Code model dropdown.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
@@ -205,7 +206,7 @@ The optional **Inline Completions URL** is a full OpenAI-compatible FIM `/comple
 | `litellm-connector.enableModelOverrides` | boolean | `false` | Master toggle for user and bundled model-card overrides |
 | `litellm-connector.modelOverrides` | array | `[]` | User-supplied regex-based field overrides; only explicitly defined fields replace LiteLLM data |
 | `litellm-connector.modelCapabilitiesOverrides` | object | `{}` | Enable `toolCalling`, `imageInput`, and explicit edit-tool hints for a model |
-| `litellm-connector.displayPricingInPicker` | boolean | `true` | Show model pricing in the model picker |
+| `litellm-connector.displayPricingInPicker` | boolean | `true` | Show model pricing in picker details, hovers, and cost metadata; native model-name rows remain price-free |
 | `litellm-connector.discoveryTimeoutMs` | number | `5000` | Timeout (ms) for `/model/info` discovery requests |
 | `litellm-connector.discoveryCacheTtlMs` | number | `60000` | TTL (ms) for cached discovery responses. Set 0 to disable |
 | `litellm-connector.discoveryFireDebounceMs` | number | `250` | Debounce window (ms) for model-change notifications |
@@ -215,9 +216,9 @@ The optional **Inline Completions URL** is a full OpenAI-compatible FIM `/comple
 
 ### Model-picker metadata
 
-The extension preserves its existing picker density rules: with multiple configured LiteLLM backends, the pinned model picker remains compact; with one backend, the picker can show fuller backend and pricing context. Pricing continues to use per-million-token values rounded to two decimal places, such as `$1.00`.
+The native VS Code model dropdown keeps each row focused on model identity: it does not show pricing inline with the model name. When `displayPricingInPicker` is enabled, prices remain available in native picker hovers and cost metadata, as well as the details of the extension-owned **LiteLLM: Show Available Models** and commit-model pickers. Pricing uses per-million-token values rounded to two decimal places, such as `$1.00`.
 
-The picker shows neutral route information through `infoText`, using the model's reported `provider` when available, then `litellm_provider`, and finally `litellm`. When `/model/info` supplies input or output pricing, the extension emits VS Code's numeric cost multiplier alongside its existing pricing fields.
+The picker shows neutral route information through `infoText`, using the model's reported `provider` when available, then `litellm_provider`, and finally `litellm`. When `/model/info` supplies input or output pricing, the extension emits VS Code's numeric cost multiplier and cost-category metadata without assigning the native inline pricing label.
 
 `warningText` is intentionally conditional. It appears only when a configured model override is active or when LiteLLM reports `blocked: true` for the model. Ordinary models do not receive a warning banner. A blocked model also receives a blocked status icon when supported by the host.
 

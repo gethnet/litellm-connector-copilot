@@ -8,6 +8,13 @@ import type {
 import { normalizeToolCallId } from "../utils";
 import { Logger } from "../utils/logger";
 
+function getResponsesReasoningEffort(effort: OpenAIChatCompletionRequest["reasoning_effort"]): string | undefined {
+    if (typeof effort === "string") {
+        return effort === "none" ? undefined : effort;
+    }
+    return effort?.effort === "none" ? undefined : effort?.effort;
+}
+
 /**
  * Transform a chat/completions request body to the responses API format.
  * The responses API uses "input" (array format) instead of "messages".
@@ -111,49 +118,33 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
                     }
                 }
             }
-            if ((msg as { thinking_blocks?: unknown[] }).thinking_blocks) {
-                const thinkingBlocks = (
-                    msg as {
-                        thinking_blocks?: {
-                            type?: string;
-                            thinking?: string;
-                            signature?: string;
-                            data?: string;
-                        }[];
-                    }
-                ).thinking_blocks;
-                if (Array.isArray(thinkingBlocks)) {
-                    for (const block of thinkingBlocks) {
-                        if (block && typeof block === "object") {
-                            if (typeof block.signature === "string") {
-                                // Emit a `reasoning` input item carrying the thinking text
-                                // (or empty string for redacted blocks) and the encrypted
-                                // signature. Anthropic uses the signature to verify the
-                                // thinking block was actually produced by the model.
-                                const thinkingText = typeof block.thinking === "string" ? block.thinking : "";
-                                inputArray.push({
-                                    type: "reasoning",
-                                    id: `reasoning_${inputArray.length}`,
-                                    summary: thinkingText ? [{ type: "summary_text", text: thinkingText }] : [],
-                                    encrypted_content: block.signature,
-                                } as unknown as LiteLLMResponseInputItem);
-                                Logger.trace(
-                                    `[responsesAdapter] Preserving thinking_block (${thinkingText.length} chars, sig ${block.signature.length} bytes)`
-                                );
-                            } else if (typeof block.data === "string") {
-                                // redacted_thinking block: opaque data, no text. The API
-                                // still requires it to be passed back unchanged.
-                                inputArray.push({
-                                    type: "reasoning",
-                                    id: `reasoning_${inputArray.length}`,
-                                    summary: [],
-                                    encrypted_content: block.data,
-                                } as unknown as LiteLLMResponseInputItem);
-                                Logger.trace(
-                                    `[responsesAdapter] Preserving redacted_thinking block (${block.data.length} bytes)`
-                                );
-                            }
-                        }
+            if (Array.isArray(msg.thinking_blocks)) {
+                for (const block of msg.thinking_blocks) {
+                    if (block.type === "thinking") {
+                        // Emit a `reasoning` input item carrying the visible thinking summary
+                        // and the encrypted signature. Anthropic uses the signature to verify
+                        // the thinking block was actually produced by the model.
+                        inputArray.push({
+                            type: "reasoning",
+                            id: `reasoning_${inputArray.length}`,
+                            summary: [{ type: "summary_text", text: block.thinking }],
+                            encrypted_content: block.signature,
+                        } as unknown as LiteLLMResponseInputItem);
+                        Logger.trace(
+                            `[responsesAdapter] Preserving thinking_block (${block.thinking.length} chars, sig ${block.signature.length} bytes)`
+                        );
+                    } else {
+                        // redacted_thinking block: opaque data, no text. The API still
+                        // requires it to be passed back unchanged.
+                        inputArray.push({
+                            type: "reasoning",
+                            id: `reasoning_${inputArray.length}`,
+                            summary: [],
+                            encrypted_content: block.data,
+                        } as unknown as LiteLLMResponseInputItem);
+                        Logger.trace(
+                            `[responsesAdapter] Preserving redacted_thinking block (${block.data.length} bytes)`
+                        );
                     }
                 }
             }
@@ -248,10 +239,17 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
         frequency_penalty: requestBody.frequency_penalty,
         presence_penalty: requestBody.presence_penalty,
         stop: requestBody.stop,
-        // LiteLLM /responses also accepts the flat `reasoning_effort` key. We pass it
-        // through unchanged so reasoning effort works identically across endpoints
-        // and the connector keeps a single canonical request shape.
+        // Preserve the flat compatibility field while also using the endpoint-native
+        // shape. Explicit Claude adaptive fields take precedence over `reasoning`.
         reasoning_effort: requestBody.reasoning_effort,
+        reasoning: requestBody.thinking
+            ? undefined
+            : (() => {
+                  const effort = getResponsesReasoningEffort(requestBody.reasoning_effort);
+                  return effort ? { effort } : undefined;
+              })(),
+        thinking: requestBody.thinking,
+        output_config: requestBody.output_config,
         stream_options: requestBody.stream_options,
         extra_body: requestBody.extra_body,
     };

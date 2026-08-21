@@ -239,10 +239,10 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         /************************************************
          * End of code block
          ***********************************************/
-        // Extract caller/justification from options or model tags
+        // Extract caller/justification from options. Model tags describe capabilities,
+        // not the request source; tags[0] is commonly "tools" and is not a caller.
         const telemetry = this.getTelemetryOptions(options);
-        const modelWithTags = model as vscode.LanguageModelChatInformation & { tags?: string[] };
-        const caller = telemetry.caller || modelWithTags.tags?.[0] || "chat";
+        const caller = telemetry.caller || "chat";
         const justification = telemetry.justification;
 
         if (this._telemetryService) {

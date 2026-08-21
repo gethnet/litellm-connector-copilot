@@ -27,17 +27,23 @@ export interface OpenAIChatMessageContentItem {
 }
 
 /**
- * Opaque reasoning continuity from a prior assistant turn.
+ * Complete Anthropic-native reasoning continuity from a prior assistant turn.
  *
- * A signature is a model-verifiable encrypted state paired with optional
- * visible summary text. `data` represents a fully redacted block and MUST
- * never be surfaced as ordinary assistant content.
+ * Normal blocks require a non-empty `thinking` summary paired with the
+ * model-verifiable `signature`. Redacted blocks carry only opaque `data`
+ * that MUST never be surfaced as ordinary assistant content. The `type`
+ * discriminant is required by Anthropic input and is always present.
  */
-export interface OpenAIThinkingBlock {
-    thinking?: string;
-    signature?: string;
-    data?: string;
-}
+export type OpenAIThinkingBlock =
+    | {
+          type: "thinking";
+          thinking: string;
+          signature: string;
+      }
+    | {
+          type: "redacted_thinking";
+          data: string;
+      };
 
 /**
  * OpenAI-style chat message used for router requests.
@@ -49,9 +55,10 @@ export interface OpenAIChatMessage {
     tool_calls?: OpenAIToolCall[];
     tool_call_id?: string;
     /**
-     * Assistant-only opaque thinking continuity. The `/responses` adapter
-     * turns these blocks into reasoning input items; `/chat/completions`
-     * deliberately ignores them because it has no portable equivalent.
+     * Assistant-only opaque thinking continuity. LiteLLM may translate these
+     * blocks into Anthropic-native message content on `/chat/completions`,
+     * while the `/responses` adapter converts them into reasoning input items.
+     * Every block must therefore be a complete discriminated wire object.
      */
     thinking_blocks?: OpenAIThinkingBlock[];
 }
@@ -118,6 +125,24 @@ export interface ModelCapabilityOverride {
 }
 
 export type SupportedReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
+export interface LiteLLMAdaptiveThinking {
+    type: "adaptive";
+}
+
+export interface LiteLLMReasoningOutputConfig {
+    effort: string;
+}
+
+export interface LiteLLMResponsesReasoning {
+    effort: string;
+}
+
+export interface ChatReasoningTransportFields {
+    reasoning_effort?: OpenAIChatCompletionRequest["reasoning_effort"];
+    thinking?: LiteLLMAdaptiveThinking;
+    output_config?: LiteLLMReasoningOutputConfig;
+}
 
 export type ReasoningModelInfoField =
     | "supports_reasoning"
@@ -326,6 +351,8 @@ export interface LiteLLMModelInfo {
     supports_web_search?: boolean | null;
     supports_url_context?: boolean | null;
     supports_reasoning?: boolean | null;
+    /** LiteLLM capability signal for Claude's adaptive thinking transport. */
+    supports_adaptive_thinking?: boolean | null;
     supports_computer_use?: boolean | null;
     // Pricing fields (per-token costs, USD). Optional; absent when backend does not return pricing.
     input_cost_per_token?: number | null;
@@ -420,6 +447,9 @@ export interface OpenAIChatCompletionRequest {
      * the model picker or modelOptions override.
      */
     reasoning_effort?: string | { effort: string; summary?: string };
+    /** Native adaptive-thinking fields forwarded by LiteLLM for affected Claude routes. */
+    thinking?: LiteLLMAdaptiveThinking;
+    output_config?: LiteLLMReasoningOutputConfig;
     /**
      * LiteLLM passthrough body.
      * Used for features like caching controls.
@@ -459,6 +489,10 @@ export interface LiteLLMResponsesRequest {
      * details.
      */
     reasoning_effort?: string | { effort: string; summary?: string };
+    /** Endpoint-native reasoning shape used when no explicit provider-native thinking is present. */
+    reasoning?: LiteLLMResponsesReasoning;
+    thinking?: LiteLLMAdaptiveThinking;
+    output_config?: LiteLLMReasoningOutputConfig;
     stream_options?: { include_usage?: boolean };
     /**
      * LiteLLM passthrough body.
