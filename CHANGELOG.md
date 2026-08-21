@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.2] - 2026-08-21
+
 ### 🐛 Fixes
 
 * **🧼 Keep native model rows price-free**: Removed inline pricing from the VS Code model dropdown while retaining pricing in picker details, hovers, cost metadata, and extension-owned model pickers. (`src/providers/liteLLMProviderRegistry.ts`)
@@ -27,6 +29,8 @@ All notable changes to this project will be documented in this file.
 ### 🧹 Chores
 
 * **🧯 Tighten thinking-block typing**: `OpenAIThinkingBlock` is now a discriminated union, making a type-less or signature-only normal block unrepresentable. The Responses adapter narrows by `type` instead of optional-field casts, with identical emitted wire behavior. (`src/types.ts`, `src/adapters/responsesAdapter.ts`)
+
+* **🚀 Promote release version**: Promoted the package version to `2.5.2`. (`package.json`)
 
 ## [2.5.1] - 2026-08-19
 
@@ -807,7 +811,8 @@ There have been a tremendous amount of backend work done with this update to mak
 
 ---
 
-[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.1...HEAD
+[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.2...HEAD
+[2.5.2]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.2
 [2.5.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.0
 [2.3.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.3.0
 [1.6.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v1.6.0

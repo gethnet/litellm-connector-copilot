@@ -8,13 +8,14 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.5.1
+## 🆕 What's New in 2.5.2
 
-> Version 2.5.1 prepares LiteLLM models for model-aware OpenAI-compatible inline completion routing.
+> Version 2.5.2 makes reasoning continuity reliable when streaming and switching models.
 
-- 🧩 **Configurable FIM endpoints** — Provider groups can expose full OpenAI-compatible inline completion endpoints while preserving paths such as `/v1`.
-- 🎯 **Model-specific routing** — Per-model `completionsUrl` overrides take priority over group-level configuration and derived LiteLLM endpoints.
-- 🧪 **Safer endpoint resolution** — Endpoint derivation, path preservation, precedence, and invalid URL fallback are covered by focused tests.
+- 🧠 **Reliable model switching** — Thinking blocks are serialized completely and replay safely across model changes.
+- ♻️ **Resilient continuity recovery** — A narrowly classified continuity rejection retries once without invalid prior-turn thinking blocks.
+- 🎚️ **Consistent adaptive reasoning** — Reasoning effort and provider-specific adaptive fields remain synchronized during fallback.
+- 🧼 **Cleaner native model rows** — Pricing stays available in details and metadata without cluttering the VS Code model dropdown.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
