@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.3] - 2026-08-21
+
+### 🐛 Fixes
+
+* **🧠 Preserve adaptive Claude thinking through retries (#137)**: Adaptive Claude requests now retain their native `thinking` representation, summarized display mode, and selected effort across the initial request, cached and live effort fallbacks, continuity retries, and context-overflow rebuilds. Flat `reasoning_effort` remains the compatibility path for other model families. Unsupported native reasoning fields are removed together, and continuity errors no longer trigger the effort fallback ladder. Thanks to [@FPA-DavidTai](https://github.com/FPA-DavidTai) for the contribution. (`src/providers/base/reasoningRetryState.ts`, `src/providers/base/reasoningTransport.ts`, `src/providers/liteLLMProviderBase.ts`, `src/adapters/litellmClient.ts`)
+
+### 🧪 Tests
+
+* Added regression coverage for native adaptive retry state, effort fallback, overflow rebuilds, continuity handling, unsupported-parameter recovery, and sanitized reasoning telemetry. (`src/providers/base/test/reasoningRetryState.test.ts`, `src/providers/test/liteLLMProviderBase.test.ts`, `src/providers/base/test/transport.fallback.test.ts`)
+
+### 🧹 Chores
+
+* **🚀 Promote release version**: Promoted the package version to `2.5.3`. (`package.json`)
+
 ## [2.5.2] - 2026-08-21
 
 ### 🐛 Fixes
@@ -811,7 +825,8 @@ There have been a tremendous amount of backend work done with this update to mak
 
 ---
 
-[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.2...HEAD
+[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.3...HEAD
+[2.5.3]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.3
 [2.5.2]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.2
 [2.5.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.0
 [2.3.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.3.0

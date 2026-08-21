@@ -8,14 +8,13 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.5.2
+## 🆕 What's New in 2.5.3
 
-> Version 2.5.2 makes reasoning continuity reliable when streaming and switching models.
+> Version 2.5.3 preserves adaptive Claude thinking through retries and request rebuilds.
 
-- 🧠 **Reliable model switching** — Thinking blocks are serialized completely and replay safely across model changes.
-- ♻️ **Resilient continuity recovery** — A narrowly classified continuity rejection retries once without invalid prior-turn thinking blocks.
-- 🎚️ **Consistent adaptive reasoning** — Reasoning effort and provider-specific adaptive fields remain synchronized during fallback.
-- 🧼 **Cleaner native model rows** — Pricing stays available in details and metadata without cluttering the VS Code model dropdown.
+- 🧠 **Preserved adaptive thinking** — Claude requests retain summarized thinking and the selected effort across initial sends, fallbacks, continuity retries, and context-overflow rebuilds.
+- ♻️ **Safer reasoning fallbacks** — Native adaptive fields remain paired, while flat `reasoning_effort` continues to serve compatible GPT/Grok-style models.
+- 🧪 **Expanded retry coverage** — Unsupported native fields and continuity failures are handled through separate, bounded recovery paths.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
