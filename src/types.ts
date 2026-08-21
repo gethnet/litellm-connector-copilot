@@ -128,6 +128,11 @@ export type SupportedReasoningEffort = "none" | "minimal" | "low" | "medium" | "
 
 export interface LiteLLMAdaptiveThinking {
     type: "adaptive";
+    /**
+     * Ask Anthropic to return thinking summaries. Omitted display still
+     * thinks but reports `reasoning_tokens: 0` and empty thinking parts.
+     */
+    display?: "summarized";
 }
 
 export interface LiteLLMReasoningOutputConfig {

@@ -240,11 +240,23 @@ export class LiteLLMClient {
 
                 // 1. Handle explicit mentions of parameters in the error message
                 // Common patterns: "unsupported parameter: 'temperature'", "unexpected keyword argument 'top_p'"
-                const paramMatch = errorText.match(/(?:parameter|argument|key)\s+['"]?([a-zA-Z0-9_-]+)['"]?/i);
+                const paramMatch = errorText.match(/(?:parameter|argument|key)\s*[: ]\s*['"]?([a-zA-Z0-9_.-]+)['"]?/i);
                 if (paramMatch && paramMatch[1]) {
                     const paramName = paramMatch[1];
                     Logger.info(`Stripping specific parameter: ${paramName}`);
-                    delete stripedAsAny[paramName];
+                    const rootParam = paramName.split(".")[0];
+                    delete stripedAsAny[rootParam];
+                    // Native adaptive fields are a pair. Dropping only one leaves
+                    // a mixed request that LiteLLM can still reject or remap.
+                    if (rootParam === "thinking" || rootParam === "output_config") {
+                        delete stripedAsAny.thinking;
+                        delete stripedAsAny.output_config;
+                    }
+                }
+
+                if (errorLower.includes("thinking") || errorLower.includes("output_config")) {
+                    delete stripedAsAny.thinking;
+                    delete stripedAsAny.output_config;
                 }
 
                 // Special-case: some providers reject a top-level `cache` object.

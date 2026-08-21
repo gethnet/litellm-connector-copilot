@@ -4,6 +4,7 @@ import { isContextOverflowError } from "../../adapters/tokenUtils";
 import { StructuredLogger } from "../../observability/structuredLogger";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../../types";
 import type { SendRequestArgs, TransportDeps } from "./types";
+import { readReasoningRetryState } from "./reasoningRetryState";
 
 /**
  * Sends a LiteLLM request to the configured endpoint.
@@ -107,14 +108,17 @@ export class Transport {
         this.logger.info(
             `[transport.sendRequestToLiteLLM] Sending request to LiteLLM: model=${request.model} caller=${caller} streaming=true`
         );
+        const reasoningState = readReasoningRetryState(request);
         StructuredLogger.info("transport.http_request_start", {
             model: request.model,
             caller,
             endpoint: modelInfo?.mode,
             requestModel: request.model,
-            reasoning_effort: (request as { reasoning_effort?: string }).reasoning_effort,
-            has_thinking: (request as { thinking?: unknown }).thinking !== undefined,
-            has_output_config: (request as { output_config?: unknown }).output_config !== undefined,
+            reasoning_representation: reasoningState.kind,
+            reasoning_effort: reasoningState.kind === "absent" ? undefined : reasoningState.effort,
+            thinking_display: request.thinking?.display,
+            has_thinking: request.thinking !== undefined,
+            has_output_config: request.output_config !== undefined,
             max_tokens: request.max_tokens,
             temperature: request.temperature,
             top_p: request.top_p,

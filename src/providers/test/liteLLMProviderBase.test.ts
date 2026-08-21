@@ -362,6 +362,45 @@ suite("LiteLLMProviderBase", () => {
             return new LiteLLMChatProvider(mockSecrets, userAgent, new EffortFallbackCache());
         }
 
+        async function captureFirstSend(
+            provider: LiteLLMChatProvider,
+            request: OpenAIChatCompletionRequest
+        ): Promise<OpenAIChatCompletionRequest> {
+            const baseConfig = { baseUrl: "https://wolfram.example", apiKey: "k" };
+            seedBackendForCall(sandbox, provider, baseConfig, {
+                backendName: "wolfram",
+                baseUrl: "https://wolfram.example",
+                apiKey: "k",
+                client: {} as never,
+            });
+            const captured: OpenAIChatCompletionRequest[] = [];
+            sandbox.stub(access(provider)._transport, "sendRequestToLiteLLM").callsFake(async (candidate) => {
+                captured.push({
+                    ...candidate,
+                    thinking: candidate.thinking ? { ...candidate.thinking } : undefined,
+                    output_config: candidate.output_config ? { ...candidate.output_config } : undefined,
+                    reasoning_effort:
+                        typeof candidate.reasoning_effort === "object" && candidate.reasoning_effort
+                            ? { ...candidate.reasoning_effort }
+                            : candidate.reasoning_effort,
+                });
+                return new ReadableStream();
+            });
+
+            await access(provider).sendRequestWithRetry(
+                request,
+                [],
+                model,
+                { configuration: baseConfig } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                { report: () => {} } as vscode.Progress<vscode.LanguageModelResponsePart>,
+                new vscode.CancellationTokenSource().token,
+                "test"
+            );
+
+            assert.ok(captured[0], "expected a first transport send");
+            return captured[0];
+        }
+
         test("retries once on reasoning 4xx and succeeds", async () => {
             const provider = setupProvider();
             const baseConfig = { baseUrl: "https://wolfram.example", apiKey: "k", reasoningEffort: "high" };
@@ -619,6 +658,76 @@ suite("LiteLLMProviderBase", () => {
             assert.ok(capturedRequests[0].reasoning_effort !== "high", "should have downgraded before first send");
         });
 
+        test("preserves native-only adaptive fields on the first HTTP send", async () => {
+            const provider = setupProvider();
+            const first = await captureFirstSend(provider, {
+                model: "claude-opus-5",
+                messages: [{ role: "user", content: "hi" }],
+                thinking: { type: "adaptive", display: "summarized" },
+                output_config: { effort: "medium" },
+            } as OpenAIChatCompletionRequest);
+
+            assert.strictEqual(first.reasoning_effort, undefined);
+            assert.deepStrictEqual(first.thinking, { type: "adaptive", display: "summarized" });
+            assert.deepStrictEqual(first.output_config, { effort: "medium" });
+        });
+
+        test("keeps a cached adaptive downgrade native on the first HTTP send", async () => {
+            const provider = setupProvider();
+            access(provider)._effortFallbackCache.recordFailure("claude-opus-5", "high");
+
+            const first = await captureFirstSend(provider, {
+                model: "claude-opus-5",
+                messages: [{ role: "user", content: "hi" }],
+                thinking: { type: "adaptive", display: "summarized" },
+                output_config: { effort: "high" },
+            } as OpenAIChatCompletionRequest);
+
+            assert.strictEqual(first.reasoning_effort, undefined);
+            assert.deepStrictEqual(first.thinking, { type: "adaptive", display: "summarized" });
+            assert.deepStrictEqual(first.output_config, { effort: "medium" });
+        });
+
+        test("does not add or remove reasoning fields when no effort is present", async () => {
+            const provider = setupProvider();
+            const first = await captureFirstSend(provider, {
+                model: "claude-opus-5",
+                messages: [{ role: "user", content: "hi" }],
+            });
+
+            assert.strictEqual(first.reasoning_effort, undefined);
+            assert.strictEqual(first.thinking, undefined);
+            assert.strictEqual(first.output_config, undefined);
+        });
+
+        test("keeps explicit none free of adaptive fields", async () => {
+            const provider = setupProvider();
+            const first = await captureFirstSend(provider, {
+                model: "claude-opus-5",
+                messages: [{ role: "user", content: "hi" }],
+                reasoning_effort: "none",
+                thinking: { type: "adaptive", display: "summarized" },
+                output_config: { effort: "high" },
+            } as OpenAIChatCompletionRequest);
+
+            assert.strictEqual(first.reasoning_effort, "none");
+            assert.strictEqual(first.thinking, undefined);
+            assert.strictEqual(first.output_config, undefined);
+        });
+
+        test("preserves object-form flat reasoning summary on the first HTTP send", async () => {
+            const provider = setupProvider();
+            const first = await captureFirstSend(provider, {
+                model: "gpt-5.4",
+                messages: [{ role: "user", content: "hi" }],
+                reasoning_effort: { effort: "high", summary: "detailed" },
+            });
+
+            assert.deepStrictEqual(first.reasoning_effort, { effort: "high", summary: "detailed" });
+            assert.strictEqual(first.thinking, undefined);
+            assert.strictEqual(first.output_config, undefined);
+        });
+
         test("retries once without thinking_blocks on a model-switch continuity rejection", async () => {
             const provider = setupProvider();
             const baseConfig = { baseUrl: "https://wolfram.example", apiKey: "k" };
@@ -641,8 +750,7 @@ suite("LiteLLMProviderBase", () => {
             const request: OpenAIChatCompletionRequest = {
                 model: "claude-opus-5",
                 stream: true,
-                reasoning_effort: "high",
-                thinking: { type: "adaptive" },
+                thinking: { type: "adaptive", display: "summarized" },
                 output_config: { effort: "high" },
                 messages: [
                     {
@@ -673,8 +781,8 @@ suite("LiteLLMProviderBase", () => {
             sinon.assert.calledTwice(sendStub);
             assert.ok(requests[0].messages[0].thinking_blocks, "first attempt must retain continuity");
             assert.strictEqual("thinking_blocks" in requests[1].messages[0], false);
-            assert.strictEqual(requests[1].reasoning_effort, "high");
-            assert.deepStrictEqual(requests[1].thinking, { type: "adaptive" });
+            assert.strictEqual(requests[1].reasoning_effort, undefined);
+            assert.deepStrictEqual(requests[1].thinking, { type: "adaptive", display: "summarized" });
             assert.deepStrictEqual(requests[1].output_config, { effort: "high" });
         });
 
@@ -739,10 +847,9 @@ suite("LiteLLMProviderBase", () => {
                 {
                     model: "claude-opus-5",
                     messages: [{ role: "user", content: "hi" }],
-                    reasoning_effort: "high",
-                    thinking: { type: "adaptive" },
+                    thinking: { type: "adaptive", display: "summarized" },
                     output_config: { effort: "high" },
-                },
+                } as OpenAIChatCompletionRequest,
                 [],
                 model,
                 { configuration: baseConfig } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
@@ -751,8 +858,8 @@ suite("LiteLLMProviderBase", () => {
                 "test"
             );
 
-            assert.strictEqual(requests[1].reasoning_effort, "medium");
-            assert.deepStrictEqual(requests[1].thinking, { type: "adaptive" });
+            assert.strictEqual(requests[1].reasoning_effort, undefined);
+            assert.deepStrictEqual(requests[1].thinking, { type: "adaptive", display: "summarized" });
             assert.deepStrictEqual(requests[1].output_config, { effort: "medium" });
         });
 
@@ -862,6 +969,66 @@ suite("LiteLLMProviderBase", () => {
             assert.ok(sent[0].messages[0].thinking_blocks);
             assert.strictEqual("thinking_blocks" in sent[1].messages[0], false);
             assert.strictEqual("thinking_blocks" in sent[2].messages[0], false);
+        });
+
+        test("does not restore original adaptive effort after overflow rebuild", async () => {
+            const provider = setupProvider();
+            const baseConfig = { baseUrl: "https://wolfram.example", apiKey: "k" };
+            seedBackendForCall(sandbox, provider, baseConfig, {
+                backendName: "wolfram",
+                baseUrl: "https://wolfram.example",
+                apiKey: "k",
+                client: {} as never,
+            });
+            sandbox.stub(access(provider), "buildOpenAIChatRequest").resolves({
+                model: "claude-opus-5",
+                stream: true,
+                max_tokens: 100,
+                thinking: { type: "adaptive", display: "summarized" },
+                output_config: { effort: "high" },
+                messages: [{ role: "user", content: "trimmed" }],
+            } as OpenAIChatCompletionRequest);
+            const sent: OpenAIChatCompletionRequest[] = [];
+            sandbox.stub(access(provider)._transport, "sendRequestToLiteLLM").callsFake(async (candidate) => {
+                sent.push({
+                    ...candidate,
+                    thinking: candidate.thinking ? { ...candidate.thinking } : undefined,
+                    output_config: candidate.output_config ? { ...candidate.output_config } : undefined,
+                });
+                if (sent.length === 1) {
+                    throw new Error("context length exceeded");
+                }
+                return new ReadableStream();
+            });
+
+            await access(provider).sendRequestWithRetry(
+                {
+                    model: "claude-opus-5",
+                    stream: true,
+                    max_tokens: 100,
+                    thinking: { type: "adaptive", display: "summarized" },
+                    output_config: { effort: "medium" },
+                    messages: [{ role: "user", content: "hi" }],
+                } as OpenAIChatCompletionRequest,
+                [
+                    {
+                        role: vscode.LanguageModelChatMessageRole.User,
+                        name: undefined,
+                        content: [new vscode.LanguageModelTextPart("hi")],
+                    },
+                ],
+                model,
+                { configuration: baseConfig } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                { report: () => {} } as vscode.Progress<vscode.LanguageModelResponsePart>,
+                new vscode.CancellationTokenSource().token,
+                "test",
+                { mode: "chat", max_input_tokens: 1000 } as unknown as LiteLLMModelInfo
+            );
+
+            assert.strictEqual(sent.length, 2);
+            assert.strictEqual(sent[1].reasoning_effort, undefined);
+            assert.deepStrictEqual(sent[1].thinking, { type: "adaptive", display: "summarized" });
+            assert.deepStrictEqual(sent[1].output_config, { effort: "medium" });
         });
 
         test("round-trips streamed continuity and recovers after switching models", async () => {

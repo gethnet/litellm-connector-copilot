@@ -14,14 +14,13 @@ suite("reasoningTransport", () => {
         assert.deepStrictEqual(
             resolveChatReasoningTransport("high", "vertex_ai/claude-opus-4-8", modelInfo, supports),
             {
-                reasoning_effort: "high",
-                thinking: { type: "adaptive" },
+                thinking: { type: "adaptive", display: "summarized" },
                 output_config: { effort: "high" },
             }
         );
         assert.deepStrictEqual(
             resolveChatReasoningTransport("medium", "anthropic/claude-sonnet-5", modelInfo, supports).thinking,
-            { type: "adaptive" }
+            { type: "adaptive", display: "summarized" }
         );
         assert.deepStrictEqual(
             resolveChatReasoningTransport("low", "claude-fable-5-1", modelInfo, supports).output_config,
@@ -38,10 +37,12 @@ suite("reasoningTransport", () => {
             supported_openai_params: ["reasoning_effort", "thinking"],
         };
 
-        assert.deepStrictEqual(
-            resolveChatReasoningTransport("high", "my-private-claude-alias", explicitInfo, supports).thinking,
-            { type: "adaptive" }
-        );
+        const alias = resolveChatReasoningTransport("high", "my-private-claude-alias", explicitInfo, supports);
+        assert.deepStrictEqual(alias, {
+            thinking: { type: "adaptive", display: "summarized" },
+            output_config: { effort: "high" },
+        });
+        assert.ok(!("reasoning_effort" in alias));
         assert.deepStrictEqual(
             resolveChatReasoningTransport("high", "anthropic/claude-opus-4-7", advertisedOnly, supports),
             { reasoning_effort: "high" }

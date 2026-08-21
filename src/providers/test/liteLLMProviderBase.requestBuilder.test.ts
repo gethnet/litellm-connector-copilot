@@ -248,8 +248,8 @@ suite("RequestBuilder", () => {
             "test"
         );
 
-        assert.strictEqual(request.reasoning_effort, "high");
-        assert.deepStrictEqual(request.thinking, { type: "adaptive" });
+        assert.strictEqual(request.reasoning_effort, undefined);
+        assert.deepStrictEqual(request.thinking, { type: "adaptive", display: "summarized" });
         assert.deepStrictEqual(request.output_config, { effort: "high" });
     });
 

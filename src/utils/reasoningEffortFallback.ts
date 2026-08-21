@@ -128,6 +128,23 @@ export function isReasoningError(error: unknown): boolean {
     }
 
     Logger.debug(`[isReasoningError] status: ${status}, text: ${text}`);
+    // Continuity rejections mention thinking blocks/signatures and must stay
+    // on the one-shot redaction path, not the effort-fallback ladder.
+    if (text.includes("thinking_blocks") || text.includes("signature")) {
+        return false;
+    }
+
+    if (text.includes("output_config")) {
+        return true;
+    }
+
+    if (
+        text.includes("thinking") &&
+        (text.includes("parameter") || text.includes("unsupported") || text.includes("unknown"))
+    ) {
+        return true;
+    }
+
     return text.includes("reasoning") && (text.includes("effort") || text.includes("parameter"));
 }
 
