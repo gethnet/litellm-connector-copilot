@@ -9,6 +9,7 @@ import type {
     OpenAIChatMessageContentItem,
     OpenAIThinkingBlock,
 } from "./types";
+import { applyEphemeralCacheControl } from "./utils/promptCacheControl";
 import { Logger } from "./utils/logger";
 
 /**
@@ -381,7 +382,10 @@ function extractOpaqueThinkingBlock(part: unknown, precedingThinkingText: string
  * @param messages The VS Code chat messages to convert.
  * @returns OpenAI-compatible messages array.
  */
-export function convertMessages(messages: readonly vscode.LanguageModelChatRequestMessage[]): OpenAIChatMessage[] {
+export function convertMessages(
+    messages: readonly vscode.LanguageModelChatRequestMessage[],
+    options: { attachPromptCacheControl?: boolean } = {}
+): OpenAIChatMessage[] {
     const out: OpenAIChatMessage[] = [];
     for (const m of messages) {
         // `lmcr_toString` returns "system" | "user" | "assistant" for the supported
@@ -392,8 +396,9 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
         const textParts: string[] = [];
         const contentItems: OpenAIChatMessageContentItem[] = [];
         const toolCalls: OpenAIToolCall[] = [];
-        const toolResults: { callId: string; content: string }[] = [];
+        const toolResults: { callId: string; content: string; hasCacheControlMarker: boolean }[] = [];
         const thinkingBlocks: OpenAIThinkingBlock[] = [];
+        let hasCacheControlMarker = false;
         // Streaming splits a thinking block into adjacent visible-text deltas
         // followed by a signature metadata part. This accumulator binds a
         // signature back to the immediately preceding visible text only; any
@@ -414,6 +419,7 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                     // BEFORE the JSON branch so that MIME types like
                     // "application/vnd.cache-control+json" cannot slip through.
                     Logger.trace(`[convertMessages] Dropping cache_control part (mimeType: ${part.mimeType})`);
+                    hasCacheControlMarker = true;
                 } else if (part.mimeType.startsWith("image/")) {
                     // Convert image data to base64 for OpenAI vision API
                     let base64Data: string;
@@ -458,8 +464,8 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
                 Logger.trace(
                     `[convertMessages] Tool result: (orig: ${(part as { callId?: string }).callId}, norm: ${callId})`
                 );
-                const content = collectToolResultText(part as { content?: readonly unknown[] });
-                toolResults.push({ callId, content });
+                const result = collectToolResultText(part as { content?: readonly unknown[] });
+                toolResults.push({ callId, ...result });
             } else {
                 const thinkingBlock = extractOpaqueThinkingBlock(part, pendingThinkingText);
                 if (thinkingBlock) {
@@ -477,7 +483,14 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
 
         let emittedAssistantToolCall = false;
         if (toolCalls.length > 0) {
-            const messageContent = buildMessageContent(textParts, contentItems);
+            const messageContent = buildMessageContent(
+                textParts,
+                contentItems,
+                options.attachPromptCacheControl === true && hasCacheControlMarker
+            );
+            if (hasCacheControlMarker && Array.isArray(messageContent)) {
+                applyEphemeralCacheControl(messageContent);
+            }
             out.push({
                 role: "assistant",
                 content: messageContent || undefined,
@@ -488,13 +501,28 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
         }
 
         for (const tr of toolResults) {
-            out.push({ role: "tool", tool_call_id: tr.callId, content: tr.content || "Success" });
+            const content = tr.content || "Success";
+            const toolContent: string | OpenAIChatMessageContentItem[] =
+                options.attachPromptCacheControl === true && tr.hasCacheControlMarker
+                    ? [{ type: "text", text: content }]
+                    : content;
+            if (Array.isArray(toolContent)) {
+                applyEphemeralCacheControl(toolContent);
+            }
+            out.push({ role: "tool", tool_call_id: tr.callId, content: toolContent });
         }
 
         const text = textParts.join("");
         if (text || contentItems.length > 0 || thinkingBlocks.length > 0) {
             if (role === "system" || role === "user" || (role === "assistant" && !emittedAssistantToolCall)) {
-                const messageContent = buildMessageContent(textParts, contentItems);
+                const messageContent = buildMessageContent(
+                    textParts,
+                    contentItems,
+                    options.attachPromptCacheControl === true && hasCacheControlMarker
+                );
+                if (hasCacheControlMarker && Array.isArray(messageContent)) {
+                    applyEphemeralCacheControl(messageContent);
+                }
                 if (messageContent || (role === "assistant" && thinkingBlocks.length > 0)) {
                     out.push({
                         role: role || "user",
@@ -671,10 +699,14 @@ export function convertV2MessagesToProviderMessages(
     return downgraded;
 }
 
-export function convertV2MessagesToOpenAI(messages: readonly V2ChatMessage[]): OpenAIChatMessage[] {
+export function convertV2MessagesToOpenAI(
+    messages: readonly V2ChatMessage[],
+    options: { attachPromptCacheControl?: boolean } = {}
+): OpenAIChatMessage[] {
     return convertV2MessagesToOpenAIDirect(messages, {
         normalizeToolCallId,
         isCacheControlMimeType,
+        attachPromptCacheControl: options.attachPromptCacheControl,
     });
 }
 
@@ -797,11 +829,12 @@ export function validateV2Messages(messages: readonly V2ChatMessage[]): void {
  */
 function buildMessageContent(
     textParts: string[],
-    contentItems: OpenAIChatMessageContentItem[]
+    contentItems: OpenAIChatMessageContentItem[],
+    forceContentItems = false
 ): string | OpenAIChatMessageContentItem[] | undefined {
     const text = textParts.join("");
 
-    if (contentItems.length === 0) {
+    if (contentItems.length === 0 && !forceContentItems) {
         return text || undefined;
     }
 
@@ -981,14 +1014,19 @@ export function mapRole(
  * Concatenate tool result content into a single text string.
  * @param pr Tool result-like object with content array.
  */
-function collectToolResultText(pr: { content?: readonly unknown[] }): string {
+function collectToolResultText(pr: { content?: readonly unknown[] }): {
+    content: string;
+    hasCacheControlMarker: boolean;
+} {
     let text = "";
+    let hasCacheControlMarker = false;
     for (const c of pr.content ?? []) {
         if (c instanceof vscode.LanguageModelTextPart) {
             text += c.value;
         } else if (c instanceof vscode.LanguageModelDataPart) {
             if (isCacheControlMimeType(c.mimeType)) {
                 Logger.trace(`[collectToolResultText] Dropping cache_control part (mimeType: ${c.mimeType})`);
+                hasCacheControlMarker = true;
                 continue;
             }
             if (c.mimeType.startsWith("text/") || c.mimeType.includes("json")) {
@@ -1004,7 +1042,7 @@ function collectToolResultText(pr: { content?: readonly unknown[] }): string {
             }
         }
     }
-    return text;
+    return { content: text, hasCacheControlMarker };
 }
 
 /**

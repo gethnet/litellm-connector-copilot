@@ -11,6 +11,7 @@ import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, OpenAIFunctionToolD
 import type { RequestBuilderDeps } from "./types";
 import type { V2ChatMessage } from "../v2Types";
 import { resolveChatReasoningTransport } from "./reasoningTransport";
+import { applyPromptCachePolicy, modelSupportsPromptCacheControl } from "../../utils/promptCacheControl";
 
 export class RequestBuilder {
     private readonly configManager: RequestBuilderDeps["configManager"];
@@ -75,7 +76,9 @@ export class RequestBuilder {
         // this call site only needs the (possibly redacted) tool list.
         const toolConfig = convertTools({ ...options, tools: toolRedaction.tools });
         const messagesToUse = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo);
-        const openaiMessages = convertMessages(messagesToUse);
+        const openaiMessages = convertMessages(messagesToUse, {
+            attachPromptCacheControl: modelSupportsPromptCacheControl(modelInfo),
+        });
         validateRequest(messagesToUse);
 
         const reasoningEffort = this.getReasoningEffort(options, model, modelInfo);
@@ -150,6 +153,10 @@ export class RequestBuilder {
             modelInfo,
             rawModelId
         );
+        const promptCachePolicy = applyPromptCachePolicy(requestBody.messages, modelInfo);
+        if (promptCachePolicy.path1) {
+            requestBody.cache_control = { type: "ephemeral" };
+        }
         return requestBody;
     }
 
@@ -178,9 +185,12 @@ export class RequestBuilder {
         );
         const mo = (options.modelOptions as Record<string, unknown>) ?? {};
 
+        const openaiMessages = convertV2MessagesToOpenAI(trimmedMessages, {
+            attachPromptCacheControl: modelSupportsPromptCacheControl(modelInfo),
+        });
         const requestBody: OpenAIChatCompletionRequest = {
             model: rawModelId,
-            messages: convertV2MessagesToOpenAI(trimmedMessages),
+            messages: openaiMessages,
             stream: true,
             max_tokens:
                 typeof options.modelOptions?.max_tokens === "number"
@@ -234,6 +244,10 @@ export class RequestBuilder {
             modelInfo,
             rawModelId
         );
+        const promptCachePolicy = applyPromptCachePolicy(requestBody.messages, modelInfo);
+        if (promptCachePolicy.path1) {
+            requestBody.cache_control = { type: "ephemeral" };
+        }
         return requestBody;
     }
 }

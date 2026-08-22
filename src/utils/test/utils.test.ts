@@ -658,6 +658,51 @@ suite("Utility Unit Tests", () => {
             assert.strictEqual(out[0].content, "visible");
         });
 
+        test("V1 translates an explicit cache marker onto the last content block when enabled", () => {
+            const messages: vscode.LanguageModelChatMessage[] = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [
+                        new vscode.LanguageModelTextPart("visible"),
+                        new vscode.LanguageModelDataPart(
+                            Buffer.from('{"$mid":24,"data":"ZXBoZW1lcmFs"}'),
+                            "application/vnd.cache-control+json"
+                        ),
+                    ],
+                },
+            ];
+
+            const out = convertMessages(messages, { attachPromptCacheControl: true });
+
+            assert.deepStrictEqual(out[0].content, [
+                { type: "text", text: "visible", cache_control: { type: "ephemeral" } },
+            ]);
+            const serialized = JSON.stringify(out);
+            assert.ok(!serialized.includes("$mid"));
+            assert.ok(!serialized.includes("ZXBoZW1lcmFs"));
+        });
+
+        test("V2 translates an explicit cache marker onto the last content block when enabled", () => {
+            const messages = normalizeMessagesForV2Pipeline([
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [
+                        new vscode.LanguageModelTextPart("visible"),
+                        new vscode.LanguageModelDataPart(Buffer.from("ephemeral"), "cache_control"),
+                    ],
+                } as unknown as vscode.LanguageModelChatMessage,
+            ]);
+
+            const out = convertV2MessagesToOpenAI(messages, { attachPromptCacheControl: true });
+
+            assert.deepStrictEqual(out[0].content, [
+                { type: "text", text: "visible", cache_control: { type: "ephemeral" } },
+            ]);
+            assert.ok(!JSON.stringify(out).includes("ZXBoZW1lcmFs"));
+        });
+
         test("V2 transport preserves legitimate text/plain and application/json data parts", () => {
             // Sanity guard: while stripping cache_control, we must NOT accidentally
             // strip real JSON / text data parts that carry actual model context.
