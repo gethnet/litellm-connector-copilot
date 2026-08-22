@@ -127,6 +127,36 @@ suite("RequestBuilder", () => {
         assert.ok(!JSON.stringify(request.messages).includes("cache_control"));
     });
 
+    test("buildOpenAIChatRequest omits Path 1 after four explicit cache markers", async () => {
+        configManager.getConfig.resolves({});
+        const model = {
+            id: "anthropic/claude-opus-5",
+            maxInputTokens: 100,
+            maxOutputTokens: 50,
+        } as vscode.LanguageModelChatInformation;
+        const messages = Array.from({ length: 4 }, (_, index) => ({
+            role: vscode.LanguageModelChatMessageRole.User,
+            content: [
+                new vscode.LanguageModelTextPart(`message ${index}`),
+                new vscode.LanguageModelDataPart(Buffer.from("ephemeral"), "cache_control"),
+            ],
+            name: undefined,
+        }));
+
+        const request = await builder.buildOpenAIChatRequest(
+            messages,
+            model,
+            { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions,
+            { supported_openai_params: ["cache_control"] }
+        );
+
+        assert.strictEqual(request.cache_control, undefined);
+        const explicitCount = request.messages.flatMap((message) =>
+            Array.isArray(message.content) ? message.content.filter((content) => content.cache_control !== undefined) : []
+        ).length;
+        assert.strictEqual(explicitCount, 4);
+    });
+
     test("buildV2ChatRequest preserves tool_choice", async () => {
         configManager.getConfig.resolves({});
         const model = { id: "gpt-v2", maxInputTokens: 100, maxOutputTokens: 20 } as vscode.LanguageModelChatInformation;
