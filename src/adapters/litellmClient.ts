@@ -11,6 +11,7 @@ import type {
 import { transformToResponsesFormat } from "./responsesAdapter";
 import { Logger } from "../utils/logger";
 import { isAnthropicModel } from "../utils/modelUtils";
+import { stripCacheBreakpoints } from "../utils/promptCacheControl";
 import type { TelemetryService } from "../telemetry/telemetryService";
 
 /**
@@ -246,6 +247,9 @@ export class LiteLLMClient {
                     Logger.info(`Stripping specific parameter: ${paramName}`);
                     const rootParam = paramName.split(".")[0];
                     delete stripedAsAny[rootParam];
+                    if (rootParam === "cache_control") {
+                        this.stripPromptCacheControls(strippedBody);
+                    }
                     // Native adaptive fields are a pair. Dropping only one leaves
                     // a mixed request that LiteLLM can still reject or remap.
                     if (rootParam === "thinking" || rootParam === "output_config") {
@@ -368,6 +372,24 @@ export class LiteLLMClient {
 
     private hasCacheBypassControl(body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest | undefined): boolean {
         return body?.extra_body?.cache?.["no-cache"] === true;
+    }
+
+    /**
+     * Removes only Anthropic prompt-cache controls after the provider rejected
+     * `cache_control`. LiteLLM response caching under `extra_body.cache` is a
+     * separate feature and must survive this retry unchanged.
+     */
+    private stripPromptCacheControls(body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest): void {
+        delete body.cache_control;
+        if ("messages" in body) {
+            stripCacheBreakpoints(body.messages);
+            return;
+        }
+        for (const input of body.input) {
+            if ("cache_control" in input) {
+                delete input.cache_control;
+            }
+        }
     }
 
     private getEndpoint(mode?: string): string {

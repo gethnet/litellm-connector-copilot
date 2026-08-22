@@ -14,6 +14,16 @@ suite("Responses Adapter Unit Tests", () => {
         assert.deepStrictEqual(body.extra_body, { cache: { "no-cache": true } });
     });
 
+    test("transformToResponsesFormat preserves top-level prompt cache control", () => {
+        const body = transformToResponsesFormat({
+            model: "claude-opus-5",
+            messages: [{ role: "user", content: "reuse this prefix" }],
+            cache_control: { type: "ephemeral" },
+        });
+
+        assert.deepStrictEqual(body.cache_control, { type: "ephemeral" });
+    });
+
     test("transformToResponsesFormat never creates a cache_control carrier object", () => {
         const body = transformToResponsesFormat({
             model: "cache-capable-model",

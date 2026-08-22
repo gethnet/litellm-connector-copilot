@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import * as sinon from "sinon";
 import { Transport } from "../base/transport";
 import { ConfigManager } from "../../config/configManager";
+import { StructuredLogger } from "../../observability/structuredLogger";
 
 suite("Transport", () => {
     let sandbox: sinon.SinonSandbox;
@@ -122,5 +123,50 @@ suite("Transport", () => {
         assert.strictEqual(factoryCalls.length, 1);
         assert.strictEqual(factoryCalls[0].url, "https://wolfram.example");
         assert.strictEqual(factoryCalls[0].key, "sk-test");
+    });
+
+    test("sendRequestToLiteLLM logs sanitized prompt-cache policy fields", async () => {
+        const token = new vscode.CancellationTokenSource().token;
+        const progress = { report: () => {} } as vscode.Progress<vscode.LanguageModelResponsePart>;
+        const infoStub = sandbox.stub(StructuredLogger, "info");
+        const localTransport = new Transport({
+            configManager,
+            userAgent: "ua",
+            logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, trace: () => {} },
+            liteLLMClientFactory: (() => ({ chat: () => new ReadableStream() }) as never) as never,
+        });
+
+        await localTransport.sendRequestToLiteLLM(
+            {
+                model: "claude-opus-5",
+                messages: [
+                    {
+                        role: "user",
+                        content: [{ type: "text", text: "private prompt", cache_control: { type: "ephemeral" } }],
+                    },
+                ],
+                cache_control: { type: "ephemeral" },
+            },
+            progress,
+            token,
+            "test",
+            { mode: "chat", supported_openai_params: ["cache_control"] },
+            { baseUrl: "https://example.com", apiKey: "test-key" }
+        );
+
+        const call = infoStub
+            .getCalls()
+            .find((entry) => entry.args[0] === "transport.http_request_start");
+        assert.ok(call);
+        const data = call?.args[1] as Record<string, unknown>;
+        assert.deepStrictEqual(
+            {
+                supported: data.prompt_cache_supported,
+                path1: data.prompt_cache_path1,
+                explicitCount: data.prompt_cache_explicit_count,
+            },
+            { supported: true, path1: true, explicitCount: 1 }
+        );
+        assert.ok(!JSON.stringify(data).includes("private prompt"));
     });
 });
