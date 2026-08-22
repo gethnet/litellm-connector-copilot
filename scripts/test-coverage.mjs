@@ -67,8 +67,9 @@ const hasXvfb =
 
 let child;
 if (hasXvfb) {
-  // xvfb-run wraps the entire command
-  child = spawn("xvfb-run", ["vscode-test", ...testArgs], {
+  // Pick an unused display so stale or parallel WSL test sessions cannot
+  // collide with xvfb-run's default :99 display.
+  child = spawn("xvfb-run", ["-a", "vscode-test", ...testArgs], {
     stdio: "inherit",
     env: process.env,
   });
