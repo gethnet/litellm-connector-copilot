@@ -53,7 +53,7 @@ export function convertV2MessagesToOpenAI(
                 return;
             }
 
-            if (hasCacheControlMarker && Array.isArray(content)) {
+            if (options.attachPromptCacheControl === true && hasCacheControlMarker && Array.isArray(content)) {
                 applyEphemeralCacheControl(content);
             }
 
@@ -77,7 +77,7 @@ export function convertV2MessagesToOpenAI(
             }
 
             const content = buildMessageContent(textParts, contentItems, hasCacheControlMarker);
-            if (hasCacheControlMarker && Array.isArray(content)) {
+            if (options.attachPromptCacheControl === true && hasCacheControlMarker && Array.isArray(content)) {
                 applyEphemeralCacheControl(content);
             }
             const emittedIndex = out.length;
@@ -110,7 +110,8 @@ export function convertV2MessagesToOpenAI(
                     textParts.push(part.text);
                     break;
                 case "data":
-                    hasCacheControlMarker = appendDataPart(part, textParts, contentItems, options) || hasCacheControlMarker;
+                    hasCacheControlMarker =
+                        appendDataPart(part, textParts, contentItems, options) || hasCacheControlMarker;
                     break;
                 case "thinking":
                     textParts.push(Array.isArray(part.value) ? part.value.join("") : part.value);

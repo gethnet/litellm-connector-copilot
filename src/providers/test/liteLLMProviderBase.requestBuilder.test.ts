@@ -98,7 +98,9 @@ suite("RequestBuilder", () => {
 
         const [v1Request, v2Request] = await Promise.all([
             builder.buildOpenAIChatRequest(messages, model, options, { supported_openai_params: ["cache_control"] }),
-            builder.buildV2ChatRequest(messages as never, model, options, { supported_openai_params: ["cache_control"] }),
+            builder.buildV2ChatRequest(messages as never, model, options, {
+                supported_openai_params: ["cache_control"],
+            }),
         ]);
 
         assert.deepStrictEqual(v1Request.cache_control, { type: "ephemeral" });
@@ -107,7 +109,11 @@ suite("RequestBuilder", () => {
 
     test("buildOpenAIChatRequest leaves cards without cache_control unstamped", async () => {
         configManager.getConfig.resolves({});
-        const model = { id: "bedrock/claude", maxInputTokens: 100, maxOutputTokens: 50 } as vscode.LanguageModelChatInformation;
+        const model = {
+            id: "bedrock/claude",
+            maxInputTokens: 100,
+            maxOutputTokens: 50,
+        } as vscode.LanguageModelChatInformation;
         const messages: vscode.LanguageModelChatRequestMessage[] = [
             {
                 role: vscode.LanguageModelChatMessageRole.User,
@@ -152,7 +158,9 @@ suite("RequestBuilder", () => {
 
         assert.strictEqual(request.cache_control, undefined);
         const explicitCount = request.messages.flatMap((message) =>
-            Array.isArray(message.content) ? message.content.filter((content) => content.cache_control !== undefined) : []
+            Array.isArray(message.content)
+                ? message.content.filter((content) => content.cache_control !== undefined)
+                : []
         ).length;
         assert.strictEqual(explicitCount, 4);
     });

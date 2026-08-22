@@ -488,7 +488,7 @@ export function convertMessages(
                 contentItems,
                 options.attachPromptCacheControl === true && hasCacheControlMarker
             );
-            if (hasCacheControlMarker && Array.isArray(messageContent)) {
+            if (options.attachPromptCacheControl === true && hasCacheControlMarker && Array.isArray(messageContent)) {
                 applyEphemeralCacheControl(messageContent);
             }
             out.push({
@@ -520,7 +520,11 @@ export function convertMessages(
                     contentItems,
                     options.attachPromptCacheControl === true && hasCacheControlMarker
                 );
-                if (hasCacheControlMarker && Array.isArray(messageContent)) {
+                if (
+                    options.attachPromptCacheControl === true &&
+                    hasCacheControlMarker &&
+                    Array.isArray(messageContent)
+                ) {
                     applyEphemeralCacheControl(messageContent);
                 }
                 if (messageContent || (role === "assistant" && thinkingBlocks.length > 0)) {

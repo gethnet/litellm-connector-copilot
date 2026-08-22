@@ -154,9 +154,7 @@ suite("Transport", () => {
             { baseUrl: "https://example.com", apiKey: "test-key" }
         );
 
-        const call = infoStub
-            .getCalls()
-            .find((entry) => entry.args[0] === "transport.http_request_start");
+        const call = infoStub.getCalls().find((entry) => entry.args[0] === "transport.http_request_start");
         assert.ok(call);
         const data = call?.args[1] as Record<string, unknown>;
         assert.deepStrictEqual(

@@ -59,9 +59,7 @@ suite("Prompt cache control policy", () => {
         assert.deepStrictEqual(summary, { supported: true, path1: false, explicitCount: 4 });
         assert.strictEqual(countCacheBreakpoints(messages), 4);
         assert.deepStrictEqual(
-            messages.map((message) =>
-                Array.isArray(message.content) ? message.content[0].cache_control : undefined
-            ),
+            messages.map((message) => (Array.isArray(message.content) ? message.content[0].cache_control : undefined)),
             [{ type: "ephemeral" }, { type: "ephemeral" }, { type: "ephemeral" }, { type: "ephemeral" }, undefined]
         );
     });
