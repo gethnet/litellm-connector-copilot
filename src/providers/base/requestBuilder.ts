@@ -12,6 +12,7 @@ import type { RequestBuilderDeps } from "./types";
 import type { V2ChatMessage } from "../v2Types";
 import { resolveChatReasoningTransport } from "./reasoningTransport";
 import { applyPromptCachePolicy, modelSupportsPromptCacheControl } from "../../utils/promptCacheControl";
+import type { PromptCachePolicySummary } from "../../utils/promptCacheControl";
 
 export class RequestBuilder {
     private readonly configManager: RequestBuilderDeps["configManager"];
@@ -46,6 +47,42 @@ export class RequestBuilder {
                 "no-cache": true,
             },
         };
+    }
+
+    /**
+     * Applies the shared finalization tail every chat request body needs,
+     * regardless of which message pipeline produced it.
+     *
+     * Order is load-bearing and must not be rearranged:
+     *
+     * 1. LiteLLM response-cache bypass goes on first so the parameter strip can
+     *    remove `cache` for backends that reject it.
+     * 2. Unsupported parameters are stripped against the model card.
+     * 3. Anthropic prompt caching is applied *after* the strip, because the
+     *    strip only knows the card's advertised parameters and would otherwise
+     *    drop a `cache_control` field it does not recognize.
+     *
+     * Returns the sanitized policy summary so callers can log the decision
+     * without re-deriving it.
+     */
+    private finalizeRequestBody(
+        requestBody: OpenAIChatCompletionRequest,
+        rawModelId: string,
+        disableCaching: boolean,
+        modelInfo?: LiteLLMModelInfo
+    ): PromptCachePolicySummary {
+        this.addCacheBypassIfEnabled(requestBody, disableCaching);
+        this.stripUnsupportedParametersFromRequest(
+            requestBody as unknown as Record<string, unknown>,
+            modelInfo,
+            rawModelId
+        );
+
+        const promptCachePolicy = applyPromptCachePolicy(requestBody.messages, modelInfo);
+        if (promptCachePolicy.path1) {
+            requestBody.cache_control = { type: "ephemeral" };
+        }
+        return promptCachePolicy;
     }
 
     public async buildOpenAIChatRequest(
@@ -147,16 +184,7 @@ export class RequestBuilder {
             // If model doesn't support tool_choice, omit it entirely
         }
 
-        this.addCacheBypassIfEnabled(requestBody, config.disableCaching === true);
-        this.stripUnsupportedParametersFromRequest(
-            requestBody as unknown as Record<string, unknown>,
-            modelInfo,
-            rawModelId
-        );
-        const promptCachePolicy = applyPromptCachePolicy(requestBody.messages, modelInfo);
-        if (promptCachePolicy.path1) {
-            requestBody.cache_control = { type: "ephemeral" };
-        }
+        this.finalizeRequestBody(requestBody, rawModelId, config.disableCaching === true, modelInfo);
         return requestBody;
     }
 
@@ -238,16 +266,7 @@ export class RequestBuilder {
             // If model doesn't support tool_choice, omit it entirely
         }
 
-        this.addCacheBypassIfEnabled(requestBody, config.disableCaching === true);
-        this.stripUnsupportedParametersFromRequest(
-            requestBody as unknown as Record<string, unknown>,
-            modelInfo,
-            rawModelId
-        );
-        const promptCachePolicy = applyPromptCachePolicy(requestBody.messages, modelInfo);
-        if (promptCachePolicy.path1) {
-            requestBody.cache_control = { type: "ephemeral" };
-        }
+        this.finalizeRequestBody(requestBody, rawModelId, config.disableCaching === true, modelInfo);
         return requestBody;
     }
 }
