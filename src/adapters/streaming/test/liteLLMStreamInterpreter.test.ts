@@ -485,6 +485,84 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
         assert.deepStrictEqual(parts, []);
     });
 
+    // Anthropic reports prompt-cache accounting at the usage root, not inside
+    // prompt_tokens_details. Without these mappings a Claude cache write is
+    // invisible to the cost pipeline and every turn looks uncached.
+    test("should map Anthropic root cache write and read tokens into prompt details", () => {
+        const state = createInitialStreamingState();
+        const parts = interpretStreamEvent(
+            {
+                usage: {
+                    prompt_tokens: 40000,
+                    completion_tokens: 12,
+                    total_tokens: 40012,
+                    cache_creation_input_tokens: 39482,
+                    cache_read_input_tokens: 0,
+                    prompt_tokens_details: { cached_tokens: 0 },
+                },
+            },
+            state
+        );
+
+        const usage = parts.find((part) => part.type === "data");
+        assert.ok(usage && usage.type === "data");
+        if (usage.type === "data") {
+            assert.deepStrictEqual(usage.value, {
+                prompt_tokens: 40000,
+                completion_tokens: 12,
+                total_tokens: 40012,
+                prompt_tokens_details: {
+                    cached_tokens: 0,
+                    cache_creation_input_tokens: 39482,
+                },
+            });
+        }
+    });
+
+    test("should read root cache_read_input_tokens when no nested cached count exists", () => {
+        const state = createInitialStreamingState();
+        const parts = interpretStreamEvent(
+            { usage: { prompt_tokens: 38689, completion_tokens: 39, cache_read_input_tokens: 38368 } },
+            state
+        );
+
+        const usage = parts.find((part) => part.type === "data");
+        assert.ok(usage && usage.type === "data");
+        if (usage.type === "data") {
+            assert.deepStrictEqual((usage.value as { prompt_tokens_details?: object }).prompt_tokens_details, {
+                cached_tokens: 38368,
+            });
+        }
+    });
+
+    test("should prefer nested cache details over root Anthropic usage fields", () => {
+        const state = createInitialStreamingState();
+        const parts = interpretStreamEvent(
+            {
+                usage: {
+                    prompt_tokens: 40000,
+                    completion_tokens: 12,
+                    cache_creation_input_tokens: 1,
+                    cache_read_input_tokens: 2,
+                    prompt_tokens_details: {
+                        cached_tokens: 35000,
+                        cache_creation_input_tokens: 5000,
+                    },
+                },
+            },
+            state
+        );
+
+        const usage = parts.find((part) => part.type === "data");
+        assert.ok(usage && usage.type === "data");
+        if (usage.type === "data") {
+            assert.deepStrictEqual((usage.value as { prompt_tokens_details?: object }).prompt_tokens_details, {
+                cached_tokens: 35000,
+                cache_creation_input_tokens: 5000,
+            });
+        }
+    });
+
     test("should pass through non-cache-control VS Code DataPart carrier objects", () => {
         const state = createInitialStreamingState();
         const parts = interpretStreamEvent(
