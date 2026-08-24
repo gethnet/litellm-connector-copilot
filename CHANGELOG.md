@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.4] - 2026-08-24
+
+### 🚀 Features
+
+* **⚡ Enable Anthropic prompt caching for eligible models (#138)**: Requests now add a root `cache_control: { type: "ephemeral" }` breakpoint when an Anthropic/Claude model advertises `cache_control` in `supported_openai_params`. This keeps prompt caching opt-in by model card, avoids stamping incompatible providers, and preserves the behavior across chat and `/responses` request shapes. Thanks to [@FPA-DavidTai](https://github.com/FPA-DavidTai) for the contribution.
+### 🐛 Fixes
+
+* **♻️ Make prompt-cache retries safe**: Requests that reject `cache_control` now remove prompt-cache controls before retrying, without removing unrelated LiteLLM gateway-cache settings. (`src/adapters/litellmClient.ts`)
+* **📊 Capture Anthropic cache usage**: Root-level `cache_creation_input_tokens` and `cache_read_input_tokens` are now mapped into usage data and token accounting, making prompt-cache activity visible to telemetry and cost reporting. (`src/adapters/streaming/liteLLMStreamInterpreter.ts`)
+
+### 🧪 Tests
+
+* Added regression coverage for model-card eligibility, chat and `/responses` payloads, V1/V2 message conversion, rejection recovery, cache usage mapping, and sanitized transport logging. The merged PR reports 1,029 passing tests with 91.20% statements/lines coverage.
+
+### 🧹 Chores
+
+* **🖥️ Improve test isolation**: `test-coverage.mjs` now selects an unused X display when invoking `xvfb-run`, avoiding collisions with stale or parallel sessions. (`scripts/test-coverage.mjs`)
+* **🚀 Promote release version**: Promoted the package version to `2.5.4`. (`package.json`)
+
 ## [2.5.3] - 2026-08-21
 
 ### 🐛 Fixes
@@ -18,7 +37,7 @@ All notable changes to this project will be documented in this file.
 
 * **🚀 Promote release version**: Promoted the package version to `2.5.3`. (`package.json`)
 
-## [2.5.2] - 2026-08-21
+## [2.5.2] - 2026-08-20
 
 ### 🐛 Fixes
 

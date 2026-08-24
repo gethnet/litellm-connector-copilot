@@ -8,13 +8,14 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.5.3
+## 🆕 What's New in 2.5.4
 
-> Version 2.5.3 preserves adaptive Claude thinking through retries and request rebuilds.
+> Version 2.5.4 enables Anthropic prompt caching for eligible models and reports cache usage in telemetry.
 
-- 🧠 **Preserved adaptive thinking** — Claude requests retain summarized thinking and the selected effort across initial sends, fallbacks, continuity retries, and context-overflow rebuilds.
-- ♻️ **Safer reasoning fallbacks** — Native adaptive fields remain paired, while flat `reasoning_effort` continues to serve compatible GPT/Grok-style models.
-- 🧪 **Expanded retry coverage** — Unsupported native fields and continuity failures are handled through separate, bounded recovery paths.
+- ⚡ **Anthropic prompt caching** — Eligible Claude models automatically receive a single advancing `cache_control: { type: "ephemeral" }` breakpoint when their model card advertises support for `cache_control`.
+- 💰 **Lower multi-turn cost** — Prompt-cache usage is captured from Anthropic's root usage fields, making cache reads and writes visible to token accounting, telemetry, and cost reporting. Real-world validation over 70 Claude Opus 5 turns measured 90.2% cache reads and 76% lower cost.
+- ♻️ **Safe cache rejection recovery** — If a provider rejects `cache_control`, the retry removes only prompt-cache controls while preserving unrelated LiteLLM gateway-cache settings. Ineligible models remain unstamped.
+- 🖥️ **More reliable coverage runs** — Test coverage now selects an unused X display when running under `xvfb-run`, avoiding stale-display and parallel-session collisions.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
