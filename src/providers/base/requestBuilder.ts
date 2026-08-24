@@ -11,6 +11,8 @@ import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, OpenAIFunctionToolD
 import type { RequestBuilderDeps } from "./types";
 import type { V2ChatMessage } from "../v2Types";
 import { resolveChatReasoningTransport } from "./reasoningTransport";
+import { applyPromptCachePolicy, modelSupportsPromptCacheControl } from "../../utils/promptCacheControl";
+import type { PromptCachePolicySummary } from "../../utils/promptCacheControl";
 
 export class RequestBuilder {
     private readonly configManager: RequestBuilderDeps["configManager"];
@@ -47,6 +49,42 @@ export class RequestBuilder {
         };
     }
 
+    /**
+     * Applies the shared finalization tail every chat request body needs,
+     * regardless of which message pipeline produced it.
+     *
+     * Order is load-bearing and must not be rearranged:
+     *
+     * 1. LiteLLM response-cache bypass goes on first so the parameter strip can
+     *    remove `cache` for backends that reject it.
+     * 2. Unsupported parameters are stripped against the model card.
+     * 3. Anthropic prompt caching is applied *after* the strip, because the
+     *    strip only knows the card's advertised parameters and would otherwise
+     *    drop a `cache_control` field it does not recognize.
+     *
+     * Returns the sanitized policy summary so callers can log the decision
+     * without re-deriving it.
+     */
+    private finalizeRequestBody(
+        requestBody: OpenAIChatCompletionRequest,
+        rawModelId: string,
+        disableCaching: boolean,
+        modelInfo?: LiteLLMModelInfo
+    ): PromptCachePolicySummary {
+        this.addCacheBypassIfEnabled(requestBody, disableCaching);
+        this.stripUnsupportedParametersFromRequest(
+            requestBody as unknown as Record<string, unknown>,
+            modelInfo,
+            rawModelId
+        );
+
+        const promptCachePolicy = applyPromptCachePolicy(requestBody.messages, rawModelId, modelInfo);
+        if (promptCachePolicy.path1) {
+            requestBody.cache_control = { type: "ephemeral" };
+        }
+        return promptCachePolicy;
+    }
+
     public async buildOpenAIChatRequest(
         messages: readonly vscode.LanguageModelChatRequestMessage[],
         model: vscode.LanguageModelChatInformation,
@@ -75,7 +113,9 @@ export class RequestBuilder {
         // this call site only needs the (possibly redacted) tool list.
         const toolConfig = convertTools({ ...options, tools: toolRedaction.tools });
         const messagesToUse = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo);
-        const openaiMessages = convertMessages(messagesToUse);
+        const openaiMessages = convertMessages(messagesToUse, {
+            attachPromptCacheControl: modelSupportsPromptCacheControl(rawModelId, modelInfo),
+        });
         validateRequest(messagesToUse);
 
         const reasoningEffort = this.getReasoningEffort(options, model, modelInfo);
@@ -144,12 +184,7 @@ export class RequestBuilder {
             // If model doesn't support tool_choice, omit it entirely
         }
 
-        this.addCacheBypassIfEnabled(requestBody, config.disableCaching === true);
-        this.stripUnsupportedParametersFromRequest(
-            requestBody as unknown as Record<string, unknown>,
-            modelInfo,
-            rawModelId
-        );
+        this.finalizeRequestBody(requestBody, rawModelId, config.disableCaching === true, modelInfo);
         return requestBody;
     }
 
@@ -178,9 +213,12 @@ export class RequestBuilder {
         );
         const mo = (options.modelOptions as Record<string, unknown>) ?? {};
 
+        const openaiMessages = convertV2MessagesToOpenAI(trimmedMessages, {
+            attachPromptCacheControl: modelSupportsPromptCacheControl(rawModelId, modelInfo),
+        });
         const requestBody: OpenAIChatCompletionRequest = {
             model: rawModelId,
-            messages: convertV2MessagesToOpenAI(trimmedMessages),
+            messages: openaiMessages,
             stream: true,
             max_tokens:
                 typeof options.modelOptions?.max_tokens === "number"
@@ -228,12 +266,7 @@ export class RequestBuilder {
             // If model doesn't support tool_choice, omit it entirely
         }
 
-        this.addCacheBypassIfEnabled(requestBody, config.disableCaching === true);
-        this.stripUnsupportedParametersFromRequest(
-            requestBody as unknown as Record<string, unknown>,
-            modelInfo,
-            rawModelId
-        );
+        this.finalizeRequestBody(requestBody, rawModelId, config.disableCaching === true, modelInfo);
         return requestBody;
     }
 }

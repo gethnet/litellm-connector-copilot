@@ -3,10 +3,12 @@ import { StructuredLogger } from "../observability/structuredLogger";
 import { sanitizeToolName } from "../utils/toolNameUtils";
 import type { V2ChatMessage, V2MessagePart } from "../providers/v2Types";
 import type { OpenAIChatMessage, OpenAIChatMessageContentItem, OpenAIChatRole, OpenAIToolCall } from "../types";
+import { applyEphemeralCacheControl } from "../utils/promptCacheControl";
 
 interface V2OpenAIConversionOptions {
     normalizeToolCallId: (id: string) => string;
     isCacheControlMimeType: (mimeType: string) => boolean;
+    attachPromptCacheControl?: boolean;
 }
 
 interface TextLikeContent {
@@ -43,11 +45,16 @@ export function convertV2MessagesToOpenAI(
         const textParts: string[] = [];
         const contentItems: OpenAIChatMessageContentItem[] = [];
         const toolCalls: OpenAIToolCall[] = [];
+        let hasCacheControlMarker = false;
 
         const flushTextMessage = (): void => {
-            const content = buildMessageContent(textParts, contentItems);
+            const content = buildMessageContent(textParts, contentItems, hasCacheControlMarker);
             if (!content) {
                 return;
+            }
+
+            if (options.attachPromptCacheControl === true && hasCacheControlMarker && Array.isArray(content)) {
+                applyEphemeralCacheControl(content);
             }
 
             const emittedIndex = out.length;
@@ -61,6 +68,7 @@ export function convertV2MessagesToOpenAI(
             });
             textParts.length = 0;
             contentItems.length = 0;
+            hasCacheControlMarker = false;
         };
 
         const flushAssistantToolCalls = (): void => {
@@ -68,7 +76,10 @@ export function convertV2MessagesToOpenAI(
                 return;
             }
 
-            const content = buildMessageContent(textParts, contentItems);
+            const content = buildMessageContent(textParts, contentItems, hasCacheControlMarker);
+            if (options.attachPromptCacheControl === true && hasCacheControlMarker && Array.isArray(content)) {
+                applyEphemeralCacheControl(content);
+            }
             const emittedIndex = out.length;
             out.push({ role: "assistant", content, name: message.name, tool_calls: [...toolCalls] });
             StructuredLogger.trace("v2.convert.message_emitted", {
@@ -83,6 +94,7 @@ export function convertV2MessagesToOpenAI(
             textParts.length = 0;
             contentItems.length = 0;
             toolCalls.length = 0;
+            hasCacheControlMarker = false;
         };
 
         message.content.forEach((part, partIndex) => {
@@ -98,7 +110,8 @@ export function convertV2MessagesToOpenAI(
                     textParts.push(part.text);
                     break;
                 case "data":
-                    appendDataPart(part, textParts, contentItems, options);
+                    hasCacheControlMarker =
+                        appendDataPart(part, textParts, contentItems, options) || hasCacheControlMarker;
                     break;
                 case "thinking":
                     textParts.push(Array.isArray(part.value) ? part.value.join("") : part.value);
@@ -115,8 +128,15 @@ export function convertV2MessagesToOpenAI(
 
                     const emittedIndex = out.length;
                     const normalizedCallId = options.normalizeToolCallId(part.callId);
-                    const content = serializeToolResultContent(part.content, options);
-                    out.push({ role: "tool", tool_call_id: normalizedCallId, content });
+                    const serialized = serializeToolResultContent(part.content, options);
+                    const toolContent: string | OpenAIChatMessageContentItem[] =
+                        options.attachPromptCacheControl === true && serialized.hasCacheControlMarker
+                            ? [{ type: "text", text: serialized.content }]
+                            : serialized.content;
+                    if (Array.isArray(toolContent)) {
+                        applyEphemeralCacheControl(toolContent);
+                    }
+                    out.push({ role: "tool", tool_call_id: normalizedCallId, content: toolContent });
                     StructuredLogger.trace("v2.convert.message_emitted", {
                         messageIndex,
                         partIndex,
@@ -126,7 +146,7 @@ export function convertV2MessagesToOpenAI(
                         rawCallId: part.callId,
                         normalizedCallId,
                         itemCount: part.content.length,
-                        preview: previewText(content),
+                        preview: previewText(serialized.content),
                     });
                     break;
                 }
@@ -181,10 +201,10 @@ function appendDataPart(
     textParts: string[],
     contentItems: OpenAIChatMessageContentItem[],
     options: V2OpenAIConversionOptions
-): void {
+): boolean {
     if (options.isCacheControlMimeType(part.mimeType)) {
         StructuredLogger.trace("v2.convert.cache_control_dropped", { mimeType: part.mimeType });
-        return;
+        return options.attachPromptCacheControl === true;
     }
 
     if (part.mimeType.startsWith("image/")) {
@@ -194,20 +214,22 @@ function appendDataPart(
                 url: `data:${part.mimeType};base64,${Buffer.from(part.data).toString("base64")}`,
             },
         });
-        return;
+        return false;
     }
 
     if (part.mimeType.startsWith("text/") || part.mimeType.includes("json")) {
         textParts.push(Buffer.from(part.data).toString("utf-8"));
     }
+    return false;
 }
 
 function buildMessageContent(
     textParts: readonly string[],
-    contentItems: readonly OpenAIChatMessageContentItem[]
+    contentItems: readonly OpenAIChatMessageContentItem[],
+    forceContentItems = false
 ): string | OpenAIChatMessageContentItem[] | undefined {
     const text = textParts.join("");
-    if (contentItems.length === 0) {
+    if (contentItems.length === 0 && !forceContentItems) {
         return text || undefined;
     }
 
@@ -219,20 +241,26 @@ function buildMessageContent(
     return items;
 }
 
-function serializeToolResultContent(content: readonly unknown[], options: V2OpenAIConversionOptions): string {
+function serializeToolResultContent(
+    content: readonly unknown[],
+    options: V2OpenAIConversionOptions
+): { content: string; hasCacheControlMarker: boolean } {
+    const hasCacheControlMarker = content.some(
+        (item) => item instanceof vscode.LanguageModelDataPart && options.isCacheControlMimeType(item.mimeType)
+    );
     const serialized = content
         .map((item) => serializeToolResultItem(item, options))
         .filter((item): item is SerializedToolResultContent => !!item);
 
     if (serialized.length === 0) {
-        return "Success";
+        return { content: "Success", hasCacheControlMarker };
     }
 
     if (serialized.length === 1 && serialized[0].type === "text") {
-        return serialized[0].text;
+        return { content: serialized[0].text, hasCacheControlMarker };
     }
 
-    return JSON.stringify({ type: "tool_result", content: serialized });
+    return { content: JSON.stringify({ type: "tool_result", content: serialized }), hasCacheControlMarker };
 }
 
 function serializeToolResultItem(

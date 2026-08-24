@@ -54,6 +54,168 @@ suite("RequestBuilder", () => {
         sinon.assert.match(req.stream, true);
     });
 
+    test("buildOpenAIChatRequest attaches top-level cache_control for eligible cards without markers", async () => {
+        configManager.getConfig.resolves({});
+        const model = {
+            id: "anthropic/claude-opus-5",
+            maxInputTokens: 100,
+            maxOutputTokens: 50,
+        } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("reuse this prefix")],
+                name: undefined,
+            },
+        ];
+
+        const request = await builder.buildOpenAIChatRequest(
+            messages,
+            model,
+            { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions,
+            { supported_openai_params: ["cache_control"] }
+        );
+
+        assert.deepStrictEqual(request.cache_control, { type: "ephemeral" });
+        assert.ok(!JSON.stringify(request.messages).includes("cache_control"));
+    });
+
+    test("V1 and V2 builders share the cache_control eligibility gate", async () => {
+        configManager.getConfig.resolves({});
+        const model = {
+            id: "anthropic/claude-opus-5",
+            maxInputTokens: 100,
+            maxOutputTokens: 50,
+        } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("same request")],
+                name: undefined,
+            },
+        ];
+        const options = { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions;
+
+        const [v1Request, v2Request] = await Promise.all([
+            builder.buildOpenAIChatRequest(messages, model, options, { supported_openai_params: ["cache_control"] }),
+            builder.buildV2ChatRequest(messages as never, model, options, {
+                supported_openai_params: ["cache_control"],
+            }),
+        ]);
+
+        assert.deepStrictEqual(v1Request.cache_control, { type: "ephemeral" });
+        assert.deepStrictEqual(v2Request.cache_control, { type: "ephemeral" });
+    });
+
+    test("buildOpenAIChatRequest leaves a lying GPT cache_control card unstamped", async () => {
+        configManager.getConfig.resolves({});
+        const model = {
+            id: "azure_ai/us-central/gpt-4o-mini",
+            maxInputTokens: 100,
+            maxOutputTokens: 50,
+        } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("do not cache")],
+                name: undefined,
+            },
+        ];
+
+        const request = await builder.buildOpenAIChatRequest(
+            messages,
+            model,
+            { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions,
+            { supported_openai_params: ["cache_control", "prompt_cache_key"], litellm_provider: "openai" }
+        );
+
+        assert.strictEqual(request.cache_control, undefined);
+        assert.ok(!JSON.stringify(request.messages).includes("cache_control"));
+    });
+
+    test("buildOpenAIChatRequest still stamps Azure-hosted Claude cards", async () => {
+        configManager.getConfig.resolves({});
+        const model = {
+            id: "azure_ai/claude-haiku-4-5",
+            maxInputTokens: 100,
+            maxOutputTokens: 50,
+        } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("reuse this prefix")],
+                name: undefined,
+            },
+        ];
+
+        const request = await builder.buildOpenAIChatRequest(
+            messages,
+            model,
+            { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions,
+            { supported_openai_params: ["cache_control"], litellm_provider: "azure_ai" }
+        );
+
+        assert.deepStrictEqual(request.cache_control, { type: "ephemeral" });
+    });
+
+    test("buildOpenAIChatRequest leaves cards without cache_control unstamped", async () => {
+        configManager.getConfig.resolves({});
+        const model = {
+            id: "bedrock/claude",
+            maxInputTokens: 100,
+            maxOutputTokens: 50,
+        } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("do not cache")],
+                name: undefined,
+            },
+        ];
+
+        const request = await builder.buildOpenAIChatRequest(
+            messages,
+            model,
+            { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions,
+            { supports_prompt_caching: true }
+        );
+
+        assert.strictEqual(request.cache_control, undefined);
+        assert.ok(!JSON.stringify(request.messages).includes("cache_control"));
+    });
+
+    test("buildOpenAIChatRequest omits Path 1 after four explicit cache markers", async () => {
+        configManager.getConfig.resolves({});
+        const model = {
+            id: "anthropic/claude-opus-5",
+            maxInputTokens: 100,
+            maxOutputTokens: 50,
+        } as vscode.LanguageModelChatInformation;
+        const messages = Array.from({ length: 4 }, (_, index) => ({
+            role: vscode.LanguageModelChatMessageRole.User,
+            content: [
+                new vscode.LanguageModelTextPart(`message ${index}`),
+                new vscode.LanguageModelDataPart(Buffer.from("ephemeral"), "cache_control"),
+            ],
+            name: undefined,
+        }));
+
+        const request = await builder.buildOpenAIChatRequest(
+            messages,
+            model,
+            { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions,
+            { supported_openai_params: ["cache_control"] }
+        );
+
+        assert.strictEqual(request.cache_control, undefined);
+        const explicitCount = request.messages.flatMap((message) =>
+            Array.isArray(message.content)
+                ? message.content.filter((content) => content.cache_control !== undefined)
+                : []
+        ).length;
+        assert.strictEqual(explicitCount, 4);
+    });
+
     test("buildV2ChatRequest preserves tool_choice", async () => {
         configManager.getConfig.resolves({});
         const model = { id: "gpt-v2", maxInputTokens: 100, maxOutputTokens: 20 } as vscode.LanguageModelChatInformation;

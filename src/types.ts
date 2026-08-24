@@ -15,6 +15,11 @@ export interface OpenAIFunctionToolDef {
     function: { name: string; description?: string; parameters?: object };
 }
 
+/** Anthropic prompt-caching control accepted by LiteLLM's OpenAI-compatible API. */
+export interface OpenAICacheControl {
+    type: "ephemeral";
+}
+
 /**
  * Content item for vision/image support in OpenAI messages
  */
@@ -24,6 +29,8 @@ export interface OpenAIChatMessageContentItem {
     image_url?: {
         url: string;
     };
+    /** Explicit host-provided cache breakpoint. Never created automatically. */
+    cache_control?: OpenAICacheControl;
 }
 
 /**
@@ -423,6 +430,8 @@ export interface LiteLLMTokenCounterResponse {
 export interface OpenAIChatCompletionRequest {
     model: string;
     messages: OpenAIChatMessage[];
+    /** Anthropic Path 1: ask the provider to advance the automatic cache point. */
+    cache_control?: OpenAICacheControl;
     stream?: boolean;
     max_tokens?: number;
     temperature?: number;
@@ -476,6 +485,8 @@ export interface OpenAIChatCompletionRequest {
 export interface LiteLLMResponsesRequest {
     model: string;
     input: (OpenAIChatMessageContentItem | LiteLLMResponseInputItem)[];
+    /** Preserved from the chat-shaped request for eligible responses-routed cards. */
+    cache_control?: OpenAICacheControl;
     instructions?: string;
     stream?: boolean;
     max_tokens?: number;

@@ -51,18 +51,31 @@ export function createInitialStreamingState(): StreamingState {
     };
 }
 
+interface RawUsagePromptTokenDetails {
+    cached_tokens?: number;
+    cache_creation_input_tokens?: number;
+}
+
 interface RawUsagePayload {
     prompt_tokens?: number;
     completion_tokens?: number;
     system_tokens?: number;
-    prompt_tokens_details?: { cached_tokens?: number; cache_creation_input_tokens?: number };
+    /**
+     * Anthropic reports prompt-cache accounting at the usage root rather than
+     * inside `prompt_tokens_details`. LiteLLM forwards the native shape
+     * unchanged for Claude models, so these are the only fields carrying cache
+     * write/read counts on that path.
+     */
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+    prompt_tokens_details?: RawUsagePromptTokenDetails;
     completion_tokens_details?: {
         reasoning_tokens?: number;
         tool_tokens?: number;
         accepted_prediction_tokens?: number;
         rejected_prediction_tokens?: number;
     };
-    input_token_details?: { cached_tokens?: number; cache_creation_input_tokens?: number };
+    input_token_details?: RawUsagePromptTokenDetails;
     output_token_details?: {
         reasoning_tokens?: number;
         tool_tokens?: number;
@@ -71,18 +84,30 @@ interface RawUsagePayload {
     };
 }
 
+function firstNumber(...values: (number | undefined)[]): number | undefined {
+    return values.find((value) => typeof value === "number");
+}
+
 function normalizeUsagePayload(usage: RawUsagePayload): OpenAIUsagePayload {
     const promptTokenDetails: OpenAIUsagePromptTokenDetails = {};
-    const cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? usage.input_token_details?.cached_tokens;
+    const cachedTokens = firstNumber(
+        usage.prompt_tokens_details?.cached_tokens,
+        usage.input_token_details?.cached_tokens,
+        usage.cache_read_input_tokens
+    );
     if (typeof cachedTokens === "number") {
         promptTokenDetails.cached_tokens = cachedTokens;
     } else if (usage.input_token_details !== undefined || usage.prompt_tokens_details !== undefined) {
         promptTokenDetails.cached_tokens = 0;
     }
 
-    const cacheCreationInputTokens =
-        usage.prompt_tokens_details?.cache_creation_input_tokens ??
-        usage.input_token_details?.cache_creation_input_tokens;
+    // Nested OpenAI-compatible details win over the Anthropic root fields so a
+    // proxy that already normalized the payload is never second-guessed.
+    const cacheCreationInputTokens = firstNumber(
+        usage.prompt_tokens_details?.cache_creation_input_tokens,
+        usage.input_token_details?.cache_creation_input_tokens,
+        usage.cache_creation_input_tokens
+    );
     if (typeof cacheCreationInputTokens === "number") {
         promptTokenDetails.cache_creation_input_tokens = cacheCreationInputTokens;
     }

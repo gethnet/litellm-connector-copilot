@@ -5,6 +5,7 @@ import { StructuredLogger } from "../../observability/structuredLogger";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../../types";
 import type { SendRequestArgs, TransportDeps } from "./types";
 import { readReasoningRetryState } from "./reasoningRetryState";
+import { countCacheBreakpoints, modelSupportsPromptCacheControl } from "../../utils/promptCacheControl";
 
 /**
  * Sends a LiteLLM request to the configured endpoint.
@@ -109,6 +110,8 @@ export class Transport {
             `[transport.sendRequestToLiteLLM] Sending request to LiteLLM: model=${request.model} caller=${caller} streaming=true`
         );
         const reasoningState = readReasoningRetryState(request);
+        const promptCacheSupported = modelSupportsPromptCacheControl(request.model, modelInfo);
+        const promptCacheExplicitCount = countCacheBreakpoints(request.messages);
         StructuredLogger.info("transport.http_request_start", {
             model: request.model,
             caller,
@@ -122,6 +125,9 @@ export class Transport {
             max_tokens: request.max_tokens,
             temperature: request.temperature,
             top_p: request.top_p,
+            prompt_cache_supported: promptCacheSupported,
+            prompt_cache_path1: request.cache_control !== undefined,
+            prompt_cache_explicit_count: promptCacheExplicitCount,
         });
 
         // Read the per-call fallback flag from the per-group configuration.

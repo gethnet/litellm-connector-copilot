@@ -11,6 +11,7 @@ import type {
 import { transformToResponsesFormat } from "./responsesAdapter";
 import { Logger } from "../utils/logger";
 import { isAnthropicModel } from "../utils/modelUtils";
+import { stripCacheBreakpoints } from "../utils/promptCacheControl";
 import type { TelemetryService } from "../telemetry/telemetryService";
 
 /**
@@ -226,7 +227,8 @@ export class LiteLLMClient {
                 errorLower.includes("unknown parameter") ||
                 errorLower.includes("extra_headers") ||
                 errorLower.includes("no-cache") ||
-                errorLower.includes("unexpected keyword argument")
+                errorLower.includes("unexpected keyword argument") ||
+                errorLower.includes("cache_control")
             ) {
                 Logger.warn(`Detected unsupported parameters for ${request.model}, attempting to strip and retry.`);
 
@@ -246,6 +248,9 @@ export class LiteLLMClient {
                     Logger.info(`Stripping specific parameter: ${paramName}`);
                     const rootParam = paramName.split(".")[0];
                     delete stripedAsAny[rootParam];
+                    if (rootParam === "cache_control") {
+                        this.stripPromptCacheControls(strippedBody);
+                    }
                     // Native adaptive fields are a pair. Dropping only one leaves
                     // a mixed request that LiteLLM can still reject or remap.
                     if (rootParam === "thinking" || rootParam === "output_config") {
@@ -257,6 +262,13 @@ export class LiteLLMClient {
                 if (errorLower.includes("thinking") || errorLower.includes("output_config")) {
                     delete stripedAsAny.thinking;
                     delete stripedAsAny.output_config;
+                }
+
+                // Azure AI says "Unrecognized request argument supplied:
+                // cache_control". The generic regex captures "supplied", so
+                // always strip Path 1 / block stamps when the name appears.
+                if (errorLower.includes("cache_control")) {
+                    this.stripPromptCacheControls(strippedBody);
                 }
 
                 // Special-case: some providers reject a top-level `cache` object.
@@ -368,6 +380,24 @@ export class LiteLLMClient {
 
     private hasCacheBypassControl(body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest | undefined): boolean {
         return body?.extra_body?.cache?.["no-cache"] === true;
+    }
+
+    /**
+     * Removes only Anthropic prompt-cache controls after the provider rejected
+     * `cache_control`. LiteLLM response caching under `extra_body.cache` is a
+     * separate feature and must survive this retry unchanged.
+     */
+    private stripPromptCacheControls(body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest): void {
+        delete body.cache_control;
+        if ("messages" in body) {
+            stripCacheBreakpoints(body.messages);
+            return;
+        }
+        for (const input of body.input) {
+            if ("cache_control" in input) {
+                delete input.cache_control;
+            }
+        }
     }
 
     private getEndpoint(mode?: string): string {

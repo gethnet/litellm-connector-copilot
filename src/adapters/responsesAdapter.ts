@@ -231,6 +231,7 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
     const responsesBody: LiteLLMResponsesRequest = {
         model: requestBody.model,
         input: finalInputArray,
+        cache_control: requestBody.cache_control,
         stream: requestBody.stream,
         instructions,
         max_tokens: requestBody.max_tokens,

@@ -302,6 +302,82 @@ suite("LiteLLM Client Unit Tests", () => {
         assert.strictEqual(retryHeaders["Cache-Control"], undefined);
     });
 
+    test("chat strips only prompt cache controls after a cache_control rejection", async () => {
+        const client = new LiteLLMClient(config, userAgent);
+        const errorResponse = {
+            ok: false,
+            status: 400,
+            statusText: "Bad Request",
+            text: async () => "Unsupported parameter: 'cache_control'",
+            clone: function () {
+                return this;
+            },
+        };
+        const successResponse = { ok: true, status: 200, body: new ReadableStream() };
+        const fetchStub = sandbox.stub(global, "fetch");
+        fetchStub.onCall(0).resolves(errorResponse as unknown as Response);
+        fetchStub.onCall(1).resolves(successResponse as unknown as Response);
+
+        await client.chat({
+            model: "claude-opus-5",
+            cache_control: { type: "ephemeral" },
+            extra_body: { cache: { "no-cache": true } },
+            messages: [
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "reuse this prefix", cache_control: { type: "ephemeral" } }],
+                },
+            ],
+        });
+
+        const retryBody = JSON.parse((fetchStub.getCall(1).args[1] as RequestInit).body as string) as Record<
+            string,
+            unknown
+        >;
+        assert.strictEqual(retryBody.cache_control, undefined);
+        assert.deepStrictEqual(retryBody.extra_body, { cache: { "no-cache": true } });
+        assert.ok(!JSON.stringify(retryBody.messages).includes("cache_control"));
+    });
+
+    test("chat strips cache_control after Azure AI unrecognized-argument phrasing", async () => {
+        const client = new LiteLLMClient(config, userAgent);
+        const errorResponse = {
+            ok: false,
+            status: 400,
+            statusText: "Bad Request",
+            text: async () =>
+                "Message: litellm.BadRequestError: Azure_aiException - Unrecognized request argument supplied: cache_control. Received Model Group=azure_ai/us-central/gpt-4o-mini Available Model Group Fallbacks=None",
+            clone: function () {
+                return this;
+            },
+        };
+        const successResponse = { ok: true, status: 200, body: new ReadableStream() };
+        const fetchStub = sandbox.stub(global, "fetch");
+        fetchStub.onCall(0).resolves(errorResponse as unknown as Response);
+        fetchStub.onCall(1).resolves(successResponse as unknown as Response);
+
+        await client.chat({
+            model: "azure_ai/us-central/gpt-4o-mini",
+            cache_control: { type: "ephemeral" },
+            extra_body: { cache: { "no-cache": true } },
+            messages: [
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "reuse this prefix", cache_control: { type: "ephemeral" } }],
+                },
+            ],
+        });
+
+        assert.strictEqual(fetchStub.callCount, 2);
+        const retryBody = JSON.parse((fetchStub.getCall(1).args[1] as RequestInit).body as string) as Record<
+            string,
+            unknown
+        >;
+        assert.strictEqual(retryBody.cache_control, undefined);
+        assert.deepStrictEqual(retryBody.extra_body, { cache: { "no-cache": true } });
+        assert.ok(!JSON.stringify(retryBody.messages).includes("cache_control"));
+    });
+
     test("parseRetryAfterDelayMs handles seconds, future date, and invalid values", () => {
         const client = new LiteLLMClient(config, userAgent);
 
