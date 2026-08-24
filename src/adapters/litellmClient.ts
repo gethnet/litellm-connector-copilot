@@ -227,7 +227,8 @@ export class LiteLLMClient {
                 errorLower.includes("unknown parameter") ||
                 errorLower.includes("extra_headers") ||
                 errorLower.includes("no-cache") ||
-                errorLower.includes("unexpected keyword argument")
+                errorLower.includes("unexpected keyword argument") ||
+                errorLower.includes("cache_control")
             ) {
                 Logger.warn(`Detected unsupported parameters for ${request.model}, attempting to strip and retry.`);
 
@@ -261,6 +262,13 @@ export class LiteLLMClient {
                 if (errorLower.includes("thinking") || errorLower.includes("output_config")) {
                     delete stripedAsAny.thinking;
                     delete stripedAsAny.output_config;
+                }
+
+                // Azure AI says "Unrecognized request argument supplied:
+                // cache_control". The generic regex captures "supplied", so
+                // always strip Path 1 / block stamps when the name appears.
+                if (errorLower.includes("cache_control")) {
+                    this.stripPromptCacheControls(strippedBody);
                 }
 
                 // Special-case: some providers reject a top-level `cache` object.

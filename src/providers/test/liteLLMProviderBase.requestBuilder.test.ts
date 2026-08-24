@@ -107,6 +107,57 @@ suite("RequestBuilder", () => {
         assert.deepStrictEqual(v2Request.cache_control, { type: "ephemeral" });
     });
 
+    test("buildOpenAIChatRequest leaves a lying GPT cache_control card unstamped", async () => {
+        configManager.getConfig.resolves({});
+        const model = {
+            id: "azure_ai/us-central/gpt-4o-mini",
+            maxInputTokens: 100,
+            maxOutputTokens: 50,
+        } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("do not cache")],
+                name: undefined,
+            },
+        ];
+
+        const request = await builder.buildOpenAIChatRequest(
+            messages,
+            model,
+            { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions,
+            { supported_openai_params: ["cache_control", "prompt_cache_key"], litellm_provider: "openai" }
+        );
+
+        assert.strictEqual(request.cache_control, undefined);
+        assert.ok(!JSON.stringify(request.messages).includes("cache_control"));
+    });
+
+    test("buildOpenAIChatRequest still stamps Azure-hosted Claude cards", async () => {
+        configManager.getConfig.resolves({});
+        const model = {
+            id: "azure_ai/claude-haiku-4-5",
+            maxInputTokens: 100,
+            maxOutputTokens: 50,
+        } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("reuse this prefix")],
+                name: undefined,
+            },
+        ];
+
+        const request = await builder.buildOpenAIChatRequest(
+            messages,
+            model,
+            { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions,
+            { supported_openai_params: ["cache_control"], litellm_provider: "azure_ai" }
+        );
+
+        assert.deepStrictEqual(request.cache_control, { type: "ephemeral" });
+    });
+
     test("buildOpenAIChatRequest leaves cards without cache_control unstamped", async () => {
         configManager.getConfig.resolves({});
         const model = {

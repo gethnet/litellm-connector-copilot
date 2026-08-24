@@ -1,4 +1,5 @@
 import type { LiteLLMModelInfo, OpenAICacheControl, OpenAIChatMessage, OpenAIChatMessageContentItem } from "../types";
+import { isAnthropicModel } from "./modelUtils";
 
 const EPHEMERAL_CACHE_CONTROL: OpenAICacheControl = { type: "ephemeral" };
 const MAX_EXPLICIT_CACHE_BREAKPOINTS = 4;
@@ -11,12 +12,20 @@ export interface PromptCachePolicySummary {
 }
 
 /**
- * Returns whether a model card accepts Anthropic's OpenAI-compatible
- * `cache_control` parameter. `supports_prompt_caching` is intentionally not
- * considered because it also describes incompatible provider contracts.
+ * Returns whether this request may carry Anthropic Path 1 `cache_control`.
+ *
+ * Both checks are required:
+ * - the card must list `cache_control` in `supported_openai_params`
+ * - the model must be Anthropic/Claude (`isAnthropicModel`)
+ *
+ * `supports_prompt_caching` and OpenAI's `prompt_cache_key` are intentionally
+ * ignored: they describe incompatible contracts. A GPT card that falsely
+ * advertises `cache_control` must stay unstamped.
  */
-export function modelSupportsPromptCacheControl(modelInfo?: LiteLLMModelInfo): boolean {
-    return modelInfo?.supported_openai_params?.includes("cache_control") === true;
+export function modelSupportsPromptCacheControl(modelId: string, modelInfo?: LiteLLMModelInfo): boolean {
+    return (
+        modelInfo?.supported_openai_params?.includes("cache_control") === true && isAnthropicModel(modelId, modelInfo)
+    );
 }
 
 /**
@@ -66,9 +75,10 @@ export function stripCacheBreakpoints(messages: readonly OpenAIChatMessage[]): v
  */
 export function applyPromptCachePolicy(
     messages: OpenAIChatMessage[],
+    modelId: string,
     modelInfo?: LiteLLMModelInfo
 ): PromptCachePolicySummary {
-    const supported = modelSupportsPromptCacheControl(modelInfo);
+    const supported = modelSupportsPromptCacheControl(modelId, modelInfo);
     if (!supported) {
         stripCacheBreakpoints(messages);
         return { supported: false, path1: false, explicitCount: 0 };

@@ -110,7 +110,7 @@ export class Transport {
             `[transport.sendRequestToLiteLLM] Sending request to LiteLLM: model=${request.model} caller=${caller} streaming=true`
         );
         const reasoningState = readReasoningRetryState(request);
-        const promptCacheSupported = modelSupportsPromptCacheControl(modelInfo);
+        const promptCacheSupported = modelSupportsPromptCacheControl(request.model, modelInfo);
         const promptCacheExplicitCount = countCacheBreakpoints(request.messages);
         StructuredLogger.info("transport.http_request_start", {
             model: request.model,

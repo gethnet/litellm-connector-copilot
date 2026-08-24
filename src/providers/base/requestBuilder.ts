@@ -78,7 +78,7 @@ export class RequestBuilder {
             rawModelId
         );
 
-        const promptCachePolicy = applyPromptCachePolicy(requestBody.messages, modelInfo);
+        const promptCachePolicy = applyPromptCachePolicy(requestBody.messages, rawModelId, modelInfo);
         if (promptCachePolicy.path1) {
             requestBody.cache_control = { type: "ephemeral" };
         }
@@ -114,7 +114,7 @@ export class RequestBuilder {
         const toolConfig = convertTools({ ...options, tools: toolRedaction.tools });
         const messagesToUse = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo);
         const openaiMessages = convertMessages(messagesToUse, {
-            attachPromptCacheControl: modelSupportsPromptCacheControl(modelInfo),
+            attachPromptCacheControl: modelSupportsPromptCacheControl(rawModelId, modelInfo),
         });
         validateRequest(messagesToUse);
 
@@ -214,7 +214,7 @@ export class RequestBuilder {
         const mo = (options.modelOptions as Record<string, unknown>) ?? {};
 
         const openaiMessages = convertV2MessagesToOpenAI(trimmedMessages, {
-            attachPromptCacheControl: modelSupportsPromptCacheControl(modelInfo),
+            attachPromptCacheControl: modelSupportsPromptCacheControl(rawModelId, modelInfo),
         });
         const requestBody: OpenAIChatCompletionRequest = {
             model: rawModelId,
