@@ -29,7 +29,7 @@ function isBinaryContentItem(item: OpenAIChatMessageContentItem): boolean {
  * content item is always array-wrapped.
  */
 function toBinaryInputItem(role: "user" | "assistant", item: OpenAIChatMessageContentItem): LiteLLMResponseInputItem {
-    Logger.debug(`[responsesAdapter] ${role} binary content item: type=${item.type}`);
+    Logger.trace(`[responsesAdapter] ${role} binary content item: type=${item.type}`);
     return {
         type: "message",
         role,

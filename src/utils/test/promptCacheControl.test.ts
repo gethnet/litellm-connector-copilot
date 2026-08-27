@@ -105,6 +105,25 @@ suite("Prompt cache control policy", () => {
         assert.deepStrictEqual(content[2].cache_control, { type: "ephemeral" });
     });
 
+    test("stamps cache_control on a trailing PDF file item", () => {
+        const content: OpenAIChatMessageContentItem[] = [
+            { type: "text" as const, text: "analyze this PDF" },
+            {
+                type: "file" as const,
+                file: {
+                    filename: "secret.pdf",
+                    file_data: "data:application/pdf;base64,JVBERi0=",
+                },
+            },
+        ];
+
+        const applied = applyEphemeralCacheControl(content);
+
+        assert.strictEqual(applied, true);
+        assert.strictEqual(content[0].cache_control, undefined);
+        assert.deepStrictEqual(content[1].cache_control, { type: "ephemeral" });
+    });
+
     test("keeps four explicit block stamps but omits Path 1", () => {
         const messages: OpenAIChatMessage[] = Array.from({ length: 5 }, (_, index) => ({
             role: "user",

@@ -29,7 +29,7 @@ export interface MessageConversionOptions {
  * - Supports V2ChatMessage part types: text, data, thinking, tool_call, tool_result
  * - Uses V2ChatMessage role for language model detection (preserves HCP role mapping)
  * - Normalizes tool calls via normalizeToolCallId before emitting
- * - Handles images and PDFs via data MIME parts (base64 encoded as OpenAI image_url)
+ * - Handles images as `image_url` and PDFs as `file.file_data` data URIs
  * - Drops cache-control MIME parts (they're opaque metadata, not content)
  * - Emits tool-result messages flush before regular messages (maintains ordering)
  *
