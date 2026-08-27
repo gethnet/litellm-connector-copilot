@@ -1,21 +1,24 @@
 import * as assert from "assert";
-import { isDataUriMimeType, toImageUrlContentItem } from "../dataUriContentItem";
+import { isDataUriMimeType, isPdfMimeType, toFileContentItem, toImageUrlContentItem } from "../dataUriContentItem";
 
 suite("dataUriContentItem", () => {
-    test("recognizes image and PDF MIME types", () => {
+    test("recognizes image MIME types separately from PDF", () => {
         assert.strictEqual(isDataUriMimeType("image/png"), true);
-        assert.strictEqual(isDataUriMimeType("application/pdf"), true);
+        assert.strictEqual(isDataUriMimeType("application/pdf"), false);
+        assert.strictEqual(isPdfMimeType("application/pdf"), true);
+        assert.strictEqual(isPdfMimeType("image/png"), false);
         assert.strictEqual(isDataUriMimeType("application/octet-stream"), false);
         assert.strictEqual(isDataUriMimeType("text/plain"), false);
     });
 
-    test("encodes PDF bytes as an image_url data URI", () => {
+    test("encodes PDF bytes as a file data URI", () => {
         const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
-        const item = toImageUrlContentItem("application/pdf", pdfBytes);
+        const item = toFileContentItem("application/pdf", pdfBytes);
 
-        assert.strictEqual(item.type, "image_url");
+        assert.strictEqual(item.type, "file");
+        assert.strictEqual(item.file?.filename, "document.pdf");
         assert.strictEqual(
-            item.image_url?.url,
+            item.file?.file_data,
             `data:application/pdf;base64,${Buffer.from(pdfBytes).toString("base64")}`
         );
     });

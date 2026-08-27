@@ -3,7 +3,7 @@ import type { OpenAIChatMessage, OpenAIChatMessageContentItem, OpenAIToolCall, O
 import { Logger } from "../utils/logger";
 import { isCacheControlMimeType } from "../utils";
 import { sanitizeToolName, logToolNameTruncationLegacy } from "../utils/toolNameUtils";
-import { isDataUriMimeType, toImageUrlContentItem } from "./dataUriContentItem";
+import { isBinaryContentMimeType, toBinaryContentItem } from "./dataUriContentItem";
 
 /**
  * Options for message conversion from V2 format to OpenAI format.
@@ -259,8 +259,8 @@ function toOpenAIToolCall(
 /**
  * Appends a V2 data part to text or content items.
  *
- * Handles cache-control MIME parts (dropped), image/PDF MIME parts (converted
- * to image_url content items), and text/json MIME parts (appended to text parts).
+ * Handles cache-control MIME parts (dropped), image MIME parts (image_url),
+ * PDF MIME parts (file.file_data), and text/json MIME parts (appended to text).
  *
  * @param part - V2 data part
  * @param textParts - Buffer for text-only content
@@ -278,8 +278,8 @@ function appendDataPart(
         return;
     }
 
-    if (isDataUriMimeType(part.mimeType)) {
-        contentItems.push(toImageUrlContentItem(part.mimeType, part.data));
+    if (isBinaryContentMimeType(part.mimeType)) {
+        contentItems.push(toBinaryContentItem(part.mimeType, part.data));
         return;
     }
 

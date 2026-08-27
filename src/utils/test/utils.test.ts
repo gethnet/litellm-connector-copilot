@@ -104,11 +104,11 @@ suite("Utility Unit Tests", () => {
 
         const out = convertMessages(messages) as unknown as Record<string, unknown>[];
         assert.strictEqual(out.length, 1);
-        const content = out[0].content as { type: string; image_url: { url: string } }[];
+        const content = out[0].content as { type: string; file: { filename: string; file_data: string } }[];
         assert.ok(Array.isArray(content));
         assert.strictEqual(content.length, 1);
-        assert.strictEqual(content[0].type, "image_url");
-        assert.ok(content[0].image_url.url.startsWith("data:application/pdf;base64,"));
+        assert.strictEqual(content[0].type, "file");
+        assert.ok(content[0].file.file_data.startsWith("data:application/pdf;base64,"));
     });
 
     test("convertMessages keeps text and encoded PDF together", () => {
@@ -125,12 +125,16 @@ suite("Utility Unit Tests", () => {
         ];
 
         const out = convertMessages(messages) as unknown as Record<string, unknown>[];
-        const content = out[0].content as { type: string; text?: string; image_url?: { url: string } }[];
+        const content = out[0].content as {
+            type: string;
+            text?: string;
+            file?: { filename: string; file_data: string };
+        }[];
         assert.strictEqual(content.length, 2);
         assert.strictEqual(content[0].type, "text");
         assert.strictEqual(content[0].text, "Please read this");
-        assert.strictEqual(content[1].type, "image_url");
-        assert.ok(content[1].image_url?.url.startsWith("data:application/pdf;base64,"));
+        assert.strictEqual(content[1].type, "file");
+        assert.ok(content[1].file?.file_data.startsWith("data:application/pdf;base64,"));
     });
 
     test("convertMessages still drops unrecognized octet-stream data parts", () => {
@@ -498,10 +502,10 @@ suite("Utility Unit Tests", () => {
         ]);
 
         assert.strictEqual(openai.length, 1);
-        const content = openai[0].content as { type: string; image_url: { url: string } }[];
+        const content = openai[0].content as { type: string; file: { filename: string; file_data: string } }[];
         assert.ok(Array.isArray(content));
-        assert.strictEqual(content[0].type, "image_url");
-        assert.ok(content[0].image_url.url.startsWith("data:application/pdf;base64,"));
+        assert.strictEqual(content[0].type, "file");
+        assert.ok(content[0].file.file_data.startsWith("data:application/pdf;base64,"));
     });
 
     test("convertV2MessagesToOpenAI keeps text and encoded PDF together", () => {
@@ -517,11 +521,15 @@ suite("Utility Unit Tests", () => {
             },
         ]);
 
-        const content = openai[0].content as { type: string; text?: string; image_url?: { url: string } }[];
+        const content = openai[0].content as {
+            type: string;
+            text?: string;
+            file?: { filename: string; file_data: string };
+        }[];
         assert.strictEqual(content.length, 2);
         assert.strictEqual(content[0].type, "text");
         assert.strictEqual(content[0].text, "Please read this");
-        assert.ok(content[1].image_url?.url.startsWith("data:application/pdf;base64,"));
+        assert.ok(content[1].file?.file_data.startsWith("data:application/pdf;base64,"));
     });
 
     test("convertV2MessagesToOpenAI still drops unrecognized octet-stream data parts", () => {

@@ -21,13 +21,19 @@ export interface OpenAICacheControl {
 }
 
 /**
- * Content item for vision/image support in OpenAI messages
+ * Content item for vision/image and file support in OpenAI messages.
+ * PDFs use the `file` shape (`file.file_data` data URI) rather than `image_url`,
+ * because Azure rejects `application/pdf` inside `image_url`.
  */
 export interface OpenAIChatMessageContentItem {
-    type: "text" | "image_url";
+    type: "text" | "image_url" | "file";
     text?: string;
     image_url?: {
         url: string;
+    };
+    file?: {
+        filename: string;
+        file_data: string;
     };
     /** Explicit host-provided cache breakpoint. Never created automatically. */
     cache_control?: OpenAICacheControl;

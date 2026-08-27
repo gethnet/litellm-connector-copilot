@@ -680,14 +680,18 @@ suite("Message Converters — appendDataPart (via convertMessagesToOpenAI)", () 
         assert.strictEqual(result.length, 0);
     });
 
-    test("encodes application/pdf data part as an image_url data URI", () => {
+    test("encodes application/pdf data part as a file data URI", () => {
         const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
         const result = convertMessagesToOpenAI([dataMessage("application/pdf", pdfBytes)], defaultOptions);
         assert.strictEqual(result.length, 1);
-        const item = (result[0].content as { type: string; image_url: { url: string } }[])[0];
-        assert.strictEqual(item.type, "image_url");
-        assert.ok(item.image_url.url.startsWith("data:application/pdf;base64,"));
-        assert.strictEqual(item.image_url.url, `data:application/pdf;base64,${Buffer.from(pdfBytes).toString("base64")}`);
+        const item = (result[0].content as { type: string; file: { filename: string; file_data: string } }[])[0];
+        assert.strictEqual(item.type, "file");
+        assert.strictEqual(item.file.filename, "document.pdf");
+        assert.ok(item.file.file_data.startsWith("data:application/pdf;base64,"));
+        assert.strictEqual(
+            item.file.file_data,
+            `data:application/pdf;base64,${Buffer.from(pdfBytes).toString("base64")}`
+        );
     });
 
     test("keeps text and encoded PDF in the same outbound message", () => {
@@ -702,12 +706,16 @@ suite("Message Converters — appendDataPart (via convertMessagesToOpenAI)", () 
         };
         const result = convertMessagesToOpenAI([message], defaultOptions);
         assert.strictEqual(result.length, 1);
-        const items = result[0].content as { type: string; text?: string; image_url?: { url: string } }[];
+        const items = result[0].content as {
+            type: string;
+            text?: string;
+            file?: { filename: string; file_data: string };
+        }[];
         assert.strictEqual(items.length, 2);
         assert.strictEqual(items[0].type, "text");
         assert.strictEqual(items[0].text, "See attached PDF");
-        assert.strictEqual(items[1].type, "image_url");
-        assert.ok(items[1].image_url?.url.startsWith("data:application/pdf;base64,"));
+        assert.strictEqual(items[1].type, "file");
+        assert.ok(items[1].file?.file_data.startsWith("data:application/pdf;base64,"));
     });
 
     // ── Mixed content: data + text in same message ────────────────────────

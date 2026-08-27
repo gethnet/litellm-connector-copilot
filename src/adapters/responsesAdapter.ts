@@ -87,6 +87,15 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
                             role: "user",
                             content: [contentItem],
                         } as unknown as LiteLLMResponseInputItem);
+                    } else if (contentItem.type === "file" && contentItem.file?.file_data) {
+                        Logger.debug(
+                            `[responsesAdapter] User file: type=${contentItem.type}, filename=${contentItem.file.filename}`
+                        );
+                        inputArray.push({
+                            type: "message",
+                            role: "user",
+                            content: [contentItem],
+                        } as unknown as LiteLLMResponseInputItem);
                     }
                 }
             }
@@ -110,6 +119,15 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
                         );
                         // LiteLLM /responses requires content to be a string or array — NOT a bare dict.
                         // Wrap the content item in an array to avoid ValueError: Invalid content type: <class 'dict'>
+                        inputArray.push({
+                            type: "message",
+                            role: "assistant",
+                            content: [contentItem],
+                        } as unknown as LiteLLMResponseInputItem);
+                    } else if (contentItem.type === "file" && contentItem.file?.file_data) {
+                        Logger.debug(
+                            `[responsesAdapter] Assistant file: type=${contentItem.type}, filename=${contentItem.file.filename}`
+                        );
                         inputArray.push({
                             type: "message",
                             role: "assistant",

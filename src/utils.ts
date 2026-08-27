@@ -11,7 +11,7 @@ import type {
 } from "./types";
 import { applyEphemeralCacheControl } from "./utils/promptCacheControl";
 import { Logger } from "./utils/logger";
-import { isDataUriMimeType, toImageUrlContentItem } from "./adapters/dataUriContentItem";
+import { isBinaryContentMimeType, toBinaryContentItem } from "./adapters/dataUriContentItem";
 
 /**
  * Normalize tool call IDs to be compatible with OpenAI-compatible providers
@@ -421,9 +421,10 @@ export function convertMessages(
                     // "application/vnd.cache-control+json" cannot slip through.
                     Logger.trace(`[convertMessages] Dropping cache_control part (mimeType: ${part.mimeType})`);
                     hasCacheControlMarker = true;
-                } else if (isDataUriMimeType(part.mimeType)) {
-                    // Images and PDFs share the OpenAI image_url data-URI shape.
-                    contentItems.push(toImageUrlContentItem(part.mimeType, part.data));
+                } else if (isBinaryContentMimeType(part.mimeType)) {
+                    // Images stay as image_url; PDFs use file.file_data so Azure
+                    // does not reject application/pdf inside image_url.
+                    contentItems.push(toBinaryContentItem(part.mimeType, part.data));
                 } else if (part.mimeType.startsWith("application/json")) {
                     // Handle JSON data parts by decoding and appending as text
                     const jsonStr = Buffer.from(part.data).toString("utf-8");
