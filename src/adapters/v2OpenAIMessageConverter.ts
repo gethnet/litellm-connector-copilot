@@ -4,6 +4,7 @@ import { sanitizeToolName } from "../utils/toolNameUtils";
 import type { V2ChatMessage, V2MessagePart } from "../providers/v2Types";
 import type { OpenAIChatMessage, OpenAIChatMessageContentItem, OpenAIChatRole, OpenAIToolCall } from "../types";
 import { applyEphemeralCacheControl } from "../utils/promptCacheControl";
+import { isDataUriMimeType, toImageUrlContentItem } from "./dataUriContentItem";
 
 interface V2OpenAIConversionOptions {
     normalizeToolCallId: (id: string) => string;
@@ -207,13 +208,8 @@ function appendDataPart(
         return options.attachPromptCacheControl === true;
     }
 
-    if (part.mimeType.startsWith("image/")) {
-        contentItems.push({
-            type: "image_url",
-            image_url: {
-                url: `data:${part.mimeType};base64,${Buffer.from(part.data).toString("base64")}`,
-            },
-        });
+    if (isDataUriMimeType(part.mimeType)) {
+        contentItems.push(toImageUrlContentItem(part.mimeType, part.data));
         return false;
     }
 

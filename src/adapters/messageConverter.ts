@@ -3,6 +3,7 @@ import type { OpenAIChatMessage, OpenAIChatMessageContentItem, OpenAIToolCall, O
 import { Logger } from "../utils/logger";
 import { isCacheControlMimeType } from "../utils";
 import { sanitizeToolName, logToolNameTruncationLegacy } from "../utils/toolNameUtils";
+import { isDataUriMimeType, toImageUrlContentItem } from "./dataUriContentItem";
 
 /**
  * Options for message conversion from V2 format to OpenAI format.
@@ -28,7 +29,7 @@ export interface MessageConversionOptions {
  * - Supports V2ChatMessage part types: text, data, thinking, tool_call, tool_result
  * - Uses V2ChatMessage role for language model detection (preserves HCP role mapping)
  * - Normalizes tool calls via normalizeToolCallId before emitting
- * - Handles images via data MIME parts (base64 encoded for OpenAI image_url format)
+ * - Handles images and PDFs via data MIME parts (base64 encoded as OpenAI image_url)
  * - Drops cache-control MIME parts (they're opaque metadata, not content)
  * - Emits tool-result messages flush before regular messages (maintains ordering)
  *
@@ -258,7 +259,7 @@ function toOpenAIToolCall(
 /**
  * Appends a V2 data part to text or content items.
  *
- * Handles cache-control MIME parts (dropped), image MIME parts (converted
+ * Handles cache-control MIME parts (dropped), image/PDF MIME parts (converted
  * to image_url content items), and text/json MIME parts (appended to text parts).
  *
  * @param part - V2 data part
@@ -277,13 +278,8 @@ function appendDataPart(
         return;
     }
 
-    if (part.mimeType.startsWith("image/")) {
-        contentItems.push({
-            type: "image_url",
-            image_url: {
-                url: `data:${part.mimeType};base64,${Buffer.from(part.data).toString("base64")}`,
-            },
-        });
+    if (isDataUriMimeType(part.mimeType)) {
+        contentItems.push(toImageUrlContentItem(part.mimeType, part.data));
         return;
     }
 
