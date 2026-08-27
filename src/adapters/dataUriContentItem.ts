@@ -1,67 +1,39 @@
 import type { OpenAIChatMessageContentItem } from "../types";
 
-/** Image MIME types that Copilot data parts should keep as OpenAI `image_url` data URIs. */
-export function isDataUriMimeType(mimeType: string): boolean {
-    return mimeType.startsWith("image/");
-}
+const PDF_MIME_TYPE = "application/pdf";
 
-/** PDF MIME type encoded as an OpenAI `file` content item, not `image_url`. */
-export function isPdfMimeType(mimeType: string): boolean {
-    return mimeType === "application/pdf";
-}
+/** Filename LiteLLM/providers echo back for inline PDF bytes; they key off the MIME, not this name. */
+const PDF_FILENAME = "document.pdf";
 
 /**
- * Binary MIME types that converters should keep instead of dropping.
- * Images use `image_url`; PDFs use `file.file_data`.
+ * Binary data parts the converters encode inline instead of dropping.
+ * Everything else (audio, octet-stream, …) has no agreed OpenAI shape.
  */
 export function isBinaryContentMimeType(mimeType: string): boolean {
-    return isDataUriMimeType(mimeType) || isPdfMimeType(mimeType);
+    return mimeType.startsWith("image/") || mimeType === PDF_MIME_TYPE;
 }
 
 /**
- * Encode a Copilot data part as an OpenAI `image_url` content item.
- * Images use this shape: `data:<mime>;base64,<bytes>`.
+ * Encode a binary data part as an OpenAI content item carrying a
+ * `data:<mime>;base64,<bytes>` URI.
+ *
+ * The two shapes are not interchangeable: Azure rejects `application/pdf`
+ * inside `image_url` ("Expected … an image MIME type"), so PDFs must use
+ * `file.file_data`. That shape is the only one accepted by Azure, Vertex
+ * Gemini, and Bedrock/Vertex Claude alike, so it is applied for every
+ * backend rather than branched per provider.
  */
-export function toImageUrlContentItem(
-    mimeType: string,
-    data: Uint8Array | string | ArrayBuffer
-): OpenAIChatMessageContentItem {
-    return {
-        type: "image_url",
-        image_url: {
-            url: `data:${mimeType};base64,${encodeAsBase64(data)}`,
-        },
-    };
-}
-
-/**
- * Encode a Copilot PDF data part as an OpenAI `file` content item.
- * Azure, Gemini, and Claude all accepted `file.file_data` as a
- * `data:application/pdf;base64,...` URI on `/chat/completions`.
- */
-export function toFileContentItem(
-    mimeType: string,
-    data: Uint8Array | string | ArrayBuffer,
-    filename = "document.pdf"
-): OpenAIChatMessageContentItem {
-    return {
-        type: "file",
-        file: {
-            filename,
-            file_data: `data:${mimeType};base64,${encodeAsBase64(data)}`,
-        },
-    };
-}
-
-/** Route a kept binary MIME type to the matching OpenAI content-item shape. */
 export function toBinaryContentItem(
     mimeType: string,
     data: Uint8Array | string | ArrayBuffer
 ): OpenAIChatMessageContentItem {
-    if (isPdfMimeType(mimeType)) {
-        return toFileContentItem(mimeType, data);
+    const dataUri = `data:${mimeType};base64,${encodeAsBase64(data)}`;
+
+    if (mimeType === PDF_MIME_TYPE) {
+        return { type: "file", file: { filename: PDF_FILENAME, file_data: dataUri } };
     }
-    return toImageUrlContentItem(mimeType, data);
+
+    return { type: "image_url", image_url: { url: dataUri } };
 }
 
 function encodeAsBase64(data: Uint8Array | string | ArrayBuffer): string {

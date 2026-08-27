@@ -15,6 +15,28 @@ function getResponsesReasoningEffort(effort: OpenAIChatCompletionRequest["reason
     return effort?.effort === "none" ? undefined : effort?.effort;
 }
 
+/** Inline binary content (image data URI or PDF `file_data`) that must survive the transform. */
+function isBinaryContentItem(item: OpenAIChatMessageContentItem): boolean {
+    return (
+        (item.type === "image_url" && typeof item.image_url?.url === "string") ||
+        (item.type === "file" && typeof item.file?.file_data === "string")
+    );
+}
+
+/**
+ * LiteLLM `/responses` requires message content to be a string or an array —
+ * a bare dict raises `ValueError: Invalid content type: <class 'dict'>`, so the
+ * content item is always array-wrapped.
+ */
+function toBinaryInputItem(role: "user" | "assistant", item: OpenAIChatMessageContentItem): LiteLLMResponseInputItem {
+    Logger.debug(`[responsesAdapter] ${role} binary content item: type=${item.type}`);
+    return {
+        type: "message",
+        role,
+        content: [item],
+    } as unknown as LiteLLMResponseInputItem;
+}
+
 /**
  * Transform a chat/completions request body to the responses API format.
  * The responses API uses "input" (array format) instead of "messages".
@@ -76,26 +98,8 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
                             role: "user",
                             content: contentItem.text,
                         });
-                    } else if (contentItem.type === "image_url" && contentItem.image_url?.url) {
-                        Logger.debug(
-                            `[responsesAdapter] User image: type=${contentItem.type}, url=${contentItem.image_url.url.substring(0, 50)}...`
-                        );
-                        // LiteLLM /responses requires content to be a string or array — NOT a bare dict.
-                        // Wrap the content item in an array to avoid ValueError: Invalid content type: <class 'dict'>
-                        inputArray.push({
-                            type: "message",
-                            role: "user",
-                            content: [contentItem],
-                        } as unknown as LiteLLMResponseInputItem);
-                    } else if (contentItem.type === "file" && contentItem.file?.file_data) {
-                        Logger.debug(
-                            `[responsesAdapter] User file: type=${contentItem.type}, filename=${contentItem.file.filename}`
-                        );
-                        inputArray.push({
-                            type: "message",
-                            role: "user",
-                            content: [contentItem],
-                        } as unknown as LiteLLMResponseInputItem);
+                    } else if (isBinaryContentItem(contentItem)) {
+                        inputArray.push(toBinaryInputItem("user", contentItem));
                     }
                 }
             }
@@ -113,26 +117,8 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
                             role: "assistant",
                             content: contentItem.text,
                         });
-                    } else if (contentItem.type === "image_url" && contentItem.image_url?.url) {
-                        Logger.debug(
-                            `[responsesAdapter] Assistant image: type=${contentItem.type}, url=${contentItem.image_url.url.substring(0, 50)}...`
-                        );
-                        // LiteLLM /responses requires content to be a string or array — NOT a bare dict.
-                        // Wrap the content item in an array to avoid ValueError: Invalid content type: <class 'dict'>
-                        inputArray.push({
-                            type: "message",
-                            role: "assistant",
-                            content: [contentItem],
-                        } as unknown as LiteLLMResponseInputItem);
-                    } else if (contentItem.type === "file" && contentItem.file?.file_data) {
-                        Logger.debug(
-                            `[responsesAdapter] Assistant file: type=${contentItem.type}, filename=${contentItem.file.filename}`
-                        );
-                        inputArray.push({
-                            type: "message",
-                            role: "assistant",
-                            content: [contentItem],
-                        } as unknown as LiteLLMResponseInputItem);
+                    } else if (isBinaryContentItem(contentItem)) {
+                        inputArray.push(toBinaryInputItem("assistant", contentItem));
                     }
                 }
             }
