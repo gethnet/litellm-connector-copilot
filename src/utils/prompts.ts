@@ -37,3 +37,12 @@ If only one category applies, include only that category.`;
 export const COMMIT_SYSTEM_PROMPT = `You are an expert at writing conventional commit messages based on git diffs.
 Follow the user's requested style and format strictly.
 Return ONLY the commit message text.`;
+
+/**
+ * Resolves a user-supplied prompt override, falling back to the built-in default
+ * when the override is unset or whitespace-only (VS Code settings default empty strings).
+ */
+export function resolvePrompt(override: string | undefined, fallback: string): string {
+    const trimmed = override?.trim();
+    return trimmed ? trimmed : fallback;
+}

@@ -116,6 +116,20 @@
 					"description": "Override the model ID for git commit message generation. If empty, the feature is disabled.",
 					"markdownDescription": "Override the model ID for git commit message generation. If empty, the feature is disabled."
 				},
+				"litellm-connector.commitSystemPromptOverride": {
+					"type": "string",
+					"default": "",
+					"editPresentation": "multilineText",
+					"description": "Override the system prompt used for git commit message generation. Leave empty to use the built-in default.",
+					"markdownDescription": "Override the system prompt used for git commit message generation. Leave empty to use the built-in default."
+				},
+				"litellm-connector.commitMessagePromptOverride": {
+					"type": "string",
+					"default": "",
+					"editPresentation": "multilineText",
+					"description": "Override the commit message style/body prompt. Leave empty to use the built-in default.",
+					"markdownDescription": "Override the commit message style/body prompt. Leave empty to use the built-in default."
+				},
 				"litellm-connector.disableQuotaToolRedaction": {
 					"type": "boolean",
 					"default": false,

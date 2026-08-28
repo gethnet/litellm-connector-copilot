@@ -130,6 +130,51 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         assert.strictEqual((model.sendRequest as sinon.SinonStub).calledOnce, true);
     });
 
+    test("handler uses configured prompt overrides when building the request", async () => {
+        const registerStub = sandbox.stub(vscode.commands, "registerCommand");
+        registerGenerateCommitMessageCommand(mockProvider as unknown as LiteLLMCommitMessageProvider);
+        const handler = registerStub.firstCall.args[1] as () => Promise<void>;
+
+        mockProvider.getConfigManager.returns({
+            getConfig: async () => ({
+                commitModelIdOverride: "test-model",
+                commitSystemPromptOverride: "custom system prompt",
+                commitMessagePromptOverride: "custom message prompt",
+            }),
+        } as unknown as ConfigManager);
+
+        sandbox.stub(GitUtils, "getStagedDiff").resolves("test-diff");
+        const mockInputBox = { value: "", placeholder: "", enabled: true };
+        const mockRepo = { inputBox: mockInputBox };
+        sandbox.stub(GitUtils, "getGitAPI").resolves({ repositories: [mockRepo] } as unknown as never);
+        mockProvider.getModelInfo.returns({ max_input_tokens: 1000 } as unknown as LiteLLMModelInfo);
+
+        const model = {
+            sendRequest: sandbox.stub().resolves({
+                stream: (async function* () {
+                    yield new vscode.LanguageModelTextPart("feat: override test");
+                })(),
+            }),
+        };
+        const selectModelsStub = vscode.lm.selectChatModels as unknown as sinon.SinonStub;
+        selectModelsStub.resolves([model as unknown as vscode.LanguageModelChat]);
+
+        sandbox.stub(vscode.window, "withProgress").callsFake(async (_options, task) => {
+            return await task(
+                { report: sandbox.stub() } as vscode.Progress<{ message?: string; increment?: number }>,
+                new vscode.CancellationTokenSource().token
+            );
+        });
+
+        await handler();
+
+        const sentMessages = (model.sendRequest as sinon.SinonStub).firstCall.args[0] as {
+            content: { value: string }[];
+        }[];
+        assert.strictEqual(sentMessages[0].content[0].value, "custom system prompt");
+        assert.ok(sentMessages[1].content[0].value.startsWith("custom message prompt"));
+    });
+
     test("shows error and does not fall back to provider when VS Code route fails", async () => {
         const registerStub = sandbox.stub(vscode.commands, "registerCommand");
         registerGenerateCommitMessageCommand(mockProvider as unknown as LiteLLMCommitMessageProvider);
