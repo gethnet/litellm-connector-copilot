@@ -1,0 +1,5 @@
+# Normalize line endings to LF for text files regardless of platform/editor
+# settings or local core.autocrlf. Prevents Windows tooling from committing
+# CRLF into files that GitHub/Prettier expect as LF (which otherwise shows
+# as a full-file diff since every line differs by a trailing \r).
+* text=auto eol=lf
