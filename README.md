@@ -8,14 +8,13 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.5.4
+## 🆕 What's New in 2.5.5
 
-> Version 2.5.4 enables Anthropic prompt caching for eligible models and reports cache usage in telemetry.
+> Version 2.5.5 sends PDFs to models that support them and lets you customize the commit message prompts.
 
-- ⚡ **Anthropic prompt caching** — Eligible Claude models automatically receive a single advancing `cache_control: { type: "ephemeral" }` breakpoint when their model card advertises support for `cache_control`.
-- 💰 **Lower multi-turn cost** — Prompt-cache usage is captured from Anthropic's root usage fields, making cache reads and writes visible to token accounting, telemetry, and cost reporting. Real-world validation over 70 Claude Opus 5 turns measured 90.2% cache reads and 76% lower cost.
-- ♻️ **Safe cache rejection recovery** — If a provider rejects `cache_control`, the retry removes only prompt-cache controls while preserving unrelated LiteLLM gateway-cache settings. Ineligible models remain unstamped.
-- 🖥️ **More reliable coverage runs** — Test coverage now selects an unused X display when running under `xvfb-run`, avoiding stale-display and parallel-session collisions.
+- 📄 **PDF attachments reach the model** — Binary PDF content is now encoded as `file.file_data` and forwarded on chat and `/responses` requests instead of being silently dropped, matching the shape accepted by Azure, Vertex Gemini, and Bedrock/Vertex Claude.
+- ⚙️ **Configurable commit message prompts** — New `litellm-connector.commitSystemPromptOverride` and `litellm-connector.commitMessagePromptOverride` settings let you customize the system/style prompts used for AI-generated commit messages, with a safe fallback to the built-in defaults.
+- 🖼️ **Fixed contributor avatar** — Corrected a broken contributor avatar in the docs.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
