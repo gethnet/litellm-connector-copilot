@@ -15,6 +15,8 @@ interface CommitProviderInternals {
     _configManager: {
         getConfig: () => Promise<{
             commitModelIdOverride?: string;
+            commitSystemPromptOverride?: string;
+            commitMessagePromptOverride?: string;
             baseUrl?: string;
             apiKey?: string;
         }>;
@@ -222,6 +224,65 @@ suite("LiteLLMCommitMessageProvider", () => {
             );
 
             assert.strictEqual(result, commitMessage);
+
+            tokenSource.dispose();
+        });
+
+        test("should use configured prompt overrides when building the request", async () => {
+            const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
+            const internals = accessInternals(provider);
+
+            const modelId = "gpt-4o";
+            internals._registry.setModelsForBackend("http://localhost:4000", "test-api-key", "localhost:4000", [
+                {
+                    id: modelId,
+                    name: "GPT-4o",
+                    family: "gpt-4o",
+                    version: "1.0",
+                    maxInputTokens: 128000,
+                    maxOutputTokens: 4096,
+                    capabilities: { toolCalling: true, imageInput: false },
+                },
+            ]);
+
+            sandbox
+                .stub(internals, "registryEntries")
+                .returns([
+                    [modelId, { baseUrl: "http://localhost:4000", apiKey: "test-api-key", rawModelName: modelId }],
+                ]);
+
+            sandbox.stub(internals._configManager, "getConfig").resolves({
+                commitModelIdOverride: modelId,
+                commitSystemPromptOverride: "custom system prompt",
+                commitMessagePromptOverride: "custom message prompt",
+            });
+
+            const modelInfo = {
+                id: modelId,
+                max_input_tokens: 128000,
+                max_output_tokens: 4096,
+            };
+            sandbox.stub(internals._registry, "getModelInfo").returns(modelInfo);
+
+            const buildRequestStub = sandbox
+                .stub(internals, "buildOpenAIChatRequest")
+                .resolves({} as Record<string, unknown>);
+
+            const mockStream = createMockStream([createSSEResponse("feat: override test")]);
+            sandbox.stub(internals, "sendRequestWithRetry").resolves(mockStream);
+
+            const tokenSource = new vscode.CancellationTokenSource();
+            const options: vscode.LanguageModelChatRequestOptions = {
+                justification: "test",
+            };
+
+            await provider.provideCommitMessage("diff content", options, tokenSource.token);
+
+            const sentMessages = buildRequestStub.firstCall.args[0] as unknown as {
+                content: { value: string }[];
+            }[];
+            assert.strictEqual(sentMessages[0].content[0].value, "custom system prompt");
+            assert.ok(sentMessages[1].content[0].value.startsWith("custom message prompt"));
 
             tokenSource.dispose();
         });

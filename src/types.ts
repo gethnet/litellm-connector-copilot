@@ -287,6 +287,12 @@ export interface LiteLLMConfig {
     /** Model id to use for LiteLLM commit message generation. */
     commitModelIdOverride?: string;
 
+    /** Override for the commit-message system prompt. Empty/unset uses the built-in default. */
+    commitSystemPromptOverride?: string;
+
+    /** Override for the commit-message style/body prompt. Empty/unset uses the built-in default. */
+    commitMessagePromptOverride?: string;
+
     /**
      * When true, forces all models to use the `/responses` endpoint instead of per-model mode selection.
      * This ensures consistent behavior across models, especially for those that require reasoning support.

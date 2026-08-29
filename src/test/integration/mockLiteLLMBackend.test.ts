@@ -184,9 +184,14 @@ suite("MockLiteLLMBackend", () => {
                 await makeHttpRequest(`http://localhost:${testPort}/models`, "GET");
                 assert.fail("Expected connection to fail after stop");
             } catch (err) {
-                // Expected - connection should fail
+                // Expected - connection should fail. Node reports refused connections via
+                // `err.code === "ECONNREFUSED"`; on some platforms (observed on Windows)
+                // `err.message` is empty, so `code` must be checked rather than message text alone.
+                const nodeErr = err as NodeJS.ErrnoException;
                 assert.ok(
-                    (err as Error).message.includes("ECONNREFUSED") || (err as Error).message.includes("refused")
+                    nodeErr.code === "ECONNREFUSED" ||
+                        nodeErr.message.includes("ECONNREFUSED") ||
+                        nodeErr.message.includes("refused")
                 );
             }
         });

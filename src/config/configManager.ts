@@ -38,6 +38,8 @@ export class ConfigManager {
     private static readonly MODEL_CAPABILITIES_OVERRIDES_KEY = "litellm-connector.modelCapabilitiesOverrides";
     private static readonly MODEL_ID_OVERRIDE_KEY = "litellm-connector.modelIdOverride";
     private static readonly SCM_COMMIT_MSG_MODEL_ID_KEY = "litellm-connector.commitModelIdOverride";
+    private static readonly COMMIT_SYSTEM_PROMPT_OVERRIDE_KEY = "litellm-connector.commitSystemPromptOverride";
+    private static readonly COMMIT_MESSAGE_PROMPT_OVERRIDE_KEY = "litellm-connector.commitMessagePromptOverride";
     private static readonly FORCE_RESPONSES_ENDPOINT_KEY = "litellm-connector.forceResponsesEndpoint";
     private static readonly ALLOW_CHAT_COMPLETIONS_FALLBACK_KEY = "litellm-connector.allowChatCompletionsFallback";
     private static readonly DISPLAY_PRICING_IN_PICKER_KEY = "litellm-connector.displayPricingInPicker";
@@ -215,6 +217,14 @@ export class ConfigManager {
         const scmGitCompletionsModelId = ConfigManager.normalizeModelId(
             workspaceConfig.get<string>(ConfigManager.SCM_COMMIT_MSG_MODEL_ID_KEY, "")
         );
+        const commitSystemPromptOverride = workspaceConfig.get<string>(
+            ConfigManager.COMMIT_SYSTEM_PROMPT_OVERRIDE_KEY,
+            ""
+        );
+        const commitMessagePromptOverride = workspaceConfig.get<string>(
+            ConfigManager.COMMIT_MESSAGE_PROMPT_OVERRIDE_KEY,
+            ""
+        );
         const forceResponsesEndpoint = workspaceConfig.get<boolean>(ConfigManager.FORCE_RESPONSES_ENDPOINT_KEY, false);
         const allowChatCompletionsFallback = workspaceConfig.get<boolean>(
             ConfigManager.ALLOW_CHAT_COMPLETIONS_FALLBACK_KEY,
@@ -249,6 +259,8 @@ export class ConfigManager {
             modelCapabilitiesOverrides,
             modelIdOverride,
             commitModelIdOverride: scmGitCompletionsModelId,
+            commitSystemPromptOverride,
+            commitMessagePromptOverride,
             forceResponsesEndpoint,
             allowChatCompletionsFallback,
             displayPricingInPicker,
