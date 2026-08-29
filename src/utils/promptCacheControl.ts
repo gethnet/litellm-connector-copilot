@@ -36,7 +36,7 @@ export function modelSupportsPromptCacheControl(modelId: string, modelInfo?: Lit
 export function applyEphemeralCacheControl(content: OpenAIChatMessageContentItem[]): boolean {
     for (let index = content.length - 1; index >= 0; index--) {
         const item = content[index];
-        if (item.type === "text" || item.type === "image_url") {
+        if (item.type === "text" || item.type === "image_url" || item.type === "file") {
             item.cache_control = { ...EPHEMERAL_CACHE_CONTROL };
             return true;
         }

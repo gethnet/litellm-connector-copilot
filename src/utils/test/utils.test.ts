@@ -92,6 +92,64 @@ suite("Utility Unit Tests", () => {
         assert.ok(url.startsWith("data:image/png;base64,"));
     });
 
+    test("convertMessages encodes a PDF-only message instead of dropping it", () => {
+        const pdfData = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+        const messages: vscode.LanguageModelChatMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelDataPart(pdfData, "application/pdf")],
+                name: undefined,
+            },
+        ];
+
+        const out = convertMessages(messages) as unknown as Record<string, unknown>[];
+        assert.strictEqual(out.length, 1);
+        const content = out[0].content as { type: string; file: { filename: string; file_data: string } }[];
+        assert.ok(Array.isArray(content));
+        assert.strictEqual(content.length, 1);
+        assert.strictEqual(content[0].type, "file");
+        assert.ok(content[0].file.file_data.startsWith("data:application/pdf;base64,"));
+    });
+
+    test("convertMessages keeps text and encoded PDF together", () => {
+        const pdfData = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+        const messages: vscode.LanguageModelChatMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [
+                    new vscode.LanguageModelTextPart("Please read this"),
+                    new vscode.LanguageModelDataPart(pdfData, "application/pdf"),
+                ],
+                name: undefined,
+            },
+        ];
+
+        const out = convertMessages(messages) as unknown as Record<string, unknown>[];
+        const content = out[0].content as {
+            type: string;
+            text?: string;
+            file?: { filename: string; file_data: string };
+        }[];
+        assert.strictEqual(content.length, 2);
+        assert.strictEqual(content[0].type, "text");
+        assert.strictEqual(content[0].text, "Please read this");
+        assert.strictEqual(content[1].type, "file");
+        assert.ok(content[1].file?.file_data.startsWith("data:application/pdf;base64,"));
+    });
+
+    test("convertMessages still drops unrecognized octet-stream data parts", () => {
+        const messages: vscode.LanguageModelChatMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelDataPart(new Uint8Array([1, 2, 3]), "application/octet-stream")],
+                name: undefined,
+            },
+        ];
+
+        const out = convertMessages(messages);
+        assert.strictEqual(out.length, 0);
+    });
+
     test("convertMessages emits tool calls and tool results", () => {
         const callId = "call-1";
         const messages: vscode.LanguageModelChatMessage[] = [
@@ -431,6 +489,59 @@ suite("Utility Unit Tests", () => {
         assert.strictEqual(openai[0].role, "assistant");
         assert.ok(openai[0].tool_calls);
         assert.strictEqual(openai[1].role, "tool");
+    });
+
+    test("convertV2MessagesToOpenAI encodes a PDF-only message instead of dropping it", () => {
+        const pdfData = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+        const openai = convertV2MessagesToOpenAI([
+            {
+                role: "user",
+                name: undefined,
+                content: [{ type: "data", mimeType: "application/pdf", data: pdfData }],
+            },
+        ]);
+
+        assert.strictEqual(openai.length, 1);
+        const content = openai[0].content as { type: string; file: { filename: string; file_data: string } }[];
+        assert.ok(Array.isArray(content));
+        assert.strictEqual(content[0].type, "file");
+        assert.ok(content[0].file.file_data.startsWith("data:application/pdf;base64,"));
+    });
+
+    test("convertV2MessagesToOpenAI keeps text and encoded PDF together", () => {
+        const pdfData = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+        const openai = convertV2MessagesToOpenAI([
+            {
+                role: "user",
+                name: undefined,
+                content: [
+                    { type: "text", text: "Please read this" },
+                    { type: "data", mimeType: "application/pdf", data: pdfData },
+                ],
+            },
+        ]);
+
+        const content = openai[0].content as {
+            type: string;
+            text?: string;
+            file?: { filename: string; file_data: string };
+        }[];
+        assert.strictEqual(content.length, 2);
+        assert.strictEqual(content[0].type, "text");
+        assert.strictEqual(content[0].text, "Please read this");
+        assert.ok(content[1].file?.file_data.startsWith("data:application/pdf;base64,"));
+    });
+
+    test("convertV2MessagesToOpenAI still drops unrecognized octet-stream data parts", () => {
+        const openai = convertV2MessagesToOpenAI([
+            {
+                role: "user",
+                name: undefined,
+                content: [{ type: "data", mimeType: "application/octet-stream", data: new Uint8Array([1, 2, 3]) }],
+            },
+        ]);
+
+        assert.strictEqual(openai.length, 0);
     });
 
     test("V2 validation allows tool results followed by adjacent user text", () => {
