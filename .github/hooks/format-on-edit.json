@@ -1,0 +1,11 @@
+{
+    "hooks": {
+        "PostToolUse": [
+            {
+                "type": "command",
+                "command": "node ./scripts/hooks/format-after-edit.mjs",
+                "timeout": 30
+            }
+        ]
+    }
+}

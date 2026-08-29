@@ -8,14 +8,13 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.5.4
+## 🆕 What's New in 2.5.5
 
-> Version 2.5.4 enables Anthropic prompt caching for eligible models and reports cache usage in telemetry.
+> Version 2.5.5 sends PDFs to models that support them and lets you customize the commit message prompts.
 
-- ⚡ **Anthropic prompt caching** — Eligible Claude models automatically receive a single advancing `cache_control: { type: "ephemeral" }` breakpoint when their model card advertises support for `cache_control`.
-- 💰 **Lower multi-turn cost** — Prompt-cache usage is captured from Anthropic's root usage fields, making cache reads and writes visible to token accounting, telemetry, and cost reporting. Real-world validation over 70 Claude Opus 5 turns measured 90.2% cache reads and 76% lower cost.
-- ♻️ **Safe cache rejection recovery** — If a provider rejects `cache_control`, the retry removes only prompt-cache controls while preserving unrelated LiteLLM gateway-cache settings. Ineligible models remain unstamped.
-- 🖥️ **More reliable coverage runs** — Test coverage now selects an unused X display when running under `xvfb-run`, avoiding stale-display and parallel-session collisions.
+- 📄 **PDF attachments reach the model** — Binary PDF content is now encoded as `file.file_data` and forwarded on chat and `/responses` requests instead of being silently dropped, matching the shape accepted by Azure, Vertex Gemini, and Bedrock/Vertex Claude.
+- ⚙️ **Configurable commit message prompts** — New `litellm-connector.commitSystemPromptOverride` and `litellm-connector.commitMessagePromptOverride` settings let you customize the system/style prompts used for AI-generated commit messages, with a safe fallback to the built-in defaults.
+- 🖼️ **Fixed contributor avatar** — Corrected a broken contributor avatar in the docs.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
@@ -350,7 +349,7 @@ The extension automatically detects quota errors and can redact tools to recover
 ## ✨ Contributors
 
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-2-orange.svg?style=flat-square)](#-contributors)
+[![All Contributors](https://img.shields.io/badge/all_contributors-3-orange.svg?style=flat-square)](#-contributors)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Thanks to everyone who contributes to LiteLLM Connector for Copilot. See [CONTRIBUTORS.md](CONTRIBUTORS.md) for contribution details and recognition guidance.
@@ -362,6 +361,7 @@ Thanks to everyone who contributes to LiteLLM Connector for Copilot. See [CONTRI
   <tbody>
     <tr>
       <td align="center" valign="top" width="16.66%"><a href="https://github.com/FPA-DavidTai"><img src="https://avatars.githubusercontent.com/u/60372864?v=4?s=100" width="100px;" alt="David Tai"/><br /><sub><b>David Tai</b></sub></a><br /><a href="https://github.com/gethnet/litellm-connector-copilot/commits?author=FPA-DavidTai" title="Code">💻</a></td>
+      <td align="center" valign="top" width="16.66%"><a href="https://github.com/kud-csi"><img src="https://avatars.githubusercontent.com/u/317819818?v=4?s=100" width="100px;" alt="N7 Architect"/><br /><sub><b>N7 Architect</b></sub></a><br /><a href="https://github.com/gethnet/litellm-connector-copilot/commits?author=kud-csi" title="Code">💻</a></td>
       <td align="center" valign="top" width="16.66%"><a href="https://github.com/amwdrizz"><img src="https://avatars.githubusercontent.com/u/1386055?v=4?s=100" width="100px;" alt="amwdrizz"/><br /><sub><b>amwdrizz</b></sub></a><br /><a href="https://github.com/gethnet/litellm-connector-copilot/commits?author=amwdrizz" title="Code">💻</a> <a href="#ideas-amwdrizz" title="Ideas, Planning, & Feedback">🤔</a> <a href="https://github.com/gethnet/litellm-connector-copilot/commits?author=amwdrizz" title="Documentation">📖</a> <a href="#infra-amwdrizz" title="Infrastructure (Hosting, Build-Tools, etc)">🚇</a> <a href="#maintenance-amwdrizz" title="Maintenance">🚧</a></td>
     </tr>
   </tbody>

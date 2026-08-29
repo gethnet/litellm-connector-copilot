@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.5] - 2026-08-29
+
+### 🚀 Features
+
+* **📄 Send PDFs as `file.file_data` instead of dropping them (#89) (#140)**: Binary PDF content parts are now encoded as `{ type: "file", file: { filename, file_data } }` data URIs and forwarded on both chat and `/responses` requests, instead of being silently dropped. Azure rejects `application/pdf` inside `image_url` ("Expected … an image MIME type"), so PDFs use the `file.file_data` shape while images keep `image_url` — this is the only shape accepted across Azure, Vertex Gemini, and Bedrock/Vertex Claude. Ephemeral prompt-cache stamping now also recognizes trailing `file` content items. Thanks to [@FPA-DavidTai](https://github.com/FPA-DavidTai) for the contribution. (`src/adapters/dataUriContentItem.ts`, `src/adapters/messageConverter.ts`, `src/adapters/v2OpenAIMessageConverter.ts`, `src/adapters/responsesAdapter.ts`, `src/types.ts`, `src/utils.ts`, `src/utils/promptCacheControl.ts`)
+* **⚙️ Configurable commit message prompts (#142) (#143)**: Added `litellm-connector.commitSystemPromptOverride` and `litellm-connector.commitMessagePromptOverride` settings so the git commit message system/style prompts can be customized per workspace. A new `resolvePrompt()` helper trims overrides and falls back to the built-in defaults when unset or whitespace-only; the resolved prompts are also used for token-budget calculations so context trimming stays accurate. Existing users with no overrides configured see no behavior change. Thanks to [@kud-csi](https://github.com/kud-csi) and [@amwdrizz](https://github.com/amwdrizz) for the contribution. (`src/utils/prompts.ts`, `src/config/configManager.ts`, `src/types.ts`, `src/commands/generateCommitMessage.ts`, `src/providers/liteLLMCommitProvider.ts`, `package.json`)
+
+### 🐛 Fixes
+
+* **🖼️ Fix broken `@amwdrizz` contributor avatar (#139) (#141)**: The contributor avatar URL used a GitHub login instead of a numeric user id, causing the `/u/<login>` endpoint to 302-redirect to the GitHub homepage (`text/html`) instead of serving an image. Swapped to the numeric id (`1386055`) across `.all-contributorsrc`, `README.md`, and `CONTRIBUTORS.md`. Docs-only change. Thanks to [@amwdrizz](https://github.com/amwdrizz) for the contribution.
+
+### 🧹 Chores
+
+* **✅ Add PR review tooling and LiteLLM API schema reference**: Added the `PR Reviewer` custom agent (`.github/agents/pr-reviewer.agent.md`), a matching `/pr` prompt, `code-review.instructions.md` (condensed review-gate checklist for `src/**`), and a post-edit auto-format hook (`scripts/hooks/format-after-edit.mjs`). Renamed `LiteLLM_API.json` to `LiteLLM_API-v1.82.3.json` and added `LiteLLM_API-v1.97.json` as an up-to-date API schema reference for reviewers/agents. (`.github/agents/pr-reviewer.agent.md`, `.github/prompts/pr.prompt.md`, `.github/instructions/code-review.instructions.md`, `.github/hooks/format-on-edit.json`, `scripts/hooks/format-after-edit.mjs`)
+* **🧾 Normalize line endings to LF**: Added `.gitattributes` (`* text=auto eol=lf`) after `package.json` and `scripts/test-coverage.mjs` were committed with CRLF line endings (both files are Prettier-ignored, so CRLF was never normalized). Prevents future cross-platform diff noise.
+* **🪟 Fix Windows test-runner spawn**: `scripts/test-coverage.mjs` now passes `shell: true` to `spawn` on `win32`, since Windows resolves `node_modules/.bin` shims via `.cmd` files that otherwise fail with `ENOENT`. (`scripts/test-coverage.mjs`)
+
+### 🧪 Tests
+
+* Added regression coverage for PDF encoding/decoding across both message converters and the `/responses` adapter, ephemeral cache-control stamping on `file` content items, prompt override resolution edge cases (undefined/empty/whitespace/multiline), config defaults and reads for the two new commit-prompt settings, and command/provider wiring that verifies overrides reach the actual request messages. Also hardened the mock-backend connection-refused assertion to check `err.code === "ECONNREFUSED"` in addition to message text, for cross-platform reliability. (`src/adapters/test/dataUriContentItem.test.ts`, `src/adapters/test/messageConverter.test.ts`, `src/adapters/test/responsesAdapter.test.ts`, `src/utils/test/promptCacheControl.test.ts`, `src/utils/test/utils.test.ts`, `src/utils/test/prompts.test.ts`, `src/config/test/config.test.ts`, `src/commands/test/generateCommitMessage.test.ts`, `src/providers/test/liteLLMCommitProvider.test.ts`, `src/test/integration/mockLiteLLMBackend.test.ts`)
+
 ## [2.5.4] - 2026-08-24
 
 ### 🚀 Features
