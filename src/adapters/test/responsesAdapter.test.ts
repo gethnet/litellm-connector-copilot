@@ -347,6 +347,26 @@ suite("Responses Adapter Unit Tests", () => {
         assert.deepStrictEqual(content[0].image_url, { url: "https://example.com/image.png" });
     });
 
+    test("transformToResponsesFormat does not strip a PDF file data URI", () => {
+        const pdfUrl = "data:application/pdf;base64,JVBERi0=";
+        const body = transformToResponsesFormat({
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [{ type: "file", file: { filename: "document.pdf", file_data: pdfUrl } }],
+                },
+            ],
+        });
+
+        const input = body.input as Record<string, unknown>[];
+        assert.strictEqual(input.length, 1);
+        const content = input[0].content as Record<string, unknown>[];
+        assert.ok(Array.isArray(content), "PDF file content must stay array-wrapped");
+        assert.strictEqual(content[0].type, "file");
+        assert.deepStrictEqual(content[0].file, { filename: "document.pdf", file_data: pdfUrl });
+    });
+
     test("transformToResponsesFormat wraps assistant image_url content item in array (not bare dict)", () => {
         // Companion to the user image test — assistant vision messages have the same bug
         const body = transformToResponsesFormat({

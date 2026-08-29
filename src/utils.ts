@@ -11,6 +11,7 @@ import type {
 } from "./types";
 import { applyEphemeralCacheControl } from "./utils/promptCacheControl";
 import { Logger } from "./utils/logger";
+import { isBinaryContentMimeType, toBinaryContentItem } from "./adapters/dataUriContentItem";
 
 /**
  * Normalize tool call IDs to be compatible with OpenAI-compatible providers
@@ -420,22 +421,10 @@ export function convertMessages(
                     // "application/vnd.cache-control+json" cannot slip through.
                     Logger.trace(`[convertMessages] Dropping cache_control part (mimeType: ${part.mimeType})`);
                     hasCacheControlMarker = true;
-                } else if (part.mimeType.startsWith("image/")) {
-                    // Convert image data to base64 for OpenAI vision API
-                    let base64Data: string;
-                    if (part.data instanceof Uint8Array) {
-                        base64Data = Buffer.from(part.data).toString("base64");
-                    } else if (typeof part.data === "string") {
-                        base64Data = Buffer.from(part.data, "utf-8").toString("base64");
-                    } else {
-                        base64Data = Buffer.from(part.data as unknown as ArrayBuffer).toString("base64");
-                    }
-                    contentItems.push({
-                        type: "image_url",
-                        image_url: {
-                            url: `data:${part.mimeType};base64,${base64Data}`,
-                        },
-                    });
+                } else if (isBinaryContentMimeType(part.mimeType)) {
+                    // Images stay as image_url; PDFs use file.file_data so Azure
+                    // does not reject application/pdf inside image_url.
+                    contentItems.push(toBinaryContentItem(part.mimeType, part.data));
                 } else if (part.mimeType.startsWith("application/json")) {
                     // Handle JSON data parts by decoding and appending as text
                     const jsonStr = Buffer.from(part.data).toString("utf-8");
