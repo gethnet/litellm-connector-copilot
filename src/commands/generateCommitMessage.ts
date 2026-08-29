@@ -5,13 +5,15 @@ import { GitUtils } from "../utils/gitUtils";
 import { Logger } from "../utils/logger";
 import { showModelPicker } from "./modelPicker";
 import { calculateAvailableContext } from "../adapters/tokenUtils";
-import { COMMIT_MESSAGE_PROMPT, COMMIT_SYSTEM_PROMPT } from "../utils/prompts";
+import { COMMIT_MESSAGE_PROMPT, COMMIT_SYSTEM_PROMPT, resolvePrompt } from "../utils/prompts";
 import { stripMarkdownCodeBlocks } from "../utils";
 import type { TelemetryService } from "../telemetry/telemetryService";
 
 async function tryGenerateViaVSCodeModelRequest(
     modelId: string,
     diff: string,
+    systemPrompt: string,
+    messagePrompt: string,
     token: vscode.CancellationToken,
     onProgress: (chunk: string) => void
 ): Promise<string | undefined> {
@@ -25,8 +27,8 @@ async function tryGenerateViaVSCodeModelRequest(
     }
 
     const messages: vscode.LanguageModelChatMessage[] = [
-        vscode.LanguageModelChatMessage.User(COMMIT_SYSTEM_PROMPT),
-        vscode.LanguageModelChatMessage.User(`${COMMIT_MESSAGE_PROMPT}\n\nHere is the diff:\n\n${diff}`),
+        vscode.LanguageModelChatMessage.User(systemPrompt),
+        vscode.LanguageModelChatMessage.User(`${messagePrompt}\n\nHere is the diff:\n\n${diff}`),
     ];
 
     const response = await selectedModel.sendRequest(
@@ -70,6 +72,8 @@ export function registerGenerateCommitMessageCommand(
             // Check if model is configured, if not, show picker
             const config = await _provider.getConfigManager().getConfig();
             const modelId = config.commitModelIdOverride;
+            const systemPrompt = resolvePrompt(config.commitSystemPromptOverride, COMMIT_SYSTEM_PROMPT);
+            const messagePrompt = resolvePrompt(config.commitMessagePromptOverride, COMMIT_MESSAGE_PROMPT);
 
             if (!modelId) {
                 const result = await vscode.window.showInformationMessage(
@@ -110,7 +114,7 @@ export function registerGenerateCommitMessageCommand(
             const availableTokens = calculateAvailableContext(
                 capabilities.maxInputTokens,
                 modelInfo?.max_output_tokens || 2000, // Reserve space for the commit message
-                [COMMIT_SYSTEM_PROMPT, COMMIT_MESSAGE_PROMPT, "Here is the diff:\n\n"],
+                [systemPrompt, messagePrompt, "Here is the diff:\n\n"],
                 modelId,
                 modelInfo
             );
@@ -177,6 +181,8 @@ export function registerGenerateCommitMessageCommand(
                             generatedMessage = await tryGenerateViaVSCodeModelRequest(
                                 modelId,
                                 processedDiff,
+                                systemPrompt,
+                                messagePrompt,
                                 token,
                                 (chunk) => {
                                     accumulatedText += chunk;

@@ -239,6 +239,22 @@ suite("ConfigManager Unit Tests", () => {
         assert.strictEqual(config.forceResponsesEndpoint, false);
     });
 
+    test("getConfig defaults commit prompt overrides to empty string when unset", async () => {
+        const cfg = await configManager.getConfig();
+        assert.strictEqual(cfg.commitSystemPromptOverride, "");
+        assert.strictEqual(cfg.commitMessagePromptOverride, "");
+    });
+
+    test("getConfig reads commit prompt overrides from workspace settings", async () => {
+        settingsMap.set("litellm-connector.commitSystemPromptOverride", "custom system prompt");
+        settingsMap.set("litellm-connector.commitMessagePromptOverride", "custom message prompt");
+
+        const cfg = await configManager.getConfig();
+
+        assert.strictEqual(cfg.commitSystemPromptOverride, "custom system prompt");
+        assert.strictEqual(cfg.commitMessagePromptOverride, "custom message prompt");
+    });
+
     test("should default forceResponsesEndpoint to false when not set", async () => {
         settingsMap.delete("litellm-connector.forceResponsesEndpoint");
         const config = await configManager.getConfig();

@@ -7,7 +7,7 @@ import { countTokens } from "../adapters/tokenUtils";
 import { StreamTokenCapture } from "../adapters/streaming/streamTokenCapture";
 import { decodeSSE } from "../adapters/sse/sseDecoder";
 import { createInitialStreamingState, interpretStreamEvent } from "../adapters/streaming/liteLLMStreamInterpreter";
-import { COMMIT_MESSAGE_PROMPT, COMMIT_SYSTEM_PROMPT } from "../utils/prompts";
+import { COMMIT_MESSAGE_PROMPT, COMMIT_SYSTEM_PROMPT, resolvePrompt } from "../utils/prompts";
 import { stripMarkdownCodeBlocks } from "../utils";
 import type { EffortFallbackCache } from "../utils/reasoningEffortFallback";
 
@@ -82,17 +82,17 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
             const modelInfo = this._registry.getModelInfo(model.id);
 
             // Construct the chat messages
+            const systemPrompt = resolvePrompt(config.commitSystemPromptOverride, COMMIT_SYSTEM_PROMPT);
+            const messagePrompt = resolvePrompt(config.commitMessagePromptOverride, COMMIT_MESSAGE_PROMPT);
             const messages: vscode.LanguageModelChatRequestMessage[] = [
                 {
                     role: vscode.LanguageModelChatMessageRole.User,
-                    content: [new vscode.LanguageModelTextPart(COMMIT_SYSTEM_PROMPT)],
+                    content: [new vscode.LanguageModelTextPart(systemPrompt)],
                     name: undefined,
                 },
                 {
                     role: vscode.LanguageModelChatMessageRole.User,
-                    content: [
-                        new vscode.LanguageModelTextPart(`${COMMIT_MESSAGE_PROMPT}\n\nHere is the diff:\n\n${diff}`),
-                    ],
+                    content: [new vscode.LanguageModelTextPart(`${messagePrompt}\n\nHere is the diff:\n\n${diff}`)],
                     name: undefined,
                 },
             ];

@@ -77,6 +77,9 @@ if (hasXvfb) {
   child = spawn("vscode-test", testArgs, {
     stdio: "inherit",
     env: process.env,
+    // Windows resolves node_modules/.bin shims via .cmd files; spawn only
+    // finds them through the shell, otherwise it fails with ENOENT.
+    shell: process.platform === "win32",
   });
 }
 
