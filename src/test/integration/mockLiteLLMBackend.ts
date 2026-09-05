@@ -34,6 +34,8 @@ export class MockLiteLLMBackend {
     private readonly random: () => number;
     private reasoningSupport: boolean;
     private requestCount = 0;
+    /** Captured request bodies for wire-shape assertions in tests. */
+    private readonly capturedRequests: { path: string; body: Record<string, unknown> }[] = [];
 
     constructor(options: MockBackendOptions) {
         this.port = options.port;
@@ -166,6 +168,15 @@ export class MockLiteLLMBackend {
     private async handleChatCompletions(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
         const body = await this.readBody(req);
         const request = JSON.parse(body) as Record<string, unknown>;
+        this.capturedRequests.push({ path: "/chat/completions", body: request });
+
+        // Enforce real Anthropic Fable 5.1 rejection semantics so tests prove
+        // the extension produces wire shapes the actual backend accepts.
+        const fableError = this.checkFable51Rejections(request);
+        if (fableError) {
+            this.sendError(res, 400, fableError);
+            return;
+        }
 
         // Simulate tool call if requested
         if (this.toolCallSupport && this.random() > 0.7) {
@@ -179,6 +190,49 @@ export class MockLiteLLMBackend {
         } else {
             this.sendNonStreamingResponse(res, request);
         }
+    }
+
+    /**
+     * Mirrors Anthropic's Fable 5.1 / Mythos 5.1 server-side validation:
+     * - forced tool_choice ({type:"tool"} / {type:"any"}) → 400
+     * - non-default temperature / top_p / top_k → 400
+     *
+     * Returns the error message to send, or undefined when the request is
+     * compliant. Keeps integration tests honest: a request the real backend
+     * would reject cannot pass here silently.
+     */
+    private checkFable51Rejections(request: Record<string, unknown>): string | undefined {
+        const model = typeof request.model === "string" ? request.model : "";
+        if (!/(?:^|\/)claude[-_.]?(?:fable|mythos)[-_.]?5[-_.]?1(?:[-_.]|$)/i.test(model)) {
+            return undefined;
+        }
+
+        const toolChoice = request.tool_choice as Record<string, unknown> | string | undefined;
+        if (toolChoice && typeof toolChoice === "object") {
+            const choiceType = toolChoice.type;
+            // Anthropic-native forced shapes: {type:"tool"|"any"}.
+            // OpenAI-native forced shape: {type:"function", function:{name}} —
+            // LiteLLM's Anthropic mapper translates this to {type:"tool"},
+            // so a named-function choice is equally rejected on Fable 5.1.
+            const isForcedFunction =
+                choiceType === "function" &&
+                typeof (toolChoice.function as { name?: unknown } | undefined)?.name === "string";
+            if (choiceType === "tool" || choiceType === "any" || isForcedFunction) {
+                return 'tool_choice: type "tool" and "any" are not supported for this model.';
+            }
+        }
+
+        if (request.temperature !== undefined && request.temperature !== 1) {
+            return "temperature: Extra inputs are not permitted for this model.";
+        }
+        if (request.top_p !== undefined && request.top_p !== 1) {
+            return "top_p: Extra inputs are not permitted for this model.";
+        }
+        if (request.top_k !== undefined && request.top_k !== 1) {
+            return "top_k: Extra inputs are not permitted for this model.";
+        }
+
+        return undefined;
     }
 
     private async handleTokenCount(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -213,6 +267,14 @@ export class MockLiteLLMBackend {
         // Streaming /responses endpoint (SSE format)
         const body = await this.readBody(req);
         const request = JSON.parse(body) as Record<string, unknown>;
+        this.capturedRequests.push({ path: "/responses", body: request });
+
+        // Enforce the same Fable 5.1 validation the real backend applies.
+        const fableError = this.checkFable51Rejections(request);
+        if (fableError) {
+            this.sendError(res, 400, fableError);
+            return;
+        }
 
         res.writeHead(200, {
             "Content-Type": "text/event-stream",
@@ -437,6 +499,19 @@ export class MockLiteLLMBackend {
 
     getRequestCount(): number {
         return this.requestCount;
+    }
+
+    /**
+     * Returns all captured request bodies (oldest first) for wire-shape
+     * assertions. Each entry records the endpoint path and the parsed body.
+     */
+    getCapturedRequests(): { path: string; body: Record<string, unknown> }[] {
+        return this.capturedRequests;
+    }
+
+    /** Clears the captured-request log between test cases. */
+    clearCapturedRequests(): void {
+        this.capturedRequests.length = 0;
     }
 }
 

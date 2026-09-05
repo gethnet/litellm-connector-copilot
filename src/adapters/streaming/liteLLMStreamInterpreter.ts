@@ -589,6 +589,14 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
             }
             state.toolCallBuffers.clear();
 
+            // Fable 5.1 can return finish_reason: "refusal" with HTTP 200.
+            // Log at warn so operators see refusals at default verbosity without
+            // the stream interpreter treating it as a normal completion.
+            if (choice.finish_reason === "refusal") {
+                StructuredLogger.warn("stream.refusal_detected", {
+                    shape: "chat-completions",
+                });
+            }
             finishParts.push({ type: "finish", reason: choice.finish_reason });
         }
 
@@ -865,6 +873,19 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                 systemPromptTokens: usageValue.system_prompt_tokens,
                 toolCallsEmitted: flushedToolCallCount,
             });
+        }
+
+        // Fable 5.1 /responses refusal: the response status can be "refusal"
+        // while HTTP transport stays 200. Emit a finish part so the chat
+        // provider can surface the refusal instead of treating the response
+        // as a silent success.
+        const responseRecord = data.response as Record<string, unknown> | undefined;
+        const responseStatus = typeof responseRecord?.status === "string" ? responseRecord.status : undefined;
+        if (responseStatus === "refusal") {
+            StructuredLogger.warn("stream.refusal_detected", {
+                shape: "responses",
+            });
+            finishParts.push({ type: "finish", reason: "refusal" });
         }
     }
     if (data.type === "response.output_item.done") {

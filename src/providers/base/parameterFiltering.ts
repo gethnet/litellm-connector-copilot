@@ -12,6 +12,12 @@ export const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
     "claude-3-sonnet": new Set(["temperature"]),
     "claude-3-haiku": new Set(["temperature"]),
     "claude-haiku-4-5": new Set(["temperature"]),
+    // Claude Fable 5.1 / Mythos 5.1: adaptive thinking always on; non-default
+    // temperature, top_p, top_k return a 400 on every request. These are
+    // prefix-match keys so provider-prefixed IDs (anthropic/claude-fable-5-1,
+    // bedrock/claude-fable-5-1) are covered.
+    "claude-fable-5-1": new Set(["temperature", "top_p", "top_k"]),
+    "claude-mythos-5-1": new Set(["temperature", "top_p", "top_k"]),
     "gpt-5.1-codex": new Set(["temperature", "frequency_penalty", "presence_penalty"]),
     "gpt-5.1-codex-mini": new Set(["temperature", "frequency_penalty", "presence_penalty"]),
     "gpt-5.1-codex-max": new Set(["temperature", "frequency_penalty", "presence_penalty"]),

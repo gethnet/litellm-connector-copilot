@@ -92,4 +92,32 @@ suite("thinkingBlockRetry", () => {
             assert.strictEqual(isThinkingBlockRetryableError(error), false, error.message);
         }
     });
+
+    test("isThinkingBlockRetryableError detects Fable 5.1 prefix-mismatch error", () => {
+        // Fable 5.1 enforced-account error message:
+        // "messages.5.content.0: Invalid `signature` in `thinking` block.
+        //  The block is bound to a different conversation."
+        const err = httpError(
+            'messages.5.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation. Remove the block, or set `thinking.block_binding.prefix_mismatch_behavior` to "drop_block".',
+            400
+        );
+        assert.strictEqual(isThinkingBlockRetryableError(err), true);
+    });
+
+    test("isThinkingBlockRetryableError detects prefix_binding_mismatch reason", () => {
+        // Beta-header reported transformation reason (without the full sentence).
+        const err = httpError("thinking block dropped: prefix_binding_mismatch on messages.3.content.1", 400);
+        assert.strictEqual(isThinkingBlockRetryableError(err), true);
+    });
+
+    test("isThinkingBlockRetryableError detects model_binding_mismatch reason", () => {
+        // Model-switch drop (older model can't read Fable 5.1 thinking blocks).
+        const err = httpError("thinking block dropped: model_binding_mismatch on messages.2.content.0", 400);
+        assert.strictEqual(isThinkingBlockRetryableError(err), true);
+    });
+
+    test("isThinkingBlockRetryableError does not retry non-400 prefix errors", () => {
+        const err = httpError("The block is bound to a different conversation.", 500);
+        assert.strictEqual(isThinkingBlockRetryableError(err), false);
+    });
 });

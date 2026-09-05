@@ -17,7 +17,11 @@
 
 import * as assert from "assert";
 import * as http from "http";
+import * as sinon from "sinon";
+import * as vscode from "vscode";
 import MockLiteLLMBackend, { type MockBackendOptions } from "./mockLiteLLMBackend";
+import { RequestBuilder } from "../../providers/base/requestBuilder";
+import { ConfigManager } from "../../config/configManager";
 
 /**
  * NOTE ON `any` TYPE USAGE IN THIS FILE:
@@ -226,6 +230,225 @@ suite("MockLiteLLMBackend", () => {
 
             await makeHttpRequest(`${backend.getBaseUrl()}/models`, "GET");
             assert.strictEqual(backend.getRequestCount(), 2);
+        });
+    });
+
+    suite("Fable 5.1 Wire Compatibility", () => {
+        // These tests prove the extension's live request pipeline produces
+        // wire shapes the real Anthropic Fable 5.1 backend accepts. The mock
+        // enforces the same server-side rejections (forced tool_choice,
+        // non-default sampling params), so a compliant request here means a
+        // compliant request against the actual proxy.
+        let requestBuilder: RequestBuilder;
+        let configManager: sinon.SinonStubbedInstance<ConfigManager>;
+
+        setup(() => {
+            configManager = sinon.createStubInstance(ConfigManager);
+            configManager.getConfig.resolves({});
+            requestBuilder = new RequestBuilder({
+                configManager,
+                getReasoningEffort: () => undefined,
+                detectQuotaToolRedaction: (messages, tools) => ({ tools, confidence: "none" as const }),
+                stripUnsupportedParametersFromRequest: (body, modelInfo) => {
+                    // Mirror production behavior: strip params not on the card.
+                    const supported = modelInfo?.supported_openai_params;
+                    if (Array.isArray(supported) && !supported.includes("temperature")) {
+                        delete body.temperature;
+                    }
+                    if (Array.isArray(supported) && !supported.includes("top_p")) {
+                        delete body.top_p;
+                    }
+                },
+                isParameterSupported: () => true,
+                getTelemetryOptions: () => ({
+                    caller: "integration",
+                    justification: undefined,
+                    modelConfiguration: {},
+                }),
+                usageOptOutModels: new Set(),
+                extractRawModelName: (id: string) => {
+                    const slash = id.indexOf("/");
+                    return slash < 0 ? id : id.slice(slash + 1);
+                },
+            });
+        });
+
+        test("mock rejects forced tool_choice with the real Fable 5.1 error", async () => {
+            backend = new MockLiteLLMBackend({ port: testPort });
+            await backend.start();
+
+            // Send the exact forced shape the extension used to emit before
+            // the fix — the mock must 400 it just like the real backend.
+            const response = await makeHttpRequest(
+                `${backend.getBaseUrl()}/chat/completions`,
+                "POST",
+                JSON.stringify({
+                    model: "claude-fable-5-1",
+                    stream: false,
+                    tool_choice: { type: "function", function: { name: "record_summary" } },
+                    messages: [{ role: "user", content: "hi" }],
+                })
+            );
+
+            assert.strictEqual(response.status, 400);
+            const errorBody = JSON.parse(response.body) as { error: { message: string } };
+            assert.ok(
+                errorBody.error.message.includes('type "tool" and "any" are not supported'),
+                `expected Fable 5.1 tool_choice rejection, got: ${response.body}`
+            );
+        });
+
+        test("mock rejects non-default temperature for Fable 5.1", async () => {
+            backend = new MockLiteLLMBackend({ port: testPort });
+            await backend.start();
+
+            const response = await makeHttpRequest(
+                `${backend.getBaseUrl()}/chat/completions`,
+                "POST",
+                JSON.stringify({
+                    model: "claude-fable-5-1",
+                    stream: false,
+                    temperature: 0.7,
+                    messages: [{ role: "user", content: "hi" }],
+                })
+            );
+
+            assert.strictEqual(response.status, 400);
+            assert.ok(response.body.includes("temperature"), `expected temperature rejection, got: ${response.body}`);
+        });
+
+        test("RequestBuilder output for Fable 5.1 with Required tool mode passes the enforcing mock", async () => {
+            backend = new MockLiteLLMBackend({ port: testPort });
+            await backend.start();
+
+            const model = {
+                id: "anthropic/claude-fable-5-1",
+                maxInputTokens: 100_000,
+                maxOutputTokens: 8_192,
+            } as vscode.LanguageModelChatInformation;
+            const messages: vscode.LanguageModelChatRequestMessage[] = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    content: [new vscode.LanguageModelTextPart("Summarize this document")],
+                    name: undefined,
+                },
+            ];
+
+            const request = await requestBuilder.buildOpenAIChatRequest(
+                messages,
+                model,
+                {
+                    modelOptions: {},
+                    toolMode: vscode.LanguageModelChatToolMode.Required,
+                    tools: [{ name: "record_summary", description: "Record summary", inputSchema: {} }],
+                } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                undefined,
+                "integration"
+            );
+
+            const response = await makeHttpRequest(
+                `${backend.getBaseUrl()}/chat/completions`,
+                "POST",
+                JSON.stringify(request)
+            );
+
+            assert.strictEqual(
+                response.status,
+                200,
+                `downgraded request must be accepted by the Fable 5.1 mock: ${response.body}`
+            );
+            const captured = backend.getCapturedRequests();
+            assert.strictEqual(captured.length, 1);
+            assert.strictEqual(captured[0].body.tool_choice, "auto");
+        });
+
+        test("RequestBuilder output for Fable 5.1 strips sampling params via model card", async () => {
+            backend = new MockLiteLLMBackend({ port: testPort });
+            await backend.start();
+
+            const model = {
+                id: "anthropic/claude-fable-5-1",
+                maxInputTokens: 100_000,
+                maxOutputTokens: 8_192,
+            } as vscode.LanguageModelChatInformation;
+            const messages: vscode.LanguageModelChatRequestMessage[] = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    content: [new vscode.LanguageModelTextPart("Test")],
+                    name: undefined,
+                },
+            ];
+
+            // Model card WITHOUT temperature/top_p — production
+            // stripUnsupportedParametersFromRequest removes them.
+            const request = await requestBuilder.buildOpenAIChatRequest(
+                messages,
+                model,
+                {
+                    modelOptions: { temperature: 0.7, top_p: 0.9 },
+                } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                { supported_openai_params: ["stream", "tools", "tool_choice"] },
+                "integration"
+            );
+
+            assert.strictEqual(request.temperature, undefined, "temperature must be stripped");
+            assert.strictEqual(request.top_p, undefined, "top_p must be stripped");
+
+            const response = await makeHttpRequest(
+                `${backend.getBaseUrl()}/chat/completions`,
+                "POST",
+                JSON.stringify(request)
+            );
+
+            assert.strictEqual(
+                response.status,
+                200,
+                `stripped request must be accepted by the Fable 5.1 mock: ${response.body}`
+            );
+        });
+
+        test("responses endpoint enforces the same Fable 5.1 validation", async () => {
+            backend = new MockLiteLLMBackend({ port: testPort });
+            await backend.start();
+
+            const response = await makeHttpRequest(
+                `${backend.getBaseUrl()}/responses`,
+                "POST",
+                JSON.stringify({
+                    model: "claude-fable-5-1",
+                    stream: true,
+                    tool_choice: { type: "function", function: { name: "forced" } },
+                    input: "hi",
+                })
+            );
+
+            assert.strictEqual(response.status, 400);
+            const errorBody = JSON.parse(response.body) as { error: { message: string } };
+            assert.ok(
+                errorBody.error.message.includes('type "tool" and "any" are not supported'),
+                `expected Fable 5.1 rejection on /responses too, got: ${response.body}`
+            );
+        });
+
+        test("request capture records both endpoints", async () => {
+            backend = new MockLiteLLMBackend({ port: testPort });
+            await backend.start();
+
+            await makeHttpRequest(
+                `${backend.getBaseUrl()}/chat/completions`,
+                "POST",
+                JSON.stringify({ model: "gpt-4o", stream: false, messages: [{ role: "user", content: "hi" }] })
+            );
+            await makeHttpRequest(
+                `${backend.getBaseUrl()}/responses`,
+                "POST",
+                JSON.stringify({ model: "gpt-4o", stream: true, input: "hi" })
+            );
+
+            const captured = backend.getCapturedRequests();
+            assert.strictEqual(captured.length, 2);
+            assert.strictEqual(captured[0].path, "/chat/completions");
+            assert.strictEqual(captured[1].path, "/responses");
         });
     });
 

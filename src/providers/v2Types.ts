@@ -1,18 +1,8 @@
-import type * as vscode from "vscode";
-
-export type V2MessagePart =
-    | { type: "text"; text: string }
-    | { type: "data"; mimeType: string; data: Uint8Array }
-    | { type: "thinking"; value: string | string[]; id?: string; metadata?: Record<string, unknown> }
-    | { type: "tool_call"; callId: string; name: string; input: unknown }
-    | { type: "tool_result"; callId: string; content: readonly unknown[] };
-
-export interface V2ChatMessage {
-    role: string | vscode.LanguageModelChatMessageRole;
-    name: string | undefined;
-    content: V2MessagePart[];
-}
-
+/**
+ * Live stream-emission contract shared by the stream interpreter and its
+ * consumers. The former V2 message-pipeline types (`V2ChatMessage`,
+ * `V2MessagePart`) were dead code and have been removed.
+ */
 export type V2EmittedPart =
     | { type: "text"; value: string }
     | { type: "data"; mimeType: string; value: unknown }

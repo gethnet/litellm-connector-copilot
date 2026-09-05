@@ -7,14 +7,13 @@ import type {
 } from "vscode";
 
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../types";
-import { convertMessages, convertTools, normalizeMessagesForV2Pipeline } from "../utils";
+import { convertMessages, convertTools } from "../utils";
 import {
     trimMessagesToFitBudget,
     estimateToolTokens,
     isContextOverflowError,
     countTokens,
 } from "../adapters/tokenUtils";
-import { countTokensForV2Messages } from "../adapters/tokenUtils";
 import { ConfigManager } from "../config/configManager";
 import { Logger } from "../utils/logger";
 import type { TelemetryService } from "../telemetry/telemetryService";
@@ -27,7 +26,6 @@ import {
     isReasoningError,
     markReasoningFallbackNotified,
 } from "../utils/reasoningEffortFallback";
-import type { V2ChatMessage } from "./v2Types";
 import type { BackendSession } from "./backendSession";
 import { RequestBuilder } from "./base/requestBuilder";
 import { Transport } from "./base/transport";
@@ -518,32 +516,6 @@ export abstract class LiteLLMProviderBase {
         caller?: string
     ): Promise<OpenAIChatCompletionRequest> {
         return this._requestBuilder.buildOpenAIChatRequest(messages, model, options, modelInfo, caller);
-    }
-
-    protected async buildV2ChatRequest(
-        messages: readonly V2ChatMessage[],
-        model: LanguageModelChatInformation,
-        options: ProvideLanguageModelChatResponseOptions,
-        modelInfo?: LiteLLMModelInfo,
-        caller?: string
-    ): Promise<OpenAIChatCompletionRequest> {
-        return this._requestBuilder.buildV2ChatRequest(messages, model, options, modelInfo, caller);
-    }
-
-    protected normalizeMessagesForV2Pipeline(
-        messages: readonly (
-            vscode.LanguageModelChatRequestMessage | vscode.LanguageModelChatMessage2 | vscode.LanguageModelChatMessage
-        )[]
-    ): V2ChatMessage[] {
-        return normalizeMessagesForV2Pipeline(messages);
-    }
-
-    protected countTokensForV2Messages(
-        input: string | V2ChatMessage | readonly V2ChatMessage[],
-        modelId?: string,
-        modelInfo?: LiteLLMModelInfo
-    ): number {
-        return countTokensForV2Messages(input, modelId, modelInfo);
     }
 
     /**

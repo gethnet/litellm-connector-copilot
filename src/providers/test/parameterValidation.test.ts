@@ -201,4 +201,40 @@ suite("Parameter Validation from supported_openai_params", () => {
         const result = provider.testIsParameterSupported("tool_choice", modelInfo, "gpt-5.6");
         assert.strictEqual(result, false);
     });
+
+    test("strips temperature for claude-fable-5-1 via static fallback", () => {
+        // No supported_openai_params → static KNOWN_PARAMETER_LIMITATIONS applies.
+        const result = provider.testIsParameterSupported("temperature", undefined, "claude-fable-5-1");
+        assert.strictEqual(result, false);
+    });
+
+    test("strips top_p for claude-fable-5-1 via static fallback", () => {
+        const result = provider.testIsParameterSupported("top_p", undefined, "claude-fable-5-1");
+        assert.strictEqual(result, false);
+    });
+
+    test("strips top_k for claude-fable-5-1 via static fallback", () => {
+        const result = provider.testIsParameterSupported("top_k", undefined, "claude-fable-5-1");
+        assert.strictEqual(result, false);
+    });
+
+    test("strips temperature for provider-prefixed anthropic/claude-fable-5-1", () => {
+        const result = provider.testIsParameterSupported("temperature", undefined, "anthropic/claude-fable-5-1");
+        assert.strictEqual(result, false);
+    });
+
+    test("strips temperature for claude-mythos-5-1 via static fallback", () => {
+        const result = provider.testIsParameterSupported("temperature", undefined, "claude-mythos-5-1");
+        assert.strictEqual(result, false);
+    });
+
+    test("model-card supported_openai_params wins over static fable-5-1 denylist", () => {
+        // If a corrected gateway card explicitly lists temperature, the static
+        // denylist must NOT override it (modelInfo is the source of truth).
+        const modelInfo: LiteLLMModelInfo = {
+            supported_openai_params: ["temperature", "top_p", "stream"],
+        };
+        const result = provider.testIsParameterSupported("temperature", modelInfo, "claude-fable-5-1");
+        assert.strictEqual(result, true);
+    });
 });

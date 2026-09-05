@@ -54,6 +54,116 @@ suite("RequestBuilder", () => {
         sinon.assert.match(req.stream, true);
     });
 
+    test("buildV2ChatRequest is removed from RequestBuilder", () => {
+        // Regression guard: the V2 message pipeline was dead code and has been
+        // removed. If a future change reintroduces a V2 builder, this test
+        // fails and forces the author to justify the reintroduction.
+        assert.strictEqual(
+            typeof (builder as unknown as { buildV2ChatRequest?: unknown }).buildV2ChatRequest,
+            "undefined",
+            "buildV2ChatRequest must not exist on RequestBuilder — the V2 pipeline is dead code"
+        );
+    });
+
+    test("buildOpenAIChatRequest downgrades forced tool_choice to auto for claude-fable-5-1", async () => {
+        configManager.getConfig.resolves({});
+        const model = {
+            id: "anthropic/claude-fable-5-1",
+            maxInputTokens: 100,
+            maxOutputTokens: 50,
+        } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("Summarize this")],
+                name: undefined,
+            },
+        ];
+
+        const req = await builder.buildOpenAIChatRequest(
+            messages,
+            model,
+            {
+                modelOptions: {},
+                toolMode: vscode.LanguageModelChatToolMode.Required,
+                tools: [{ name: "record_summary", description: "Record summary", inputSchema: {} }],
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+            undefined,
+            "caller"
+        );
+
+        // Fable 5.1 rejects { type: "function", function: { name } } with a 400.
+        // The builder must downgrade to "auto" so the request succeeds.
+        assert.strictEqual(req.tool_choice, "auto");
+        // The tool definition must still be present.
+        assert.ok(req.tools && req.tools.length === 1);
+        assert.strictEqual(req.tools[0].function.name, "record_summary");
+    });
+
+    test("buildOpenAIChatRequest downgrades forced tool_choice to auto for claude-mythos-5-1", async () => {
+        configManager.getConfig.resolves({});
+        const model = {
+            id: "anthropic/claude-mythos-5-1",
+            maxInputTokens: 100,
+            maxOutputTokens: 50,
+        } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("Test")],
+                name: undefined,
+            },
+        ];
+
+        const req = await builder.buildOpenAIChatRequest(
+            messages,
+            model,
+            {
+                modelOptions: {},
+                toolMode: vscode.LanguageModelChatToolMode.Required,
+                tools: [{ name: "my_tool", description: "desc", inputSchema: {} }],
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+            undefined,
+            "caller"
+        );
+
+        assert.strictEqual(req.tool_choice, "auto");
+    });
+
+    test("buildOpenAIChatRequest preserves forced tool_choice for non-Fable-5.1 models", async () => {
+        configManager.getConfig.resolves({});
+        const model = {
+            id: "gpt-5",
+            maxInputTokens: 100,
+            maxOutputTokens: 50,
+        } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("Test")],
+                name: undefined,
+            },
+        ];
+
+        const req = await builder.buildOpenAIChatRequest(
+            messages,
+            model,
+            {
+                modelOptions: {},
+                toolMode: vscode.LanguageModelChatToolMode.Required,
+                tools: [{ name: "forced_tool", description: "desc", inputSchema: {} }],
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+            undefined,
+            "caller"
+        );
+
+        // Non-Fable-5.1 models keep forced tool_choice as before.
+        sinon.assert.match(req.tool_choice, {
+            type: "function",
+            function: { name: "forced_tool" },
+        });
+    });
+
     test("buildOpenAIChatRequest attaches top-level cache_control for eligible cards without markers", async () => {
         configManager.getConfig.resolves({});
         const model = {
@@ -96,15 +206,11 @@ suite("RequestBuilder", () => {
         ];
         const options = { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions;
 
-        const [v1Request, v2Request] = await Promise.all([
-            builder.buildOpenAIChatRequest(messages, model, options, { supported_openai_params: ["cache_control"] }),
-            builder.buildV2ChatRequest(messages as never, model, options, {
-                supported_openai_params: ["cache_control"],
-            }),
-        ]);
+        const request = await builder.buildOpenAIChatRequest(messages, model, options, {
+            supported_openai_params: ["cache_control"],
+        });
 
-        assert.deepStrictEqual(v1Request.cache_control, { type: "ephemeral" });
-        assert.deepStrictEqual(v2Request.cache_control, { type: "ephemeral" });
+        assert.deepStrictEqual(request.cache_control, { type: "ephemeral" });
     });
 
     test("buildOpenAIChatRequest leaves a lying GPT cache_control card unstamped", async () => {
@@ -216,36 +322,6 @@ suite("RequestBuilder", () => {
         assert.strictEqual(explicitCount, 4);
     });
 
-    test("buildV2ChatRequest preserves tool_choice", async () => {
-        configManager.getConfig.resolves({});
-        const model = { id: "gpt-v2", maxInputTokens: 100, maxOutputTokens: 20 } as vscode.LanguageModelChatInformation;
-        const messages = [
-            {
-                role: vscode.LanguageModelChatMessageRole.User,
-                content: [new vscode.LanguageModelTextPart("hi")],
-                name: undefined,
-            },
-        ];
-        const modelInfo = { mode: "chat" } as LiteLLMModelInfo;
-
-        const req = await builder.buildV2ChatRequest(
-            messages as never,
-            model,
-            {
-                modelOptions: {},
-                toolMode: vscode.LanguageModelChatToolMode.Required,
-                tools: [{ name: "test_tool", description: "desc", inputSchema: {} }],
-            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
-            modelInfo,
-            "caller"
-        );
-
-        sinon.assert.match(req.tool_choice, {
-            type: "function",
-            function: { name: "test_tool" },
-        });
-    });
-
     test("buildOpenAIChatRequest injects cache bypass before applying the shared filter", async () => {
         configManager.getConfig.resolves({ disableCaching: true });
         const cacheBypassBuilder = new RequestBuilder({
@@ -293,55 +369,6 @@ suite("RequestBuilder", () => {
         );
 
         assert.deepStrictEqual(request.extra_body, { cache: { "no-cache": true } });
-    });
-
-    test("buildV2ChatRequest removes cache bypass for a model that excludes cache", async () => {
-        configManager.getConfig.resolves({ disableCaching: true });
-        const cacheBypassBuilder = new RequestBuilder({
-            configManager,
-            getReasoningEffort: () => undefined,
-            detectQuotaToolRedaction: (messages, tools) => ({ tools, confidence: "none" as const }),
-            stripUnsupportedParametersFromRequest: (body, modelInfo) => {
-                const supportedParams = modelInfo?.supported_openai_params;
-                if (Array.isArray(supportedParams) && !supportedParams.includes("cache")) {
-                    const extraBody = body.extra_body;
-                    if (extraBody && typeof extraBody === "object") {
-                        delete (extraBody as Record<string, unknown>).cache;
-                        if (Object.keys(extraBody).length === 0) {
-                            delete body.extra_body;
-                        }
-                    }
-                }
-            },
-            isParameterSupported: (parameter, modelInfo) => {
-                const supportedParams = modelInfo?.supported_openai_params;
-                return parameter !== "cache" || !Array.isArray(supportedParams) || supportedParams.includes("cache");
-            },
-            getTelemetryOptions: () => ({ caller: "test", justification: undefined, modelConfiguration: {} }),
-            usageOptOutModels: new Set(),
-            extractRawModelName: (id: string) => id,
-        });
-        const model = {
-            id: "azure_ai/gpt-5.4-mini",
-            maxInputTokens: 100,
-            maxOutputTokens: 50,
-        } as vscode.LanguageModelChatInformation;
-        const messages = [
-            {
-                role: vscode.LanguageModelChatMessageRole.User,
-                content: [new vscode.LanguageModelTextPart("hi")],
-                name: undefined,
-            },
-        ];
-
-        const request = await cacheBypassBuilder.buildV2ChatRequest(
-            messages as never,
-            model,
-            { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions,
-            { supported_openai_params: ["stream"] }
-        );
-
-        assert.strictEqual(request.extra_body, undefined);
     });
 
     test("buildOpenAIChatRequest serializes an explicitly selected none effort", async () => {
@@ -454,7 +481,7 @@ suite("RequestBuilder", () => {
         assert.strictEqual(request.output_config, undefined);
     });
 
-    test("buildV2ChatRequest omits none when reasoning_effort is unsupported", async () => {
+    test("buildOpenAIChatRequest omits none when reasoning_effort is unsupported", async () => {
         configManager.getConfig.resolves({});
         const noneBuilder = new RequestBuilder({
             configManager,
@@ -475,8 +502,8 @@ suite("RequestBuilder", () => {
             },
         ];
 
-        const request = await noneBuilder.buildV2ChatRequest(
-            messages as never,
+        const request = await noneBuilder.buildOpenAIChatRequest(
+            messages,
             model,
             { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions,
             { supported_openai_params: ["stream"] },
