@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2.5.6] - 2026-09-08
 
 ### 🐛 Fixes
 
@@ -18,6 +18,10 @@ All notable changes to this project will be documented in this file.
 * Added regression coverage for the Fable 5.1 fixes: forced-`tool_choice` downgrade for fable/mythos model IDs with preservation on other models, the three new continuity-rejection error strings, static sampling-param stripping (including provider-prefixed IDs and model-card precedence), refusal detection in both chat-completions and `/responses` stream shapes, and thinking-block stripping during front-trim (preserved when no trim occurs). (`src/providers/test/liteLLMProviderBase.requestBuilder.test.ts`, `src/providers/base/test/thinkingBlockRetry.test.ts`, `src/providers/test/parameterValidation.test.ts`, `src/adapters/streaming/test/liteLLMStreamInterpreter.test.ts`, `src/adapters/test/tokenUtils.test.ts`)
 * The mock LiteLLM backend now enforces real Fable 5.1 server-side rejections (forced `tool_choice` in both Anthropic and OpenAI shapes, non-default sampling params → 400) and captures request bodies on both endpoints. A new `Fable 5.1 Wire Compatibility` integration suite pipes real `RequestBuilder` output through the enforcing mock, proving the extension produces wire shapes the actual Anthropic backend accepts — without spending API credits. (`src/test/integration/mockLiteLLMBackend.ts`, `src/test/integration/mockLiteLLMBackend.test.ts`)
 * Removed the test files and suites that exclusively covered the deleted dead V2 pipeline; equivalent behaviors remain covered through the live `convertMessages` / stream-interpreter paths. Suite count dropped from 1,057 to 985 while all four coverage categories improved (91.65% lines from 91.50%).
+
+### 🧹 Chores
+
+* **🚀 Promote release version**: Promoted the package version from `2.5.6-dev1` to `2.5.6`. (`package.json`)
 
 ## [2.5.5] - 2026-08-29
 
