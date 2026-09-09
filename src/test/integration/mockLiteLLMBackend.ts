@@ -203,7 +203,11 @@ export class MockLiteLLMBackend {
      */
     private checkFable51Rejections(request: Record<string, unknown>): string | undefined {
         const model = typeof request.model === "string" ? request.model : "";
-        if (!/(?:^|\/)claude[-_.]?(?:fable|mythos)[-_.]?5[-_.]?1(?:[-_.]|$)/i.test(model)) {
+        // Same family match as the connector guards (utils/modelUtils
+        // `isFable51Family`): snapshot and Bedrock dot-namespaced aliases
+        // must be rejected exactly like the bare id, so wire tests prove
+        // the extension produces accepted shapes for aliased ids too.
+        if (!/(?:^|[/.])claude[-_.]?(?:fable|mythos)[-_.]?5[-_.]?1(?=[-_.@]|$)/i.test(model)) {
             return undefined;
         }
 

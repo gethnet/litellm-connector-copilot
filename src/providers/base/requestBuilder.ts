@@ -2,6 +2,7 @@ import type * as vscode from "vscode";
 import { convertMessages, convertTools, validateRequest } from "../../utils";
 import { trimMessagesToFitBudget } from "../../adapters/tokenUtils";
 import { StructuredLogger } from "../../observability/structuredLogger";
+import { isFable51Family } from "../../utils/modelUtils";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, OpenAIFunctionToolDef } from "../../types";
 import type { RequestBuilderDeps } from "./types";
 import { resolveChatReasoningTransport } from "./reasoningTransport";
@@ -202,14 +203,13 @@ export class RequestBuilder {
  * is incompatible with forced tool use; the migration guide requires
  * `tool_choice: "auto"` + strict tools + explicit instruction instead.
  *
- * Matches both bare (`claude-fable-5-1`) and provider-prefixed
- * (`anthropic/claude-fable-5-1`, `bedrock/claude-fable-5-1`) IDs.
+ * Delegates to the shared `isFable51Family` helper (utils/modelUtils) so this
+ * guard recognizes exactly the same id shapes as the sampling-param denylist
+ * (parameterFiltering) — bare, provider-prefixed, snapshot, and Bedrock
+ * dot-namespaced ids alike. Parity is enforced by test; the guards must never
+ * drift apart (a gap here would strip sampling params for an id while still
+ * sending a forced tool_choice the backend rejects with a 400).
  */
-const FORCED_TOOL_CHOICE_REJECTING_MODELS: readonly RegExp[] = [
-    /(?:^|\/)claude[-_.]?fable[-_.]?5[-_.]?1(?:[-_.]|$)/i,
-    /(?:^|\/)claude[-_.]?mythos[-_.]?5[-_.]?1(?:[-_.]|$)/i,
-];
-
 function isForcedToolChoiceRejectedByModel(rawModelId: string): boolean {
-    return FORCED_TOOL_CHOICE_REJECTING_MODELS.some((pattern) => pattern.test(rawModelId));
+    return isFable51Family(rawModelId);
 }

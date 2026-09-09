@@ -130,6 +130,53 @@ suite("RequestBuilder", () => {
         assert.strictEqual(req.tool_choice, "auto");
     });
 
+    test("buildOpenAIChatRequest downgrades forced tool_choice to auto for aliased Fable 5.1 ids", async () => {
+        // Aliased/snapshot shapes (Bedrock dot-namespace, regional prefix,
+        // @-versioned snapshot) must trigger the same downgrade as the bare
+        // id — these previously slipped past the boundary regex while the
+        // sampling denylist caught them, sending a forced tool_choice that
+        // the real backend rejects with a 400.
+        configManager.getConfig.resolves({});
+        const aliasedIds = [
+            "anthropic/claude-fable-5-1@20260801",
+            "anthropic/anthropic.claude-fable-5-1-v1:0",
+            "anthropic/us.anthropic.claude-fable-5-1-v1:0",
+        ];
+
+        for (const id of aliasedIds) {
+            const model = {
+                id,
+                maxInputTokens: 100,
+                maxOutputTokens: 50,
+            } as vscode.LanguageModelChatInformation;
+            const messages: vscode.LanguageModelChatRequestMessage[] = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    content: [new vscode.LanguageModelTextPart("Test")],
+                    name: undefined,
+                },
+            ];
+
+            const req = await builder.buildOpenAIChatRequest(
+                messages,
+                model,
+                {
+                    modelOptions: {},
+                    toolMode: vscode.LanguageModelChatToolMode.Required,
+                    tools: [{ name: "forced_tool", description: "desc", inputSchema: {} }],
+                } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                undefined,
+                "caller"
+            );
+
+            assert.strictEqual(
+                req.tool_choice,
+                "auto",
+                `expected tool_choice downgrade for aliased Fable 5.1 id "${id}"`
+            );
+        }
+    });
+
     test("buildOpenAIChatRequest preserves forced tool_choice for non-Fable-5.1 models", async () => {
         configManager.getConfig.resolves({});
         const model = {

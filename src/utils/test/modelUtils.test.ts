@@ -1,8 +1,70 @@
 import * as assert from "assert";
 import * as sinon from "sinon";
 import { getModelTags } from "../modelCapabilities";
+import { isFable51Family } from "../modelUtils";
 import type { DerivedModelCapabilities } from "../modelCapabilities";
 import type { ModelCapabilityOverride } from "../../types";
+
+suite("Fable 5.1 Family Detection", () => {
+    /**
+     * Matrix of LiteLLM model-ID shapes that must all be recognized as the
+     * Fable 5.1 / Mythos 5.1 family. Every guard (tool_choice downgrade,
+     * sampling-param denylist) must agree on exactly this set — see the
+     * parity suite in parameterValidation.test.ts.
+     */
+    const matches: readonly string[] = [
+        "claude-fable-5-1",
+        "claude-mythos-5-1",
+        "anthropic/claude-fable-5-1",
+        "bedrock/claude-fable-5-1",
+        "openrouter/anthropic/claude-fable-5-1",
+        "anthropic/claude-mythos-5-1",
+        "claude-fable-5-1-20260801", // date-suffixed snapshot
+        "claude-fable-5-1@20260801", // @-versioned snapshot (Anthropic/Vertex style)
+        "anthropic.claude-fable-5-1-v1:0", // Bedrock dot-namespaced
+        "us.anthropic.claude-fable-5-1-v1:0", // Bedrock regional
+        "anthropic.claude-mythos-5-1-v1:0",
+        // Deliberate conservative over-match: the separator between 5 and 1 is
+        // optional, so a stripped-separator lookalike is treated as family.
+        // Over-matching costs only a soft downgrade (tool_choice "auto" +
+        // stripped sampling params); under-matching a real alias would send a
+        // forced tool_choice the backend rejects with a hard 400.
+        "claude-fable-51",
+    ];
+
+    /**
+     * IDs that must NOT match: adjacent-family versions, future minors,
+     * and substring-embedded lookalikes.
+     */
+    const nonMatches: readonly string[] = [
+        "claude-fable-5", // base Fable 5 — forced tool_choice still allowed
+        "claude-mythos-5", // base Mythos 5
+        "claude-fable-5-10", // hypothetical future minor — must not over-match
+        "notclaude-fable-5-1", // embedded substring, not a boundary
+        "gpt-5.4",
+        "claude-opus-4-8",
+    ];
+
+    test("matches every aliased/snapshot Fable 5.1 and Mythos 5.1 id shape", () => {
+        for (const id of matches) {
+            assert.strictEqual(
+                isFable51Family(id),
+                true,
+                `expected family match for "${id}" — aliased/snapshot Fable 5.1 IDs must be recognized so the tool_choice downgrade fires`
+            );
+        }
+    });
+
+    test("rejects adjacent families, future minors, and embedded substrings", () => {
+        for (const id of nonMatches) {
+            assert.strictEqual(
+                isFable51Family(id),
+                false,
+                `expected NO family match for "${id}" — only the 5.1 generation is affected`
+            );
+        }
+    });
+});
 
 suite("Model Tags Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;

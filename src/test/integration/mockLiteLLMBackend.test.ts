@@ -362,6 +362,54 @@ suite("MockLiteLLMBackend", () => {
             assert.strictEqual(captured[0].body.tool_choice, "auto");
         });
 
+        test("RequestBuilder output for aliased Fable 5.1 (Bedrock shape) passes the enforcing mock", async () => {
+            backend = new MockLiteLLMBackend({ port: testPort });
+            await backend.start();
+
+            // Bedrock dot-namespaced alias: the mock rejects forced tool_choice
+            // for this shape exactly like the bare id, so this proves the
+            // downgrade fires for aliased ids end-to-end on the wire.
+            const model = {
+                id: "anthropic/anthropic.claude-fable-5-1-v1:0",
+                maxInputTokens: 100_000,
+                maxOutputTokens: 8_192,
+            } as vscode.LanguageModelChatInformation;
+            const messages: vscode.LanguageModelChatRequestMessage[] = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    content: [new vscode.LanguageModelTextPart("Summarize this document")],
+                    name: undefined,
+                },
+            ];
+
+            const request = await requestBuilder.buildOpenAIChatRequest(
+                messages,
+                model,
+                {
+                    modelOptions: {},
+                    toolMode: vscode.LanguageModelChatToolMode.Required,
+                    tools: [{ name: "record_summary", description: "Record summary", inputSchema: {} }],
+                } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                undefined,
+                "integration"
+            );
+
+            const response = await makeHttpRequest(
+                `${backend.getBaseUrl()}/chat/completions`,
+                "POST",
+                JSON.stringify(request)
+            );
+
+            assert.strictEqual(
+                response.status,
+                200,
+                `aliased-id downgraded request must be accepted by the Fable 5.1 mock: ${response.body}`
+            );
+            const captured = backend.getCapturedRequests();
+            assert.strictEqual(captured.length, 1);
+            assert.strictEqual(captured[0].body.tool_choice, "auto");
+        });
+
         test("RequestBuilder output for Fable 5.1 strips sampling params via model card", async () => {
             backend = new MockLiteLLMBackend({ port: testPort });
             await backend.start();
