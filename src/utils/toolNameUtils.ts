@@ -34,9 +34,8 @@ export interface SanitizedToolName {
  * Sanitizes and truncates a tool function name to comply with AWS Bedrock's 64-character limit.
  *
  * This function is applied at **outbound boundaries** where tool names are emitted:
- * 1. **v1 message converter** (`src/adapters/messageConverter.ts`): `toOpenAIToolCall`
- * 2. **v2 message converter** (`src/adapters/v2OpenAIMessageConverter.ts`): `toOpenAIToolCall`
- * 3. **streaming interpreter** (`src/adapters/streaming/liteLLMStreamInterpreter.ts`):
+ * 1. **message converter** (`src/utils.ts`): `convertMessages` / `convertTools`
+ * 2. **streaming interpreter** (`src/adapters/streaming/liteLLMStreamInterpreter.ts`):
  *    - `state.toolCallBuffers` initialization (OpenAI format)
  *    - `state.responseToolCallBuffers` updates (output_item.delta)
  *    - `state.responseToolCallBuffers` updates (output_tool_call.*)

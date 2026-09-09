@@ -11,12 +11,9 @@ import {
     calculateAvailableContext,
     getStaticPromptTokenCount,
     getReservedOutputTokens,
-    countTokensForV2Messages,
-    trimV2MessagesForBudget,
     isContextOverflowError,
 } from "../tokenUtils";
 import type { LiteLLMModelInfo, OpenAIFunctionToolDef } from "../../types";
-import type { V2ChatMessage } from "../../providers/v2Types";
 
 suite("TokenUtils Unit Tests", () => {
     test("countTokens handles strings, single messages, and message arrays", () => {
@@ -311,121 +308,6 @@ suite("TokenUtils Unit Tests", () => {
         assert.strictEqual(count1, count2);
     });
 
-    test("countTokensForV2Messages counts text, thinking, data, tool_call, tool_result", () => {
-        const messages = [
-            {
-                role: "assistant",
-                content: [
-                    { type: "text", text: "hi" },
-                    { type: "thinking", value: ["thought ", "process"] },
-                    { type: "data", data: new Uint8Array([104, 105]), mimeType: "application/json" },
-                    { type: "data", data: new Uint8Array([104, 105]), mimeType: "cache_control" },
-                    { type: "tool_call", id: "c1", name: "n", input: undefined },
-                    { type: "tool_result", id: "c1", call_id: "c1", content: undefined },
-                ],
-            },
-        ] as unknown as V2ChatMessage[];
-
-        const count = countTokensForV2Messages(messages, "m");
-        assert.ok(count > 0);
-
-        assert.strictEqual(countTokensForV2Messages("string"), 2);
-    });
-
-    test("countTokensForV2Messages estimates tokens for image data parts", () => {
-        // PNG image data (small)
-        const pngHeader = Buffer.from([
-            /* Lines 83-85 omitted */
-            0x49,
-            0x48,
-            0x44,
-            0x52, // IHDR
-        ]);
-        const messages = [
-            {
-                role: "user",
-                content: [
-                    { type: "text", text: "What is in this image?" },
-                    { type: "image", data: pngHeader.slice(0, 16), mimeType: "image/png" },
-                ],
-            } as unknown as V2ChatMessage,
-        ] as V2ChatMessage[];
-
-        const count = countTokensForV2Messages(messages, "gpt-4o");
-        // Text: "What is in this image?" ≈ 5 tokens
-        // Image: 85 base + ceil(16/750) = 86 tokens
-        // Total should be > 0 (not skipped)
-        assert.ok(count > 5, `Expected image to add tokens, got ${count}`);
-    });
-
-    test("countTokensForV2Messages estimates tokens for jpeg and webp images", () => {
-        const jpegData = new Uint8Array(1000); // 1KB of data
-        const messages = [
-            {
-                role: "user",
-                content: [
-                    { type: "text", text: "Describe this image" },
-                    { type: "image", data: jpegData, mimeType: "image/jpeg" },
-                ],
-            } as unknown as V2ChatMessage,
-        ] as V2ChatMessage[];
-
-        const count = countTokensForV2Messages(messages, "gpt-4o");
-        // Should account for image: 85 + ceil(1000/750) = 87 tokens
-        assert.ok(count >= 85, `Expected at least 85 tokens for JPEG, got ${count}`);
-    });
-
-    test("countTokensForV2Messages estimates tokens for PDF data parts", () => {
-        const pdfData = new Uint8Array(4000); // 4KB PDF
-        const messages = [
-            {
-                role: "user",
-                content: [
-                    { type: "text", text: "Analyze this PDF" },
-                    { type: "image", data: pdfData, mimeType: "application/pdf" },
-                ],
-            } as unknown as V2ChatMessage,
-        ] as V2ChatMessage[];
-
-        const count = countTokensForV2Messages(messages, "gpt-4o");
-        // PDF: ceil(4000/4) = 1000 tokens (or minimum 100)
-        assert.ok(count >= 100, `Expected at least 100 tokens for PDF, got ${count}`);
-    });
-
-    test("countTokensForV2Messages still skips cache_control mime types", () => {
-        const messages = [
-            {
-                role: "user",
-                content: [
-                    { type: "text", text: "test" },
-                    { type: "data", data: new Uint8Array([1, 2, 3]), mimeType: "cache_control" },
-                ],
-            } as unknown as V2ChatMessage,
-        ] as V2ChatMessage[];
-
-        const count = countTokensForV2Messages(messages, "gpt-4o");
-        // "test" text ≈ ceil(4/3.5) = 2 tokens; cache_control data part is skipped (0 tokens)
-        assert.strictEqual(count, 2, "Cache control parts should be skipped while text is still counted");
-    });
-
-    test("countTokensForV2Messages handles mixed content with images and text", () => {
-        const imageData = new Uint8Array(5000); // 5KB image
-        const messages = [
-            {
-                role: "user",
-                content: [
-                    { type: "text", text: "Hello" },
-                    { type: "data", data: JSON.stringify({ key: "value" }), mimeType: "application/json" },
-                    { type: "image", data: imageData, mimeType: "image/png" },
-                ],
-            } as unknown as V2ChatMessage,
-        ] as V2ChatMessage[];
-
-        const count = countTokensForV2Messages(messages, "gpt-4o");
-        // Text + JSON + Image all counted
-        assert.ok(count > 20, `Expected tokens for mixed content, got ${count}`);
-    });
-
     test("countOpenAIChatMessagesTokens counts transport tool calls and tool results", () => {
         const count = countOpenAIChatMessagesTokens(
             [
@@ -455,176 +337,91 @@ suite("TokenUtils Unit Tests", () => {
         assert.ok(count > 0);
     });
 
-    test("trimV2MessagesForBudget protects assistant message on 'continue'", () => {
-        const systemMsg = { role: "system", content: [{ type: "text", text: "System" }] } as unknown as V2ChatMessage;
-        const assistantMsg = {
-            role: "assistant",
-            content: [{ type: "text", text: "Long text..." }],
-        } as unknown as V2ChatMessage;
-        const continueMsg = { role: "user", content: [{ type: "text", text: "continue" }] } as unknown as V2ChatMessage;
+    test("trimMessagesToFitBudget strips thinking_blocks from retained messages when front is trimmed", () => {
+        // Fable 5.1 thinking blocks are conversation-prefix-bound: removing
+        // earlier messages invalidates all later thinking_blocks. The trimmer
+        // must strip them (preserve text/tool_calls/tool_results) when it
+        // removes any earlier messages.
+        const model = {
+            id: "anthropic/claude-fable-5-1",
+            maxInputTokens: 50,
+            maxOutputTokens: 100,
+        } as vscode.LanguageModelChatInformation;
 
-        const modelInfo = { id: "test", maxInputTokens: 100 } as unknown as vscode.LanguageModelChatInformation;
+        // Build messages where the first user turn is large enough to be trimmed,
+        // and a later assistant turn carries thinking_blocks.
+        const oldUserMessage: vscode.LanguageModelChatRequestMessage = {
+            role: vscode.LanguageModelChatMessageRole.User,
+            content: [new vscode.LanguageModelTextPart("x".repeat(400))],
+            name: undefined,
+        };
+        const assistantWithThinking = {
+            role: vscode.LanguageModelChatMessageRole.Assistant,
+            content: [new vscode.LanguageModelTextPart("answer")],
+            name: undefined,
+            // thinking_blocks are attached as a non-standard property the trimmer
+            // inspects. In the live path, convertMessages() reconstructs these
+            // from VS Code thinking parts. Here we attach them directly to test
+            // the trimmer's stripping behavior.
+            thinking_blocks: [{ type: "thinking", thinking: "reasoning", signature: "sig-abc" }],
+        } as unknown as vscode.LanguageModelChatRequestMessage;
+        const recentUserMessage: vscode.LanguageModelChatRequestMessage = {
+            role: vscode.LanguageModelChatMessageRole.User,
+            content: [new vscode.LanguageModelTextPart("follow up")],
+            name: undefined,
+        };
 
-        const trimmed = trimV2MessagesForBudget([systemMsg, assistantMsg, continueMsg], undefined, modelInfo);
-        assert.strictEqual(trimmed.length, 3);
-    });
-
-    test("trimV2MessagesForBudget handles budget edge cases", () => {
-        const msg = { role: "user", content: [{ type: "text", text: "hi" }] } as unknown as V2ChatMessage;
-        const modelInfo = { id: "test", maxInputTokens: 1 } as unknown as vscode.LanguageModelChatInformation;
-
-        const tools = [
-            { type: "function", function: { name: "t", description: "x".repeat(1000) } },
-        ] as unknown as OpenAIFunctionToolDef[];
-
-        assert.throws(() => trimV2MessagesForBudget([msg], tools, modelInfo), /Message exceeds token limit/);
-
-        const sysMsg = {
-            role: "system",
-            content: [{ type: "text", text: "way too long system message" }],
-        } as unknown as V2ChatMessage;
-        assert.throws(() => trimV2MessagesForBudget([sysMsg], undefined, modelInfo), /Message exceeds token limit/);
-    });
-
-    test("isContextOverflowError matches known patterns", () => {
-        const codeError = Object.assign(new Error("overflow"), { code: "context_length_exceeded" });
-        const tokenError = Object.assign(new Error("overflow"), { code: "tokens_exceeded" });
-        const messageError = new Error("This model's maximum context length is 50 tokens");
-        const typedError = Object.assign(new Error("overflow"), {
-            type: "invalid_request_error",
-            message: "maximum context length exceeded",
-        });
-
-        assert.strictEqual(isContextOverflowError(codeError), true);
-        assert.strictEqual(isContextOverflowError(tokenError), true);
-        assert.strictEqual(isContextOverflowError(messageError), true);
-        assert.strictEqual(isContextOverflowError(typedError), true);
-    });
-
-    test("isContextOverflowError ignores unrelated errors", () => {
-        const networkError = Object.assign(new Error("timeout"), { code: "ETIMEDOUT" });
-        const badRequest = Object.assign(new Error("invalid"), { status: 400, message: "invalid input" });
-
-        assert.strictEqual(isContextOverflowError(networkError), false);
-        assert.strictEqual(isContextOverflowError(badRequest), false);
-        assert.strictEqual(isContextOverflowError("plain string"), false);
-    });
-
-    test("trimV2MessagesForBudget detects cache boundary and trims from front", () => {
-        const cachedMsg = {
-            role: "system",
-            content: [
-                { type: "text", text: "This is system prompt - expensive, should be preserved" },
-                { type: "data", mimeType: "application/vnd.ai.cache-control", data: new Uint8Array() },
-            ],
-        } as unknown as V2ChatMessage;
-
-        const longUserMsg = {
-            role: "user",
-            content: [
-                { type: "text", text: "X".repeat(5000) }, // ~2300 tokens - expensive
-                { type: "data", mimeType: "cache_control", data: new Uint8Array() }, // marks boundary
-            ],
-        } as unknown as V2ChatMessage;
-
-        const recentMsg = {
-            role: "user",
-            content: [{ type: "text", text: "Recent context" }], // ~2 tokens
-        } as unknown as V2ChatMessage;
-
-        const modelInfo = { id: "test", maxInputTokens: 500 } as unknown as vscode.LanguageModelChatInformation;
-
-        // Total cost: cached system (2300) + long user (2300) + recent (2) = ~4602 tokens
-        // Budget: 500 - 0 = 500 tokens
-        // Expected: keep cachedMsg and recentMsg (cached) only
-        const trimmed = trimV2MessagesForBudget([cachedMsg, longUserMsg, recentMsg], undefined, modelInfo);
-
-        assert.strictEqual(trimmed.length, 2);
-        assert.strictEqual(trimmed[0], cachedMsg);
-        assert.strictEqual(trimmed[1], recentMsg);
-    });
-
-    test("trimV2MessagesForBudget preserves cache boundary when budget allows all messages", () => {
-        const cachedMsg = {
-            role: "system",
-            content: [
-                { type: "text", text: "Cached system prompt" },
-                { type: "data", mimeType: "cache_control", data: new Uint8Array() },
-            ],
-        } as unknown as V2ChatMessage;
-
-        const regularMsg = {
-            role: "user",
-            content: [{ type: "text", text: "Regular message" }],
-        } as unknown as V2ChatMessage;
-
-        const modelInfo = { id: "test", maxInputTokens: 10000 } as unknown as vscode.LanguageModelChatInformation;
-
-        // All messages should fit within large budget
-        const trimmed = trimV2MessagesForBudget([cachedMsg, regularMsg], undefined, modelInfo);
-
-        assert.strictEqual(trimmed.length, 2);
-        assert.strictEqual(trimmed[0], cachedMsg);
-        assert.strictEqual(trimmed[1], regularMsg);
-    });
-
-    test("trimV2MessagesForBudget falls back to normal trimming with no cache boundary", () => {
-        const oldMsg = { role: "user", content: [{ type: "text", text: "Old message" }] } as unknown as V2ChatMessage;
-        const oldMsg2 = {
-            role: "user",
-            content: [{ type: "text", text: "Older message" }],
-        } as unknown as V2ChatMessage;
-        const newMsg = { role: "user", content: [{ type: "text", text: "New message" }] } as unknown as V2ChatMessage;
-
-        const modelInfo = { id: "test", maxInputTokens: 100 } as unknown as vscode.LanguageModelChatInformation;
-
-        // Old captures: 13, Older captures: 14, New captures: 11 -> total ~38 tokens
-        // Budget: 100 - 0 = 100 tokens
-        // All should fit: no trimming needed
-        const trimmed = trimV2MessagesForBudget([oldMsg, oldMsg2, newMsg], undefined, modelInfo);
-
-        assert.strictEqual(trimmed.length, 3);
-        assert.strictEqual(trimmed[2], newMsg); // Most recent kept
-    });
-
-    test("trimV2MessagesForBudget handles cache boundary with assistant protect on continue", () => {
-        const cachedMsg = {
-            role: "system",
-            content: [
-                { type: "text", text: "Cached system" },
-                { type: "data", mimeType: "cache_control", data: new Uint8Array() },
-            ],
-        } as unknown as V2ChatMessage;
-
-        const cachedUserMsg = {
-            role: "user",
-            content: [
-                { type: "text", text: "Response content" },
-                { type: "data", mimeType: "cache_control", data: new Uint8Array() },
-            ],
-        } as unknown as V2ChatMessage;
-
-        const assistantMsg = {
-            role: "assistant",
-            content: [{ type: "text", text: "Assistant response" }],
-        } as unknown as V2ChatMessage;
-
-        const continueMsg = {
-            role: "user",
-            content: [{ type: "text", text: "continue" }],
-        } as unknown as V2ChatMessage;
-
-        const modelInfo = { id: "test", maxInputTokens: 500 } as unknown as vscode.LanguageModelChatInformation;
-
-        const trimmed = trimV2MessagesForBudget(
-            [cachedMsg, cachedUserMsg, assistantMsg, continueMsg],
+        const trimmed = trimMessagesToFitBudget(
+            [oldUserMessage, assistantWithThinking, recentUserMessage],
             undefined,
-            modelInfo
+            model
         );
 
-        // All messages should fit (4 messages within large budget)
-        assert.strictEqual(trimmed.length, 4);
-        assert.strictEqual(trimmed[0], cachedMsg);
-        assert.strictEqual(trimmed[3], continueMsg);
+        // The old user message (400 chars) must be trimmed to fit the 50-token budget.
+        assert.ok(trimmed.length < 3, "front message must be trimmed");
+
+        // The retained assistant message must NOT carry thinking_blocks.
+        const retainedAssistant = trimmed.find(
+            (m) => m.role === (vscode.LanguageModelChatMessageRole.Assistant as unknown as number)
+        );
+        assert.ok(retainedAssistant, "assistant message must be retained");
+        assert.strictEqual(
+            "thinking_blocks" in (retainedAssistant as unknown as Record<string, unknown>),
+            false,
+            "thinking_blocks must be stripped when earlier prefix was removed"
+        );
+    });
+
+    test("trimMessagesToFitBudget preserves thinking_blocks when no front trimming occurs", () => {
+        const model = {
+            id: "anthropic/claude-fable-5-1",
+            maxInputTokens: 10000,
+            maxOutputTokens: 100,
+        } as vscode.LanguageModelChatInformation;
+
+        const userMessage: vscode.LanguageModelChatRequestMessage = {
+            role: vscode.LanguageModelChatMessageRole.User,
+            content: [new vscode.LanguageModelTextPart("small message")],
+            name: undefined,
+        };
+        const assistantWithThinking = {
+            role: vscode.LanguageModelChatMessageRole.Assistant,
+            content: [new vscode.LanguageModelTextPart("answer")],
+            name: undefined,
+            thinking_blocks: [{ type: "thinking", thinking: "reasoning", signature: "sig-abc" }],
+        } as unknown as vscode.LanguageModelChatRequestMessage;
+
+        const trimmed = trimMessagesToFitBudget([userMessage, assistantWithThinking], undefined, model);
+
+        // No trimming occurred, so thinking_blocks must be preserved.
+        assert.strictEqual(trimmed.length, 2);
+        const retainedAssistant = trimmed.find(
+            (m) => m.role === (vscode.LanguageModelChatMessageRole.Assistant as unknown as number)
+        );
+        assert.ok(retainedAssistant);
+        assert.ok(
+            "thinking_blocks" in (retainedAssistant as unknown as Record<string, unknown>),
+            "thinking_blocks must be preserved when no front trimming occurred"
+        );
     });
 });

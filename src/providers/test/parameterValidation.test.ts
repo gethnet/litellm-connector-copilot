@@ -1,5 +1,6 @@
 import * as assert from "assert";
 import { LiteLLMProviderBase } from "../liteLLMProviderBase";
+import { isFable51Family } from "../../utils/modelUtils";
 import type { LiteLLMModelInfo } from "../../types";
 import { createMockSecrets } from "../../test/utils/testMocks";
 
@@ -200,5 +201,96 @@ suite("Parameter Validation from supported_openai_params", () => {
         };
         const result = provider.testIsParameterSupported("tool_choice", modelInfo, "gpt-5.6");
         assert.strictEqual(result, false);
+    });
+
+    test("strips temperature for claude-fable-5-1 via static fallback", () => {
+        // No supported_openai_params → static KNOWN_PARAMETER_LIMITATIONS applies.
+        const result = provider.testIsParameterSupported("temperature", undefined, "claude-fable-5-1");
+        assert.strictEqual(result, false);
+    });
+
+    test("strips top_p for claude-fable-5-1 via static fallback", () => {
+        const result = provider.testIsParameterSupported("top_p", undefined, "claude-fable-5-1");
+        assert.strictEqual(result, false);
+    });
+
+    test("strips top_k for claude-fable-5-1 via static fallback", () => {
+        const result = provider.testIsParameterSupported("top_k", undefined, "claude-fable-5-1");
+        assert.strictEqual(result, false);
+    });
+
+    test("strips temperature for provider-prefixed anthropic/claude-fable-5-1", () => {
+        const result = provider.testIsParameterSupported("temperature", undefined, "anthropic/claude-fable-5-1");
+        assert.strictEqual(result, false);
+    });
+
+    test("strips temperature for claude-mythos-5-1 via static fallback", () => {
+        const result = provider.testIsParameterSupported("temperature", undefined, "claude-mythos-5-1");
+        assert.strictEqual(result, false);
+    });
+
+    test("model-card supported_openai_params wins over static fable-5-1 denylist", () => {
+        // If a corrected gateway card explicitly lists temperature, the static
+        // denylist must NOT override it (modelInfo is the source of truth).
+        const modelInfo: LiteLLMModelInfo = {
+            supported_openai_params: ["temperature", "top_p", "stream"],
+        };
+        const result = provider.testIsParameterSupported("temperature", modelInfo, "claude-fable-5-1");
+        assert.strictEqual(result, true);
+    });
+
+    test("strips temperature for aliased Fable 5.1 ids (snapshot, Bedrock, regional)", () => {
+        // These shapes previously slipped past the tool_choice guard while the
+        // denylist caught them; both guards must now agree (see parity suite).
+        const aliasedIds = [
+            "claude-fable-5-1@20260801",
+            "anthropic.claude-fable-5-1-v1:0",
+            "us.anthropic.claude-fable-5-1-v1:0",
+        ];
+        for (const id of aliasedIds) {
+            assert.strictEqual(
+                provider.testIsParameterSupported("temperature", undefined, id),
+                false,
+                `expected sampling-param strip for aliased Fable 5.1 id "${id}"`
+            );
+        }
+    });
+
+    test("does NOT strip sampling params for claude-fable-5-10 (future minor)", () => {
+        // The old substring denylist over-matched `claude-fable-5-10` because
+        // `id.includes("claude-fable-5-1")` is true. Boundary-aware matching
+        // must treat it as a distinct model.
+        assert.strictEqual(
+            provider.testIsParameterSupported("temperature", undefined, "claude-fable-5-10"),
+            true,
+            "claude-fable-5-10 is not the 5.1 generation — sampling params must not be stripped"
+        );
+    });
+
+    test("Fable 5.1 guards agree: denylist membership matches the family helper", () => {
+        // Parity guard. The tool_choice downgrade (requestBuilder) and the
+        // sampling-param denylist (this module) must recognize exactly the
+        // same set of Fable 5.1 / Mythos 5.1 ids, so no id can get its
+        // sampling params stripped while a forced tool_choice still goes out.
+        const probeIds = [
+            "claude-fable-5-1",
+            "claude-mythos-5-1",
+            "anthropic/claude-fable-5-1",
+            "claude-fable-5-1@20260801",
+            "anthropic.claude-fable-5-1-v1:0",
+            "us.anthropic.claude-fable-5-1-v1:0",
+            "claude-fable-51", // conservative over-match — both guards must agree
+            "claude-fable-5",
+            "claude-fable-5-10",
+            "notclaude-fable-5-1",
+        ];
+        for (const id of probeIds) {
+            const denylistStrips = !provider.testIsParameterSupported("temperature", undefined, id);
+            assert.strictEqual(
+                denylistStrips,
+                isFable51Family(id),
+                `guard divergence for "${id}": denylistStrips=${denylistStrips}, familyMatch=${isFable51Family(id)} — both Fable 5.1 guards must agree`
+            );
+        }
     });
 });

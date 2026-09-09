@@ -121,5 +121,18 @@ export function isThinkingBlockRetryableError(error: unknown): boolean {
 
     const identifiesMissingBlockDiscriminant = /messages\.\d+\.content\.\d+\.type:\s*field required/.test(text);
 
-    return (identifiesThinking && identifiesRejection) || identifiesMissingBlockDiscriminant;
+    // Fable 5.1 preserved-thinking errors (enforced on accounts created on/after
+    // 2026-08-31). These are 400s that are cleared by stripping thinking_blocks
+    // and retrying once. See migration guide "Editing earlier turns invalidates
+    // thinking blocks" and "Controls for blocks that aren't preserved (beta)".
+    const identifiesFable51PrefixMismatch =
+        text.includes("bound to a different conversation") ||
+        text.includes("prefix_binding_mismatch") ||
+        text.includes("model_binding_mismatch");
+
+    return (
+        (identifiesThinking && identifiesRejection) ||
+        identifiesMissingBlockDiscriminant ||
+        identifiesFable51PrefixMismatch
+    );
 }

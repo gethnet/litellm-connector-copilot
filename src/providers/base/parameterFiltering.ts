@@ -1,4 +1,5 @@
 import type { LiteLLMModelInfo } from "../../types";
+import { isFable51Family } from "../../utils/modelUtils";
 
 /**
  * Static fallback parameter limitations for known model families.
@@ -12,6 +13,12 @@ export const KNOWN_PARAMETER_LIMITATIONS: Record<string, Set<string>> = {
     "claude-3-sonnet": new Set(["temperature"]),
     "claude-3-haiku": new Set(["temperature"]),
     "claude-haiku-4-5": new Set(["temperature"]),
+    // Claude Fable 5.1 / Mythos 5.1: adaptive thinking always on; non-default
+    // temperature, top_p, top_k return a 400 on every request. These are
+    // prefix-match keys so provider-prefixed IDs (anthropic/claude-fable-5-1,
+    // bedrock/claude-fable-5-1) are covered.
+    "claude-fable-5-1": new Set(["temperature", "top_p", "top_k"]),
+    "claude-mythos-5-1": new Set(["temperature", "top_p", "top_k"]),
     "gpt-5.1-codex": new Set(["temperature", "frequency_penalty", "presence_penalty"]),
     "gpt-5.1-codex-mini": new Set(["temperature", "frequency_penalty", "presence_penalty"]),
     "gpt-5.1-codex-max": new Set(["temperature", "frequency_penalty", "presence_penalty"]),
@@ -82,7 +89,22 @@ export function isParameterSupported(
         if (KNOWN_PARAMETER_LIMITATIONS[modelId]?.has(param)) {
             return false;
         }
+        // Fable 5.1 / Mythos 5.1 family: boundary-aware match via the shared
+        // helper so snapshot (`@20260801`) and Bedrock dot-namespaced
+        // (`anthropic.claude-fable-5-1-v1:0`) aliases are covered, while a
+        // hypothetical `claude-fable-5-10` is NOT the 5.1 generation. The
+        // helper is the single source of truth shared with the tool_choice
+        // downgrade guard in requestBuilder; parity is enforced by test.
+        if (isFable51Family(modelId) && KNOWN_PARAMETER_LIMITATIONS["claude-fable-5-1"]?.has(param)) {
+            return false;
+        }
         for (const [knownModel, limitations] of Object.entries(KNOWN_PARAMETER_LIMITATIONS)) {
+            // Fable-family keys are matched boundary-aware above; skip them
+            // here so plain substring matching cannot over-match lookalike
+            // ids (e.g. `claude-fable-5-10` contains `claude-fable-5-1`).
+            if (isFable51Family(knownModel)) {
+                continue;
+            }
             if (modelId.includes(knownModel) && limitations.has(param)) {
                 return false;
             }

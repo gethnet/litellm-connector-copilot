@@ -927,6 +927,71 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
     });
 });
 
+suite("Fable 5.1 Refusal Detection", () => {
+    test("detects chat-completions refusal via finish_reason and emits refusal finish", () => {
+        const state = createInitialStreamingState();
+
+        // Fable 5.1 can return HTTP 200 with finish_reason: "refusal".
+        // The stream interpreter must surface this as a refusal, not a
+        // normal completion.
+        const parts = interpretStreamEvent(
+            {
+                choices: [
+                    {
+                        finish_reason: "refusal",
+                        message: {
+                            stop_details: { category: "cyber" },
+                        },
+                    },
+                ],
+            },
+            state
+        );
+
+        const finish = parts.find((p) => p.type === "finish");
+        assert.ok(finish && finish.type === "finish");
+        if (finish && finish.type === "finish") {
+            assert.strictEqual(finish.reason, "refusal");
+        }
+    });
+
+    test("detects /responses refusal via response.status and emits refusal finish", () => {
+        const state = createInitialStreamingState();
+
+        // /responses shape: response.completed carries status: "refusal".
+        const parts = interpretStreamEvent(
+            {
+                type: "response.completed",
+                response: {
+                    status: "refusal",
+                    stop_details: { category: "reasoning_extraction" },
+                    usage: { input_tokens: 10, output_tokens: 5 },
+                },
+            },
+            state
+        );
+
+        const finish = parts.find((p) => p.type === "finish");
+        assert.ok(finish && finish.type === "finish");
+        if (finish && finish.type === "finish") {
+            assert.strictEqual(finish.reason, "refusal");
+        }
+    });
+
+    test("does not treat normal finish_reason as refusal", () => {
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent({ choices: [{ finish_reason: "stop" }] }, state);
+
+        const finish = parts.find((p) => p.type === "finish");
+        assert.ok(finish && finish.type === "finish");
+        if (finish && finish.type === "finish") {
+            assert.strictEqual(finish.reason, "stop");
+            assert.notStrictEqual(finish.reason, "refusal");
+        }
+    });
+});
+
 suite("flushPendingBuffers Unit Tests", () => {
     test("flushes /responses-format tool calls and emits with reason: incomplete_stream_end", () => {
         const state = createInitialStreamingState();

@@ -1,15 +1,10 @@
 import type * as vscode from "vscode";
-import {
-    convertMessages,
-    convertTools,
-    validateRequest,
-    validateV2Messages,
-    convertV2MessagesToOpenAI,
-} from "../../utils";
-import { trimMessagesToFitBudget, trimV2MessagesForBudget } from "../../adapters/tokenUtils";
+import { convertMessages, convertTools, validateRequest } from "../../utils";
+import { trimMessagesToFitBudget } from "../../adapters/tokenUtils";
+import { StructuredLogger } from "../../observability/structuredLogger";
+import { isFable51Family } from "../../utils/modelUtils";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, OpenAIFunctionToolDef } from "../../types";
 import type { RequestBuilderDeps } from "./types";
-import type { V2ChatMessage } from "../v2Types";
 import { resolveChatReasoningTransport } from "./reasoningTransport";
 import { applyPromptCachePolicy, modelSupportsPromptCacheControl } from "../../utils/promptCacheControl";
 import type { PromptCachePolicySummary } from "../../utils/promptCacheControl";
@@ -172,7 +167,20 @@ export class RequestBuilder {
         //    b. Model supports it - default to "auto" for backward compatibility
         if (toolConfig.tools && toolConfig.tools.length > 0) {
             if (this.isParameterSupported("tool_choice", modelInfo, rawModelId)) {
-                if (toolConfig.tool_choice) {
+                if (toolConfig.tool_choice && isForcedToolChoiceRejectedByModel(rawModelId)) {
+                    // Fable 5.1 and Mythos 5.1 reject { type: "tool" } / { type: "any" }
+                    // with a 400. Downgrade to "auto" so the request succeeds; the tool
+                    // schema is preserved and the model decides whether to call it.
+                    // Migration guide: use tool_choice: "auto" + strict tool + explicit
+                    // instruction. We cannot inject per-turn instructions without
+                    // invalidating thinking-block prefixes, so "auto" is the safe floor.
+                    StructuredLogger.warn("request.tool_choice_forced_downgraded", {
+                        model: rawModelId,
+                        downgradedTo: "auto",
+                        reason: "fable-5-1-rejects-forced-tool-choice",
+                    });
+                    requestBody.tool_choice = "auto";
+                } else if (toolConfig.tool_choice) {
                     // Explicitly required tool (toolMode === Required)
                     requestBody.tool_choice = toolConfig.tool_choice;
                 } else {
@@ -187,86 +195,21 @@ export class RequestBuilder {
         this.finalizeRequestBody(requestBody, rawModelId, config.disableCaching === true, modelInfo);
         return requestBody;
     }
+}
 
-    public async buildV2ChatRequest(
-        messages: readonly V2ChatMessage[],
-        model: vscode.LanguageModelChatInformation,
-        options: vscode.ProvideLanguageModelChatResponseOptions,
-        modelInfo?: LiteLLMModelInfo,
-        _caller?: string
-    ): Promise<OpenAIChatCompletionRequest> {
-        const config = await this.configManager.getConfig();
-        // See `buildOpenAIChatRequest` for the rationale: `model.id` is
-        // namespaced, the body needs the raw model name.
-        const rawModelId = this.extractRawModelName(model.id);
-
-        const toolConfig = convertTools(options);
-        const trimmedMessages = trimV2MessagesForBudget(messages, toolConfig.tools, model, modelInfo);
-        validateV2Messages(trimmedMessages);
-
-        const reasoningEffort = this.getReasoningEffort(options, model, modelInfo);
-        const reasoningTransport = resolveChatReasoningTransport(
-            reasoningEffort,
-            rawModelId,
-            modelInfo,
-            this.isParameterSupported
-        );
-        const mo = (options.modelOptions as Record<string, unknown>) ?? {};
-
-        const openaiMessages = convertV2MessagesToOpenAI(trimmedMessages, {
-            attachPromptCacheControl: modelSupportsPromptCacheControl(rawModelId, modelInfo),
-        });
-        const requestBody: OpenAIChatCompletionRequest = {
-            model: rawModelId,
-            messages: openaiMessages,
-            stream: true,
-            max_tokens:
-                typeof options.modelOptions?.max_tokens === "number"
-                    ? Math.min(options.modelOptions.max_tokens, model.maxOutputTokens)
-                    : model.maxOutputTokens,
-            ...reasoningTransport,
-        };
-
-        if (this.isParameterSupported("temperature", modelInfo, rawModelId)) {
-            const temp = mo.temperature as number | undefined;
-            requestBody.temperature = temp;
-        }
-        if (this.isParameterSupported("frequency_penalty", modelInfo, rawModelId)) {
-            const fp = mo.frequency_penalty as number | undefined;
-            requestBody.frequency_penalty = fp;
-        }
-        if (this.isParameterSupported("presence_penalty", modelInfo, rawModelId)) {
-            const pp = mo.presence_penalty as number | undefined;
-            requestBody.presence_penalty = pp;
-        }
-        if (this.isParameterSupported("top_p", modelInfo, rawModelId) && typeof mo.top_p === "number") {
-            requestBody.top_p = mo.top_p;
-        }
-
-        if (toolConfig.tools) {
-            requestBody.tools = toolConfig.tools as unknown as OpenAIFunctionToolDef[];
-        }
-
-        // Only include tool_choice when:
-        // 1. Model supports tool_choice (per isParameterSupported), AND
-        // 2. Tools are present, AND
-        //    a. Explicitly required by toolMode (toolConfig.tool_choice is set), OR
-        //    b. Model supports it - default to "auto" for backward compatibility
-        if (toolConfig.tools && toolConfig.tools.length > 0) {
-            if (this.isParameterSupported("tool_choice", modelInfo, rawModelId)) {
-                if (toolConfig.tool_choice) {
-                    // Explicitly required tool (toolMode === Required)
-                    requestBody.tool_choice = toolConfig.tool_choice;
-                } else {
-                    // Model supports tool_choice, tools present, but no explicit required mode
-                    // Default to "auto" for backward compatibility
-                    requestBody.tool_choice = "auto";
-                }
-            }
-            // If model doesn't support tool_choice, omit it entirely
-        }
-
-        this.finalizeRequestBody(requestBody, rawModelId, config.disableCaching === true, modelInfo);
-        return requestBody;
-    }
+/**
+ * Models that reject forced `tool_choice` (`{ type: "tool" }` or `{ type: "any" }`)
+ * with a 400 error. Claude Fable 5.1 and Mythos 5.1 always-on adaptive thinking
+ * is incompatible with forced tool use; the migration guide requires
+ * `tool_choice: "auto"` + strict tools + explicit instruction instead.
+ *
+ * Delegates to the shared `isFable51Family` helper (utils/modelUtils) so this
+ * guard recognizes exactly the same id shapes as the sampling-param denylist
+ * (parameterFiltering) — bare, provider-prefixed, snapshot, and Bedrock
+ * dot-namespaced ids alike. Parity is enforced by test; the guards must never
+ * drift apart (a gap here would strip sampling params for an id while still
+ * sending a forced tool_choice the backend rejects with a 400).
+ */
+function isForcedToolChoiceRejectedByModel(rawModelId: string): boolean {
+    return isFable51Family(rawModelId);
 }

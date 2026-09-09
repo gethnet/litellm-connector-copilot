@@ -1,10 +1,9 @@
 import * as vscode from "vscode";
 import type { LiteLLMModelInfo, OpenAIChatMessage } from "../types";
 import { isAnthropicModel } from "../utils/modelUtils";
+import { StructuredLogger } from "../observability/structuredLogger";
 import { selectTokenizer } from "./tokenizers/selectTokenizer";
-import type { V2ChatMessage } from "../providers/v2Types";
 import type { TelemetryService } from "../telemetry/telemetryService";
-import { isCacheControlMimeType } from "../utils";
 
 // Token estimation constants for binary media types
 // These are conservative estimates to avoid context window overflow
@@ -211,106 +210,6 @@ export function getTotalTokenLimit(model: vscode.LanguageModelChatInformation, m
     return Math.max(1, model.maxInputTokens + model.maxOutputTokens);
 }
 
-export function countTokensForV2Messages(
-    input: string | V2ChatMessage | readonly V2ChatMessage[],
-    modelId?: string,
-    modelInfo?: LiteLLMModelInfo
-): number {
-    if (typeof input === "string") {
-        return countTokens(input, modelId, modelInfo);
-    }
-
-    // Properly type narrow to V2ChatMessage array for type safety
-    const messages: readonly V2ChatMessage[] = Array.isArray(input)
-        ? (input as readonly V2ChatMessage[])
-        : [input as V2ChatMessage];
-    let total = 0;
-    for (const message of messages) {
-        // Guard: ensure message has required V2ChatMessage properties
-        if (!message || typeof message !== "object" || !("content" in message) || !("role" in message)) {
-            continue;
-        }
-        const msgContent = (message as V2ChatMessage).content;
-        if (!Array.isArray(msgContent)) {
-            continue;
-        }
-
-        for (const part of msgContent) {
-            // Cast to V2ChatMessagePart type for existing types, allow extensions for image/pdf
-            const castedPart = part as unknown as
-                | { type: "text"; text: string }
-                | { type: "thinking"; value: string | string[] }
-                | { type: "data"; mimeType: string; data: Uint8Array<ArrayBufferLike> }
-                | { type: "tool_call"; name: string; input?: object }
-                | { type: "tool_result"; content?: object }
-                | { type: "image" | "pdf"; mimeType: string; data: Uint8Array<ArrayBufferLike> };
-            switch (castedPart.type) {
-                case "text":
-                    total += countTokens(castedPart.text, modelId, modelInfo);
-                    break;
-                case "thinking":
-                    total += countTokens(
-                        Array.isArray(castedPart.value) ? castedPart.value.join("") : castedPart.value,
-                        modelId,
-                        modelInfo
-                    );
-                    break;
-                case "image":
-                    if (typeof castedPart.mimeType === "string" && castedPart.data instanceof Uint8Array) {
-                        const dataLength = castedPart.data.length;
-                        total += estimateMediaTokenCost(castedPart.mimeType, dataLength);
-                    }
-                    break;
-                case "pdf":
-                    if (typeof castedPart.mimeType === "string" && castedPart.data instanceof Uint8Array) {
-                        const dataLength = castedPart.data.length;
-                        total += estimateMediaTokenCost(castedPart.mimeType, dataLength);
-                    }
-                    break;
-                case "data":
-                    // Skip cache_control parts — they are dropped at the
-                    // transport layer (see decodeV2DataPart / convertMessages)
-                    // and must not inflate the token budget. Checked BEFORE the
-                    // JSON branch so that "application/vnd.cache-control+json"
-                    // variants are also skipped.
-                    if (isCacheControlMimeType(castedPart.mimeType)) {
-                        break;
-                    }
-                    // Count media types (images, PDFs) with conservative token estimates
-                    if (
-                        typeof castedPart.mimeType === "string" &&
-                        (castedPart.mimeType.startsWith("image/") || castedPart.mimeType === "application/pdf")
-                    ) {
-                        const dataLength =
-                            castedPart.data instanceof Uint8Array
-                                ? castedPart.data.length
-                                : Buffer.from(castedPart.data).length;
-                        total += estimateMediaTokenCost(castedPart.mimeType, dataLength);
-                    }
-                    // Count text and JSON data
-                    else if (
-                        (typeof castedPart.mimeType === "string" && castedPart.mimeType.startsWith("text/")) ||
-                        castedPart.mimeType.includes("json")
-                    ) {
-                        total += countTokens(Buffer.from(castedPart.data).toString("utf-8"), modelId, modelInfo);
-                    }
-                    break;
-                case "tool_call":
-                    total += countTokens(
-                        `${castedPart.name}${JSON.stringify(castedPart.input ?? {})}`,
-                        modelId,
-                        modelInfo
-                    );
-                    break;
-                case "tool_result":
-                    total += countTokens(JSON.stringify(castedPart.content ?? []), modelId, modelInfo);
-                    break;
-            }
-        }
-    }
-    return total;
-}
-
 /**
  * Roughly estimate tokens for VS Code chat messages (text only)
  */
@@ -459,7 +358,56 @@ export function trimMessagesToFitBudget(
         telemetryServiceInstance.captureTrimExecuted(model.id, "chat", originalTokens, used, budget);
     }
 
+    // Fable 5.1 thinking blocks are conversation-prefix-bound: if we removed
+    // any earlier messages, all retained thinking_blocks are invalidated and
+    // would cause a 400 ("The block is bound to a different conversation") on
+    // enforced accounts. Strip thinking_blocks from retained assistant messages
+    // (preserve text, tool_calls, tool_results) when front trimming occurred.
+    // This is the "keep-tail compaction" shape from the Fable 5.1 migration guide.
+    if (selected.length < messageArray.length) {
+        const stripped = stripThinkingBlocksFromRetainedMessages(selected);
+        if (stripped.didStrip) {
+            StructuredLogger.warn("trim.thinking_blocks_stripped", {
+                model: model.id,
+                originalCount: messageArray.length,
+                retainedCount: selected.length,
+                reason: "front-trim-invalidates-prefix-bound-thinking",
+            });
+        }
+        return stripped.messages;
+    }
+
     return selected;
+}
+
+/**
+ * Strips `thinking_blocks` from retained assistant messages when front trimming
+ * has removed earlier conversation content. Fable 5.1 thinking blocks are bound
+ * to the exact conversation prefix that preceded them; removing any earlier
+ * message invalidates every later thinking block and causes a 400 on enforced
+ * accounts. Text, tool_calls, and tool_results are preserved.
+ *
+ * Returns the (possibly modified) message array and a flag indicating whether
+ * any stripping occurred, so the caller can log the degradation.
+ */
+function stripThinkingBlocksFromRetainedMessages(messages: readonly vscode.LanguageModelChatRequestMessage[]): {
+    messages: readonly vscode.LanguageModelChatRequestMessage[];
+    didStrip: boolean;
+} {
+    let didStrip = false;
+    const result = messages.map((message) => {
+        const record = message as unknown as { thinking_blocks?: unknown };
+        if (Array.isArray(record.thinking_blocks) && record.thinking_blocks.length > 0) {
+            didStrip = true;
+            // Shallow-copy and delete only the continuity field; all other
+            // content (text, tool calls, tool results) stays intact.
+            const copy = { ...message } as unknown as Record<string, unknown>;
+            delete copy.thinking_blocks;
+            return copy as unknown as vscode.LanguageModelChatRequestMessage;
+        }
+        return message;
+    });
+    return { messages: result, didStrip };
 }
 
 /**
@@ -488,119 +436,4 @@ export function isContextOverflowError(err: unknown): boolean {
     }
 
     return false;
-}
-
-export function trimV2MessagesForBudget(
-    messages: readonly V2ChatMessage[],
-    tools: { type: string; function: { name: string; description?: string; parameters?: object } }[] | undefined,
-    model: vscode.LanguageModelChatInformation,
-    modelInfo?: LiteLLMModelInfo,
-    hardBudgetOverride?: number
-): readonly V2ChatMessage[] {
-    const toolTokenCount = estimateToolTokens(tools);
-    const tokenLimit = Math.max(1, model.maxInputTokens);
-    const budgetLimit =
-        hardBudgetOverride !== undefined
-            ? Math.max(1, Math.floor(hardBudgetOverride))
-            : (() => {
-                  const bufferedLimit = Math.max(1, Math.floor(tokenLimit * 0.95));
-                  return isAnthropicModel(model.id, modelInfo)
-                      ? Math.max(1, Math.floor(bufferedLimit * 0.98))
-                      : bufferedLimit;
-              })();
-
-    const budget = budgetLimit - toolTokenCount;
-    if (budget <= 0) {
-        throw new Error("Message exceeds token limit.");
-    }
-
-    const messageArray: readonly V2ChatMessage[] = Array.isArray(messages) ? messages : [messages];
-    const originalTokens = countTokensForV2Messages(messageArray, model.id, modelInfo);
-
-    const messageHasCacheControl = (msg: V2ChatMessage): boolean =>
-        Array.isArray(msg.content) &&
-        msg.content.some(
-            (part) =>
-                part.type === "data" &&
-                typeof (part as { mimeType?: string }).mimeType === "string" &&
-                isCacheControlMimeType((part as { mimeType: string }).mimeType)
-        );
-
-    const cacheSplitIndex = messageArray.findIndex(messageHasCacheControl);
-    const hasCacheControlInHistory = cacheSplitIndex !== -1;
-
-    const lastMessage = messageArray.length > 0 ? messageArray[messageArray.length - 1] : undefined;
-    const isContinuation =
-        lastMessage &&
-        (lastMessage.role === (vscode.LanguageModelChatMessageRole.User as unknown as number) ||
-            lastMessage.role === "user") &&
-        Array.isArray(lastMessage.content) &&
-        lastMessage.content.length === 1 &&
-        lastMessage.content[0]?.type === "text" &&
-        typeof lastMessage.content[0].text === "string" &&
-        lastMessage.content[0].text.trim().toLowerCase() === "continue";
-
-    const selected: V2ChatMessage[] = [];
-    let used = 0;
-
-    if (hasCacheControlInHistory) {
-        // Preserve all messages up to and including the cache boundary as cached (zero-cost)
-        const cachedPrefix = messageArray.slice(0, cacheSplitIndex + 1);
-        selected.push(...cachedPrefix);
-
-        const tail = messageArray.slice(cacheSplitIndex + 1);
-        const tailSelected: V2ChatMessage[] = [];
-
-        for (let i = tail.length - 1; i >= 0; i--) {
-            const msg = tail[i];
-            const msgTokens = countTokensForV2Messages(msg, model.id, modelInfo);
-            const isProtectedAssistantMessage =
-                isContinuation &&
-                i === tail.length - 2 &&
-                (msg.role === (vscode.LanguageModelChatMessageRole.Assistant as unknown as number) ||
-                    msg.role === "assistant");
-
-            if (
-                used + msgTokens <= budget ||
-                (tailSelected.length === 0 && selected.length === cachedPrefix.length) ||
-                isProtectedAssistantMessage
-            ) {
-                tailSelected.unshift(msg);
-                used += msgTokens;
-            } else if (!isContinuation) {
-                break;
-            }
-        }
-
-        selected.push(...tailSelected);
-    } else {
-        // No cache boundary: trim from the end, preserving the most recent messages
-        for (let i = messageArray.length - 1; i >= 0; i--) {
-            const msg = messageArray[i];
-            const msgTokens = countTokensForV2Messages(msg, model.id, modelInfo);
-            const isProtectedAssistantMessage =
-                isContinuation &&
-                i === messageArray.length - 2 &&
-                (msg.role === (vscode.LanguageModelChatMessageRole.Assistant as unknown as number) ||
-                    msg.role === "assistant");
-
-            if (used + msgTokens <= budget || selected.length === 0 || isProtectedAssistantMessage) {
-                selected.unshift(msg);
-                used += msgTokens;
-            } else if (!isContinuation) {
-                break;
-            }
-        }
-    }
-
-    const budgetTokens = used;
-    if (telemetryServiceInstance && selected.length < messageArray.length) {
-        telemetryServiceInstance.captureTrimExecuted(model.id, "v2-chat", originalTokens, budgetTokens, budget);
-    }
-
-    if (budgetTokens > budget) {
-        throw new Error("Message exceeds token limit.");
-    }
-
-    return selected;
 }
