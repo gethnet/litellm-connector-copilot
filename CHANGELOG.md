@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 ### 🧹 Chores
 
 * **🗑️ Remove dead V2 message pipeline**: The unified request path (`buildOpenAIChatRequest` + endpoint-level `/responses` transform) has been the only live pipeline since the V1/V2 split was collapsed; the orphaned V2 message conversion stack was never called by any provider. Removed `buildV2ChatRequest`, `normalizeMessagesForV2Pipeline`, `convertV2MessagesToProviderMessages`, `convertV2MessagesToOpenAI`, `convertV2MessagesToTransportMessages`, `validateV2Messages`, `trimV2MessagesForBudget`, `countTokensForV2Messages`, and the `v2OpenAIMessageConverter.ts` / `messageConverter.ts` modules (~2,700 lines including their tests). `v2Types.ts` now exports only the live `V2EmittedPart` stream contract. (`src/providers/base/requestBuilder.ts`, `src/providers/liteLLMProviderBase.ts`, `src/utils.ts`, `src/adapters/tokenUtils.ts`, `src/providers/v2Types.ts`)
+* **🚀 Promote release version**: Promoted the package version from `2.5.6-dev1` to `2.5.6`. (`package.json`)
 
 ### 🧪 Tests
 
@@ -20,10 +21,6 @@ All notable changes to this project will be documented in this file.
 * Added a Fable 5.1 ID-matching matrix (bare, provider-prefixed, snapshot, Bedrock dot-namespaced, regional; plus adjacent-family and lookalike negatives) for the shared `isFable51Family()` helper, a guard-parity test asserting the `tool_choice` downgrade and sampling denylist agree on every probed ID, aliased-ID downgrade tests through the real `RequestBuilder`, and a wire test piping a Bedrock-alias request through the enforcing mock. (`src/utils/test/modelUtils.test.ts`, `src/providers/test/parameterValidation.test.ts`, `src/providers/test/liteLLMProviderBase.requestBuilder.test.ts`, `src/test/integration/mockLiteLLMBackend.test.ts`)
 * The mock LiteLLM backend now enforces real Fable 5.1 server-side rejections (forced `tool_choice` in both Anthropic and OpenAI shapes, non-default sampling params → 400) and captures request bodies on both endpoints. A new `Fable 5.1 Wire Compatibility` integration suite pipes real `RequestBuilder` output through the enforcing mock, proving the extension produces wire shapes the actual Anthropic backend accepts — without spending API credits. (`src/test/integration/mockLiteLLMBackend.ts`, `src/test/integration/mockLiteLLMBackend.test.ts`)
 * Removed the test files and suites that exclusively covered the deleted dead V2 pipeline; equivalent behaviors remain covered through the live `convertMessages` / stream-interpreter paths. Suite count dropped from 1,057 to 985 while all four coverage categories improved (91.65% lines from 91.50%).
-
-### 🧹 Chores
-
-* **🚀 Promote release version**: Promoted the package version from `2.5.6-dev1` to `2.5.6`. (`package.json`)
 
 ## [2.5.5] - 2026-08-29
 
