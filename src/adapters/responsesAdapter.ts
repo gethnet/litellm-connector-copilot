@@ -251,7 +251,10 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
             ? undefined
             : (() => {
                   const effort = getResponsesReasoningEffort(requestBody.reasoning_effort);
-                  return effort ? { effort } : undefined;
+                  // summary:"auto" makes OpenAI reasoning models return summary
+                  // text; LiteLLM's bridge ignores it for non-OpenAI models
+                  // (they always stream reasoning_content). See issue #149.
+                  return effort ? { effort, summary: "auto" } : undefined;
               })(),
         thinking: requestBody.thinking,
         output_config: requestBody.output_config,

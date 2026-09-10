@@ -61,34 +61,23 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
         }
     });
 
-    test("should emit thinking before text and tool calls when mixed in one chunk", () => {
+    test("should emit thinking before text when /responses reasoning delta precedes text delta", () => {
         const state = createInitialStreamingState();
 
-        const parts = interpretStreamEvent(
-            {
-                choices: [
-                    {
-                        delta: {
-                            content: "hi",
-                            tool_calls: [
-                                {
-                                    index: 0,
-                                    id: "call_order",
-                                    function: { name: "tool", arguments: "{}" },
-                                },
-                            ],
-                        },
-                        // Simulate thinking surfaced in /responses style alongside OpenAI delta
-                    },
-                ],
-                type: "response.output_reasoning.delta",
-                delta: "thought",
-            },
+        const reasoningParts = interpretStreamEvent(
+            { type: "response.reasoning_summary_text.delta", item_id: "rs_1", delta: "thought" },
             state
         );
+        const textParts = interpretStreamEvent({ type: "response.output_text.delta", delta: "hi" }, state);
 
-        const order = parts.map((p) => p.type);
-        assert.deepStrictEqual(order, ["thinking", "text"]);
+        assert.deepStrictEqual(
+            reasoningParts.map((p) => p.type),
+            ["thinking"]
+        );
+        assert.deepStrictEqual(
+            textParts.map((p) => p.type),
+            ["text"]
+        );
     });
 
     test("should parse LiteLLM /responses tool calls and flush on completed", () => {
@@ -819,8 +808,11 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
     test("should handle /responses format edge cases", () => {
         const state = createInitialStreamingState();
 
-        // Reasoning delta
-        const parts1 = interpretStreamEvent({ type: "response.output_reasoning.delta", delta: "thinking" }, state);
+        // Reasoning delta (real LiteLLM event name — see issue #149)
+        const parts1 = interpretStreamEvent(
+            { type: "response.reasoning_summary_text.delta", item_id: "rs_1", delta: "thinking" },
+            state
+        );
         assert.strictEqual(parts1[0].type, "thinking");
 
         // response.completed with partial usage
@@ -1062,117 +1054,138 @@ suite("flushPendingBuffers Unit Tests", () => {
     });
 });
 
-suite("Anthropic Thinking Block Support", () => {
-    test("emits thinking part when content_block_start with type=thinking", () => {
+suite("/responses Reasoning Event Support (real LiteLLM sequence)", () => {
+    test("full reasoning sequence: added → deltas → done emits thinking then signature part", () => {
         const state = createInitialStreamingState();
 
-        const parts = interpretStreamEvent(
+        // 1. Block opens (no part yet)
+        const open = interpretStreamEvent(
             {
-                type: "response.content_block_start",
-                index: 0,
-                block: { type: "thinking", id: "thought-1" },
+                type: "response.output_item.added",
+                output_index: 0,
+                item: { type: "reasoning", id: "rs_abc", summary: [] },
             },
             state
         );
+        assert.strictEqual(open.length, 0);
 
-        assert.ok(parts.length >= 1, "Should emit at least one part");
-        const thinkingPart = parts.find((p) => p.type === "thinking");
-        assert.ok(thinkingPart, "Should emit a thinking part");
-        if (thinkingPart && thinkingPart.type === "thinking") {
-            assert.strictEqual(thinkingPart.value, "");
-            assert.strictEqual(thinkingPart.metadata?.display, undefined);
+        // 2. Deltas stream visible thinking text
+        const d1 = interpretStreamEvent(
+            { type: "response.reasoning_summary_text.delta", item_id: "rs_abc", delta: "First " },
+            state
+        );
+        const d2 = interpretStreamEvent(
+            { type: "response.reasoning_summary_text.delta", item_id: "rs_abc", delta: "thought" },
+            state
+        );
+        assert.deepStrictEqual(
+            d1.map((p) => p.type),
+            ["thinking"]
+        );
+        assert.deepStrictEqual(
+            d2.map((p) => p.type),
+            ["thinking"]
+        );
+        if (d1[0].type === "thinking" && d2[0].type === "thinking") {
+            assert.strictEqual(d1[0].value, "First ");
+            assert.strictEqual(d2[0].value, "thought");
         }
-    });
 
-    test("emits thinking part with display=summarized when content_block_start specifies it", () => {
-        const state = createInitialStreamingState();
-
-        const parts = interpretStreamEvent(
+        // 3. Terminal text events are no-ops (text already streamed)
+        const textDone = interpretStreamEvent(
+            { type: "response.reasoning_summary_text.done", item_id: "rs_abc", text: "First thought" },
+            state
+        );
+        assert.strictEqual(textDone.length, 0);
+        const partDone = interpretStreamEvent(
             {
-                type: "response.content_block_start",
-                index: 0,
-                block: { type: "thinking", id: "thought-1", display: "summarized" },
+                type: "response.reasoning_summary_part.done",
+                item_id: "rs_abc",
+                part: { type: "summary_text", text: "First thought" },
             },
             state
         );
+        assert.strictEqual(partDone.length, 0);
 
-        const thinkingPart = parts.find((p) => p.type === "thinking");
-        assert.ok(thinkingPart && thinkingPart.type === "thinking");
-        if (thinkingPart && thinkingPart.type === "thinking") {
-            assert.strictEqual(thinkingPart.metadata?.display, "summarized");
-        }
-    });
-
-    test("emits thinking part with redactedData when content_block_start has redacted=true", () => {
-        const state = createInitialStreamingState();
-
-        const parts = interpretStreamEvent(
+        // 4. Block closes carrying the encrypted continuity state
+        const done = interpretStreamEvent(
             {
-                type: "response.content_block_start",
-                index: 0,
-                block: { type: "thinking", id: "thought-1", redacted: true, redacted_data: "encrypted_blob_123" },
+                type: "response.output_item.done",
+                output_index: 0,
+                item: {
+                    type: "reasoning",
+                    id: "rs_abc",
+                    summary: [{ type: "summary_text", text: "First thought" }],
+                    encrypted_content: "opaque-sig-123",
+                },
             },
             state
         );
-
-        const thinkingPart = parts.find((p) => p.type === "thinking");
-        assert.ok(thinkingPart && thinkingPart.type === "thinking");
-        if (thinkingPart && thinkingPart.type === "thinking") {
-            assert.strictEqual(thinkingPart.value, "");
-            assert.strictEqual(thinkingPart.metadata?.redactedData, "encrypted_blob_123");
-            assert.strictEqual(thinkingPart.metadata?.display, "omitted");
+        const sigPart = done.find((p) => p.type === "thinking");
+        assert.ok(sigPart && sigPart.type === "thinking");
+        if (sigPart.type === "thinking") {
+            assert.strictEqual(sigPart.value, "");
+            assert.strictEqual(sigPart.metadata?.encrypted_content, "opaque-sig-123");
         }
     });
 
-    test("emits signature-only thinking part when content_block_delta has signature_delta", () => {
+    test("reasoning output_item.done does not trigger the legacy tool-call flush-all", () => {
         const state = createInitialStreamingState();
 
-        const parts = interpretStreamEvent(
-            {
-                type: "response.content_block_delta",
-                index: 0,
-                delta: { type: "signature_delta", signature: "OmitSigExample123" },
-            },
-            state
-        );
-
-        const thinkingPart = parts.find((p) => p.type === "thinking");
-        assert.ok(thinkingPart && thinkingPart.type === "thinking");
-        if (thinkingPart && thinkingPart.type === "thinking") {
-            assert.strictEqual(thinkingPart.value, "");
-            assert.strictEqual(thinkingPart.metadata?.signature, "OmitSigExample123");
-            assert.strictEqual(thinkingPart.metadata?.display, "omitted");
-        }
-    });
-
-    test("preserves display metadata in output_reasoning.delta when display is set", () => {
-        const state = createInitialStreamingState();
-
-        // First set display via content_block_start
+        // Seed a buffered tool call as if a prior output_item.delta had fragments pending
         interpretStreamEvent(
             {
-                type: "response.content_block_start",
-                index: 0,
-                block: { type: "thinking", id: "thought-1", display: "omitted" },
+                type: "response.output_item.delta",
+                item: { type: "function_call", call_id: "c9", name: "t", arguments: '{"a":1}' },
             },
             state
         );
 
-        // Now receive reasoning delta but display is still "omitted" means no thinking_delta events
-        // In practice, display:omitted means the model won't send thinking deltas, only signature
+        // Reasoning done arrives for a different item — it must NOT flush the
+        // pending tool call (only function_call output_item.done may).
         const parts = interpretStreamEvent(
             {
-                type: "response.output_reasoning.delta",
-                delta: "This should not happen with display:omitted",
+                type: "response.output_item.done",
+                output_index: 0,
+                item: { type: "reasoning", id: "rs_x", summary: [], encrypted_content: "sig" },
+            },
+            state
+        );
+        assert.strictEqual(parts.filter((p) => p.type === "tool_call").length, 0);
+        // And the buffered call is still available for its own done event
+        const flush = interpretStreamEvent(
+            {
+                type: "response.output_item.done",
+                item: { type: "function_call", call_id: "c9", name: "t", arguments: '{"a":1}' },
+            },
+            state
+        );
+        assert.strictEqual(flush.filter((p) => p.type === "tool_call").length, 1);
+    });
+
+    test("redacted thinking continuity surfaces via reasoning output_item.done encrypted_content", () => {
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent(
+            {
+                type: "response.output_item.done",
+                output_index: 0,
+                item: {
+                    type: "reasoning",
+                    id: "rs_r",
+                    summary: [],
+                    // LiteLLM places redacted_thinking's opaque data in encrypted_content
+                    encrypted_content: "opaque-redacted-thinking",
+                },
             },
             state
         );
 
-        // If display:omitted and we still get deltas, they should carry the metadata
         const thinkingPart = parts.find((p) => p.type === "thinking");
         assert.ok(thinkingPart && thinkingPart.type === "thinking");
-        if (thinkingPart && thinkingPart.type === "thinking") {
-            assert.strictEqual(thinkingPart.metadata?.display, "omitted");
+        if (thinkingPart.type === "thinking") {
+            assert.strictEqual(thinkingPart.value, "");
+            assert.strictEqual(thinkingPart.metadata?.encrypted_content, "opaque-redacted-thinking");
         }
     });
 });

@@ -517,14 +517,16 @@ suite("Responses Adapter Unit Tests", () => {
         assert.strictEqual(body.input.length, 0);
     });
 
-    test("transformToResponsesFormat emits native reasoning for a selected effort", () => {
+    test("transformToResponsesFormat emits native reasoning with summary for a selected effort", () => {
         const body = transformToResponsesFormat({
             model: "gpt-5.6",
             messages: [{ role: "user", content: "hi" }],
             reasoning_effort: "high",
         });
         assert.strictEqual(body.reasoning_effort, "high");
-        assert.deepStrictEqual(body.reasoning, { effort: "high" });
+        // summary:"auto" is required for OpenAI o-series/gpt-5 to return any
+        // reasoning summary text on /responses (issue #149).
+        assert.deepStrictEqual(body.reasoning, { effort: "high", summary: "auto" });
     });
 
     test("transformToResponsesFormat preserves explicit adaptive Claude fields", () => {
