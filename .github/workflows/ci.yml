@@ -45,11 +45,16 @@ jobs:
           VSCODE_TEST_RESULTS_DIR: ${{ github.workspace }}/test-results
           POSTHOG_MOCK: true
 
+      # NOTE: Dependabot PRs are treated like fork PRs — they never receive
+      # secrets, so CODECOV_TOKEN is absent and the upload fails with
+      # "Token required because branch is protected". Do not let that
+      # cosmetic upload failure gate Dependabot dependency bumps; the build
+      # and test steps themselves still gate the merge.
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
           files: ${{ github.workspace }}/coverage/lcov.info
-          fail_ci_if_error: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' }}
+          fail_ci_if_error: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && github.event.pull_request.user.login != 'app/dependabot' }}
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload test results to Codecov
@@ -58,7 +63,7 @@ jobs:
         with:
           files: ${{ github.workspace }}/test-results/test-results.xml
           report_type: test_results
-          fail_ci_if_error: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' }}
+          fail_ci_if_error: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && github.event.pull_request.user.login != 'app/dependabot' }}
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Get Package Info

@@ -87,11 +87,31 @@ jobs:
 
           echo "VSIX_FILE=$VSIX_FILE" >> $GITHUB_ENV
 
+      # NOTE: this job never runs `npm install`, so an unscoped `npx vsce`
+      # silently resolves the deprecated vsce@2.15.0 from the registry — a
+      # 2022-era tool with a hard 3-minute socket timeout and no retry. A
+      # transient Marketplace handshake stall (>3 min on /_apis/gallery) then
+      # hard-fails the release (see rel/v2.5.6 attempts 1-2). The scoped,
+      # pinned @vscode/vsce + retry loop + --skip-duplicate (retries are
+      # idempotent; the gallery 409s duplicate versions) makes publishes
+      # resilient to transient Marketplace outages.
       - name: Publish to VS Code Marketplace
         if: |
           !contains(github.event.release.tag_name, 'dev') &&
           !contains(github.event.release.tag_name, 'test')
-        run: npx vsce publish --packagePath "$VSIX_FILE" -p ${{ secrets.VS_MARKETPLACE_PUB_TOKEN }} --no-dependencies
+        env:
+          VS_MARKETPLACE_PUB_TOKEN: ${{ secrets.VS_MARKETPLACE_PUB_TOKEN }}
+        run: |
+          for attempt in 1 2 3; do
+            if npx --yes @vscode/vsce@3.9.2 publish --packagePath "$VSIX_FILE" -p "$VS_MARKETPLACE_PUB_TOKEN" --no-dependencies --skip-duplicate; then
+              echo "Marketplace publish succeeded on attempt $attempt."
+              exit 0
+            fi
+            echo "Marketplace publish attempt $attempt failed; retrying in 60s."
+            sleep 60
+          done
+          echo "Marketplace publish failed after 3 attempts."
+          exit 1
 
       - name: Publish to Open VSX Registry
         if: |
@@ -99,4 +119,14 @@ jobs:
           !contains(github.event.release.tag_name, 'test')
         env:
           OPENVSX_TOKEN: ${{ secrets.OPENVSX_REGISTRY }}
-        run: npx ovsx publish "$VSIX_FILE" -p "$OPENVSX_TOKEN"
+        run: |
+          for attempt in 1 2 3; do
+            if npx --yes ovsx@1.1.1 publish "$VSIX_FILE" -p "$OPENVSX_TOKEN" --skip-duplicate; then
+              echo "Open VSX publish succeeded on attempt $attempt."
+              exit 0
+            fi
+            echo "Open VSX publish attempt $attempt failed; retrying in 60s."
+            sleep 60
+          done
+          echo "Open VSX publish failed after 3 attempts."
+          exit 1
