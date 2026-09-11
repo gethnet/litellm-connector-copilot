@@ -64,18 +64,54 @@ suite("Responses /responses stream interpreter integration", () => {
         }
     });
 
-    test("should handle reasoning delta events", () => {
+    test("should surface the real LiteLLM /responses reasoning sequence end-to-end", () => {
         const state = createInitialStreamingState();
 
-        const parts = interpretStreamEvent(
-            { type: "response.output_reasoning.delta", delta: "Let me think..." },
+        // Real LiteLLM bridge sequence for a reasoning model (issue #149)
+        const open = interpretStreamEvent(
+            {
+                type: "response.output_item.added",
+                output_index: 0,
+                item: { type: "reasoning", id: "rs_1", summary: [] },
+            },
             state
         );
+        assert.strictEqual(open.length, 0);
 
-        assert.strictEqual(parts.length, 1);
-        assert.strictEqual(parts[0].type, "thinking");
-        if (parts[0].type === "thinking") {
-            assert.strictEqual(parts[0].value, "Let me think...");
+        const delta = interpretStreamEvent(
+            { type: "response.reasoning_summary_text.delta", item_id: "rs_1", delta: "Let me think..." },
+            state
+        );
+        assert.strictEqual(delta.length, 1);
+        assert.strictEqual(delta[0].type, "thinking");
+        if (delta[0].type === "thinking") {
+            assert.strictEqual(delta[0].value, "Let me think...");
         }
+
+        const done = interpretStreamEvent(
+            {
+                type: "response.output_item.done",
+                output_index: 0,
+                item: {
+                    type: "reasoning",
+                    id: "rs_1",
+                    summary: [{ type: "summary_text", text: "Let me think..." }],
+                    encrypted_content: "opaque-continuity",
+                },
+            },
+            state
+        );
+        const sig = done.find((p) => p.type === "thinking");
+        assert.ok(sig && sig.type === "thinking");
+        if (sig.type === "thinking") {
+            assert.strictEqual(sig.metadata?.encrypted_content, "opaque-continuity");
+        }
+
+        // And the completed frame still yields usage afterwards
+        const completed = interpretStreamEvent(
+            { type: "response.completed", response: { usage: { input_tokens: 3, output_tokens: 2 } } },
+            state
+        );
+        assert.ok(completed.some((p) => p.type === "data"));
     });
 });

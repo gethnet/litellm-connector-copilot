@@ -8,6 +8,12 @@ All notable changes to this project will be documented in this file.
 
 * **🛠️ Harden marketplace publish pipeline**: The `publish-marketplace` release job invoked unpinned `npx vsce`, which silently resolved the deprecated unscoped `vsce@2.15.0` from the registry (the job never installs dependencies) — a 2022-era tool with a hard 3-minute socket timeout and no retry. A transient Marketplace handshake stall on `/_apis/gallery` then hard-failed both publish attempts for `rel/v2.5.6` (`Request timeout: /_apis/gallery`). Publish steps now use the scoped, pinned `@vscode/vsce@3.9.2` (matching the local devDependency) and `ovsx@1.1.1`, wrap the publish in a 3-attempt retry loop with 60s backoff, and pass `--skip-duplicate` so retries are idempotent (the gallery 409s duplicate versions). Also un-gated the Codecov uploads from failing Dependabot PR CI: Dependabot runs never receive secrets, so the upload always fails with "Token required because branch is protected" — build and test steps still gate those PRs. (`.github/workflows/release.yml`, `.github/workflows/ci.yml`)
 
+## [2.5.7] - 2026-09-11
+
+### 🐛 Fixes
+
+* **🧠 Reasoning/thinking blocks surfaced on the `/responses` endpoint (#149)**: The stream interpreter listened for `/responses` reasoning event names LiteLLM never emits (`response.output_reasoning.delta`, raw Anthropic `content_block_*`), so thinking from every non-OpenAI reasoning model routed via `/responses` (Claude Fable 5.1, Z.ai GLM, DeepSeek, ...) was silently dropped — the model reasoned (usage reported `reasoning_tokens`) but no thinking block ever rendered, and Anthropic signature continuity data was lost. A new `responsesReasoningEvents.ts` module maps the real LiteLLM bridge sequence (`output_item.added`/`output_item.done` with `item.type "reasoning"`, `reasoning_summary_text.delta`, and the native OpenAI `reasoning_text.delta` alias) to thinking parts, capturing `encrypted_content`/`signature` continuity metadata compatible with the existing multi-turn replay path. Reasoning items can no longer fall into the tool-call "legacy flush-all" branch (which would drain pending tool buffers early). The request side now sends `reasoning: { effort, summary: "auto" }` when effort is set and adaptive `thinking` is absent, so native OpenAI o-series/gpt-5 models return summary text instead of only `reasoning_tokens`. Tests previously asserting the fictional events were rewritten against the real sequence. The `/chat/completions` reasoning path is unchanged. (`src/adapters/streaming/responsesReasoningEvents.ts`, `src/adapters/streaming/liteLLMStreamInterpreter.ts`, `src/adapters/responsesAdapter.ts`, `src/types.ts`)
+
 ## [2.5.6] - 2026-09-08
 
 ### 🐛 Fixes
@@ -890,7 +896,9 @@ There have been a tremendous amount of backend work done with this update to mak
 
 ---
 
-[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.3...HEAD
+[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.7...HEAD
+[2.5.7]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.6...rel/v2.5.7
+[2.5.6]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.6
 [2.5.3]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.3
 [2.5.2]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.2
 [2.5.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.0

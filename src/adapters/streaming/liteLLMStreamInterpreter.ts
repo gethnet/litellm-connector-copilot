@@ -5,6 +5,11 @@ import { isCacheControlMimeType, normalizeToolCallId } from "../../utils";
 import { sanitizeToolName } from "../../utils/toolNameUtils";
 import { Logger } from "../../utils/logger";
 import { StructuredLogger } from "../../observability/structuredLogger";
+import {
+    createResponsesReasoningState,
+    interpretResponsesReasoningEvent,
+    type ResponsesReasoningState,
+} from "./responsesReasoningEvents";
 
 export interface StreamingState {
     toolCallBuffers: Map<number, { id?: string; name?: string; args: string }>;
@@ -22,17 +27,11 @@ export interface StreamingState {
     anonymousResponseToolName: string | undefined;
     anonymousResponseToolArgs: string;
     /**
-     * Tracks the current thinking block type for Anthropic content_block events.
-     * "thinking" = normal thinking block
-     * "redacted_thinking" = safety-redacted thinking block (encrypted content)
+     * /responses reasoning sequence state (output_item.added/done with
+     * item.type "reasoning", reasoning_summary_text.delta). Owned by
+     * responsesReasoningEvents.ts; see issue #149.
      */
-    currentThinkingBlockType: "thinking" | "redacted_thinking" | undefined;
-    /**
-     * Tracks the display mode for the current thinking block.
-     * "summarized" = thinking content is visible (default)
-     * "omitted" = only signature present, no thinking_delta events
-     */
-    currentThinkingDisplay: "summarized" | "omitted" | undefined;
+    responsesReasoning: ResponsesReasoningState;
 }
 
 export function createInitialStreamingState(): StreamingState {
@@ -46,8 +45,7 @@ export function createInitialStreamingState(): StreamingState {
         mergeReasoningContentInChoices: false,
         anonymousResponseToolName: undefined,
         anonymousResponseToolArgs: "",
-        currentThinkingBlockType: undefined,
-        currentThinkingDisplay: undefined,
+        responsesReasoning: createResponsesReasoningState(),
     };
 }
 
@@ -336,6 +334,14 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
         StructuredLogger.trace("stream.merge_reasoning_setting", {
             mergeReasoningContentInChoices: data.merge_reasoning_content_in_choices,
         });
+    }
+
+    // /responses reasoning events (real LiteLLM sequence — issue #149).
+    // Runs before every other /responses branch so reasoning frames are never
+    // swallowed by the text/tool-call handling below.
+    const reasoningParts = interpretResponsesReasoningEvent(data, state.responsesReasoning);
+    if (reasoningParts.length > 0) {
+        thinkingParts.push(...reasoningParts);
     }
 
     // 0. Handle VS Code DataPart carrier objects. Cache-control carrier parts
@@ -627,79 +633,13 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
             preview: data.delta.substring(0, 100),
         });
     }
-    if (data.type === "response.output_reasoning.delta" && typeof data.delta === "string") {
-        Logger.trace(`[interpretStreamEvent] Emitting /responses thinking delta: ${data.delta.length} chars`);
-        // Include display metadata if set (for display: "omitted" mode, no thinking_delta events)
-        const metadata = state.currentThinkingDisplay ? { display: state.currentThinkingDisplay } : undefined;
-        thinkingParts.push({ type: "thinking", value: data.delta, metadata });
-        StructuredLogger.trace("stream.responses_reasoning_delta", {
-            length: data.delta.length,
-            preview: data.delta.substring(0, 100),
-            display: state.currentThinkingDisplay,
-        });
-    }
-
-    // 2a. Handle Anthropic content_block_start for thinking blocks
-    if (data.type === "response.content_block_start") {
-        const block = data.block as Record<string, unknown> | undefined;
-        if (block?.type === "thinking") {
-            const isRedacted = block.redacted === true;
-            state.currentThinkingBlockType = isRedacted ? "redacted_thinking" : "thinking";
-            state.currentThinkingDisplay = block.display as "summarized" | "omitted" | undefined;
-
-            // Always emit an empty thinking part when a thinking block starts.
-            // For redacted: includes redactedData and display:omitted.
-            // For display:omitted: includes display:omitted (no thinking_delta events will follow).
-            // For normal: includes display if specified, otherwise just an empty start marker.
-            // This ensures VS Code consumer knows a thinking block has started.
-            const thinkingMetadata: Record<string, unknown> = {};
-            if (isRedacted) {
-                const redactedData = typeof block.redacted_data === "string" ? block.redacted_data : undefined;
-                thinkingMetadata.redactedData = redactedData;
-                thinkingMetadata.display = "omitted";
-                Logger.info(`[interpretStreamEvent] Emitting redacted_thinking block, data present: ${!!redactedData}`);
-                StructuredLogger.trace("stream.redacted_thinking_block", {
-                    hasRedactedData: !!redactedData,
-                });
-            } else if (state.currentThinkingDisplay) {
-                thinkingMetadata.display = state.currentThinkingDisplay;
-                Logger.trace(
-                    `[interpretStreamEvent] Emitting thinking block with display: ${state.currentThinkingDisplay}`
-                );
-                StructuredLogger.trace("stream.thinking_block_with_display", {
-                    display: state.currentThinkingDisplay,
-                });
-            } else {
-                Logger.trace(`[interpretStreamEvent] content_block_start for thinking block`);
-            }
-
-            thinkingParts.push({
-                type: "thinking",
-                value: "",
-                metadata: Object.keys(thinkingMetadata).length > 0 ? thinkingMetadata : undefined,
-            });
-        }
-    }
-
-    // 2b. Handle Anthropic content_block_delta for signature_delta
-    if (data.type === "response.content_block_delta") {
-        const delta = data.delta as Record<string, unknown> | undefined;
-        if (delta?.type === "signature_delta") {
-            const signature = typeof delta.signature === "string" ? delta.signature : undefined;
-            state.currentThinkingDisplay = "omitted";
-            Logger.info(
-                `[interpretStreamEvent] Emitting signature-only thinking part, signature length: ${signature?.length ?? 0}`
-            );
-            thinkingParts.push({
-                type: "thinking",
-                value: "",
-                metadata: { signature, display: "omitted" },
-            });
-            StructuredLogger.trace("stream.signature_delta", {
-                signatureLength: signature?.length ?? 0,
-            });
-        }
-    }
+    // NOTE (/responses reasoning): thinking deltas, block open/close, and
+    // encrypted continuity for the real LiteLLM sequence
+    // (output_item.added/done with item.type "reasoning",
+    // reasoning_summary_text.delta, reasoning_text.delta) are handled up front
+    // by responsesReasoningEvents.ts — see issue #149. The former handlers for
+    // `response.output_reasoning.delta` and raw Anthropic `content_block_*`
+    // events were deleted: LiteLLM never emits them on /responses.
 
     // 2b. Robust event shape: response.output_item.delta (keyed on item.call_id)
     // This is the event shape used by ResponsesClient — preserved here for providers
@@ -957,6 +897,11 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
             // Reset anonymous buffer regardless of whether we emitted
             state.anonymousResponseToolName = undefined;
             state.anonymousResponseToolArgs = "";
+        } else if ((data.item as { type?: unknown } | undefined)?.type === "reasoning") {
+            // Consumed by responsesReasoningEvents (routed up front). Must NOT
+            // fall into the legacy flush-all: a reasoning item closing between
+            // tool-call fragments would otherwise drain pending tool buffers early.
+            Logger.debug(`[interpretStreamEvent] Reasoning output_item.done handled by responsesReasoningEvents`);
         } else {
             // No function_call item (e.g., text item, or no item at all) — legacy flush-all.
             // Preserves backward compat with output_tool_call.* path which relies on

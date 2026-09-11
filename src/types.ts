@@ -154,6 +154,12 @@ export interface LiteLLMReasoningOutputConfig {
 
 export interface LiteLLMResponsesReasoning {
     effort: string;
+    /**
+     * "auto" requests reasoning summaries on the OpenAI Responses API.
+     * Without it, o-series/gpt-5 models return no summary text at all —
+     * only reasoning_tokens in usage. See issue #149.
+     */
+    summary?: "auto" | "detailed";
 }
 
 export interface ChatReasoningTransportFields {

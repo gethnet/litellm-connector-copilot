@@ -716,7 +716,12 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
             start(controller) {
                 controller.enqueue(
                     encoder.encode(
-                        'data: {"type":"response.content_block_start","block":{"type":"thinking","redacted":true,"redacted_data":"opaque-redacted-thinking"}}\n\n'
+                        'data: {"type":"response.output_item.added","item":{"type":"reasoning","id":"rs_1","summary":[]}}\n\n'
+                    )
+                );
+                controller.enqueue(
+                    encoder.encode(
+                        'data: {"type":"response.output_item.done","item":{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"opaque-redacted-thinking"}}\n\n'
                     )
                 );
                 controller.enqueue(encoder.encode("data: [DONE]\n\n"));
@@ -761,7 +766,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
 
         const thinkingPart = reported.find((part) => {
             const candidate = part as unknown as { metadata?: Record<string, unknown> };
-            return candidate.metadata?.redactedData === "opaque-redacted-thinking";
+            return candidate.metadata?.encrypted_content === "opaque-redacted-thinking";
         });
         assert.ok(thinkingPart, "expected a thinking part carrying opaque redacted metadata");
         const candidate = thinkingPart as unknown as {
@@ -769,8 +774,7 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
             metadata?: Record<string, unknown>;
         };
         assert.strictEqual(candidate.value, "");
-        assert.strictEqual(candidate.metadata?.redactedData, "opaque-redacted-thinking");
-        assert.strictEqual(candidate.metadata?.display, "omitted");
+        assert.strictEqual(candidate.metadata?.encrypted_content, "opaque-redacted-thinking");
     });
 
     test("provideLanguageModelChatResponse emits usage data part via StreamTokenCapture after streaming", async () => {
