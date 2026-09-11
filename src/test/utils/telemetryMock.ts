@@ -19,6 +19,7 @@ export interface TelemetryMocks {
     captureRequestCompletedWithCacheStub: sinon.SinonStub;
     captureRequestFailedStub: sinon.SinonStub;
     captureChatRequestStub: sinon.SinonStub;
+    captureModelUsedStub: sinon.SinonStub;
     setup: () => void;
     teardown: () => void;
 }
@@ -28,12 +29,14 @@ export function createTelemetryMocks(sandbox: sinon.SinonSandbox): TelemetryMock
     const captureRequestCompletedWithCacheStub = sandbox.stub();
     const captureRequestFailedStub = sandbox.stub();
     const captureChatRequestStub = sandbox.stub();
+    const captureModelUsedStub = sandbox.stub();
 
     const telemetryServiceStub = {
         capture: captureStub,
         captureRequestCompletedWithCache: captureRequestCompletedWithCacheStub,
         captureRequestFailed: captureRequestFailedStub,
         captureChatRequest: captureChatRequestStub,
+        captureModelUsed: captureModelUsedStub,
     } as unknown as TelemetryService;
 
     return {
@@ -42,6 +45,7 @@ export function createTelemetryMocks(sandbox: sinon.SinonSandbox): TelemetryMock
         captureRequestCompletedWithCacheStub,
         captureRequestFailedStub,
         captureChatRequestStub,
+        captureModelUsedStub,
         setup: () => {
             LiteLLMTelemetry.setTelemetryService(telemetryServiceStub);
         },

@@ -763,4 +763,18 @@ suite("Extension Activation Unit Tests", () => {
         assert.strictEqual(setReviewPromptService.calledOnce, true);
         assert.ok(context.subscriptions.length > 0);
     });
+
+    test("activation folds static features into one event without adoption captures", async () => {
+        const ctx = createContextWithState(sandbox);
+        const env = stubActivationEnvironment(sandbox, ctx);
+        activateAndTrack(ctx);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.strictEqual(env.telemetry.captureExtensionActivated.callCount, 1);
+        assert.deepStrictEqual(env.telemetry.captureExtensionActivated.firstCall.args[2], [
+            "chat",
+            "commit-generation",
+            "model-picker",
+        ]);
+        assert.strictEqual(env.telemetry.captureFeatureAdoption.callCount, 0);
+    });
 });

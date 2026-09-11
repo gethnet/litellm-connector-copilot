@@ -285,4 +285,49 @@ suite("Telemetry Unit Tests", () => {
         assert.strictEqual(props.caller, "chat");
         assert.strictEqual(props.errorType, "network_error");
     });
+
+    for (const status of ["success", "failure"] as const) {
+        test(`reportMetric forwards independent known costs for ${status}`, () => {
+            const capture = sandbox.stub();
+            const service = {
+                captureRequestCompletedWithCache: capture,
+                captureRequestFailed: capture,
+            } as unknown as TelemetryService;
+            LiteLLMTelemetry.setTelemetryService(service);
+            try {
+                LiteLLMTelemetry.reportMetric({
+                    requestId: "costs",
+                    model: "model",
+                    caller: "chat",
+                    status,
+                    estimatedInputCost: 0,
+                    estimatedOutputCost: 2.5,
+                    estimatedTotalCost: 3.75,
+                });
+                interface CapturedLifecycle {
+                    cost: {
+                        estimated_input_cost?: number;
+                        estimated_output_cost?: number;
+                        estimated_total_cost?: number;
+                    };
+                }
+                const props = firstArg<CapturedLifecycle>(capture);
+                assert.deepStrictEqual(props.cost, {
+                    estimated_input_cost: 0,
+                    estimated_output_cost: 2.5,
+                    estimated_total_cost: 3.75,
+                });
+                capture.resetHistory();
+                LiteLLMTelemetry.reportMetric({ requestId: "unknown", model: "model", status });
+                const unknownProps = firstArg<CapturedLifecycle>(capture);
+                assert.deepStrictEqual(unknownProps.cost, {
+                    estimated_input_cost: undefined,
+                    estimated_output_cost: undefined,
+                    estimated_total_cost: undefined,
+                });
+            } finally {
+                LiteLLMTelemetry.setTelemetryService(undefined as unknown as TelemetryService);
+            }
+        });
+    }
 });

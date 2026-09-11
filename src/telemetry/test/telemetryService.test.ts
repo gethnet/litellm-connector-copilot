@@ -23,6 +23,7 @@ suite("TelemetryService", () => {
     });
 
     teardown(() => {
+        telemetryService.dispose();
         sandbox.restore();
     });
 
@@ -118,7 +119,7 @@ suite("TelemetryService", () => {
         telemetryService.initialize(mockContext);
         telemetryService.captureRequestCompleted({
             request_id: "req-complete-123",
-            caller: "inline-completions",
+            caller: "chat",
             model: "test-model",
             endpoint: "/chat/completions",
             durationMs: 42,
@@ -135,7 +136,7 @@ suite("TelemetryService", () => {
         const event = adapterMock.capture.firstCall.args[0];
         assert.strictEqual(event.event, "request_completed");
         assert.strictEqual(event.properties.request_id, "req-complete-123");
-        assert.strictEqual(event.properties.caller, "inline-completions");
+        assert.strictEqual(event.properties.caller, "chat");
         assert.strictEqual(event.properties.estimated_input_cost, 0.01);
         assert.strictEqual(event.properties.estimated_output_cost, 0.02);
         assert.strictEqual(event.properties.estimated_total_cost, 0.03);
@@ -429,6 +430,7 @@ suite("TelemetryService", () => {
         });
 
         teardown(() => {
+            telemetryService.dispose();
             clock.restore();
         });
 
@@ -444,11 +446,11 @@ suite("TelemetryService", () => {
             // Should not have captured anything yet (aggregated)
             assert.strictEqual(adapterMock.capture.called, false);
 
-            // Tick forward 15 minutes
+            // Idle timer flushes the closed window; the following usage belongs to the next window.
             clock.tick(15 * 60 * 1000);
-            telemetryService.captureFeatureUsed("other", "test"); // This call should trigger flush of PRIOR aggregation
-
             assert.strictEqual(adapterMock.capture.calledOnce, true);
+            telemetryService.captureFeatureUsed("other", "test");
+
             const event = adapterMock.capture.firstCall.args[0];
             assert.strictEqual(event.event, "feature_used_aggregated");
             const features = JSON.parse(event.properties.features as string) as Record<string, number | undefined>;
@@ -462,6 +464,7 @@ suite("TelemetryService", () => {
             const mockContext = { packageJSON: { version: "1.0.0" } } as unknown as vscode.ExtensionContext;
             telemetryService.initialize(mockContext);
 
+            // Empty timer windows emit nothing; this usage belongs to the current window.
             clock.tick(15 * 60 * 1000);
             telemetryService.captureFeatureUsed("chat", "test");
 
@@ -471,34 +474,20 @@ suite("TelemetryService", () => {
     });
 
     suite("Model Usage Tracking", () => {
-        test("should capture model_used and provider_used events", () => {
-            const mockContext = { packageJSON: { version: "1.0.0" } } as unknown as vscode.ExtensionContext;
-            telemetryService.initialize(mockContext);
-
-            telemetryService.captureModelUsed("openai/gpt-4o", "chat");
-
-            assert.strictEqual(adapterMock.capture.calledTwice, true);
-
-            const modelEvent = adapterMock.capture.firstCall.args[0];
-            assert.strictEqual(modelEvent.event, "model_used");
-            assert.strictEqual(modelEvent.properties.model_id, "openai/gpt-4o");
-            assert.strictEqual(modelEvent.properties.caller, "chat");
-
-            const providerEvent = adapterMock.capture.secondCall.args[0];
-            assert.strictEqual(providerEvent.event, "provider_used");
-            assert.strictEqual(providerEvent.properties.provider, "openai");
-            assert.strictEqual(providerEvent.properties.caller, "chat");
-        });
-
-        test("should handle modelId without provider prefix", () => {
-            const mockContext = { packageJSON: { version: "1.0.0" } } as unknown as vscode.ExtensionContext;
-            telemetryService.initialize(mockContext);
-
-            telemetryService.captureModelUsed("gpt-4o", "chat");
-
-            const providerEvent = adapterMock.capture.secondCall.args[0];
-            assert.strictEqual(providerEvent.properties.provider, "gpt-4o"); // Fallback to full id if no /
-        });
+        for (const model of ["routing/openai/gpt-4o", "gpt-4o"]) {
+            test(`buffers complete model identity without provider event: ${model}`, () => {
+                telemetryService.initialize({
+                    extension: { packageJSON: { version: "1.0.0" } },
+                } as unknown as vscode.ExtensionContext);
+                telemetryService.captureModelUsed(model, "chat");
+                assert.strictEqual(adapterMock.capture.callCount, 0);
+                telemetryService.dispose();
+                assert.strictEqual(adapterMock.capture.callCount, 1);
+                assert.strictEqual(adapterMock.capture.firstCall.args[0].event, "model_used_aggregated");
+                assert.strictEqual(adapterMock.capture.firstCall.args[0].properties.model_id, model);
+                assert.strictEqual(adapterMock.capture.firstCall.args[0].properties.attempt_count, 1);
+            });
+        }
     });
 
     suite("Review Prompt Telemetry", () => {

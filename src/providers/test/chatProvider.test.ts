@@ -1539,4 +1539,61 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
             assert.strictEqual(toolCallParts[0].name, "my_tool", "Tool call should have correct name");
         }
     });
+
+    test("failed chat emits one failure lifecycle event and no duplicate chat_request", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        provider.setTelemetryService(telemetryMocks.telemetryServiceStub);
+        const tokenSource = new vscode.CancellationTokenSource();
+
+        interface ProviderInternals {
+            _configManager: { getConfig: () => Promise<{ url?: string }> };
+        }
+        const providerWithConfig = provider as unknown as ProviderInternals;
+        sandbox
+            .stub(providerWithConfig._configManager, "getConfig")
+            .rejects(new Error("fixture configuration failure"));
+
+        const reportMetricSpy = sandbox.spy(LiteLLMTelemetry, "reportMetric");
+
+        const model: vscode.LanguageModelChatInformation = {
+            id: "model",
+            name: "model",
+            tooltip: "",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 1_000,
+            maxOutputTokens: 1_000,
+            capabilities: { toolCalling: true, imageInput: false },
+        };
+
+        try {
+            await assert.rejects(
+                () =>
+                    provider.provideLanguageModelChatResponse(
+                        model,
+                        [
+                            {
+                                role: vscode.LanguageModelChatMessageRole.User,
+                                name: undefined,
+                                content: [new vscode.LanguageModelTextPart("hi")],
+                            },
+                        ],
+                        {
+                            modelOptions: {},
+                            tools: [],
+                            toolMode: vscode.LanguageModelChatToolMode.Auto,
+                            requestInitiator: "test",
+                        } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+                        { report: () => undefined },
+                        tokenSource.token
+                    ),
+                /fixture configuration failure/
+            );
+            assert.strictEqual(reportMetricSpy.callCount, 1);
+            assert.strictEqual(telemetryMocks.captureRequestFailedStub.callCount, 1);
+            assert.strictEqual(telemetryMocks.captureChatRequestStub.callCount, 0);
+        } finally {
+            tokenSource.dispose();
+        }
+    });
 });

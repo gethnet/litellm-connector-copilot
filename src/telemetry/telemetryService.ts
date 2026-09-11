@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { PostHogAdapter } from "./posthogAdapter";
+import { BoundedTelemetryAggregate, type AggregateSample } from "./telemetryAggregate";
 import type {
     LegacyConfigMigrationEvent,
     CostSummary,
@@ -9,16 +10,42 @@ import type {
     TelemetryPersonProperties,
 } from "./types";
 
+/**
+ * Aggregation window length and the per-instance cardinality cap.
+ *
+ * Both values are deliberately explicit rather than inferred from config so
+ * that PostHog dashboards and the bounded-key overflow math see a stable,
+ * documented shape.
+ */
+const AGGREGATE_INTERVAL_MS = 15 * 60 * 1000;
+const MAX_AGGREGATE_KEYS = 128;
+
 export class TelemetryService implements vscode.Disposable {
     private adapter: PostHogAdapter;
     private distinctId = "";
     private extensionVersion = "";
     private disposables: vscode.Disposable[] = [];
 
-    private _featureUsageCounter = new Map<string, number>();
-    private _lastFeatureUsageFlush: number = Date.now();
+    /**
+     * Service-owned aggregation lifecycle. The previous opportunistic flush
+     * (timestamp-based, per call) leaked pending state across consent
+     * transitions and produced inconsistent per-window totals. The timer,
+     * aggregate maps, and consent transitions are now co-located in one place
+     * so dispose/shutdown, consent revocation, and re-enable can drain and
+     * restart deterministically.
+     */
+    private initialized = false;
+    private disposed = false;
+    private shutdownPromise: Promise<void> | undefined;
+    private telemetryEnabled = false;
+    private aggregateTimer: ReturnType<typeof setInterval> | undefined;
+    private aggregateWindowStartedAt = 0;
+    private readonly modelAttempts = new BoundedTelemetryAggregate(MAX_AGGREGATE_KEYS);
+    private readonly inlineCompletionSuccesses = new BoundedTelemetryAggregate(MAX_AGGREGATE_KEYS);
+    private readonly featureUsage = new Map<string, number>();
 
     private static readonly EXTENSION_VERSION_PROPERTY = "extension_version";
+    private static readonly INLINE_COMPLETIONS_CALLER = "inline-completions";
 
     static readonly POSTHOG_API_KEY = "phc_OJr5j3sxq9AX6YglCd9NMP4HlwchYwBa53n8Jz44jkp";
     static readonly POSTHOG_HOST = "https://us.i.posthog.com";
@@ -28,6 +55,11 @@ export class TelemetryService implements vscode.Disposable {
     }
 
     initialize(context: vscode.ExtensionContext): void {
+        // `initialize` is idempotent so re-entry from hot-swap or test seams
+        // cannot double-start the timer or layer duplicate listeners.
+        if (this.initialized || this.disposed) {
+            return;
+        }
         this.distinctId = vscode.env.machineId || vscode.env.sessionId;
         // Safely extract version with proper type guards
         const getVersion = (ext: vscode.Extension<unknown> | undefined): string => {
@@ -51,14 +83,46 @@ export class TelemetryService implements vscode.Disposable {
             enabled: vscode.env.isTelemetryEnabled,
         });
 
+        this.initialized = true;
+        this.telemetryEnabled = vscode.env.isTelemetryEnabled;
+        this.aggregateWindowStartedAt = Date.now();
+
         this.disposables.push(
             vscode.env.onDidChangeTelemetryEnabled((enabled) => {
+                if (this.disposed || enabled === this.telemetryEnabled) {
+                    return;
+                }
+                this.telemetryEnabled = enabled;
                 this.adapter.setEnabled(enabled);
+                this.stopAggregateTimer();
+                // Consent off must drop pending aggregates without transmitting
+                // them. Consent re-enable starts a fresh window so a denial
+                // followed by re-approval cannot bleed old totals into a new
+                // window.
+                this.clearAggregateState();
+                if (!enabled) {
+                    return;
+                }
+                this.aggregateWindowStartedAt = Date.now();
+                this.startAggregateTimer();
             })
         );
+        this.startAggregateTimer();
+    }
+
+    /**
+     * `canCapture` is the only predicate that gates capture paths; adapter-level
+     * `enabled` guards are defense-in-depth that protect against reentry from a
+     * queued listener fired after `disposed`.
+     */
+    private canCapture(): boolean {
+        return this.initialized && !this.disposed && this.telemetryEnabled;
     }
 
     private capture(event: string, properties: TelemetryEventProperties = {}): void {
+        if (!this.canCapture()) {
+            return;
+        }
         const fullProperties: TelemetryEventProperties = {
             ...properties,
             distinctId: this.distinctId,
@@ -100,6 +164,22 @@ export class TelemetryService implements vscode.Disposable {
             cost?: CostSummary;
         }
     ): void {
+        // Inline completions are aggregated instead of emitted immediately to
+        // cut per-row PostHog event volume. Chat callers and failures retain
+        // their request-level immediacy so dashboards stay accurate.
+        if (eventName === "request_completed" && props.caller === TelemetryService.INLINE_COMPLETIONS_CALLER) {
+            this.captureInlineCompletionSucceeded({
+                model: props.model,
+                caller: props.caller,
+                durationMs: props.durationMs,
+                tokensIn: props.tokensIn,
+                tokensOut: props.tokensOut,
+                cacheReadRatio: props.cacheReadRatio,
+                cost: props.cost,
+            });
+            return;
+        }
+
         const properties: TelemetryEventProperties = {
             request_id: props.request_id,
             caller: props.caller,
@@ -123,6 +203,17 @@ export class TelemetryService implements vscode.Disposable {
     }
 
     public captureException(error: Error, options?: TelemetryCaptureExceptionOptions): void {
+        // `Logger.error("message", err)` does not invoke `captureException` —
+        // callers must pass an `Error` as the first argument. We keep the same
+        // contract for `captureException` (and the global exception listener
+        // bridges) so the global exception listener does not silently inject
+        // an extra failure event per successful chat call.
+        if (!(error instanceof Error)) {
+            return;
+        }
+        if (!this.canCapture()) {
+            return;
+        }
         const fullProperties: TelemetryEventProperties = {
             ...options?.properties,
             distinctId: options?.distinctId ?? this.distinctId,
@@ -141,6 +232,9 @@ export class TelemetryService implements vscode.Disposable {
     }
 
     public identify(distinctId: string, properties?: TelemetryPersonProperties): void {
+        if (!this.canCapture()) {
+            return;
+        }
         this.adapter.identify(distinctId || this.distinctId, {
             ...properties,
             [TelemetryService.EXTENSION_VERSION_PROPERTY]: this.extensionVersion,
@@ -148,16 +242,30 @@ export class TelemetryService implements vscode.Disposable {
     }
 
     public isFeatureEnabled(flagKey: string, distinctId?: string): Promise<boolean> | boolean {
+        if (!this.canCapture()) {
+            return false;
+        }
         return this.adapter.isFeatureEnabled(flagKey, distinctId ?? this.distinctId);
     }
 
     public reloadFeatureFlags(): Promise<void> | void {
+        if (!this.canCapture()) {
+            return;
+        }
         return this.adapter.reloadFeatureFlags();
     }
 
     // Lifecycle
-    captureExtensionActivated(version: string, vscodeVersion: string): void {
-        this.capture("extension_activated", { version, vscode_version: vscodeVersion });
+    captureExtensionActivated(version: string, vscodeVersion: string, features: string[] = []): void {
+        // Fold the legacy startup `feature_adoption` triplet into the
+        // activation event so dashboards see one row per install instead of
+        // four. `features` is the static set the extension advertises —
+        // actual adoption is inferred from other lifecycle events.
+        this.capture("extension_activated", {
+            version,
+            vscode_version: vscodeVersion,
+            feature_adoption: features,
+        });
     }
 
     captureExtensionDeactivated(uptimeSeconds: number): void {
@@ -210,6 +318,10 @@ export class TelemetryService implements vscode.Disposable {
         error?: string;
         stack?: string;
     }): void {
+        // `chat_request` is preserved as a dormant compatibility API for
+        // dashboards that were wired before the per-call failure was removed.
+        // The provider-level duplicate failure capture no longer exists; new
+        // code should emit `request_failed` through the lifecycle helper.
         this.captureRequestLifecycleEvent("chat_request", props);
     }
 
@@ -354,77 +466,185 @@ export class TelemetryService implements vscode.Disposable {
         });
     }
 
+    /**
+     * Aggregate feature usage into a single per-window summary. The timer
+     * flushes even when idle (no callers between ticks) so a stale window
+     * still emits a structured `feature_used_aggregated` row with the JSON
+     * counter payload — same shape as before the volume-reduction work.
+     */
     captureFeatureUsed(featureName: string, _caller: string): void {
-        this._captureAggregatedFeatureUsage(featureName);
-    }
-
-    private _captureAggregatedFeatureUsage(featureName: string): void {
-        const now = Date.now();
-        const flushIntervalMs = 15 * 60 * 1000; // 15 minutes
-
-        if (now - this._lastFeatureUsageFlush >= flushIntervalMs) {
-            this._flushAggregatedFeatureUsage();
-            this._lastFeatureUsageFlush = now;
-        }
-
-        const count = this._featureUsageCounter.get(featureName) || 0;
-        this._featureUsageCounter.set(featureName, count + 1);
-    }
-
-    private _flushAggregatedFeatureUsage(): void {
-        if (this._featureUsageCounter.size === 0) {
+        if (!this.canCapture()) {
             return;
         }
-
-        const features: Record<string, number> = {};
-        for (const [feature, count] of this._featureUsageCounter) {
-            features[feature] = count;
-        }
-
-        this.capture("feature_used_aggregated", {
-            features: JSON.stringify(features),
-            period_minutes: 15,
-        });
-
-        this._featureUsageCounter.clear();
+        this.featureUsage.set(featureName, (this.featureUsage.get(featureName) ?? 0) + 1);
+        this.startAggregateTimer();
     }
 
     public captureModelUsed(modelId: string, caller: string): void {
-        this.capture("model_used", { model_id: modelId, caller });
-
-        // Also track provider
-        const provider = modelId.includes("/") ? modelId.split("/")[0] : modelId;
-        this.capture("provider_used", { provider, caller });
+        // The aggregate helper preserves the complete model id and caller on
+        // the resulting row so naming, routing, and capability dashboards
+        // remain accurate. The first slash segment of a namespaced id is a
+        // routing identity (not necessarily a provider vendor), so the
+        // previous `provider_used` path has been removed to avoid inventing a
+        // vendor property from routing structure.
+        this.addAggregate({ modelId, caller }, "model");
     }
 
+    /**
+     * Kept as a dormant method so dashboards that probe `feature_adoption`
+     * in tests/CLI tooling do not lose data, but no production startup path
+     * invokes it. The folded `feature_adoption` array lives on the
+     * `extension_activated` event.
+     */
     public captureFeatureAdoption(feature: string): void {
         this.capture("feature_adoption", { feature });
     }
 
+    /**
+     * Aggregate a single inline completion success into the bounded window.
+     * Public-style visibility keeps it reachable from tests and the
+     * lifecycle interposer; production callers go through the lifecycle
+     * router so callers other than `inline-completions` stay immediate.
+     */
+    captureInlineCompletionSucceeded(props: {
+        model: string;
+        caller: string;
+        durationMs?: number;
+        tokensIn?: number;
+        tokensOut?: number;
+        cacheReadRatio?: number;
+        cost?: CostSummary;
+    }): void {
+        this.addAggregate(
+            {
+                modelId: props.model,
+                caller: props.caller,
+                durationMs: props.durationMs,
+                tokensIn: props.tokensIn,
+                tokensOut: props.tokensOut,
+                cacheReadRatio: props.cacheReadRatio,
+                estimatedInputCost: props.cost?.estimated_input_cost,
+                estimatedOutputCost: props.cost?.estimated_output_cost,
+                estimatedTotalCost: props.cost?.estimated_total_cost,
+            },
+            "inline"
+        );
+    }
+
+    private startAggregateTimer(): void {
+        if (!this.canCapture() || this.aggregateTimer !== undefined) {
+            return;
+        }
+        this.aggregateTimer = setInterval(() => {
+            this.flushAggregates();
+        }, AGGREGATE_INTERVAL_MS);
+    }
+
+    private stopAggregateTimer(): void {
+        if (this.aggregateTimer !== undefined) {
+            clearInterval(this.aggregateTimer);
+        }
+        this.aggregateTimer = undefined;
+    }
+
+    private clearAggregateState(): void {
+        this.modelAttempts.drain();
+        this.inlineCompletionSuccesses.drain();
+        this.featureUsage.clear();
+        this.aggregateWindowStartedAt = 0;
+    }
+
+    private flushAggregates(): void {
+        if (!this.canCapture()) {
+            return;
+        }
+        const endedAt = Date.now();
+        const elapsed = Math.max(0, endedAt - this.aggregateWindowStartedAt);
+        const window: TelemetryEventProperties = {
+            window_started_at_ms: this.aggregateWindowStartedAt,
+            window_ended_at_ms: endedAt,
+            window_duration_ms: elapsed,
+            period_minutes: elapsed / 60_000,
+            aggregation_version: 1,
+        };
+        const modelSummaries = this.modelAttempts.drain();
+        const inlineSummaries = this.inlineCompletionSuccesses.drain();
+        const featureSummary = this.drainFeatureUsage();
+        this.aggregateWindowStartedAt = endedAt;
+        for (const summary of modelSummaries) {
+            this.capture("model_used_aggregated", {
+                ...window,
+                model_id: summary.model_id,
+                caller: summary.caller,
+                attempt_count: summary.request_count,
+                overflow: summary.overflow,
+            });
+        }
+        for (const summary of inlineSummaries) {
+            this.capture("inline_completion_aggregated", { ...summary, ...window });
+        }
+        if (featureSummary) {
+            this.capture("feature_used_aggregated", { ...featureSummary, ...window });
+        }
+    }
+
+    private drainFeatureUsage(): TelemetryEventProperties | undefined {
+        if (this.featureUsage.size === 0) {
+            return undefined;
+        }
+        const features: Record<string, number> = {};
+        for (const [feature, count] of this.featureUsage) {
+            features[feature] = count;
+        }
+        this.featureUsage.clear();
+        return { features: JSON.stringify(features) };
+    }
+
+    private addAggregate(sample: AggregateSample, target: "model" | "inline"): void {
+        if (!this.canCapture()) {
+            return;
+        }
+        const aggregate = target === "model" ? this.modelAttempts : this.inlineCompletionSuccesses;
+        aggregate.add(sample);
+        this.startAggregateTimer();
+    }
+
     async shutdown(): Promise<void> {
-        this._flushAggregatedFeatureUsage();
-        await this.adapter.flush();
-        await this.adapter.shutdown();
+        if (!this.shutdownPromise) {
+            this.shutdownPromise = this.completeShutdown();
+        }
+        await this.shutdownPromise;
+    }
+
+    private async completeShutdown(): Promise<void> {
+        // Run the synchronous lifecycle work before the first await so
+        // `dispose()` halts capture paths immediately even when the async
+        // adapter shutdown is still pending.
+        this.stopAggregateTimer();
+        try {
+            this.flushAggregates();
+        } catch {
+            // Telemetry is best effort; failed capture must not prevent cleanup.
+            this.clearAggregateState();
+        } finally {
+            this.disposed = true;
+            this.clearAggregateState();
+            this.disposables.forEach((disposable) => {
+                disposable.dispose();
+            });
+            this.disposables = [];
+        }
+        try {
+            await this.adapter.flush();
+        } finally {
+            await this.adapter.shutdown();
+        }
     }
 
     dispose(): void {
-        this.disposables.forEach((d: vscode.Disposable) => {
-            d.dispose();
-        });
-        // Note: We intentionally do NOT await shutdown here because:
-        // 1. VS Code's Disposable.dispose() is synchronous by contract
-        // 2. During test teardown, awaiting async operations can cause hangs
-        // 3. The PostHog client shutdown is best-effort cleanup
-        // Use shutdown() directly if you need to await completion.
-        try {
-            // Synchronous flush attempt for graceful shutdown
-            this._flushAggregatedFeatureUsage();
-        } catch {
-            // Ignore errors during dispose
-        }
-        // Fire-and-forget the async shutdown - it will complete in background
-        this.adapter.shutdown().catch(() => {
-            // Silently ignore shutdown errors
-        });
+        // `dispose()` matches the VS Code synchronous contract. The async
+        // shutdown runs in the background; capture paths are blocked the
+        // moment `disposed` is set in `completeShutdown`.
+        void this.shutdown().catch(() => undefined);
     }
 }

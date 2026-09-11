@@ -647,20 +647,6 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             };
             LiteLLMTelemetry.reportMetric(metric);
 
-            if (this._telemetryService) {
-                this._telemetryService.captureChatRequest({
-                    request_id: requestId,
-                    caller,
-                    model: model.id,
-                    endpoint: "unknown",
-                    durationMs: metric.durationMs,
-                    tokensIn: tokensIn ?? 0,
-                    tokensOut: 0,
-                    status: "failure",
-                    error: errorMessage,
-                    stack: err instanceof Error ? err.stack : undefined,
-                });
-            }
             throw new Error(errorMessage, { cause: err });
         }
     }

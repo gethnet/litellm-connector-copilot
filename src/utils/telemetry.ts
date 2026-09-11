@@ -1,5 +1,6 @@
 import { Logger } from "./logger";
 import type { TelemetryService } from "../telemetry/telemetryService";
+import type { CostSummary } from "../telemetry/types";
 
 export interface IMetrics {
     requestId: string;
@@ -69,6 +70,7 @@ export class LiteLLMTelemetry {
                     tokensIn: number;
                     tokensOut: number;
                     cacheReadRatio?: number;
+                    cost?: CostSummary;
                 }) => void;
                 captureRequestFailed?: (props: {
                     request_id: string;
@@ -77,6 +79,7 @@ export class LiteLLMTelemetry {
                     endpoint: string;
                     durationMs: number;
                     errorType: string;
+                    cost?: CostSummary;
                 }) => void;
                 captureRequestCachingBypassed?: (props: {
                     request_id: string;
@@ -97,6 +100,11 @@ export class LiteLLMTelemetry {
                     tokensIn: metric.tokensIn ?? 0,
                     tokensOut: metric.tokensOut ?? 0,
                     cacheReadRatio: metric.cacheReadRatio,
+                    cost: {
+                        estimated_input_cost: metric.estimatedInputCost,
+                        estimated_output_cost: metric.estimatedOutputCost,
+                        estimated_total_cost: metric.estimatedTotalCost,
+                    },
                 });
             } else if (metric.status === "failure") {
                 telemetryService.captureRequestFailed?.({
@@ -106,6 +114,11 @@ export class LiteLLMTelemetry {
                     endpoint: "unknown",
                     durationMs: metric.durationMs ?? 0,
                     errorType: metric.error ?? "unknown",
+                    cost: {
+                        estimated_input_cost: metric.estimatedInputCost,
+                        estimated_output_cost: metric.estimatedOutputCost,
+                        estimated_total_cost: metric.estimatedTotalCost,
+                    },
                 });
             } else if (metric.status === "caching_bypassed") {
                 telemetryService.captureRequestCachingBypassed?.({

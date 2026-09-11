@@ -102,7 +102,12 @@ export function activate(context: vscode.ExtensionContext): void {
         ua = `litellm-vscode-chat/${extVersion} VSCode/${vscodeVersionStr}`;
 
         // Capture activation
-        telemetryService.captureExtensionActivated(extVersion, vscodeVersionStr);
+        // Fold static startup adoption facts into the activation event to avoid three extra events.
+        telemetryService.captureExtensionActivated(extVersion, vscodeVersionStr, [
+            "chat",
+            "commit-generation",
+            "model-picker",
+        ]);
     } catch (uaErr) {
         Logger.error("Failed to build UA", uaErr);
     }
@@ -153,11 +158,6 @@ export function activate(context: vscode.ExtensionContext): void {
     };
 
     const effortFallbackCache = new EffortFallbackCache();
-
-    // Track feature adoption
-    telemetryService.captureFeatureAdoption("chat");
-    telemetryService.captureFeatureAdoption("commit-generation");
-    telemetryService.captureFeatureAdoption("model-picker");
 
     // Emit feature usage snapshot after config is loaded
     void configManager.getConfig().then((config) => {
