@@ -4,15 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.8] - 2026-09-11
+
 ### 📊 Improvements
 
 - **📉 Reduce PostHog event volume**: Aggregate model attempts and successful inline completions in bounded 15-minute windows, remove duplicate failure events, and consolidate startup metadata. Chat outcomes and failures remain immediate; no sampling or user configuration is required.
 
-### �🐛 Fixes
+### 🐛 Fixes
 
 * **⏱️ Stop the inactivity watchdog from aborting live streams during extended reasoning (#151)**: The streaming inactivity timeout (`litellm-connector.inactivityTimeout`, default 60s) was anchored to *yielded SSE payloads* — it only reset when the decoder emitted a complete, parseable `data:` event. During extended reasoning, a model can stream keep-alive/comment frames (`: ping`), partially-buffered events, or nothing displayable for longer than the window while the connection is perfectly healthy; the watchdog starved, fired, and `controller.abort()` killed the stream mid-reasoning (observed on Fable 5.1: a 265k-token request emitted only 25 output tokens before the abort). Liveness is now anchored to **raw chunk arrival** — every resolved `reader.read()` that returns bytes resets the watchdog via a new optional `onActivity` callback on `decodeSSE` — so only a genuinely silent connection (zero bytes for the full window) is aborted. Raising the timeout remains a valid knob for true server-side silence, but keep-alive-only reasoning phases can no longer be misread as a dead connection. (`src/adapters/sse/sseDecoder.ts`, `src/providers/liteLLMChatProvider.ts`)
 
 ### 🧹 Chores
+
+* **🧪 Roll in the mocha 12 test adapter upgrade (Dependabot #148)**: Bumped the dev-only `mocha` dependency from `^11.8.0` to `^12.0.0` on the watchdog-fix branch, absorbing the pending Dependabot PR. mocha 12 (released 2026-08-31) turns its `Base` reporter into an ES class — the exact break that motivated the in-repo version-agnostic `JunitSpecReporter` (v2.5.6), which `extends` mocha's built-in `Spec` reporter and therefore constructs correctly on both mocha 11 (function-style Base) and mocha 12 (class-style Base). Full suite verified under mocha 12: 1,011 passing / 0 failing with unchanged coverage (91.79% lines), and the JUnit XML artifact CI uploads (`tests="1011" failures="0"`) renders correctly. (`package.json`)
 
 * **🛠️ Harden marketplace publish pipeline**: The `publish-marketplace` release job invoked unpinned `npx vsce`, which silently resolved the deprecated unscoped `vsce@2.15.0` from the registry (the job never installs dependencies) — a 2022-era tool with a hard 3-minute socket timeout and no retry. A transient Marketplace handshake stall on `/_apis/gallery` then hard-failed both publish attempts for `rel/v2.5.6` (`Request timeout: /_apis/gallery`). Publish steps now use the scoped, pinned `@vscode/vsce@3.9.2` (matching the local devDependency) and `ovsx@1.1.1`, wrap the publish in a 3-attempt retry loop with 60s backoff, and pass `--skip-duplicate` so retries are idempotent (the gallery 409s duplicate versions). Also un-gated the Codecov uploads from failing Dependabot PR CI: Dependabot runs never receive secrets, so the upload always fails with "Token required because branch is protected" — build and test steps still gate those PRs. (`.github/workflows/release.yml`, `.github/workflows/ci.yml`)
 
@@ -904,7 +908,8 @@ There have been a tremendous amount of backend work done with this update to mak
 
 ---
 
-[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.7...HEAD
+[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.8...HEAD
+[2.5.8]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.7...rel/v2.5.8
 [2.5.7]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.6...rel/v2.5.7
 [2.5.6]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.6
 [2.5.3]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.3
