@@ -166,4 +166,63 @@ suite("SSE Decoder Unit Tests", () => {
         // Only the complete payload should be yielded
         assert.deepStrictEqual(results, ['{"text": "hello"}']);
     });
+
+    test("onActivity fires on every raw chunk, including comment-only frames", async () => {
+        const activityChunks: number[] = [];
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                // Chunk 1: keep-alive comment frame only — no data: line, never yielded as payload
+                controller.enqueue(new TextEncoder().encode(": ping\n\n"));
+                // Chunk 2: complete data payload
+                controller.enqueue(new TextEncoder().encode('data: {"text": "hello"}\n\n'));
+                controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+                controller.close();
+            },
+        });
+
+        const results: string[] = [];
+        for await (const payload of decodeSSE(stream, undefined, undefined, (byteLength) => {
+            activityChunks.push(byteLength);
+        })) {
+            results.push(payload);
+        }
+
+        // Payload extraction is unaffected by the activity callback
+        assert.deepStrictEqual(results, ['{"text": "hello"}']);
+        // Activity fired for ALL three chunks — including the comment-only frame that yields nothing
+        assert.strictEqual(
+            activityChunks.length,
+            3,
+            "onActivity must fire for every raw chunk, not just payload-bearing chunks"
+        );
+        // The comment frame chunk (": ping\n\n" = 8 bytes) is reported with its byte length
+        assert.strictEqual(activityChunks[0], 8, "comment-only frame must be reported as activity");
+    });
+
+    test("onActivity fires for chunks that contain only partial events", async () => {
+        const activityChunks: number[] = [];
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                // Fragment 1: partial event, no terminator — buffered, not yielded
+                controller.enqueue(new TextEncoder().encode('data: {"text": "hel'));
+                // Fragment 2: remainder + terminator — only NOW does a payload get yielded
+                controller.enqueue(new TextEncoder().encode('lo"}\n\ndata: [DONE]\n\n'));
+                controller.close();
+            },
+        });
+
+        const results: string[] = [];
+        for await (const payload of decodeSSE(stream, undefined, undefined, (byteLength) => {
+            activityChunks.push(byteLength);
+        })) {
+            results.push(payload);
+        }
+
+        assert.deepStrictEqual(results, ['{"text": "hello"}']);
+        assert.strictEqual(
+            activityChunks.length,
+            2,
+            "onActivity must fire for partial-event chunks even though they yield no payload"
+        );
+    });
 });

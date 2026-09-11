@@ -648,6 +648,83 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         assert.strictEqual(textParts.map((p) => p.value).join(""), "Hello");
     });
 
+    test("inactivity watchdog does not abort a stream fed only by comment/keep-alive frames", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const tokenSource = new vscode.CancellationTokenSource();
+
+        const encoder = new TextEncoder();
+        const { ReadableStream } = await import("node:stream/web");
+
+        // 0.2s watchdog window. Chunks arrive every 50ms, but ONLY comment frames
+        // (no data: lines) until the end — so NO payloads are yielded during the
+        // window. Pre-fix, the watchdog starves on payload granularity and aborts.
+        // Post-fix, raw chunk arrival keeps resetting the watchdog and the stream
+        // completes.
+        const timeoutSeconds = 0.2;
+        const chunkIntervalMs = 50;
+        const keepAliveCount = 6;
+
+        const makeStream = () =>
+            new ReadableStream<Uint8Array>({
+                async start(controller) {
+                    for (let i = 0; i < keepAliveCount; i++) {
+                        controller.enqueue(encoder.encode(": ping\n\n"));
+                        await new Promise((resolve) => setTimeout(resolve, chunkIntervalMs));
+                    }
+                    controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Hello"}}]}\n'));
+                    controller.enqueue(encoder.encode("data: [DONE]\n"));
+                    controller.close();
+                },
+            });
+
+        // Mock config: 0.2s inactivity timeout
+        interface ProviderWithConfig {
+            _configManager: {
+                getConfig: () => Promise<unknown>;
+            };
+        }
+        const pWithConfig = provider as unknown as ProviderWithConfig;
+        sandbox.stub(pWithConfig._configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            inactivityTimeout: timeoutSeconds,
+        });
+
+        const parts: vscode.LanguageModelResponsePart[] = [];
+        const progress = { report: (part: vscode.LanguageModelResponsePart) => parts.push(part) };
+
+        const providerTest = provider as unknown as {
+            resetStreamingState: () => void;
+            processStreamingResponse: (
+                stream: ReadableStream<Uint8Array>,
+                progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+                token: vscode.CancellationToken
+            ) => Promise<void>;
+        };
+        providerTest.resetStreamingState();
+
+        const started = Date.now();
+        await providerTest.processStreamingResponse(makeStream(), progress, tokenSource.token);
+        const elapsed = Date.now() - started;
+
+        // The stream must complete (not abort) and emit the final text part.
+        const textParts = parts.filter(
+            (p): p is vscode.LanguageModelTextPart =>
+                p instanceof vscode.LanguageModelTextPart ||
+                typeof (p as unknown as Record<string, unknown>)?.value === "string"
+        );
+        assert.strictEqual(
+            textParts.map((p) => p.value).join(""),
+            "Hello",
+            "stream must survive keep-alive-only periods and emit the final text"
+        );
+        // Elapsed time must span the full keep-alive phase (~300ms), proving the
+        // watchdog was repeatedly reset rather than firing at 200ms.
+        assert.ok(
+            elapsed >= keepAliveCount * chunkIntervalMs,
+            `stream should have run to completion (~${keepAliveCount * chunkIntervalMs}ms), took ${elapsed}ms — watchdog likely aborted early`
+        );
+    });
+
     test("caller defaults to 'chat' instead of the model's first tag", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         seedDiscoveredBackend(sandbox, provider, "model-1");

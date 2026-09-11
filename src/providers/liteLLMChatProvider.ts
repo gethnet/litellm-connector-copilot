@@ -732,7 +732,11 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             resetWatchdog();
             Logger.debug(`[processStreamingResponse] Starting SSE decoder loop`);
 
-            for await (const payload of decodeSSE(responseBody, token, controller.signal)) {
+            // Anchor watchdog liveness to RAW chunk arrival (every resolved read with
+            // bytes), not payload yield. Payload-level granularity starves the timer
+            // during extended reasoning when the stream is alive but nothing
+            // displayable is yielded (comment frames, partial events) — issue #151.
+            for await (const payload of decodeSSE(responseBody, token, controller.signal, resetWatchdog)) {
                 resetWatchdog();
                 eventCount++;
 

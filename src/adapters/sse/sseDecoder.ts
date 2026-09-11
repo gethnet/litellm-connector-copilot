@@ -9,7 +9,15 @@ import { StructuredLogger } from "../../observability/structuredLogger";
 export async function* decodeSSE(
     stream: ReadableStream<Uint8Array>,
     token?: CancellationToken,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    /**
+     * Liveness feed: invoked once per resolved `reader.read()` that returned bytes,
+     * BEFORE parsing. Fires for chunks that never yield a payload (comment/keep-alive
+     * frames, partial events still awaiting a `\r?\n\r?\n` separator). Consumers use
+     * this to anchor inactivity watchdogs to raw connection liveness instead of
+     * payload yield — see issue #151.
+     */
+    onActivity?: (byteLength: number) => void
 ): AsyncGenerator<string> {
     const reader = stream.getReader();
     const decoder = new TextDecoder();
@@ -103,6 +111,13 @@ export async function* decodeSSE(
                 break;
             }
             chunkCount++;
+            // Feed the consumer's liveness watchdog on EVERY raw chunk, before any
+            // parsing. This is the authoritative connection-liveness signal: a chunk
+            // with only comment frames or a partial event still proves the server is
+            // alive even though nothing is yielded downstream (issue #151).
+            if (onActivity && value) {
+                onActivity(value.length);
+            }
             Logger.trace("[decodeSSE] Chunk #" + chunkCount + " received, length=", value?.length);
             StructuredLogger.trace("stream.chunk_received", {
                 chunkNumber: chunkCount,
