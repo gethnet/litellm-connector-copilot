@@ -8,13 +8,13 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.5.7
+## 🆕 What's New in 2.5.8
 
-> Version 2.5.7 fixes reasoning/thinking blocks being silently dropped on the LiteLLM `/responses` endpoint.
+> Version 2.5.8 cuts PostHog telemetry event volume with bounded 15-minute aggregates and fixes the streaming watchdog aborting live reasoning streams.
 
-- 🧠 **`/responses` reasoning blocks now render** — The interpreter previously listened for event names LiteLLM never emits, so thinking from non-OpenAI reasoning models (Claude Fable 5.1, Z.ai GLM, DeepSeek) routed via `/responses` was silently dropped and Anthropic signature continuity was lost. The real LiteLLM event sequence (`output_item.added`/`done` with `item.type "reasoning"`, `reasoning_summary_text.delta`) is now mapped to thinking parts, with `encrypted_content`/`signature` continuity preserved for multi-turn flows.
-- 🧩 **Reasoning items no longer disturb buffered tool calls** — A reasoning item closing between tool-call fragments used to hit the tool-call "flush-all" branch and drain pending buffers early; reasoning items are now handled by their own module.
-- ⚙️ **`reasoning.summary: "auto"` is now requested** — Native OpenAI o-series/gpt-5 models return reasoning summary text instead of only `reasoning_tokens` in usage.
+- 📉 **Bounded 15-minute telemetry aggregates** — Model attempts and successful inline completions are summarized in bounded 15-minute windows (128 model/caller keys + an overflow bucket that keeps counts accurate), instead of one billable event per request. Chat outcomes and all failures remain immediate; no sampling or user configuration required.
+- ⏱️ **Watchdog anchored to raw chunk arrival** — The streaming inactivity timeout only reset on parseable payloads, so keep-alive frames and quiet reasoning phases starved it and killed healthy streams mid-reasoning. Liveness now resets on every raw byte arrival.
+- 🧪 **mocha 12 test adapter** — Dev-only `mocha` bumped to `^12.0.0`, absorbing the pending Dependabot upgrade; the in-repo version-agnostic JUnit reporter constructs correctly on both mocha 11 and 12.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
