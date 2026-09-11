@@ -35,7 +35,9 @@
 		"amwdrizz"
 	],
 	"contributors": [
-		"amwdrizz"
+		"amwdrizz",
+		"FPA-DavidTai",
+		"kud-csi"
 	],
 	"publisher": "GethNet",
 	"main": "./dist/extension.js",
