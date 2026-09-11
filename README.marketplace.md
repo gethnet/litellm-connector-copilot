@@ -10,14 +10,13 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.5.6
+## 🆕 What's New in 2.5.7
 
-> Version 2.5.6 adds Claude Fable 5.1 / Mythos 5.1 compatibility and removes ~2,700 lines of dead code.
+> Version 2.5.7 fixes reasoning/thinking blocks being silently dropped on the LiteLLM `/responses` endpoint.
 
-- 🤖 **Claude Fable 5.1 / Mythos 5.1 compatibility** — Forced `tool_choice` is downgraded to `"auto"` (these models reject it with a 400), retained `thinking_blocks` are stripped when front-trimming invalidates their conversation binding, the one-shot continuity retry recognizes the Fable-specific rejection strings, and `stop_reason: "refusal"` (HTTP 200) is detected and logged on both endpoints.
-- 🎚️ **Sampling params stripped for Fable 5.1** — `temperature`, `top_p`, and `top_k` are removed for `claude-fable-5-1` / `claude-mythos-5-1` (non-default values 400), covering proxies whose model cards misreport capabilities. Model-card lists still win.
-- 🧭 **Unified model-ID matching** — The `tool_choice` downgrade and sampling guard now share one boundary-aware matcher, so aliased IDs (`anthropic.claude-fable-5-1-v1:0`, `claude-fable-5-1@20260801`) get both protections together.
-- 🗑️ **Removed the dead V2 message pipeline** — ~2,700 lines of orphaned message-conversion code that no provider called. No behavior change; all four coverage categories improved.
+- 🧠 **`/responses` reasoning blocks now render** — The interpreter previously listened for event names LiteLLM never emits, so thinking from non-OpenAI reasoning models (Claude Fable 5.1, Z.ai GLM, DeepSeek) routed via `/responses` was silently dropped and Anthropic signature continuity was lost. The real LiteLLM event sequence (`output_item.added`/`done` with `item.type "reasoning"`, `reasoning_summary_text.delta`) is now mapped to thinking parts, with `encrypted_content`/`signature` continuity preserved for multi-turn flows.
+- 🧩 **Reasoning items no longer disturb buffered tool calls** — A reasoning item closing between tool-call fragments used to hit the tool-call "flush-all" branch and drain pending buffers early; reasoning items are now handled by their own module.
+- ⚙️ **`reasoning.summary: "auto"` is now requested** — Native OpenAI o-series/gpt-5 models return reasoning summary text instead of only `reasoning_tokens` in usage.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
