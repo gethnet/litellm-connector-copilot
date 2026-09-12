@@ -19,6 +19,13 @@ import * as http from "http";
 import * as url from "url";
 
 export interface MockBackendOptions {
+    /**
+     * Port to listen on. Pass `0` to request an OS-assigned ephemeral port —
+     * required for collision-free parallel/CI runs, because any fixed port
+     * inside the kernel's ephemeral range (32768–60999 on Linux) can be
+     * handed to an outbound client socket at any moment. When `0` is used,
+     * `getBaseUrl()` reports the actual bound port after `start()`.
+     */
     port: number;
     latencyMs?: number;
     toolCallSupport?: boolean;
@@ -54,6 +61,12 @@ export class MockLiteLLMBackend {
             });
 
             this.server.listen(this.port, () => {
+                // With port 0 the kernel assigns the real port at listen()
+                // time; record it so getBaseUrl() stays accurate.
+                const address = this.server?.address();
+                if (address && typeof address === "object" && typeof address.port === "number") {
+                    this.port = address.port;
+                }
                 console.log(`[MockLiteLLM] Server listening on port ${this.port}`);
                 resolve();
             });

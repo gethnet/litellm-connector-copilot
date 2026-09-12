@@ -154,7 +154,13 @@ function makeStreamingRequest(url: string, method: "GET" | "POST", body?: string
 
 suite("MockLiteLLMBackend", () => {
     let backend: MockLiteLLMBackend;
-    const testPort = 45000;
+    // Bind an OS-assigned ephemeral port instead of a fixed one. A fixed port
+    // inside the kernel's ephemeral range (32768–60999 on Linux) races with
+    // outbound client sockets the kernel assigns from the same pool — the
+    // source of the EADDRINUSE CI flake on this suite (issue observed on
+    // PR #153's run). Port 0 asks the kernel for a guaranteed-free port at
+    // listen() time, so collisions are impossible by construction.
+    const testPort = 0;
 
     teardown(async () => {
         if (backend) {
@@ -163,13 +169,27 @@ suite("MockLiteLLMBackend", () => {
     });
 
     suite("Lifecycle Management", () => {
+        test("should report the actual bound port when listening on an ephemeral port", async () => {
+            const options: MockBackendOptions = { port: 0 };
+            backend = new MockLiteLLMBackend(options);
+
+            await backend.start();
+            const baseUrl = backend.getBaseUrl();
+            // The base URL must reflect the kernel-assigned port, not 0.
+            assert.match(baseUrl, /^http:\/\/localhost:[1-9]\d+$/);
+            // And that port must actually serve requests.
+            const response = await makeHttpRequest(`${baseUrl}/models`, "GET");
+            assert.strictEqual(response.status, 200);
+        });
         test("should start and accept connections", async () => {
             const options: MockBackendOptions = { port: testPort };
             backend = new MockLiteLLMBackend(options);
 
             await backend.start();
             const baseUrl = backend.getBaseUrl();
-            assert.strictEqual(baseUrl, `http://localhost:${testPort}`);
+            // With an ephemeral port the exact number is unknowable ahead of
+            // time; assert the shape and that the server responds on it.
+            assert.match(baseUrl, /^http:\/\/localhost:[1-9]\d+$/);
 
             // Verify we can make a request
             const response = await makeHttpRequest(`${baseUrl}/models`, "GET");
@@ -181,11 +201,14 @@ suite("MockLiteLLMBackend", () => {
             backend = new MockLiteLLMBackend(options);
 
             await backend.start();
+            // Capture the URL before stop() so we probe the port the server
+            // actually held (an ephemeral port is unknowable beforehand).
+            const stoppedUrl = backend.getBaseUrl();
             await backend.stop();
 
-            // Verify server is truly stopped by attempting to connect
+            // Verify server is truly stopped by attempting to connect.
             try {
-                await makeHttpRequest(`http://localhost:${testPort}/models`, "GET");
+                await makeHttpRequest(`${stoppedUrl}/models`, "GET");
                 assert.fail("Expected connection to fail after stop");
             } catch (err) {
                 // Expected - connection should fail. Node reports refused connections via
@@ -1153,20 +1176,22 @@ suite("MockLiteLLMBackend", () => {
             await backend.start();
 
             const baseUrl = backend.getBaseUrl();
-            assert.strictEqual(baseUrl, `http://localhost:${testPort}`);
+            // Ephemeral binding: assert shape rather than a hard-coded port.
+            assert.match(baseUrl, /^http:\/\/localhost:[1-9]\d+$/);
         });
 
         test("should generate different baseUrls for different ports", async () => {
+            // Two ephemeral bindings must never collide — the kernel assigns
+            // distinct free ports, which is exactly the property the old
+            // fixed-port version could not guarantee in CI.
             const backend1 = new MockLiteLLMBackend({ port: testPort });
-            const backend2 = new MockLiteLLMBackend({ port: testPort + 1 });
+            const backend2 = new MockLiteLLMBackend({ port: testPort });
 
             await backend1.start();
             await backend2.start();
 
             try {
                 assert.notStrictEqual(backend1.getBaseUrl(), backend2.getBaseUrl());
-                assert.ok(backend1.getBaseUrl().includes(`${testPort}`));
-                assert.ok(backend2.getBaseUrl().includes(`${testPort + 1}`));
             } finally {
                 await backend1.stop();
                 await backend2.stop();
