@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2.5.9] - 2026-09-13
 
 ### 🐛 Fixes
 
@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 
 * **🔀 Decouple Marketplace and Open VSX publish jobs**: The two registry publishes ran as sequential steps in one `publish-marketplace` job, so a late Open VSX failure failed the whole job *after* Marketplace had already published — forcing a full re-run (re-building the VSIX, re-billing Actions minutes) just to retry one registry. They are now independent parallel jobs (`publish-marketplace`, `publish-openvsx`), each with its own download/validate step and 3-attempt retry loop; either can be re-run alone from the Actions UI, and `--skip-duplicate` keeps retries idempotent. (`.github/workflows/release.yml`)
 * **👥 Credit all contributors in package metadata**: `package.json` `contributors` listed only `amwdrizz` while `main` history and `.all-contributorsrc` credit three authors; `FPA-DavidTai` and `kud-csi` are now included. `maintainers` remains `amwdrizz` alone. (`package.json`)
+* **🚀 Promote release version**: `2.5.9-dev1` → `2.5.9`. (`package.json`)
 
 ## [2.5.8] - 2026-09-11
 
