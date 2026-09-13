@@ -2,7 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2.5.9] - 2026-09-13
+
+### 🐛 Fixes
+
+* **🖼️ Fix image/PDF attachments dropped on `/responses` (#154)**: The `/responses` adapter forwarded Chat-Completions content parts (`image_url`, `file`) verbatim, but the Responses API — and LiteLLM's bridge for Anthropic/Bedrock/Vertex/Gemini — only understands `input_text` / `input_image` / `input_file`, so vision prompts silently lost their screenshots on bridged providers and were malformed for native OpenAI. Each user/assistant turn now becomes exactly ONE `message` item whose content is translated part-by-part into Responses-native types (all-text turns keep LiteLLM's plain-string shortcut; `cache_control` stamps survive on the translated part). The body also now sends `max_output_tokens` — the Responses-API name for the output cap — instead of the chat-only `max_tokens`, which LiteLLM filtered as unknown (so the cap was never enforced on this route), and stops emitting `frequency_penalty` / `presence_penalty` / `stop` / `stream_options` for the same reason. The `cache_control`-rejection retry now strips stamps from inside `/responses` content parts. (`src/adapters/responsesAdapter.ts`, `src/adapters/litellmClient.ts`, `src/utils/promptCacheControl.ts`, `src/types.ts`)
+* **🧪 Fix EADDRINUSE CI flake with ephemeral mock ports**: The `MockLiteLLMBackend` suite bound a fixed port (45000) that sits inside the kernel's ephemeral port range (32768–60999 on Linux), racing against outbound client sockets the kernel assigns from the same pool — an `EADDRINUSE` collision that intermittently failed CI and, because the failed teardown hook aborted the suite, suppressed the remaining 44 tests (985 vs 1030 passing). The mock backend now supports `port: 0` (kernel-assigned) and reports the actual bound port via `getBaseUrl()`; tests assert URL shape instead of hard-coded ports. Collisions are now impossible by construction. (`src/test/integration/mockLiteLLMBackend.ts`, `src/test/integration/mockLiteLLMBackend.test.ts`)
+
+### 🧹 Chores
+
+* **🔀 Decouple Marketplace and Open VSX publish jobs**: The two registry publishes ran as sequential steps in one `publish-marketplace` job, so a late Open VSX failure failed the whole job *after* Marketplace had already published — forcing a full re-run (re-building the VSIX, re-billing Actions minutes) just to retry one registry. They are now independent parallel jobs (`publish-marketplace`, `publish-openvsx`), each with its own download/validate step and 3-attempt retry loop; either can be re-run alone from the Actions UI, and `--skip-duplicate` keeps retries idempotent. (`.github/workflows/release.yml`)
+* **👥 Credit all contributors in package metadata**: `package.json` `contributors` listed only `amwdrizz` while `main` history and `.all-contributorsrc` credit three authors; `FPA-DavidTai` and `kud-csi` are now included. `maintainers` remains `amwdrizz` alone. (`package.json`)
+* **🚀 Promote release version**: `2.5.9-dev1` → `2.5.9`. (`package.json`)
 
 ## [2.5.8] - 2026-09-11
 

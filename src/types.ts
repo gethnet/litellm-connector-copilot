@@ -498,21 +498,49 @@ export interface OpenAIChatCompletionRequest {
 }
 
 /**
+ * Content part inside a `/responses` `message` input item.
+ *
+ * The Responses API — and LiteLLM's Chat-Completions bridge for Anthropic /
+ * Bedrock / Vertex / Gemini — recognises ONLY these three discriminants. The
+ * Chat-Completions shapes (`text` / `image_url` / `file`) are silently dropped
+ * by the bridge and rejected by native OpenAI, so `responsesAdapter.ts` must
+ * translate every part into one of these before sending (issue #154).
+ *
+ * `input_image.image_url` is a plain string (URL or data URI), NOT the nested
+ * `{ url }` object used by Chat Completions. `detail` is optional and omitted
+ * by the adapter so LiteLLM applies its own `"auto"` default.
+ */
+export type LiteLLMResponsesContentItem =
+    | { type: "input_text"; text: string; cache_control?: OpenAICacheControl }
+    | {
+          type: "input_image";
+          image_url: string;
+          detail?: "auto" | "low" | "high";
+          cache_control?: OpenAICacheControl;
+      }
+    | { type: "input_file"; filename?: string; file_data?: string; cache_control?: OpenAICacheControl };
+
+/**
  * LiteLLM /responses endpoint request.
+ *
+ * Only Responses-API parameters are representable here. Chat-only knobs
+ * (`max_tokens`, `frequency_penalty`, `presence_penalty`, `stop`,
+ * `stream_options`) are deliberately absent: LiteLLM's
+ * `get_requested_response_api_optional_param` filters unknown keys, so emitting
+ * them was a silent no-op and — for `max_tokens` — meant the output cap was
+ * never enforced on this route. Use `max_output_tokens` instead (issue #154).
  */
 export interface LiteLLMResponsesRequest {
     model: string;
-    input: (OpenAIChatMessageContentItem | LiteLLMResponseInputItem)[];
+    input: LiteLLMResponseInputItem[];
     /** Preserved from the chat-shaped request for eligible responses-routed cards. */
     cache_control?: OpenAICacheControl;
     instructions?: string;
     stream?: boolean;
-    max_tokens?: number;
+    /** Responses-API output cap; populated from the chat request's `max_tokens`. */
+    max_output_tokens?: number;
     temperature?: number;
     top_p?: number;
-    frequency_penalty?: number;
-    presence_penalty?: number;
-    stop?: string | string[];
     tools?: LiteLLMResponseTool[];
     tool_choice?: string | object;
     /**
@@ -527,7 +555,6 @@ export interface LiteLLMResponsesRequest {
     reasoning?: LiteLLMResponsesReasoning;
     thinking?: LiteLLMAdaptiveThinking;
     output_config?: LiteLLMReasoningOutputConfig;
-    stream_options?: { include_usage?: boolean };
     /**
      * LiteLLM passthrough body.
      * Used for features like caching controls.
@@ -547,7 +574,12 @@ export type LiteLLMResponseInputItem =
     | {
           type: "message";
           role: string;
-          content: string | OpenAIChatMessageContentItem[];
+          /**
+           * Either LiteLLM's plain-string shortcut (used when every part is
+           * un-stamped text) or an array of Responses-native parts. Never a
+           * bare object — LiteLLM raises `Invalid content type: <class 'dict'>`.
+           */
+          content: string | LiteLLMResponsesContentItem[];
       }
     | { type: "function_call"; id: string; call_id?: string; name: string; arguments: string }
     | { type: "function_call_output"; id?: string; call_id: string; output: string }

@@ -4,6 +4,8 @@ import type {
     LiteLLMConfig,
     LiteLLMModelInfo,
     LiteLLMResponseInputItem,
+    LiteLLMResponsesContentItem,
+    LiteLLMResponsesRequest,
     OpenAIChatCompletionRequest,
     OpenAIChatMessage,
     OpenAIToolCall,
@@ -46,6 +48,21 @@ suite("Types Unit Tests", () => {
         assert.strictEqual(a.type, "message");
         assert.strictEqual(b.type, "function_call");
         assert.strictEqual(c.type, "function_call_output");
+    });
+
+    test("LiteLLMResponseInputItem message content accepts Responses-native parts (#154)", () => {
+        const parts: LiteLLMResponsesContentItem[] = [
+            { type: "input_text", text: "hello", cache_control: { type: "ephemeral" } },
+            { type: "input_image", image_url: "data:image/png;base64,aW1hZ2U=" },
+            { type: "input_file", filename: "doc.pdf", file_data: "data:application/pdf;base64,JVBERi0=" },
+        ];
+        const message: LiteLLMResponseInputItem = { type: "message", role: "user", content: parts };
+        const request: LiteLLMResponsesRequest = { model: "m", input: [message], max_output_tokens: 42 };
+
+        assert.strictEqual(message.type, "message");
+        assert.strictEqual(request.max_output_tokens, 42);
+        assert.strictEqual(request.input.length, 1);
+        assert.ok(Array.isArray(message.content));
     });
 
     test("LiteLLMModelInfo index signature allows extra fields", () => {

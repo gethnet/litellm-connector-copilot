@@ -1,5 +1,10 @@
 import * as assert from "assert";
-import type { LiteLLMModelInfo, OpenAIChatMessage, OpenAIChatMessageContentItem } from "../../types";
+import type {
+    LiteLLMModelInfo,
+    LiteLLMResponsesContentItem,
+    OpenAIChatMessage,
+    OpenAIChatMessageContentItem,
+} from "../../types";
 import {
     applyEphemeralCacheControl,
     applyPromptCachePolicy,
@@ -115,6 +120,32 @@ suite("Prompt cache control policy", () => {
                     file_data: "data:application/pdf;base64,JVBERi0=",
                 },
             },
+        ];
+
+        const applied = applyEphemeralCacheControl(content);
+
+        assert.strictEqual(applied, true);
+        assert.strictEqual(content[0].cache_control, undefined);
+        assert.deepStrictEqual(content[1].cache_control, { type: "ephemeral" });
+    });
+
+    test("stamps the trailing Responses-native part (input_image) for /responses content (#154)", () => {
+        const content: LiteLLMResponsesContentItem[] = [
+            { type: "input_text", text: "first block" },
+            { type: "input_image", image_url: "data:image/png;base64,aW1hZ2U=" },
+        ];
+
+        const applied = applyEphemeralCacheControl(content);
+
+        assert.strictEqual(applied, true);
+        assert.strictEqual(content[0].cache_control, undefined);
+        assert.deepStrictEqual(content[1].cache_control, { type: "ephemeral" });
+    });
+
+    test("stamps a trailing input_file part for /responses content (#154)", () => {
+        const content: LiteLLMResponsesContentItem[] = [
+            { type: "input_text", text: "analyze this PDF" },
+            { type: "input_file", filename: "secret.pdf", file_data: "data:application/pdf;base64,JVBERi0=" },
         ];
 
         const applied = applyEphemeralCacheControl(content);

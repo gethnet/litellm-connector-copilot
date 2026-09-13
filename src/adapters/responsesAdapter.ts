@@ -1,6 +1,8 @@
 import type {
     OpenAIChatCompletionRequest,
+    OpenAIChatMessage,
     LiteLLMResponsesRequest,
+    LiteLLMResponsesContentItem,
     LiteLLMResponseInputItem,
     LiteLLMResponseTool,
     OpenAIChatMessageContentItem,
@@ -15,26 +17,88 @@ function getResponsesReasoningEffort(effort: OpenAIChatCompletionRequest["reason
     return effort?.effort === "none" ? undefined : effort?.effort;
 }
 
-/** Inline binary content (image data URI or PDF `file_data`) that must survive the transform. */
-function isBinaryContentItem(item: OpenAIChatMessageContentItem): boolean {
-    return (
-        (item.type === "image_url" && typeof item.image_url?.url === "string") ||
-        (item.type === "file" && typeof item.file?.file_data === "string")
-    );
+/**
+ * Translate ONE Chat-Completions content part into its Responses-native
+ * counterpart (issue #154):
+ *
+ *   text      → input_text  { text }
+ *   image_url → input_image { image_url: <string> }   (no `detail`; LiteLLM defaults "auto")
+ *   file      → input_file  { filename, file_data }
+ *
+ * The Responses API and LiteLLM's provider bridge only recognise the `input_*`
+ * discriminants — forwarding the chat shapes verbatim made bridged providers
+ * silently drop attachments. An explicit host `cache_control` stamp is carried
+ * across unchanged. Malformed parts (missing URL / data) return `undefined` so
+ * the caller can drop them without aborting the whole turn.
+ */
+function toResponsesContentItem(item: OpenAIChatMessageContentItem): LiteLLMResponsesContentItem | undefined {
+    const cacheControl = item.cache_control ? { cache_control: item.cache_control } : {};
+
+    if (item.type === "text" && typeof item.text === "string") {
+        return { type: "input_text", text: item.text, ...cacheControl };
+    }
+    if (item.type === "image_url" && typeof item.image_url?.url === "string") {
+        return { type: "input_image", image_url: item.image_url.url, ...cacheControl };
+    }
+    if (item.type === "file" && typeof item.file?.file_data === "string") {
+        return {
+            type: "input_file",
+            filename: item.file.filename,
+            file_data: item.file.file_data,
+            ...cacheControl,
+        };
+    }
+
+    Logger.warn(`[responsesAdapter] Dropping malformed content part: type=${String(item.type)}`);
+    return undefined;
+}
+
+/** A text part with no cache stamp — the only kind that may collapse into LiteLLM's string shortcut. */
+function isPlainInputText(
+    part: LiteLLMResponsesContentItem
+): part is Extract<LiteLLMResponsesContentItem, { type: "input_text" }> {
+    return part.type === "input_text" && part.cache_control === undefined;
 }
 
 /**
- * LiteLLM `/responses` requires message content to be a string or an array —
- * a bare dict raises `ValueError: Invalid content type: <class 'dict'>`, so the
- * content item is always array-wrapped.
+ * Build exactly ONE `message` input item for a user/assistant turn.
+ *
+ * - String content is forwarded as-is (empty/whitespace turns are skipped).
+ * - Array content is translated part-by-part via `toResponsesContentItem`; a
+ *   turn whose parts are ALL un-stamped text collapses to a joined string to
+ *   match LiteLLM's canonical shortcut, otherwise the parts array is kept so
+ *   images, files, and `cache_control` stamps survive.
+ * - LiteLLM requires string-or-array content — never a bare object — and
+ *   splitting one turn into several `message` items (the pre-#154 behaviour)
+ *   broke the text ↔ image association for vision prompts.
  */
-function toBinaryInputItem(role: "user" | "assistant", item: OpenAIChatMessageContentItem): LiteLLMResponseInputItem {
-    Logger.trace(`[responsesAdapter] ${role} binary content item: type=${item.type}`);
-    return {
-        type: "message",
-        role,
-        content: [item],
-    } as unknown as LiteLLMResponseInputItem;
+function toMessageInputItem(
+    role: "user" | "assistant",
+    content: OpenAIChatMessage["content"]
+): LiteLLMResponseInputItem | undefined {
+    if (typeof content === "string") {
+        return content.trim() ? { type: "message", role, content } : undefined;
+    }
+    if (!Array.isArray(content)) {
+        return undefined;
+    }
+
+    const parts = content
+        .map(toResponsesContentItem)
+        .filter((part): part is LiteLLMResponsesContentItem => part !== undefined);
+    if (parts.length === 0) {
+        return undefined;
+    }
+
+    if (parts.every(isPlainInputText)) {
+        const text = parts.map((part) => part.text).join("\n");
+        return text.trim() ? { type: "message", role, content: text } : undefined;
+    }
+
+    Logger.trace(
+        `[responsesAdapter] ${role} message with ${parts.length} part(s): ${parts.map((part) => part.type).join(",")}`
+    );
+    return { type: "message", role, content: parts };
 }
 
 /**
@@ -46,7 +110,7 @@ function toBinaryInputItem(role: "user" | "assistant", item: OpenAIChatMessageCo
  */
 export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequest): LiteLLMResponsesRequest {
     const messages = requestBody.messages;
-    const inputArray: (OpenAIChatMessageContentItem | LiteLLMResponseInputItem)[] = [];
+    const inputArray: LiteLLMResponseInputItem[] = [];
     let instructions: string | undefined;
 
     const toolCallIdMap = new Map<string, string>();
@@ -87,40 +151,16 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
         }
 
         if (msg.role === "user") {
-            if (typeof msg.content === "string" && msg.content.trim()) {
-                inputArray.push({ type: "message", role: "user", content: msg.content });
-            } else if (Array.isArray(msg.content)) {
-                // Unpack content array into individual message items
-                for (const contentItem of msg.content) {
-                    if (contentItem.type === "text" && typeof contentItem.text === "string") {
-                        inputArray.push({
-                            type: "message",
-                            role: "user",
-                            content: contentItem.text,
-                        });
-                    } else if (isBinaryContentItem(contentItem)) {
-                        inputArray.push(toBinaryInputItem("user", contentItem));
-                    }
-                }
+            const userMessage = toMessageInputItem("user", msg.content);
+            if (userMessage) {
+                inputArray.push(userMessage);
             }
         } else if (msg.role === "assistant") {
-            // If assistant has tool calls, we add them.
-            // If it ALSO has content, we add that as a message with text or image_url items.
-            if (typeof msg.content === "string" && msg.content.trim()) {
-                inputArray.push({ type: "message", role: "assistant", content: msg.content });
-            } else if (Array.isArray(msg.content)) {
-                // Unpack content array into individual message items
-                for (const contentItem of msg.content) {
-                    if (contentItem.type === "text" && typeof contentItem.text === "string") {
-                        inputArray.push({
-                            type: "message",
-                            role: "assistant",
-                            content: contentItem.text,
-                        });
-                    } else if (isBinaryContentItem(contentItem)) {
-                        inputArray.push(toBinaryInputItem("assistant", contentItem));
-                    }
-                }
+            // Assistant content (if any) becomes ONE message item; thinking blocks
+            // and tool calls are appended after it as their own input items.
+            const assistantMessage = toMessageInputItem("assistant", msg.content);
+            if (assistantMessage) {
+                inputArray.push(assistantMessage);
             }
             if (Array.isArray(msg.thinking_blocks)) {
                 for (const block of msg.thinking_blocks) {
@@ -183,7 +223,7 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
     // Third pass: Ensure every function_call_output has a preceding function_call in the inputArray
     // AND ensure they are in the correct order: [call, output, call, output]
     // LiteLLM /responses endpoint is strict about the sequence.
-    const finalInputArray: (OpenAIChatMessageContentItem | LiteLLMResponseInputItem)[] = [];
+    const finalInputArray: LiteLLMResponseInputItem[] = [];
     const seenCallIds = new Set<string>();
 
     for (const item of inputArray) {
@@ -232,18 +272,20 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
     // UNLESS it's the very end of the conversation and we want the model to generate.
     // However, if we have a function_call at the end, we should probably ensure it's valid.
 
+    // Only Responses-API parameters are emitted. Chat-only knobs (`max_tokens`,
+    // `frequency_penalty`, `presence_penalty`, `stop`, `stream_options`) are
+    // filtered by LiteLLM as unknown — so sending them was a silent no-op and the
+    // output cap was never enforced on this route. `max_output_tokens` is the
+    // Responses-API name for the cap (issue #154).
     const responsesBody: LiteLLMResponsesRequest = {
         model: requestBody.model,
         input: finalInputArray,
         cache_control: requestBody.cache_control,
         stream: requestBody.stream,
         instructions,
-        max_tokens: requestBody.max_tokens,
+        max_output_tokens: requestBody.max_tokens,
         temperature: requestBody.temperature,
         top_p: requestBody.top_p,
-        frequency_penalty: requestBody.frequency_penalty,
-        presence_penalty: requestBody.presence_penalty,
-        stop: requestBody.stop,
         // Preserve the flat compatibility field while also using the endpoint-native
         // shape. Explicit Claude adaptive fields take precedence over `reasoning`.
         reasoning_effort: requestBody.reasoning_effort,
@@ -258,7 +300,6 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
               })(),
         thinking: requestBody.thinking,
         output_config: requestBody.output_config,
-        stream_options: requestBody.stream_options,
         extra_body: requestBody.extra_body,
     };
 

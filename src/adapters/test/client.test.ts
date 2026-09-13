@@ -378,6 +378,61 @@ suite("LiteLLM Client Unit Tests", () => {
         assert.ok(!JSON.stringify(retryBody.messages).includes("cache_control"));
     });
 
+    test("chat strips content-part cache_control from /responses input after a cache_control rejection (#154)", async () => {
+        const client = new LiteLLMClient(config, userAgent);
+        const errorResponse = {
+            ok: false,
+            status: 400,
+            statusText: "Bad Request",
+            text: async () => "Unsupported parameter: 'cache_control'",
+            clone: function () {
+                return this;
+            },
+        };
+        const successResponse = { ok: true, status: 200, body: new ReadableStream() };
+        const fetchStub = sandbox.stub(global, "fetch");
+        fetchStub.onCall(0).resolves(errorResponse as unknown as Response);
+        fetchStub.onCall(1).resolves(successResponse as unknown as Response);
+
+        await client.chat(
+            {
+                model: "claude-opus-5",
+                cache_control: { type: "ephemeral" },
+                messages: [
+                    {
+                        role: "user",
+                        content: [
+                            { type: "text", text: "reuse this prefix", cache_control: { type: "ephemeral" } },
+                            { type: "image_url", image_url: { url: "data:image/png;base64,aW1hZ2U=" } },
+                        ],
+                    },
+                ],
+            },
+            "responses"
+        );
+
+        assert.strictEqual(fetchStub.callCount, 2);
+        assert.ok(String(fetchStub.getCall(0).args[0]).endsWith("/responses"), "must route to /responses");
+
+        const firstBody = JSON.parse((fetchStub.getCall(0).args[1] as RequestInit).body as string) as Record<
+            string,
+            unknown
+        >;
+        // The initial request DID carry the stamp inside the Responses-native part…
+        assert.ok(JSON.stringify(firstBody.input).includes('"cache_control"'), "first attempt should carry the stamp");
+        assert.ok(JSON.stringify(firstBody.input).includes('"input_image"'), "first attempt should carry input_image");
+
+        const retryBody = JSON.parse((fetchStub.getCall(1).args[1] as RequestInit).body as string) as Record<
+            string,
+            unknown
+        >;
+        // …and the retry must strip it from BOTH the top level and every content part.
+        assert.strictEqual(retryBody.cache_control, undefined);
+        assert.ok(!JSON.stringify(retryBody.input).includes("cache_control"), "retry leaked a content-part stamp");
+        // The image itself must survive the strip.
+        assert.ok(JSON.stringify(retryBody.input).includes('"input_image"'), "retry dropped the image part");
+    });
+
     test("parseRetryAfterDelayMs handles seconds, future date, and invalid values", () => {
         const client = new LiteLLMClient(config, userAgent);
 

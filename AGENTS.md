@@ -198,7 +198,7 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
 - **Adapters**:
   - `src/adapters/litellmClient.ts` — HTTP client and endpoint routing integration
   - `src/adapters/multiBackendClient.ts` — Multi-backend orchestrator and model namespacing
-  - `src/adapters/responsesAdapter.ts` — LiteLLM `/responses` endpoint payload translation
+  - `src/adapters/responsesAdapter.ts` — LiteLLM `/responses` endpoint payload translation. Owns the Chat→Responses **content-part translation** (`text`/`image_url`/`file` → `input_text`/`input_image`/`input_file`, one `message` item per turn) and the parameter mapping (`max_tokens` → `max_output_tokens`; chat-only params are never emitted). See issue #154.
   - `/responses` stream event handling (`output_item.delta`, `output_item.done`, anonymous tool buffering) lives in `src/adapters/streaming/liteLLMStreamInterpreter.ts`; the real LiteLLM reasoning sequence (`output_item.added`/`output_item.done` with `item.type "reasoning"`, `reasoning_summary_text.delta`, `reasoning_text.delta`) lives in `src/adapters/streaming/responsesReasoningEvents.ts` (issue #149)
   - `src/adapters/tokenUtils.ts` — token budgeting, trimming, and related helpers
 
