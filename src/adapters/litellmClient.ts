@@ -386,6 +386,10 @@ export class LiteLLMClient {
      * Removes only Anthropic prompt-cache controls after the provider rejected
      * `cache_control`. LiteLLM response caching under `extra_body.cache` is a
      * separate feature and must survive this retry unchanged.
+     *
+     * On `/responses` bodies the stamps live on the Responses-native parts
+     * inside each `message` item's `content[]` (issue #154), so the strip
+     * walks into array content rather than the input item itself.
      */
     private stripPromptCacheControls(body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest): void {
         delete body.cache_control;
@@ -394,8 +398,11 @@ export class LiteLLMClient {
             return;
         }
         for (const input of body.input) {
-            if ("cache_control" in input) {
-                delete input.cache_control;
+            if (input.type !== "message" || !Array.isArray(input.content)) {
+                continue;
+            }
+            for (const part of input.content) {
+                delete part.cache_control;
             }
         }
     }

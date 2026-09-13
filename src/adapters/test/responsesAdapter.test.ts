@@ -1,7 +1,7 @@
 import * as assert from "assert";
 import { transformToResponsesFormat } from "../responsesAdapter";
 import { normalizeToolCallId } from "../../utils";
-import type { OpenAIFunctionToolDef, OpenAIChatMessage, LiteLLMResponseInputItem } from "../../types";
+import type { OpenAIFunctionToolDef, OpenAIChatMessage, LiteLLMResponsesContentItem } from "../../types";
 
 suite("Responses Adapter Unit Tests", () => {
     test("transformToResponsesFormat preserves cache bypass extra_body", () => {
@@ -321,33 +321,51 @@ suite("Responses Adapter Unit Tests", () => {
         assert.strictEqual(body.instructions, "sys");
     });
 
-    test("transformToResponsesFormat wraps user image_url content item in array (not bare dict)", () => {
-        // Reproduces addendum bug: LiteLLM raises ValueError: Invalid content type: <class 'dict'>
-        // when content is a bare object. The fix is to wrap it in an array.
+    // ---------------------------------------------------------------------------
+    // Issue #154 — Responses-native content parts.
+    //
+    // The Responses API (and LiteLLM's bridge for Anthropic/Bedrock/Vertex/Gemini)
+    // only understands `input_text` / `input_image` / `input_file` inside
+    // `input[].content[]`. Chat-Completions parts (`text` / `image_url` / `file`)
+    // were previously forwarded verbatim and silently dropped by bridged providers.
+    // ---------------------------------------------------------------------------
+
+    /** Narrow a raw input item to its message shape for assertions. */
+    function asMessage(item: unknown): { type: string; role: string; content: unknown } {
+        const record = item as Record<string, unknown>;
+        assert.strictEqual(record.type, "message");
+        return record as { type: string; role: string; content: unknown };
+    }
+
+    test("transformToResponsesFormat emits ONE message with input_text + input_image for a user text+image turn (#154)", () => {
+        const imageUrl = "data:image/png;base64,iVBORw0KGgo=";
         const body = transformToResponsesFormat({
-            model: "gpt-4o",
+            model: "claude-sonnet-4-5",
             messages: [
                 {
                     role: "user",
-                    content: [{ type: "image_url", image_url: { url: "https://example.com/image.png" } }],
+                    content: [
+                        { type: "text", text: "What's in this image?" },
+                        { type: "image_url", image_url: { url: imageUrl } },
+                    ],
                 },
             ],
         });
 
-        const input = body.input as Record<string, unknown>[];
-        assert.strictEqual(input.length, 1, "Should produce one input item");
-        const item = input[0];
-        assert.strictEqual(item.type, "message");
-        assert.strictEqual(item.role, "user");
-        // content must be an ARRAY, not a bare object
-        assert.ok(Array.isArray(item.content), "content must be an array, not a bare dict");
-        const content = item.content as Record<string, unknown>[];
-        assert.strictEqual(content.length, 1);
-        assert.strictEqual(content[0].type, "image_url");
-        assert.deepStrictEqual(content[0].image_url, { url: "https://example.com/image.png" });
+        assert.strictEqual(body.input.length, 1, "text + image must collapse into ONE message item");
+        const message = asMessage(body.input[0]);
+        assert.strictEqual(message.role, "user");
+        assert.deepStrictEqual(message.content, [
+            { type: "input_text", text: "What's in this image?" },
+            { type: "input_image", image_url: imageUrl },
+        ] satisfies LiteLLMResponsesContentItem[]);
+
+        // `detail` is intentionally NOT emitted — LiteLLM defaults it to "auto".
+        const imagePart = (message.content as Record<string, unknown>[])[1];
+        assert.strictEqual("detail" in imagePart, false, "input_image must not carry a detail key");
     });
 
-    test("transformToResponsesFormat does not strip a PDF file data URI", () => {
+    test("transformToResponsesFormat maps a PDF file part to input_file (#154)", () => {
         const pdfUrl = "data:application/pdf;base64,JVBERi0=";
         const body = transformToResponsesFormat({
             model: "gpt-4o",
@@ -359,123 +377,18 @@ suite("Responses Adapter Unit Tests", () => {
             ],
         });
 
-        const input = body.input as Record<string, unknown>[];
-        assert.strictEqual(input.length, 1);
-        const content = input[0].content as Record<string, unknown>[];
-        assert.ok(Array.isArray(content), "PDF file content must stay array-wrapped");
-        assert.strictEqual(content[0].type, "file");
-        assert.deepStrictEqual(content[0].file, { filename: "document.pdf", file_data: pdfUrl });
+        assert.strictEqual(body.input.length, 1);
+        const message = asMessage(body.input[0]);
+        assert.deepStrictEqual(message.content, [
+            { type: "input_file", filename: "document.pdf", file_data: pdfUrl },
+        ] satisfies LiteLLMResponsesContentItem[]);
     });
 
-    test("transformToResponsesFormat wraps assistant image_url content item in array (not bare dict)", () => {
-        // Companion to the user image test — assistant vision messages have the same bug
+    test("transformToResponsesFormat maps assistant image_url parts to input_image (#154)", () => {
         const body = transformToResponsesFormat({
             model: "gpt-4o",
             messages: [
-                {
-                    role: "user",
-                    content: [{ type: "text", text: "describe this image" }],
-                },
-                {
-                    role: "assistant",
-                    content: [{ type: "image_url", image_url: { url: "https://example.com/image.png" } }],
-                },
-            ],
-        });
-
-        const input = body.input as Record<string, unknown>[];
-        const imageMessage = input.find(
-            (i) => i.type === "message" && (i as Record<string, unknown>).role === "assistant"
-        );
-        assert.ok(imageMessage, "Should find assistant message");
-        assert.ok(Array.isArray((imageMessage as Record<string, unknown>).content), "content must be an array");
-        const content = (imageMessage as Record<string, unknown>).content as Record<string, unknown>[];
-        assert.strictEqual(content[0].type, "image_url");
-    });
-
-    test("transformToResponsesFormat handles user message with mixed array content", () => {
-        const body = transformToResponsesFormat({
-            model: "m",
-            messages: [
-                {
-                    role: "user",
-                    content: [
-                        { type: "text", text: "  " }, // whitespace only
-                        { type: "text", text: "hello" },
-                        { type: "image_url", image_url: { url: "https://example.com/image.png" } }, // not text
-                    ] as unknown as string,
-                },
-            ],
-        });
-        // Each content item is unpacked into the input array as LiteLLMResponseInputItem
-        assert.strictEqual(body.input.length, 3);
-
-        // First item: text message (type="message" because it's wrapped in response format)
-        const whitespaceMessage = body.input[0];
-        assert.strictEqual(whitespaceMessage.type, "message");
-        assert.strictEqual(whitespaceMessage.role, "user");
-        assert.strictEqual(whitespaceMessage.content, "  "); // text content is unpacked string
-
-        // Second item: text message
-        const textMessage = body.input[1];
-        assert.strictEqual(textMessage.type, "message");
-        assert.strictEqual(textMessage.role, "user");
-        assert.strictEqual(textMessage.content, "hello");
-
-        // Third item: image_url message — content must be an ARRAY (not a bare dict)
-        const imageMessage = body.input[2] as LiteLLMResponseInputItem;
-        assert.strictEqual(imageMessage.type, "message");
-        assert.strictEqual(imageMessage.role, "user");
-        const content = imageMessage.content as unknown as Record<string, unknown>[];
-        assert.ok(Array.isArray(content), "image_url content must be array-wrapped");
-        assert.strictEqual(content[0].type, "image_url");
-        assert.deepStrictEqual(content[0].image_url, { url: "https://example.com/image.png" });
-    });
-
-    test("transformToResponsesFormat preserves image_url content in user messages", () => {
-        const body = transformToResponsesFormat({
-            model: "gpt-4o",
-            messages: [
-                {
-                    role: "user",
-                    content: [
-                        { type: "text", text: "What's in this image?" },
-                        { type: "image_url", image_url: { url: "https://example.com/image.png" } },
-                    ],
-                },
-            ],
-        });
-
-        const input = body.input as Record<string, unknown>[];
-        // Should have both text message and image message
-        assert.ok(input.length >= 2, `Expected at least 2 input items, got ${input.length}`);
-
-        const textMessage = input.find(
-            (i) => i.type === "message" && (i as Record<string, unknown>).content === "What's in this image?"
-        );
-        const imageMessage = input.find(
-            (i) =>
-                i.type === "message" &&
-                (i as Record<string, unknown>).role === "user" &&
-                typeof (i as Record<string, unknown>).content === "object"
-        );
-
-        assert.ok(textMessage, "Text message should be preserved");
-        assert.ok(imageMessage, "Image message should be preserved");
-        assert.ok(
-            Array.isArray((imageMessage as Record<string, unknown>).content),
-            "image_url message content must be an array"
-        );
-    });
-
-    test("transformToResponsesFormat preserves image_url content in assistant messages", () => {
-        const body = transformToResponsesFormat({
-            model: "gpt-4o",
-            messages: [
-                {
-                    role: "user",
-                    content: [{ type: "text", text: "describe this image" }],
-                },
+                { role: "user", content: [{ type: "text", text: "describe this image" }] },
                 {
                     role: "assistant",
                     content: [
@@ -486,26 +399,223 @@ suite("Responses Adapter Unit Tests", () => {
             ],
         });
 
-        const input = body.input as Record<string, unknown>[];
-        // Should have both text message and image message
-        assert.ok(input.length >= 2, `Expected at least 2 input items, got ${input.length}`);
+        const assistant = (body.input as Record<string, unknown>[]).filter(
+            (i) => i.type === "message" && i.role === "assistant"
+        );
+        assert.strictEqual(assistant.length, 1, "assistant turn must be a single message item");
+        assert.deepStrictEqual(assistant[0].content, [
+            { type: "input_text", text: "This image shows a sunset." },
+            { type: "input_image", image_url: "https://example.com/image.png" },
+        ] satisfies LiteLLMResponsesContentItem[]);
+    });
 
-        const textMessage = input.find(
-            (i) => i.type === "message" && (i as Record<string, unknown>).role === "assistant"
-        );
-        const imageMessage = input.find(
-            (i) =>
-                i.type === "message" &&
-                (i as Record<string, unknown>).role === "assistant" &&
-                typeof (i as Record<string, unknown>).content === "object"
-        );
+    test("transformToResponsesFormat collapses an all-text content array to a plain string (#154 regression guard)", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "first" },
+                        { type: "text", text: "second" },
+                    ],
+                },
+            ],
+        });
 
-        assert.ok(textMessage, "Assistant text message should be preserved");
-        assert.ok(imageMessage, "Assistant image message should be preserved");
-        assert.ok(
-            Array.isArray((imageMessage as Record<string, unknown>).content),
-            "assistant image_url message content must be an array"
+        assert.strictEqual(body.input.length, 1);
+        const message = asMessage(body.input[0]);
+        assert.strictEqual(typeof message.content, "string", "all-text arrays use LiteLLM's string shortcut");
+        assert.strictEqual(message.content, "first\nsecond");
+    });
+
+    test("transformToResponsesFormat preserves cache_control on an input_text part (#154)", () => {
+        const body = transformToResponsesFormat({
+            model: "claude-opus-5",
+            messages: [
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "reuse this prefix", cache_control: { type: "ephemeral" } }],
+                },
+            ],
+        });
+
+        assert.strictEqual(body.input.length, 1);
+        const message = asMessage(body.input[0]);
+        // A cache-stamped text part must NOT collapse to a string — the stamp would be lost.
+        assert.deepStrictEqual(message.content, [
+            { type: "input_text", text: "reuse this prefix", cache_control: { type: "ephemeral" } },
+        ] satisfies LiteLLMResponsesContentItem[]);
+    });
+
+    test("transformToResponsesFormat drops malformed content parts but keeps the rest (#154)", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "image_url" }, // missing image_url.url
+                        { type: "file", file: { filename: "x.pdf" } }, // missing file.file_data
+                        { type: "text", text: "still here" },
+                        { type: "image_url", image_url: { url: "https://example.com/ok.png" } },
+                    ] as unknown as string,
+                },
+            ],
+        });
+
+        assert.strictEqual(body.input.length, 1);
+        const message = asMessage(body.input[0]);
+        assert.deepStrictEqual(message.content, [
+            { type: "input_text", text: "still here" },
+            { type: "input_image", image_url: "https://example.com/ok.png" },
+        ] satisfies LiteLLMResponsesContentItem[]);
+    });
+
+    test("transformToResponsesFormat skips a content array whose parts are all malformed (#154)", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [{ role: "user", content: [{ type: "image_url" }] }],
+        });
+
+        assert.strictEqual(body.input.length, 0);
+    });
+
+    test("transformToResponsesFormat maps max_tokens to max_output_tokens and drops chat-only params (#154)", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [{ role: "user", content: "hi" }],
+            max_tokens: 123,
+            frequency_penalty: 0.1,
+            presence_penalty: 0.2,
+            stop: ["END"],
+            stream_options: { include_usage: true },
+        });
+
+        assert.strictEqual(body.max_output_tokens, 123);
+
+        const raw = body as unknown as Record<string, unknown>;
+        for (const key of ["max_tokens", "frequency_penalty", "presence_penalty", "stop", "stream_options"]) {
+            assert.strictEqual(key in raw, false, `${key} is not a Responses API parameter and must not be emitted`);
+        }
+    });
+
+    test("transformToResponsesFormat still forwards Responses-valid params unchanged (#154)", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [
+                { role: "system", content: "sys" },
+                { role: "user", content: "hi" },
+            ],
+            stream: true,
+            temperature: 0.3,
+            top_p: 0.9,
+            reasoning_effort: "high",
+            extra_body: { cache: { "no-cache": true } },
+            cache_control: { type: "ephemeral" },
+        });
+
+        assert.strictEqual(body.stream, true);
+        assert.strictEqual(body.instructions, "sys");
+        assert.strictEqual(body.temperature, 0.3);
+        assert.strictEqual(body.top_p, 0.9);
+        assert.strictEqual(body.reasoning_effort, "high");
+        assert.deepStrictEqual(body.reasoning, { effort: "high", summary: "auto" });
+        assert.deepStrictEqual(body.extra_body, { cache: { "no-cache": true } });
+        assert.deepStrictEqual(body.cache_control, { type: "ephemeral" });
+    });
+
+    test("transformToResponsesFormat array-wraps a lone user image as input_image (never a bare dict)", () => {
+        // Historical addendum bug: LiteLLM raises ValueError: Invalid content type: <class 'dict'>
+        // when content is a bare object. Content arrays are always emitted as arrays.
+        const body = transformToResponsesFormat({
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [{ type: "image_url", image_url: { url: "https://example.com/image.png" } }],
+                },
+            ],
+        });
+
+        assert.strictEqual(body.input.length, 1, "Should produce one input item");
+        const message = asMessage(body.input[0]);
+        assert.strictEqual(message.role, "user");
+        assert.ok(Array.isArray(message.content), "content must be an array, not a bare dict");
+        assert.deepStrictEqual(message.content, [
+            { type: "input_image", image_url: "https://example.com/image.png" },
+        ] satisfies LiteLLMResponsesContentItem[]);
+    });
+
+    test("transformToResponsesFormat array-wraps a lone assistant image as input_image (never a bare dict)", () => {
+        const body = transformToResponsesFormat({
+            model: "gpt-4o",
+            messages: [
+                { role: "user", content: [{ type: "text", text: "describe this image" }] },
+                {
+                    role: "assistant",
+                    content: [{ type: "image_url", image_url: { url: "https://example.com/image.png" } }],
+                },
+            ],
+        });
+
+        const assistant = (body.input as Record<string, unknown>[]).find(
+            (i) => i.type === "message" && i.role === "assistant"
         );
+        assert.ok(assistant, "Should find assistant message");
+        assert.deepStrictEqual(assistant.content, [
+            { type: "input_image", image_url: "https://example.com/image.png" },
+        ] satisfies LiteLLMResponsesContentItem[]);
+    });
+
+    test("transformToResponsesFormat keeps a mixed user content array as one multi-part message", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "  " }, // whitespace-only text is preserved as a part
+                        { type: "text", text: "hello" },
+                        { type: "image_url", image_url: { url: "https://example.com/image.png" } },
+                    ] as unknown as string,
+                },
+            ],
+        });
+
+        // One turn → one message item (was previously exploded into three).
+        assert.strictEqual(body.input.length, 1);
+        const message = asMessage(body.input[0]);
+        assert.strictEqual(message.role, "user");
+        assert.deepStrictEqual(message.content, [
+            { type: "input_text", text: "  " },
+            { type: "input_text", text: "hello" },
+            { type: "input_image", image_url: "https://example.com/image.png" },
+        ] satisfies LiteLLMResponsesContentItem[]);
+    });
+
+    test("transformToResponsesFormat never emits chat-completions part types on /responses", () => {
+        const body = transformToResponsesFormat({
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "look" },
+                        { type: "image_url", image_url: { url: "https://example.com/image.png" } },
+                        {
+                            type: "file",
+                            file: { filename: "doc.pdf", file_data: "data:application/pdf;base64,JVBERi0=" },
+                        },
+                    ],
+                },
+            ],
+        });
+
+        const serialized = JSON.stringify(body.input);
+        assert.ok(!serialized.includes('"type":"text"'), "chat `text` part leaked into /responses body");
+        assert.ok(!serialized.includes('"type":"image_url"'), "chat `image_url` part leaked into /responses body");
+        assert.ok(!serialized.includes('"type":"file"'), "chat `file` part leaked into /responses body");
     });
 
     test("transformToResponsesFormat handles tool message with missing id", () => {
@@ -645,12 +755,14 @@ suite("Responses Adapter Unit Tests", () => {
                 `Offending items: ${JSON.stringify(invalidItems, null, 2)}`
         );
 
-        // Additionally verify the two image-bearing user turns produce array-wrapped content.
+        // Additionally verify the two image-bearing user turns each produce ONE message whose
+        // content array carries the accompanying text as `input_text` and the screenshot as
+        // `input_image` (issue #154 — Responses-native part types).
         const imageBearingMessages = input.filter(
             (item) =>
                 item.type === "message" &&
                 Array.isArray(item.content) &&
-                (item.content as Record<string, unknown>[]).some((c) => c.type === "image_url")
+                (item.content as Record<string, unknown>[]).some((c) => c.type === "input_image")
         );
         assert.strictEqual(
             imageBearingMessages.length,
@@ -658,13 +770,22 @@ suite("Responses Adapter Unit Tests", () => {
             `Expected exactly 2 image-bearing message items (one per user image turn), got ${imageBearingMessages.length}`
         );
 
-        for (const msg of imageBearingMessages) {
-            const content = msg.content as Record<string, unknown>[];
-            assert.ok(Array.isArray(content), "image-bearing message content must be an array");
-            const imageItem = content.find((c) => c.type === "image_url") as Record<string, unknown> | undefined;
-            assert.ok(imageItem, "image_url item must be present inside the content array");
-            assert.deepStrictEqual(imageItem.image_url, { url: imageUrl });
-        }
+        const expectedTexts = [
+            "Here is a screenshot of the current code:",
+            "Apply this change to the highlighted region.",
+        ];
+        imageBearingMessages.forEach((msg, index) => {
+            assert.strictEqual(msg.role, "user");
+            assert.deepStrictEqual(msg.content, [
+                { type: "input_text", text: expectedTexts[index] },
+                { type: "input_image", image_url: imageUrl },
+            ] satisfies LiteLLMResponsesContentItem[]);
+        });
+
+        // Layout sanity: 7 input items — user, assistant, user(text+image), function_call,
+        // function_call_output, assistant, user(text+image). The system prompt becomes `instructions`.
+        assert.strictEqual(input.length, 7, `Unexpected input layout: ${JSON.stringify(input.map((i) => i.type))}`);
+        assert.strictEqual(body.instructions, "You are a helpful inline code editor.");
 
         // Sanity-check: function_call and function_call_output items are present and correctly linked.
         const functionCall = input.find((i) => i.type === "function_call") as Record<string, unknown> | undefined;

@@ -1,4 +1,10 @@
-import type { LiteLLMModelInfo, OpenAICacheControl, OpenAIChatMessage, OpenAIChatMessageContentItem } from "../types";
+import type {
+    LiteLLMModelInfo,
+    LiteLLMResponsesContentItem,
+    OpenAICacheControl,
+    OpenAIChatMessage,
+    OpenAIChatMessageContentItem,
+} from "../types";
 import { isAnthropicModel } from "./modelUtils";
 
 const EPHEMERAL_CACHE_CONTROL: OpenAICacheControl = { type: "ephemeral" };
@@ -28,15 +34,32 @@ export function modelSupportsPromptCacheControl(modelId: string, modelInfo?: Lit
     );
 }
 
+/** Every content-part discriminant that may legally carry an explicit `cache_control` stamp. */
+const CACHEABLE_CONTENT_TYPES: ReadonlySet<string> = new Set([
+    // Chat-Completions parts
+    "text",
+    "image_url",
+    "file",
+    // Responses-native parts (issue #154)
+    "input_text",
+    "input_image",
+    "input_file",
+]);
+
 /**
  * Adds a host-requested explicit breakpoint to the final eligible content
  * block. The converter calls this only after it sees a cache-marker DataPart;
  * no automatic content breakpoints are ever invented here.
+ *
+ * Accepts both Chat-Completions parts and Responses-native parts so the same
+ * stamper serves `/chat/completions` bodies and `/responses` `message` items.
  */
-export function applyEphemeralCacheControl(content: OpenAIChatMessageContentItem[]): boolean {
+export function applyEphemeralCacheControl(
+    content: (OpenAIChatMessageContentItem | LiteLLMResponsesContentItem)[]
+): boolean {
     for (let index = content.length - 1; index >= 0; index--) {
         const item = content[index];
-        if (item.type === "text" || item.type === "image_url" || item.type === "file") {
+        if (CACHEABLE_CONTENT_TYPES.has(item.type)) {
             item.cache_control = { ...EPHEMERAL_CACHE_CONTROL };
             return true;
         }
