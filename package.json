@@ -1,7 +1,7 @@
 {
 	"name": "litellm-connector-copilot",
 	"displayName": "LiteLLM Connector for Copilot",
-	"version": "2.5.10-dev1",
+	"version": "2.5.10-dev2",
 	"description": "An extension that integrates LiteLLM proxy into Copilot",
 	"categories": [
 		"AI",
@@ -410,7 +410,7 @@
 		"@vscode/dts": "^0.4.1",
 		"@vscode/test-cli": "^0.0.15",
 		"@vscode/test-electron": "^3.0.0",
-		"@vscode/vsce": "^3.7.0",
+		"@vscode/vsce": "^4.0.0",
 		"all-contributors-cli": "^6.26.1",
 		"esbuild": "^0.28.0",
 		"eslint": "^10.7.0",
