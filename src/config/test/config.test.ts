@@ -255,6 +255,22 @@ suite("ConfigManager Unit Tests", () => {
         assert.strictEqual(cfg.commitMessagePromptOverride, "custom message prompt");
     });
 
+    test("getConfig defaults commitOutputTokenReserve to 0 when unset", async () => {
+        assert.strictEqual((await configManager.getConfig()).commitOutputTokenReserve, 0);
+    });
+
+    test("getConfig floors a positive commitOutputTokenReserve", async () => {
+        settingsMap.set("litellm-connector.commitOutputTokenReserve", 3000.7);
+        assert.strictEqual((await configManager.getConfig()).commitOutputTokenReserve, 3000);
+    });
+
+    test("getConfig coerces invalid commitOutputTokenReserve to 0", async () => {
+        settingsMap.set("litellm-connector.commitOutputTokenReserve", -100);
+        assert.strictEqual((await configManager.getConfig()).commitOutputTokenReserve, 0);
+        settingsMap.set("litellm-connector.commitOutputTokenReserve", "lots");
+        assert.strictEqual((await configManager.getConfig()).commitOutputTokenReserve, 0);
+    });
+
     test("should default forceResponsesEndpoint to false when not set", async () => {
         settingsMap.delete("litellm-connector.forceResponsesEndpoint");
         const config = await configManager.getConfig();
@@ -291,6 +307,7 @@ suite("ConfigManager Unit Tests", () => {
             "modelCapabilitiesOverrides",
             "modelIdOverride",
             "commitModelIdOverride",
+            "commitOutputTokenReserve",
             "forceResponsesEndpoint",
             "allowChatCompletionsFallback",
             // NOTE: sendDefaultParameters, inlineCompletions*, v2ApiEnabled,

@@ -6,6 +6,33 @@ import { LiteLLMCommitMessageProvider } from "../../providers/liteLLMCommitProvi
 import { GitUtils } from "../../utils/gitUtils";
 import type { ConfigManager } from "../../config/configManager";
 import type { LiteLLMModelInfo, LiteLLMConfig } from "../../types";
+import type { TelemetryService } from "../../telemetry/telemetryService";
+import { countTokens } from "../../adapters/tokenUtils";
+import { computeDiffBudget, computeOutputReserve, countDiffBreadth } from "../../utils/commitDiffBudget";
+import { COMMIT_MESSAGE_PROMPT, COMMIT_SYSTEM_PROMPT } from "../../utils/prompts";
+
+const DIFF_PREAMBLE = "Here is the diff:\n\n";
+
+function buildLargeDiff(files: number, linesPerFile: number): string {
+    const parts: string[] = [];
+    for (let f = 0; f < files; f++) {
+        parts.push(`diff --git a/src/file${f}.ts b/src/file${f}.ts`, "index 0000000..1111111 100644");
+        parts.push(`--- a/src/file${f}.ts`, `+++ b/src/file${f}.ts`);
+        parts.push(`@@ -1,${linesPerFile} +1,${linesPerFile} @@`);
+        for (let i = 0; i < linesPerFile; i++) {
+            parts.push(`+    const value${i} = computeSomething(${i}, "payload-${f}-${i}");`);
+        }
+    }
+    return parts.join("\n");
+}
+
+function extractSentDiff(sendRequest: sinon.SinonStub): string {
+    const messages = sendRequest.firstCall.args[0] as { content: { value: string }[] }[];
+    const body = messages[1].content[0].value;
+    const index = body.indexOf(DIFF_PREAMBLE);
+    assert.ok(index >= 0);
+    return body.substring(index + DIFF_PREAMBLE.length);
+}
 
 suite("GenerateCommitMessage Command Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -66,6 +93,7 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         // mock chat model that streams the expected commit message so the input box is
         // updated via the VS Code route.
         const model = {
+            maxInputTokens: 128000,
             sendRequest: sandbox.stub().resolves({
                 stream: (async function* () {
                     yield new vscode.LanguageModelTextPart("feat: ");
@@ -106,6 +134,7 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         mockProvider.getModelInfo.returns({ max_input_tokens: 1000 } as unknown as LiteLLMModelInfo);
 
         const model = {
+            maxInputTokens: 128000,
             sendRequest: sandbox.stub().resolves({
                 stream: (async function* () {
                     yield new vscode.LanguageModelTextPart("feat: ");
@@ -150,6 +179,7 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         mockProvider.getModelInfo.returns({ max_input_tokens: 1000 } as unknown as LiteLLMModelInfo);
 
         const model = {
+            maxInputTokens: 128000,
             sendRequest: sandbox.stub().resolves({
                 stream: (async function* () {
                     yield new vscode.LanguageModelTextPart("feat: override test");
@@ -225,27 +255,67 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         assert.strictEqual(errorMsgStub.firstCall.args[0].includes("No staged changes found"), true);
     });
 
-    test("handler shows warning when diff is truncated", async () => {
+    test("handler sizes a large diff from the VS Code model context window", async () => {
         const registerStub = sandbox.stub(vscode.commands, "registerCommand");
-        registerGenerateCommitMessageCommand(mockProvider as unknown as LiteLLMCommitMessageProvider);
+        const telemetry = {
+            captureCommandExecuted: sandbox.stub(),
+            captureFeatureUsed: sandbox.stub(),
+            captureTrimExecuted: sandbox.stub(),
+            captureCommitMessageGenerated: sandbox.stub(),
+        };
+        registerGenerateCommitMessageCommand(
+            mockProvider as unknown as LiteLLMCommitMessageProvider,
+            telemetry as unknown as TelemetryService
+        );
         const handler = registerStub.firstCall.args[1] as () => Promise<void>;
 
         mockProvider.getConfigManager.returns({
-            getConfig: async () => ({ commitModelIdOverride: "test-model" }),
+            getConfig: async () => ({ commitModelIdOverride: "test-model", commitOutputTokenReserve: 0 }),
         } as unknown as ConfigManager);
 
-        sandbox.stub(GitUtils, "getStagedDiff").resolves("a".repeat(10000));
-        mockProvider.getModelInfo.returns({ max_input_tokens: 100 } as unknown as LiteLLMModelInfo);
+        mockProvider.getModelInfo.returns(undefined);
+        const largeDiff = buildLargeDiff(3, 350);
+        assert.ok(largeDiff.length >= 60000);
+        sandbox.stub(GitUtils, "getStagedDiff").resolves(largeDiff);
+        const sendRequest = sandbox.stub().resolves({
+            stream: (async function* () {
+                yield new vscode.LanguageModelTextPart("feat: large change");
+            })(),
+        });
+        const model = { maxInputTokens: 8000, sendRequest };
+        const selectModelsStub = vscode.lm.selectChatModels as unknown as sinon.SinonStub;
+        selectModelsStub.resolves([model as unknown as vscode.LanguageModelChat]);
 
         const warnStub = sandbox.stub(vscode.window, "showWarningMessage");
-        sandbox.stub(vscode.window, "withProgress").resolves();
         sandbox
-            .stub(GitUtils, "getGitAPI")
-            .resolves({ repositories: [{ inputBox: { value: "" } }] } as unknown as never);
+            .stub(vscode.window, "withProgress")
+            .callsFake(async (_options, task) =>
+                task(
+                    { report: sandbox.stub() } as vscode.Progress<{ message?: string; increment?: number }>,
+                    new vscode.CancellationTokenSource().token
+                )
+            );
+        sandbox.stub(GitUtils, "getGitAPI").resolves({
+            repositories: [{ inputBox: { value: "", placeholder: "", enabled: true } }],
+        } as unknown as never);
 
         await handler();
 
+        const breadth = countDiffBreadth(largeDiff);
+        const budget = computeDiffBudget({
+            maxInputTokens: 8000,
+            outputReserve: computeOutputReserve(breadth),
+            staticPrompts: [COMMIT_SYSTEM_PROMPT, COMMIT_MESSAGE_PROMPT, DIFF_PREAMBLE],
+            modelId: "test-model",
+        });
+        const sentDiff = extractSentDiff(sendRequest);
+        const sentTokens = countTokens(sentDiff, "test-model");
+        assert.strictEqual(selectModelsStub.calledOnce, true);
+        assert.ok(sentTokens <= budget);
+        assert.ok(sentDiff.length < largeDiff.length);
         assert.ok(warnStub.calledWith(sinon.match("truncated")));
+        assert.strictEqual(telemetry.captureTrimExecuted.calledOnce, true);
+        assert.strictEqual(telemetry.captureTrimExecuted.firstCall.args[1], "commit-message");
     });
 
     test("handler handles empty diff correctly", async () => {
@@ -280,6 +350,7 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         // `sendRequest` to simulate an upstream provider failure and assert the user sees
         // an error message.
         const model = {
+            maxInputTokens: 128000,
             sendRequest: sandbox.stub().rejects(new Error("provider fail")),
         };
         const selectModelsStub = vscode.lm.selectChatModels as unknown as sinon.SinonStub;
@@ -368,6 +439,7 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         // The handler now uses VS Code's `selectChatModels` route. Stream the commit message
         // through the mock model so the input box is updated.
         const model = {
+            maxInputTokens: 128000,
             sendRequest: sandbox.stub().resolves({
                 stream: (async function* () {
                     yield new vscode.LanguageModelTextPart("fix: update file");

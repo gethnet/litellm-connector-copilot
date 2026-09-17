@@ -323,6 +323,11 @@ Keep this pipeline shared unless the change is intentionally protocol-specific a
 - **Model selection**: resolve model using `modelIdOverride` config or first available model with `inline-completions` tag
 - **Cost tracking**: completions reuse the same pricing/token snapshot pipeline so estimated request costs are reported consistently with chat.
 
+#### Commit-Message Diff Budgeting (`src/utils/commitDiffBudget.ts`)
+- The commit command resolves the chat model once and uses `LanguageModelChat.maxInputTokens` as the context window, with derived capabilities only as a fallback.
+- `countDiffBreadth`, `computeOutputReserve`, and `computeDiffBudget` own adaptive reserve and token-measured diff budgeting; the output reserve is subtracted exactly once.
+- `GitUtils.compactDiff` and `truncateToTokenLimit` accept optional model details and guarantee that the returned diff fits the requested token budget.
+
 #### Configuration Flow (v1.120+, per-group)
 Configuration from user settings reaches providers via VS Code's language model API on a per-group basis:
 1. User configures Base URL, API Key, and any other declared properties for a provider group in the language model provider settings UI

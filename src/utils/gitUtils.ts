@@ -1,5 +1,9 @@
 import * as vscode from "vscode";
+import type { LiteLLMModelInfo } from "../types";
+import { countTokens } from "../adapters/tokenUtils";
 import { Logger } from "./logger";
+
+export const DIFF_TRUNCATION_MARKER = "\n\n[... Content truncated due to context limits ...]";
 
 /**
  * Interface for the Git Extension API.
@@ -118,15 +122,11 @@ export class GitUtils {
      * @param maxTokens The target token limit
      * @returns A compacted diff string
      */
-    static compactDiff(diff: string, maxTokens: number): string {
-        const lines = diff.split("\n");
-        const maxChars = maxTokens * 4;
-
-        if (diff.length <= maxChars) {
+    static compactDiff(diff: string, maxTokens: number, modelId?: string, modelInfo?: LiteLLMModelInfo): string {
+        if (countTokens(diff, modelId, modelInfo) <= maxTokens) {
             return diff;
         }
-
-        Logger.info(`Compacting diff from ${diff.length} to ${maxChars} chars`);
+        Logger.info(`Compacting diff to fit ${maxTokens} tokens`);
 
         // First pass: remove most context lines, keeping only hunk headers and changes
         // A git diff line starts with:
@@ -137,7 +137,7 @@ export class GitUtils {
 
         const compactedLines: string[] = [];
 
-        for (const line of lines) {
+        for (const line of diff.split("\n")) {
             // Check for file headers first
             if (line.startsWith("--- ") || line.startsWith("+++ ")) {
                 compactedLines.push(line);
@@ -168,12 +168,12 @@ export class GitUtils {
         // Final sanity check: if we somehow removed everything (e.g. malformed diff),
         // fall back to truncation
         if (result.trim().length === 0 && diff.trim().length > 0) {
-            return this.truncateToTokenLimit(diff, maxTokens);
+            return this.truncateToTokenLimit(diff, maxTokens, modelId, modelInfo);
         }
 
         // If it's still too large, we might need to truncate at the file level
-        if (result.length > maxChars) {
-            return this.truncateToTokenLimit(result, maxTokens);
+        if (countTokens(result, modelId, modelInfo) > maxTokens) {
+            return this.truncateToTokenLimit(result, maxTokens, modelId, modelInfo);
         }
 
         return result;
@@ -185,13 +185,27 @@ export class GitUtils {
      * @param maxTokens The maximum allowed tokens
      * @returns The truncated text
      */
-    static truncateToTokenLimit(text: string, maxTokens: number): string {
-        // Rough estimate: 4 characters per token
-        const allowedChars = maxTokens * 4;
-        if (text.length <= allowedChars) {
+    static truncateToTokenLimit(
+        text: string,
+        maxTokens: number,
+        modelId?: string,
+        modelInfo?: LiteLLMModelInfo
+    ): string {
+        if (countTokens(text, modelId, modelInfo) <= maxTokens) {
             return text;
         }
-
-        return text.substring(0, allowedChars) + "\n\n[... Content truncated due to context limits ...]";
+        const fits = (length: number): boolean =>
+            countTokens(text.substring(0, length) + DIFF_TRUNCATION_MARKER, modelId, modelInfo) <= maxTokens;
+        let low = 0;
+        let high = text.length;
+        while (low < high) {
+            const mid = Math.ceil((low + high) / 2);
+            if (fits(mid)) {
+                low = mid;
+            } else {
+                high = mid - 1;
+            }
+        }
+        return text.substring(0, low) + DIFF_TRUNCATION_MARKER;
     }
 }

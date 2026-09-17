@@ -132,6 +132,13 @@
 					"description": "Override the commit message style/body prompt. Leave empty to use the built-in default.",
 					"markdownDescription": "Override the commit message style/body prompt. Leave empty to use the built-in default."
 				},
+				"litellm-connector.commitOutputTokenReserve": {
+					"type": "number",
+					"default": 0,
+					"minimum": 0,
+					"description": "Tokens reserved for the generated commit message when sizing the staged diff. 0 = adaptive (1000 + 400 per file + 40 per hunk). Any value is clamped to 1000–8000 tokens.",
+					"markdownDescription": "Tokens reserved for the generated commit message when sizing the staged diff. `0` (default) uses an adaptive reserve of `1000 + 400 × files + 40 × hunks`. Any explicit value is clamped to **1000–8000** tokens."
+				},
 				"litellm-connector.disableQuotaToolRedaction": {
 					"type": "boolean",
 					"default": false,
