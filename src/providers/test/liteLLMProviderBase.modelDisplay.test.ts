@@ -430,7 +430,12 @@ suite("LiteLLM model display", () => {
         assert.strictEqual(info.statusIcon, undefined);
     });
 
-    test("passes configured edit tools through discovery without guessing a default", async () => {
+    /**
+     * Drives discovery with an explicit `editTools` override while the host either
+     * grants or withholds the `chatProvider` proposal. The registry caches the host
+     * policy for its lifetime, so the seam is reset before and after each call.
+     */
+    async function discoverWithEditToolsOverride(hostGrantsProposal: boolean): Promise<{ editTools?: string[] }> {
         const mockSecrets = {
             get: async () => undefined,
             store: async () => {},
@@ -440,6 +445,7 @@ suite("LiteLLM model display", () => {
         const provider = new LiteLLMChatProvider(mockSecrets, "test-agent");
         const providerInternals = provider as unknown as {
             _configManager: { getConfig: () => Promise<LiteLLMConfig> };
+            _registry: { _capabilityHostPolicy?: { allowEditTools: boolean }; _editToolsDropWarned: boolean };
         };
         sandbox.stub(providerInternals._configManager, "getConfig").resolves({
             displayPricingInPicker: true,
@@ -463,16 +469,34 @@ suite("LiteLLM model display", () => {
             ],
         });
 
-        const models = await provider.discoverModels(
-            {
-                silent: true,
-                configuration: { baseUrl: "https://proxy.example.com", apiKey: "test-key" },
-            },
-            new vscode.CancellationTokenSource().token
-        );
-        const capabilities = models[0].capabilities as unknown as { editTools?: string[] };
+        // Seed the host policy directly: the shared registry is a process-wide
+        // singleton and the real value depends on the test host's proposal grants.
+        providerInternals._registry._capabilityHostPolicy = { allowEditTools: hostGrantsProposal };
+        providerInternals._registry._editToolsDropWarned = false;
+        try {
+            const models = await provider.discoverModels(
+                {
+                    silent: true,
+                    configuration: { baseUrl: "https://proxy.example.com", apiKey: "test-key" },
+                },
+                new vscode.CancellationTokenSource().token
+            );
+            return models[0].capabilities as unknown as { editTools?: string[] };
+        } finally {
+            providerInternals._registry._capabilityHostPolicy = undefined;
+        }
+    }
+
+    test("passes configured edit tools through discovery when the host grants the chatProvider proposal", async () => {
+        const capabilities = await discoverWithEditToolsOverride(true);
 
         assert.deepStrictEqual(capabilities.editTools, ["apply-patch", "find-replace"]);
+    });
+
+    test("suppresses configured edit tools when the host withholds the chatProvider proposal (VS Code Stable ≥ 1.138)", async () => {
+        const capabilities = await discoverWithEditToolsOverride(false);
+
+        assert.strictEqual(capabilities.editTools, undefined);
     });
 
     test("adds cache indicator to detail string for models with prompt caching support", async () => {

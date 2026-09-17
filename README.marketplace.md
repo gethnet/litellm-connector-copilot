@@ -78,6 +78,10 @@ See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 1. Run **LiteLLM: Manage Configuration** and verify Base URL + API key
 2. Run **LiteLLM: Reload Models** to force refresh
 3. If stuck: Remove LiteLLM provider groups via **LiteLLM: Manage Configuration** → VS Code's Language Models UI, then re-add
+4. On VS Code 1.138+ stable, remove any edit-tool values (`find-replace`, `apply-patch`, …) from `litellm-connector.modelCapabilitiesOverrides` — they require a proposed API and blank the model list. `toolCalling` and `imageInput` are fine.
+
+**"Sign in to use GitHub Copilot" appears while using BYOK?**
+A background utility call is being routed to a Copilot model. Set `chat.byokUtilityModelDefault` to `"mainAgent"` — see below.
 
 ---
 
@@ -87,7 +91,7 @@ See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
 A few Copilot-backed features stop working without a login because their defaults point at Copilot models. You can redirect **all** of them to your LiteLLM Connector models so the full chat experience keeps working offline.
 
-> ⚠️ **Keep `chat.byokUtilityModelDefault` set to `GitHub Copilot`.** This setting governs how BYOK models are surfaced. Changing it can prevent your BYOK models from appearing in the picker.
+> ⚠️ **Set `chat.byokUtilityModelDefault` to `"mainAgent"` when you are not signed in to Copilot.** Since VS Code 1.134 it defaults to `"copilot"`, which routes background utility calls (chat titles, commit messages, summaries) to Copilot models and shows a **"Sign in to use GitHub Copilot"** dialog when no Copilot token is available. `"mainAgent"` reuses your selected LiteLLM chat model. A specific model in `chat.utilityModel` / `chat.utilitySmallModel` always takes precedence. This setting does not affect which models appear in the picker.
 
 ### Settings that take a fully qualified model name
 
@@ -112,8 +116,9 @@ These settings present a dropdown of every available model (including your BYOK 
 
 ```jsonc
 {
-  // Keep this as "GitHub Copilot" so BYOK models are surfaced correctly.
-  "chat.byokUtilityModelDefault": "GitHub Copilot",
+  // Use your selected LiteLLM chat model for utility calls instead of Copilot.
+  // Values: "mainAgent" | "copilot" (default; requires Copilot sign-in) | "none" (error if unset).
+  "chat.byokUtilityModelDefault": "mainAgent",
 
   // Redirect Copilot-backed features to LiteLLM Connector models.
   "github.copilot.selectedCompletionModel": "litellm-connector/<group>/<model>",
@@ -133,6 +138,19 @@ Replace `<group>` with your provider group name and the model placeholders with 
 After configuring a provider, run **LiteLLM: Reload Models**, then run **LiteLLM: Show Available Models**. Select a model to copy its fully qualified ID to the clipboard for use in VS Code BYOK settings.
 
 The picker shows a friendly model name but copies the complete model ID, including the provider-group namespace. Use the copied value for settings such as `github.copilot.selectedCompletionModel`, `chat.utilityModel`, and `chat.utilitySmallModel`.
+
+### What still requires Copilot
+
+Some surfaces have no BYOK routing in VS Code today, regardless of configuration:
+
+| Surface | Status |
+|---------|--------|
+| Next Edit Suggestions | Copilot models only |
+| Execution / search subagents | Copilot models only |
+| Agents window subagents | BYOK main model works; BYOK models are not offered for subagents ([vscode#333802](https://github.com/microsoft/vscode/issues/333802)) |
+| Copilot's SCM commit-message sparkle | Follows `chat.utilitySmallModel` / `chat.byokUtilityModelDefault`. The connector's own **LiteLLM: Generate Commit Message** command talks to your LiteLLM model directly and never needs Copilot. |
+
+These are VS Code / Copilot Chat limitations, not connector limitations.
 
 > **Enterprise note:** For Copilot Business or Enterprise, organization administrators can control BYOK availability through Copilot policy settings.
 

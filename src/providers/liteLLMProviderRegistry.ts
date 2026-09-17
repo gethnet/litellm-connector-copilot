@@ -72,6 +72,8 @@ import {
     buildReasoningEffortConfigurationSchema,
     getSupportedReasoningEfforts,
     derivePickerCategory,
+    hostGrantsChatProviderProposal,
+    type CapabilityHostPolicy,
 } from "../utils/modelCapabilities";
 import { deriveGroupNameFromUrl } from "../utils";
 import { sha256HexAsync } from "../utils/discoveryHash";
@@ -213,6 +215,18 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
     // Debounced change event emitter (initialized lazily on first use)
     private _debouncedOnDidChange: DebouncedEmitter | undefined;
 
+    /**
+     * Whether the running host granted us the `chatProvider` proposal. Resolved
+     * once per registry lifetime because the host rewrites `enabledApiProposals`
+     * before activation and never changes it afterwards. `undefined` = not yet read.
+     */
+    private _capabilityHostPolicy: CapabilityHostPolicy | undefined;
+
+    /** Ensures the "editTools dropped" warning fires once per session, not once per model. */
+    private _editToolsDropWarned = false;
+
+    private static readonly EXTENSION_ID = "GethNet.litellm-connector-copilot";
+
     // Discovery debounce defaults
     private static readonly DEFAULT_DISCOVERY_FIRE_DEBOUNCE_MS = 250;
     private static readonly DEFAULT_DISCOVERY_FIRE_MIN_INTERVAL_MS = 2_000;
@@ -228,6 +242,27 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
         this.configManager = deps.configManager;
         this._userAgent = deps.userAgent;
         this._onModernConfigurationDetected = deps.onModernConfigurationDetected;
+    }
+
+    /**
+     * Resolves whether proposed-API-dependent capability fields may be emitted.
+     *
+     * Reads the host-rewritten `enabledApiProposals` from the live extension
+     * description (see {@link hostGrantsChatProviderProposal}). On VS Code Stable
+     * ≥ 1.138 marketplace installs, the list is emptied and `editTools` must be
+     * suppressed or `$provideLanguageModelChatInfo` throws and blanks the picker.
+     * When the extension cannot be looked up (unit tests, partial stubs) we
+     * fail *closed* — dropping an optional hint is always safer than losing the
+     * whole model list.
+     */
+    private getCapabilityHostPolicy(): CapabilityHostPolicy {
+        if (!this._capabilityHostPolicy) {
+            const ext = vscode.extensions?.getExtension?.(LiteLLMProviderRegistry.EXTENSION_ID);
+            const allowEditTools = hostGrantsChatProviderProposal(ext?.packageJSON);
+            this._capabilityHostPolicy = { allowEditTools };
+            StructuredLogger.debug("discovery.capability_host_policy", { allowEditTools, extensionFound: !!ext });
+        }
+        return this._capabilityHostPolicy;
     }
 
     /**
@@ -778,7 +813,22 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
         this.derivedCapabilitiesCache.set(modelId, derived);
 
         const capabilityOverrides = modelCapabilitiesOverrides?.[modelId] ?? modelCapabilitiesOverrides?.[modelName];
-        const capabilities = capabilitiesToVSCode(derived, capabilityOverrides);
+        const hostPolicy = this.getCapabilityHostPolicy();
+        if (!hostPolicy.allowEditTools && capabilityOverrides?.editTools?.length && !this._editToolsDropWarned) {
+            // Recoverable degradation: the user asked for an edit-tool hint that
+            // this host cannot accept. Tell them once, keep the model list intact.
+            this._editToolsDropWarned = true;
+            StructuredLogger.warn(
+                "discovery.edit_tools_suppressed",
+                {
+                    reason: "chatProvider proposal not granted by host (VS Code Stable ≥ 1.138)",
+                    setting: "litellm-connector.modelCapabilitiesOverrides",
+                    remedy: "remove edit-tool values, use VS Code Insiders, or launch with --enable-proposed-api",
+                },
+                { model: modelId }
+            );
+        }
+        const capabilities = capabilitiesToVSCode(derived, capabilityOverrides, hostPolicy);
         const completionsUrl = resolveCompletionsUrl(
             backend?.url,
             modelInfo?.completionsUrl ?? modelInfo?.completions_url ?? activeModelOverride?.completionsUrl,

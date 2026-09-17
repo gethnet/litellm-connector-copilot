@@ -105,13 +105,53 @@ export function deriveCapabilitiesFromModelInfo(
     };
 }
 
+/**
+ * Host-side policy for capability fields that depend on proposed VS Code APIs.
+ *
+ * `allowEditTools` — whether `capabilities.editTools` may be emitted. The
+ * extension host guards that field with `checkProposedApiEnabled('chatProvider')`
+ * inside `$provideLanguageModelChatInfo`; when the proposal is not granted the
+ * check throws and VS Code discards the provider's entire model list. Marketplace
+ * installs on VS Code Stable ≥ 1.138 never receive the proposal (the extension is
+ * not in `product.json#extensionEnabledApiProposals`), so callers must derive
+ * this from the live host state via {@link hostGrantsChatProviderProposal}.
+ */
+export interface CapabilityHostPolicy {
+    allowEditTools: boolean;
+}
+
+/**
+ * Reads the *effective* `enabledApiProposals` the host granted this extension.
+ *
+ * VS Code rewrites `enabledApiProposals` on the extension description before
+ * activation: on Stable, `ExtensionsProposedApi.doUpdateEnabledApiProposals`
+ * empties it for any non-builtin extension not allow-listed in `product.json`,
+ * while Insiders, OSS, extension-development hosts, and `--enable-proposed-api`
+ * leave the declared list intact. `vscode.extensions.getExtension(id).packageJSON`
+ * exposes that rewritten description, so its `enabledApiProposals` is the
+ * authoritative "may I use the proposal" signal — not the shipped `package.json`.
+ *
+ * Accepts `unknown` because `packageJSON` is untyped; any shape other than a
+ * string array containing `"chatProvider"` is treated as "not granted".
+ */
+export function hostGrantsChatProviderProposal(packageJSON: unknown): boolean {
+    if (typeof packageJSON !== "object" || packageJSON === null) {
+        return false;
+    }
+    const proposals = (packageJSON as Record<string, unknown>).enabledApiProposals;
+    return Array.isArray(proposals) && proposals.includes("chatProvider");
+}
+
 export function capabilitiesToVSCode(
     derived: DerivedModelCapabilities,
-    overrides?: ModelCapabilityOverride
+    overrides?: ModelCapabilityOverride,
+    hostPolicy: CapabilityHostPolicy = { allowEditTools: true }
 ): vscode.LanguageModelChatCapabilities {
-    const editTools = overrides?.editTools?.filter((tool) =>
-        (["find-replace", "multi-find-replace", "apply-patch", "code-rewrite"] as const).includes(tool)
-    );
+    const editTools = hostPolicy.allowEditTools
+        ? overrides?.editTools?.filter((tool) =>
+              (["find-replace", "multi-find-replace", "apply-patch", "code-rewrite"] as const).includes(tool)
+          )
+        : undefined;
     return {
         // VS Code currently supports these two main ones.
         toolCalling: overrides?.toolCalling ?? derived.supportsTools,

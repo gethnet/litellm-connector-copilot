@@ -54,6 +54,35 @@ interface RawUsagePromptTokenDetails {
     cache_creation_input_tokens?: number;
 }
 
+interface RawUsageCompletionTokenDetails {
+    reasoning_tokens?: number;
+    tool_tokens?: number;
+    accepted_prediction_tokens?: number;
+    rejected_prediction_tokens?: number;
+}
+
+/**
+ * Raw `/responses` usage block as emitted on `response.completed`.
+ *
+ * The OpenAI Responses API (and LiteLLM's `ResponseAPIUsage`) name the
+ * breakdowns `input_tokens_details` / `output_tokens_details` (plural
+ * "tokens"). Some bridges emit the singular `input_token_details` form
+ * instead, and the Anthropic bridge forwards `cache_read_input_tokens` /
+ * `cache_creation_input_tokens` at the usage root. All three shapes must be
+ * accepted or cache hits silently read as zero.
+ */
+interface RawResponsesUsage {
+    input_tokens?: number;
+    output_tokens?: number;
+    system_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+    input_tokens_details?: RawUsagePromptTokenDetails;
+    output_tokens_details?: RawUsageCompletionTokenDetails;
+    input_token_details?: RawUsagePromptTokenDetails;
+    output_token_details?: RawUsageCompletionTokenDetails;
+}
+
 interface RawUsagePayload {
     prompt_tokens?: number;
     completion_tokens?: number;
@@ -67,19 +96,9 @@ interface RawUsagePayload {
     cache_creation_input_tokens?: number;
     cache_read_input_tokens?: number;
     prompt_tokens_details?: RawUsagePromptTokenDetails;
-    completion_tokens_details?: {
-        reasoning_tokens?: number;
-        tool_tokens?: number;
-        accepted_prediction_tokens?: number;
-        rejected_prediction_tokens?: number;
-    };
+    completion_tokens_details?: RawUsageCompletionTokenDetails;
     input_token_details?: RawUsagePromptTokenDetails;
-    output_token_details?: {
-        reasoning_tokens?: number;
-        tool_tokens?: number;
-        accepted_prediction_tokens?: number;
-        rejected_prediction_tokens?: number;
-    };
+    output_token_details?: RawUsageCompletionTokenDetails;
 }
 
 function firstNumber(...values: (number | undefined)[]): number | undefined {
@@ -729,22 +748,7 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
     }
     if (data.type === "response.completed") {
         Logger.info(`[interpretStreamEvent] Received /responses response.completed event`);
-        const response = data.response as
-            | {
-                  usage?: {
-                      input_tokens?: number;
-                      output_tokens?: number;
-                      system_tokens?: number;
-                      input_token_details?: { cached_tokens?: number; cache_creation_input_tokens?: number };
-                      output_token_details?: {
-                          reasoning_tokens?: number;
-                          tool_tokens?: number;
-                          accepted_prediction_tokens?: number;
-                          rejected_prediction_tokens?: number;
-                      };
-                  };
-              }
-            | undefined;
+        const response = data.response as { usage?: RawResponsesUsage } | undefined;
         responseParts.push({
             type: "response",
             usage: {
@@ -784,12 +788,18 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
         Logger.trace(`[interpretStreamEvent] Flushed ${flushedToolCallCount} tool calls on response.completed`);
 
         if (typeof response?.usage?.input_tokens === "number" || typeof response?.usage?.output_tokens === "number") {
+            const rawUsage = response.usage;
+            // The Responses API spec uses the plural `*_tokens_details`; the
+            // singular form is a bridge variant. Prefer the spec field and
+            // fall back so neither shape loses its cache/reasoning counts.
             const usageValue = normalizeUsagePayload({
-                prompt_tokens: response?.usage?.input_tokens,
-                completion_tokens: response?.usage?.output_tokens,
-                system_tokens: response?.usage?.system_tokens,
-                input_token_details: response?.usage?.input_token_details,
-                output_token_details: response?.usage?.output_token_details,
+                prompt_tokens: rawUsage.input_tokens,
+                completion_tokens: rawUsage.output_tokens,
+                system_tokens: rawUsage.system_tokens,
+                cache_creation_input_tokens: rawUsage.cache_creation_input_tokens,
+                cache_read_input_tokens: rawUsage.cache_read_input_tokens,
+                input_token_details: rawUsage.input_tokens_details ?? rawUsage.input_token_details,
+                output_token_details: rawUsage.output_tokens_details ?? rawUsage.output_token_details,
             });
 
             if (!usageValue.prompt_tokens_details) {
@@ -811,6 +821,9 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                 inputTokens: usageValue.prompt_tokens,
                 outputTokens: usageValue.completion_tokens,
                 systemPromptTokens: usageValue.system_prompt_tokens,
+                cachedTokens: usageValue.prompt_tokens_details?.cached_tokens,
+                cacheCreationInputTokens: usageValue.prompt_tokens_details?.cache_creation_input_tokens,
+                reasoningTokens: usageValue.completion_tokens_details?.reasoning_tokens,
                 toolCallsEmitted: flushedToolCallCount,
             });
         }
