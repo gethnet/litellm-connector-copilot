@@ -4,6 +4,8 @@
 [![Codecov](https://codecov.io/gh/gethnet/litellm-connector-copilot/branch/main/graph/badge.svg)](https://codecov.io/gh/gethnet/litellm-connector-copilot)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/gethnet/litellm-connector-copilot?sort=semver)](https://github.com/gethnet/litellm-connector-copilot/releases)
 ![Open VSX Version](https://img.shields.io/open-vsx/v/GethNet/litellm-connector-copilot)
+![Marketplace Version](https://vsmarketplacebadges.dev/version-short/gethnet.litellm-connector-copilot.svg)
+![GitHub Repo stars](https://img.shields.io/github/stars/gethnet/litellm-connector-copilot)
 ![Open VSX Downloads](https://img.shields.io/open-vsx/dt/GethNet/litellm-connector-copilot)
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
