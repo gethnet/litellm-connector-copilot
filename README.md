@@ -105,7 +105,7 @@ Models can use tools to interact with your workspace. Perfect for code analysis,
 Use image-capable models to analyze screenshots, diagrams, and code directly in chat. Images are correctly serialized for all endpoint types including `/responses`.
 
 ### 📊 Token Awareness
-See real-time token usage with context window indicators (e.g., "↑128K in / ↓16K out").
+Every turn reports input and output token counts — including cached and reasoning token breakdowns on both `/chat/completions` and `/responses` — which VS Code surfaces as live usage in the chat UI.
 
 ### ✍️ Git Commit Generation
 Generate structured, conventional commit messages from staged changes. Set `commitModelIdOverride` to enable.
@@ -214,6 +214,8 @@ The optional **Inline Completions URL** is a full OpenAI-compatible FIM `/comple
 |---------|------|---------|-------------|
 | `litellm-connector.commitModelIdOverride` | string | `""` | Model ID for git commit message generation. Accepts the complete `litellm-connector/<group>/<model>` value copied from the model picker; the vendor prefix is normalized automatically. |
 | `litellm-connector.commitOutputTokenReserve` | number | `0` | Tokens reserved for the generated commit message when sizing the staged diff. `0` = adaptive (`1000 + 400/file + 40/hunk`), clamped to 1000–8000 |
+| `litellm-connector.commitSystemPromptOverride` | string | `""` | Override the system prompt used for git commit message generation. Leave empty to use the built-in default. |
+| `litellm-connector.commitMessagePromptOverride` | string | `""` | Override the commit message style/body prompt. Leave empty to use the built-in default. |
 | `litellm-connector.inactivityTimeout` | number | `60` | Seconds before connection is considered idle |
 | `litellm-connector.disableCaching` | boolean | `false` | When enabled, bypass LiteLLM caching for models that advertise support for the `cache` parameter |
 | `litellm-connector.disableQuotaToolRedaction` | boolean | `false` | Disable automatic tool removal on quota errors |
@@ -225,6 +227,7 @@ The optional **Inline Completions URL** is a full OpenAI-compatible FIM `/comple
 | `litellm-connector.discoveryCacheTtlMs` | number | `60000` | TTL (ms) for cached discovery responses. Set 0 to disable |
 | `litellm-connector.discoveryFireDebounceMs` | number | `250` | Debounce window (ms) for model-change notifications |
 | `litellm-connector.discoveryFireMinIntervalMs` | number | `2000` | Min interval (ms) between change notifications |
+| `litellm-connector.modelIdOverride` | string | `""` | **(Deprecated)** Force a specific LiteLLM model id for legacy workflows. Prefer the model picker or `commitModelIdOverride`. |
 
 > **Tip**: Most users won't need to touch these — the defaults work great! Caching bypass and model-card overrides are opt-in.
 
@@ -325,9 +328,10 @@ These settings are **not visible in the Settings UI** — they're for power user
 |---------|--------------|
 | **LiteLLM: Manage Configuration** | Open Language Models UI to add/edit provider groups |
 | **LiteLLM: Reload Models** | Manually refresh the model list |
-| **LiteLLM: Show Available Models** | See all discovered models |
-| **LiteLLM: Generate Commit Message** | Generate a commit message from staged changes |
+| **LiteLLM: Show Available Models** | See all discovered models and copy a fully qualified ID to the clipboard |
+| **Generate Commit Message** | Generate a commit message from staged changes. The SCM sparkle button appears in the Source Control view once `litellm-connector.commitModelIdOverride` is set. |
 | **LiteLLM: Set Log Level** | Change the extension's logging verbosity |
+| **LiteLLM: Reset All Configuration** | Remove all LiteLLM provider groups, API keys, and connector settings (asks for confirmation) |
 
 ---
 

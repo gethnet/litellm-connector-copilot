@@ -166,8 +166,11 @@ Base URL + API key are configured through **VS Code's Language Models UI** (run 
 |---------|---------|-------------|
 | `commitModelIdOverride` | `""` | Model ID for commit message generation. Accepts the complete `litellm-connector/<group>/<model>` value copied from the model picker; the vendor prefix is normalized automatically. |
 | `commitOutputTokenReserve` | `0` | Tokens reserved for the generated commit message when sizing the staged diff. `0` = adaptive (`1000 + 400/file + 40/hunk`), clamped to 1000–8000 |
+| `commitSystemPromptOverride` | `""` | Override the system prompt used for git commit message generation. Leave empty for the built-in default. |
+| `commitMessagePromptOverride` | `""` | Override the commit message style/body prompt. Leave empty for the built-in default. |
 | `inactivityTimeout` | `60` | Seconds before stream is considered idle |
 | `disableCaching` | `false` | When enabled, bypass LiteLLM caching for models that advertise support for the `cache` parameter |
+| `disableQuotaToolRedaction` | `false` | Disable automatic tool removal on quota errors |
 | `enableModelOverrides` | `false` | Enable model-card override rules |
 | `displayPricingInPicker` | `true` | Show model pricing in picker details, hovers, and cost metadata; native model-name rows remain price-free |
 | `discoveryTimeoutMs` | `5000` | Timeout (ms) for model discovery |
@@ -218,9 +221,10 @@ These aren't in Settings UI — add to `settings.json` if needed:
 
 - **LiteLLM: Manage Configuration** — Add/edit provider groups
 - **LiteLLM: Reload Models** — Refresh model list
-- **LiteLLM: Show Available Models** — View discovered models
-- **LiteLLM: Generate Commit Message** — Generate commit from staged changes
+- **LiteLLM: Show Available Models** — View discovered models and copy a fully qualified ID to the clipboard
+- **Generate Commit Message** — Generate a commit message from staged changes (SCM sparkle appears once `commitModelIdOverride` is set)
 - **LiteLLM: Set Log Level** — Change logging verbosity
+- **LiteLLM: Reset All Configuration** — Remove all provider groups, API keys, and connector settings (asks for confirmation)
 
 ---
 
