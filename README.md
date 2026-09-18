@@ -8,13 +8,13 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.5.8
+## 🆕 What's New in 2.5.10
 
-> Version 2.5.8 cuts PostHog telemetry event volume with bounded 15-minute aggregates and fixes the streaming watchdog aborting live reasoning streams.
+> Version 2.5.10 restores cache/reasoning token counts on `/responses`, stops edit-tool capability overrides from blanking the model list on VS Code 1.138 Stable, and sizes commit-message diffs against the model's real context window.
 
-- 📉 **Bounded 15-minute telemetry aggregates** — Model attempts and successful inline completions are summarized in bounded 15-minute windows (128 model/caller keys + an overflow bucket that keeps counts accurate), instead of one billable event per request. Chat outcomes and all failures remain immediate; no sampling or user configuration required.
-- ⏱️ **Watchdog anchored to raw chunk arrival** — The streaming inactivity timeout only reset on parseable payloads, so keep-alive frames and quiet reasoning phases starved it and killed healthy streams mid-reasoning. Liveness now resets on every raw byte arrival.
-- 🧪 **mocha 12 test adapter** — Dev-only `mocha` bumped to `^12.0.0`, absorbing the pending Dependabot upgrade; the in-repo version-agnostic JUnit reporter constructs correctly on both mocha 11 and 12.
+- 📦 **Cache and reasoning tokens on `/responses`** — Every model routed via `/responses` previously reported `cached_tokens: 0` and `reasoning_tokens: 0` on every turn, even on healthy prompt-cache hits. The OpenAI Responses API names its usage breakdowns `input_tokens_details` / `output_tokens_details` (plural), but the stream interpreter only read the singular form, so the zero fallback was stamped into usage, costs, and telemetry. All three payload shapes (plural, singular bridge, and Anthropic root-level) are now normalized.
+- 🛡️ **Edit-tool overrides no longer blank the model list on Stable 1.138+** — VS Code 1.138 removed the experiment that granted proposed-API access to marketplace extensions; `editTools` capability overrides now require the `chatProvider` proposal and are suppressed (with a one-time warning) when it is not granted, instead of discarding the entire model list for the group. `toolCalling` and `imageInput` overrides are unaffected.
+- 📏 **Commit diffs sized against the real context window** — The commit-message generator now budgets the staged diff from the selected VS Code model's reported `maxInputTokens` (previously a stale 128k default), applies a single adaptive 1,000–8,000-token output reserve (`litellm-connector.commitOutputTokenReserve`), and measures the diff with the same heuristic tokenizer used for prompts, so small-context models stop overflowing.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
@@ -48,7 +48,7 @@ Your support keeps this project alive and improving! ❤️
 
 ### Prerequisites
 
-- ✅ **VS Code 1.120+** (required)
+- ✅ **VS Code 1.125+** (required)
 - 🌐 A **LiteLLM proxy** running somewhere (locally or in the cloud)
 - 🔑 Your **Base URL** and **API Key**
 
@@ -213,6 +213,7 @@ The optional **Inline Completions URL** is a full OpenAI-compatible FIM `/comple
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `litellm-connector.commitModelIdOverride` | string | `""` | Model ID for git commit message generation. Accepts the complete `litellm-connector/<group>/<model>` value copied from the model picker; the vendor prefix is normalized automatically. |
+| `litellm-connector.commitOutputTokenReserve` | number | `0` | Tokens reserved for the generated commit message when sizing the staged diff. `0` = adaptive (`1000 + 400/file + 40/hunk`), clamped to 1000–8000 |
 | `litellm-connector.inactivityTimeout` | number | `60` | Seconds before connection is considered idle |
 | `litellm-connector.disableCaching` | boolean | `false` | When enabled, bypass LiteLLM caching for models that advertise support for the `cache` parameter |
 | `litellm-connector.disableQuotaToolRedaction` | boolean | `false` | Disable automatic tool removal on quota errors |

@@ -102,7 +102,8 @@ jobs:
       # hard-fails the release (see rel/v2.5.6 attempts 1-2). The scoped,
       # pinned @vscode/vsce + retry loop + --skip-duplicate (retries are
       # idempotent; the gallery 409s duplicate versions) makes publishes
-      # resilient to transient Marketplace outages.
+      # resilient to transient Marketplace outages. The pin tracks the
+      # devDependency (@vscode/vsce ^4.0.0) — bump both together.
       - name: Publish to VS Code Marketplace
         if: |
           !contains(github.event.release.tag_name, 'dev') &&
@@ -111,7 +112,7 @@ jobs:
           VS_MARKETPLACE_PUB_TOKEN: ${{ secrets.VS_MARKETPLACE_PUB_TOKEN }}
         run: |
           for attempt in 1 2 3; do
-            if npx --yes @vscode/vsce@3.9.2 publish --packagePath "$VSIX_FILE" -p "$VS_MARKETPLACE_PUB_TOKEN" --no-dependencies --skip-duplicate; then
+            if npx --yes @vscode/vsce@4.0.0 publish --packagePath "$VSIX_FILE" -p "$VS_MARKETPLACE_PUB_TOKEN" --no-dependencies --skip-duplicate; then
               echo "Marketplace publish succeeded on attempt $attempt."
               exit 0
             fi

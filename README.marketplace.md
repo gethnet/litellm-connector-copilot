@@ -10,13 +10,13 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.5.8
+## 🆕 What's New in 2.5.10
 
-> Version 2.5.8 cuts PostHog telemetry event volume with bounded 15-minute aggregates and fixes the streaming watchdog aborting live reasoning streams.
+> Version 2.5.10 restores cache/reasoning token counts on `/responses`, stops edit-tool capability overrides from blanking the model list on VS Code 1.138 Stable, and sizes commit-message diffs against the model's real context window.
 
-- 📉 **Bounded 15-minute telemetry aggregates** — Model attempts and successful inline completions are summarized in bounded 15-minute windows (128 model/caller keys + an overflow bucket that keeps counts accurate), instead of one billable event per request. Chat outcomes and all failures remain immediate; no sampling or user configuration required.
-- ⏱️ **Watchdog anchored to raw chunk arrival** — The streaming inactivity timeout only reset on parseable payloads, so keep-alive frames and quiet reasoning phases starved it and killed healthy streams mid-reasoning. Liveness now resets on every raw byte arrival.
-- 🧪 **mocha 12 test adapter** — Dev-only `mocha` bumped to `^12.0.0`, absorbing the pending Dependabot upgrade; the in-repo version-agnostic JUnit reporter constructs correctly on both mocha 11 and 12.
+- 📦 **Cache and reasoning tokens on `/responses`** — Every model routed via `/responses` previously reported `cached_tokens: 0` and `reasoning_tokens: 0` on every turn, even on healthy prompt-cache hits. The OpenAI Responses API names its usage breakdowns `input_tokens_details` / `output_tokens_details` (plural), but the stream interpreter only read the singular form, so the zero fallback was stamped into usage, costs, and telemetry. All three payload shapes (plural, singular bridge, and Anthropic root-level) are now normalized.
+- 🛡️ **Edit-tool overrides no longer blank the model list on Stable 1.138+** — VS Code 1.138 removed the experiment that granted proposed-API access to marketplace extensions; `editTools` capability overrides now require the `chatProvider` proposal and are suppressed (with a one-time warning) when it is not granted, instead of discarding the entire model list for the group. `toolCalling` and `imageInput` overrides are unaffected.
+- 📏 **Commit diffs sized against the real context window** — The commit-message generator now budgets the staged diff from the selected VS Code model's reported `maxInputTokens` (previously a stale 128k default), applies a single adaptive 1,000–8,000-token output reserve (`litellm-connector.commitOutputTokenReserve`), and measures the diff with the same heuristic tokenizer used for prompts, so small-context models stop overflowing.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
@@ -46,7 +46,7 @@ See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
 ## ✅ Requirements
 
-- 🖥️ **VS Code 1.120+**
+- 🖥️ **VS Code 1.125+**
 - 🌐 A **LiteLLM proxy URL** and **API key**
 
 > **No Copilot subscription required.** BYOK models work without a GitHub login or Copilot plan — including air-gapped scenarios. See [Using BYOK Without Copilot](#-using-byok-without-copilot) to redirect the Copilot-backed utility models to your LiteLLM models.
@@ -165,6 +165,7 @@ Base URL + API key are configured through **VS Code's Language Models UI** (run 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `commitModelIdOverride` | `""` | Model ID for commit message generation. Accepts the complete `litellm-connector/<group>/<model>` value copied from the model picker; the vendor prefix is normalized automatically. |
+| `commitOutputTokenReserve` | `0` | Tokens reserved for the generated commit message when sizing the staged diff. `0` = adaptive (`1000 + 400/file + 40/hunk`), clamped to 1000–8000 |
 | `inactivityTimeout` | `60` | Seconds before stream is considered idle |
 | `disableCaching` | `false` | When enabled, bypass LiteLLM caching for models that advertise support for the `cache` parameter |
 | `enableModelOverrides` | `false` | Enable model-card override rules |

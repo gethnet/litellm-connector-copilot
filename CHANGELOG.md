@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2.5.10] - 2026-09-18
 
 ### 🐛 Fixes
 * **📏 Size commit-message diffs against the model's real context window**: The commit-message generator now resolves the selected VS Code model once and uses its reported `maxInputTokens` instead of relying on the commit provider's potentially empty registry. It applies a single adaptive 1,000–8,000-token output reserve, configurable through `litellm-connector.commitOutputTokenReserve`, and measures diff compaction with the same heuristic tokenizer used for prompts. Token-measured binary-search truncation guarantees the staged diff stays within budget for small-context models, while structured logs and the existing trim telemetry record any reduction.
@@ -17,6 +17,9 @@ All notable changes to this project will be documented in this file.
 ### 🧹 Chores
 
 * **🔧 Start next dev cycle**: `2.5.9` → `2.5.10-dev1`. (`package.json`)
+* **🔧 Start next dev cycle**: `2.5.10-dev1` → `2.5.10-dev2`. (`package.json`)
+* **📦 Upgrade `@vscode/vsce` to `^4.0.0`**: The dev-only packaging devDependency moves from `^3.7.0` to `^4.0.0`, tracking the current scoped VSCE tooling used for local packaging and the pinned publish workflow. (`package.json`)
+* **🚀 Promote release version**: `2.5.10-dev2` → `2.5.10`. (`package.json`)
 
 ## [2.5.9] - 2026-09-13
 
@@ -935,11 +938,15 @@ There have been a tremendous amount of backend work done with this update to mak
 
 ---
 
-[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.8...HEAD
+[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.10...HEAD
+[2.5.10]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.9...rel/v2.5.10
+[2.5.9]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.8...rel/v2.5.9
 [2.5.8]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.7...rel/v2.5.8
 [2.5.7]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.6...rel/v2.5.7
 [2.5.6]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.6
-[2.5.3]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.3
+[2.5.5]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.4...rel/v2.5.5
+[2.5.4]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.3...rel/v2.5.4
+[2.5.3]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.2...rel/v2.5.3
 [2.5.2]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.2
 [2.5.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.0
 [2.3.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.3.0
