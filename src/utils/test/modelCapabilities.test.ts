@@ -7,6 +7,7 @@ import {
     getDefaultReasoningEffort,
     buildReasoningEffortConfigurationSchema,
     derivePickerCategory,
+    hostGrantsChatProviderProposal,
     type DerivedModelCapabilities,
     type ExtendedModelInformation,
 } from "../modelCapabilities";
@@ -223,6 +224,81 @@ suite("modelCapabilities", () => {
             const capabilities = capabilitiesToVSCode(derived);
 
             assert.strictEqual(capabilities.editTools, undefined);
+        });
+
+        // Regression for VS Code 1.138+: `capabilities.editTools` is guarded by
+        // `checkProposedApiEnabled('chatProvider')` in the extension host. When the
+        // host has NOT granted the proposal (marketplace installs on Stable), emitting
+        // it throws inside `$provideLanguageModelChatInfo` and blanks the whole model
+        // list. The guard must drop `editTools` while preserving the other overrides.
+        suite("editTools proposed-API guard", () => {
+            const derived: DerivedModelCapabilities = {
+                supportsTools: false,
+                supportsVision: false,
+                supportsStreaming: true,
+                supportsReasoning: false,
+                supportsPdf: false,
+                supportsAudioInput: false,
+                supportsAudioOutput: false,
+                supportsComputerUse: false,
+                supportsFunctionCalling: false,
+                supportsToolChoice: false,
+                supportsSystemMessages: false,
+                supportsResponseSchema: false,
+                supportsPromptCaching: false,
+                supportsWebSearch: false,
+                supportsUrlContext: false,
+                supportsReasoningEffort: false,
+                supportsThinking: false,
+                endpointMode: "chat",
+                maxInputTokens: 100000,
+                maxOutputTokens: 16000,
+                rawContextWindow: 128000,
+            };
+            const overrides: ModelCapabilityOverride = {
+                toolCalling: true,
+                editTools: ["apply-patch", "find-replace"],
+            };
+
+            test("drops editTools when the host has not granted the chatProvider proposal", () => {
+                const capabilities = capabilitiesToVSCode(derived, overrides, { allowEditTools: false });
+
+                assert.strictEqual(capabilities.editTools, undefined);
+                assert.strictEqual(capabilities.toolCalling, true, "non-proposed overrides must survive");
+            });
+
+            test("keeps editTools when the host has granted the chatProvider proposal", () => {
+                const capabilities = capabilitiesToVSCode(derived, overrides, { allowEditTools: true });
+
+                assert.deepStrictEqual(capabilities.editTools, ["apply-patch", "find-replace"]);
+            });
+
+            test("defaults to allowing editTools when no host policy is supplied", () => {
+                const capabilities = capabilitiesToVSCode(derived, overrides);
+
+                assert.deepStrictEqual(capabilities.editTools, ["apply-patch", "find-replace"]);
+            });
+        });
+    });
+
+    suite("hostGrantsChatProviderProposal", () => {
+        test("returns true when the effective enabledApiProposals still lists chatProvider", () => {
+            assert.strictEqual(
+                hostGrantsChatProviderProposal({ enabledApiProposals: ["chatProvider", "languageModelPricing"] }),
+                true
+            );
+        });
+
+        test("returns false when the host nulled enabledApiProposals to an empty list", () => {
+            // This is exactly what `ExtensionsProposedApi.doUpdateEnabledApiProposals`
+            // does on Stable for extensions not listed in product.json.
+            assert.strictEqual(hostGrantsChatProviderProposal({ enabledApiProposals: [] }), false);
+        });
+
+        test("returns false when enabledApiProposals is missing or malformed", () => {
+            assert.strictEqual(hostGrantsChatProviderProposal({}), false);
+            assert.strictEqual(hostGrantsChatProviderProposal(undefined), false);
+            assert.strictEqual(hostGrantsChatProviderProposal({ enabledApiProposals: "chatProvider" }), false);
         });
     });
 

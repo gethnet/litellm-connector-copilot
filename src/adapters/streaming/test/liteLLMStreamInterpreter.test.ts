@@ -552,6 +552,103 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
         }
     });
 
+    // Regression: the OpenAI Responses API (and LiteLLM's ResponseAPIUsage) name
+    // the breakdown fields `input_tokens_details` / `output_tokens_details`
+    // (plural "tokens"). The interpreter previously read only the singular
+    // `input_token_details`, so every /responses turn reported cached_tokens=0
+    // and reasoning_tokens=0 even when caching was working upstream.
+    test("should read cached and reasoning tokens from plural /responses *_tokens_details fields", () => {
+        const state = createInitialStreamingState();
+        const parts = interpretStreamEvent(
+            {
+                type: "response.completed",
+                response: {
+                    usage: {
+                        input_tokens: 40000,
+                        output_tokens: 120,
+                        total_tokens: 40120,
+                        input_tokens_details: { cached_tokens: 38368, cache_creation_input_tokens: 1200 },
+                        output_tokens_details: { reasoning_tokens: 90 },
+                    },
+                },
+            },
+            state
+        );
+
+        const usage = parts.find((part) => part.type === "data");
+        assert.ok(usage && usage.type === "data");
+        if (usage.type === "data") {
+            assert.deepStrictEqual(usage.value, {
+                prompt_tokens: 40000,
+                completion_tokens: 120,
+                total_tokens: 40120,
+                prompt_tokens_details: {
+                    cached_tokens: 38368,
+                    cache_creation_input_tokens: 1200,
+                },
+                completion_tokens_details: {
+                    reasoning_tokens: 90,
+                },
+            });
+        }
+    });
+
+    test("should still honor singular /responses input_token_details when that is what the proxy sends", () => {
+        const state = createInitialStreamingState();
+        const parts = interpretStreamEvent(
+            {
+                type: "response.completed",
+                response: {
+                    usage: {
+                        input_tokens: 100,
+                        output_tokens: 10,
+                        input_token_details: { cached_tokens: 64 },
+                        output_token_details: { reasoning_tokens: 4 },
+                    },
+                },
+            },
+            state
+        );
+
+        const usage = parts.find((part) => part.type === "data");
+        assert.ok(usage && usage.type === "data");
+        if (usage.type === "data") {
+            const value = usage.value as {
+                prompt_tokens_details?: { cached_tokens?: number };
+                completion_tokens_details?: { reasoning_tokens?: number };
+            };
+            assert.strictEqual(value.prompt_tokens_details?.cached_tokens, 64);
+            assert.strictEqual(value.completion_tokens_details?.reasoning_tokens, 4);
+        }
+    });
+
+    test("should read Anthropic root cache fields on /responses usage via the LiteLLM bridge", () => {
+        const state = createInitialStreamingState();
+        const parts = interpretStreamEvent(
+            {
+                type: "response.completed",
+                response: {
+                    usage: {
+                        input_tokens: 40000,
+                        output_tokens: 12,
+                        cache_read_input_tokens: 38368,
+                        cache_creation_input_tokens: 1000,
+                    },
+                },
+            },
+            state
+        );
+
+        const usage = parts.find((part) => part.type === "data");
+        assert.ok(usage && usage.type === "data");
+        if (usage.type === "data") {
+            assert.deepStrictEqual((usage.value as { prompt_tokens_details?: object }).prompt_tokens_details, {
+                cached_tokens: 38368,
+                cache_creation_input_tokens: 1000,
+            });
+        }
+    });
+
     test("should pass through non-cache-control VS Code DataPart carrier objects", () => {
         const state = createInitialStreamingState();
         const parts = interpretStreamEvent(

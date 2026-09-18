@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.10] - 2026-09-18
+
+### 🐛 Fixes
+* **📏 Size commit-message diffs against the model's real context window**: The commit-message generator now resolves the selected VS Code model once and uses its reported `maxInputTokens` instead of relying on the commit provider's potentially empty registry. It applies a single adaptive 1,000–8,000-token output reserve, configurable through `litellm-connector.commitOutputTokenReserve`, and measures diff compaction with the same heuristic tokenizer used for prompts. Token-measured binary-search truncation guarantees the staged diff stays within budget for small-context models, while structured logs and the existing trim telemetry record any reduction.
+
+* **📦 Restore cache-hit and reasoning token counts on the `/responses` endpoint**: Every model routed via `/responses` (Claude Fable/Mythos 5.1, GPT-5 family, ...) reported `cached_tokens: 0` and `reasoning_tokens: 0` on every turn — in the usage DataPart, estimated cost, and telemetry — even when LiteLLM was serving a healthy prompt-cache hit, giving the false impression that caching was not operational. The OpenAI Responses API (and LiteLLM's `ResponseAPIUsage`) name the breakdowns `input_tokens_details` / `output_tokens_details` (plural "tokens"), but the stream interpreter only read the singular `input_token_details` / `output_token_details`, so the lookup missed and the zero fallback was stamped in. The `response.completed` handler now accepts the spec plural form (preferred), the singular bridge variant, and Anthropic's root-level `cache_read_input_tokens` / `cache_creation_input_tokens` (previously only handled on `/chat/completions`), routing all three through the shared `normalizeUsagePayload()`. The `stream.responses_usage` trace now includes the cache and reasoning counts for direct triage. The `/chat/completions` path was unaffected. (`src/adapters/streaming/liteLLMStreamInterpreter.ts`)
+* **🛡️ Prevent edit-tool capability overrides from blanking the model list on VS Code Stable ≥ 1.138**: VS Code 1.138.0 removed the Stable-only experiment that had been granting proposed-API access to marketplace extensions since 1.133 (microsoft/vscode#335038). The extension host guards `capabilities.editTools` with `checkProposedApiEnabled('chatProvider')` inside `$provideLanguageModelChatInfo`; without the grant that check throws and VS Code discards the provider's **entire** model list for the group. Any user with `find-replace` / `multi-find-replace` / `apply-patch` / `code-rewrite` values in `litellm-connector.modelCapabilitiesOverrides` would therefore see an empty picker after updating. The registry now reads the host-rewritten `enabledApiProposals` from the live extension description (the authoritative post-gating value — Insiders, OSS, extension-development hosts and `--enable-proposed-api` keep it; Stable marketplace installs empty it), and drops `editTools` when `chatProvider` is not granted while preserving `toolCalling` / `imageInput`. A single `warn` (`discovery.edit_tools_suppressed`) names the setting and the remedy. Fails closed when the extension cannot be looked up: losing an optional hint is always safer than losing every model. (`src/utils/modelCapabilities.ts`, `src/providers/liteLLMProviderRegistry.ts`, `package.json`)
+
+### 📚 Documentation
+
+* **📖 Correct BYOK-without-Copilot guidance**: Both READMEs told users to *keep* `chat.byokUtilityModelDefault` at `"GitHub Copilot"` or their models would vanish from the picker — that setting never affected picker visibility, and since VS Code 1.134 its default is `"copilot"`, which routes background utility calls (chat titles, commit messages, summaries) to Copilot models and surfaces a **"Sign in to use GitHub Copilot"** dialog when no Copilot token exists (microsoft/vscode#335347). Guidance now recommends `"mainAgent"` for signed-out use, documents the valid enum values, adds a **"What still requires Copilot"** table (Next Edit Suggestions, execution/search subagents, Agents-window subagents — microsoft/vscode#333802), and adds troubleshooting entries for the sign-in dialog and for the edit-tool / proposed-API constraint above. (`README.md`, `README.marketplace.md`)
+
+### 🧹 Chores
+
+* **🔧 Start next dev cycle**: `2.5.9` → `2.5.10-dev1`. (`package.json`)
+* **🔧 Start next dev cycle**: `2.5.10-dev1` → `2.5.10-dev2`. (`package.json`)
+* **📦 Upgrade `@vscode/vsce` to `^4.0.0`**: The dev-only packaging devDependency moves from `^3.7.0` to `^4.0.0`, tracking the current scoped VSCE tooling used for local packaging and the pinned publish workflow. (`package.json`)
+* **🚀 Promote release version**: `2.5.10-dev2` → `2.5.10`. (`package.json`)
+
 ## [2.5.9] - 2026-09-13
 
 ### 🐛 Fixes
@@ -919,11 +938,15 @@ There have been a tremendous amount of backend work done with this update to mak
 
 ---
 
-[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.8...HEAD
+[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.10...HEAD
+[2.5.10]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.9...rel/v2.5.10
+[2.5.9]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.8...rel/v2.5.9
 [2.5.8]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.7...rel/v2.5.8
 [2.5.7]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.6...rel/v2.5.7
 [2.5.6]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.6
-[2.5.3]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.3
+[2.5.5]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.4...rel/v2.5.5
+[2.5.4]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.3...rel/v2.5.4
+[2.5.3]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.2...rel/v2.5.3
 [2.5.2]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.2
 [2.5.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.5.0
 [2.3.0]: https://github.com/gethnet/litellm-connector-copilot/releases/tag/rel/v2.3.0

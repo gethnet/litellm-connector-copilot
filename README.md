@@ -4,17 +4,19 @@
 [![Codecov](https://codecov.io/gh/gethnet/litellm-connector-copilot/branch/main/graph/badge.svg)](https://codecov.io/gh/gethnet/litellm-connector-copilot)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/gethnet/litellm-connector-copilot?sort=semver)](https://github.com/gethnet/litellm-connector-copilot/releases)
 ![Open VSX Version](https://img.shields.io/open-vsx/v/GethNet/litellm-connector-copilot)
+![Marketplace Version](https://vsmarketplacebadges.dev/version-short/gethnet.litellm-connector-copilot.svg)
+![GitHub Repo stars](https://img.shields.io/github/stars/gethnet/litellm-connector-copilot)
 ![Open VSX Downloads](https://img.shields.io/open-vsx/dt/GethNet/litellm-connector-copilot)
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.5.8
+## 🆕 What's New in 2.5.10
 
-> Version 2.5.8 cuts PostHog telemetry event volume with bounded 15-minute aggregates and fixes the streaming watchdog aborting live reasoning streams.
+> Version 2.5.10 restores cache/reasoning token counts on `/responses`, stops edit-tool capability overrides from blanking the model list on VS Code 1.138 Stable, and sizes commit-message diffs against the model's real context window.
 
-- 📉 **Bounded 15-minute telemetry aggregates** — Model attempts and successful inline completions are summarized in bounded 15-minute windows (128 model/caller keys + an overflow bucket that keeps counts accurate), instead of one billable event per request. Chat outcomes and all failures remain immediate; no sampling or user configuration required.
-- ⏱️ **Watchdog anchored to raw chunk arrival** — The streaming inactivity timeout only reset on parseable payloads, so keep-alive frames and quiet reasoning phases starved it and killed healthy streams mid-reasoning. Liveness now resets on every raw byte arrival.
-- 🧪 **mocha 12 test adapter** — Dev-only `mocha` bumped to `^12.0.0`, absorbing the pending Dependabot upgrade; the in-repo version-agnostic JUnit reporter constructs correctly on both mocha 11 and 12.
+- 📦 **Cache and reasoning tokens on `/responses`** — Every model routed via `/responses` previously reported `cached_tokens: 0` and `reasoning_tokens: 0` on every turn, even on healthy prompt-cache hits. The OpenAI Responses API names its usage breakdowns `input_tokens_details` / `output_tokens_details` (plural), but the stream interpreter only read the singular form, so the zero fallback was stamped into usage, costs, and telemetry. All three payload shapes (plural, singular bridge, and Anthropic root-level) are now normalized.
+- 🛡️ **Edit-tool overrides no longer blank the model list on Stable 1.138+** — VS Code 1.138 removed the experiment that granted proposed-API access to marketplace extensions; `editTools` capability overrides now require the `chatProvider` proposal and are suppressed (with a one-time warning) when it is not granted, instead of discarding the entire model list for the group. `toolCalling` and `imageInput` overrides are unaffected.
+- 📏 **Commit diffs sized against the real context window** — The commit-message generator now budgets the staged diff from the selected VS Code model's reported `maxInputTokens` (previously a stale 128k default), applies a single adaptive 1,000–8,000-token output reserve (`litellm-connector.commitOutputTokenReserve`), and measures the diff with the same heuristic tokenizer used for prompts, so small-context models stop overflowing.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
@@ -48,7 +50,7 @@ Your support keeps this project alive and improving! ❤️
 
 ### Prerequisites
 
-- ✅ **VS Code 1.120+** (required)
+- ✅ **VS Code 1.125+** (required)
 - 🌐 A **LiteLLM proxy** running somewhere (locally or in the cloud)
 - 🔑 Your **Base URL** and **API Key**
 
@@ -105,7 +107,7 @@ Models can use tools to interact with your workspace. Perfect for code analysis,
 Use image-capable models to analyze screenshots, diagrams, and code directly in chat. Images are correctly serialized for all endpoint types including `/responses`.
 
 ### 📊 Token Awareness
-See real-time token usage with context window indicators (e.g., "↑128K in / ↓16K out").
+Every turn reports input and output token counts — including cached and reasoning token breakdowns on both `/chat/completions` and `/responses` — which VS Code surfaces as live usage in the chat UI.
 
 ### ✍️ Git Commit Generation
 Generate structured, conventional commit messages from staged changes. Set `commitModelIdOverride` to enable.
@@ -134,7 +136,7 @@ Fine-tune model metadata for specific models via `litellm-connector.modelOverrid
 
 A few Copilot-backed features stop working without a login because their defaults point at Copilot models. You can redirect **all** of them to your LiteLLM Connector models so the full chat experience keeps working offline.
 
-> ⚠️ **Keep `chat.byokUtilityModelDefault` set to `GitHub Copilot`.** This setting governs how BYOK models are surfaced. Changing it can prevent your BYOK models from appearing in the picker.
+> ⚠️ **Set `chat.byokUtilityModelDefault` to `"mainAgent"` when you are not signed in to Copilot.** Since VS Code 1.134 this setting defaults to `"copilot"`, which routes background utility calls (chat titles, commit messages, summaries) to GitHub Copilot models and shows a **"Sign in to use GitHub Copilot"** dialog when no Copilot token is available. `"mainAgent"` reuses whichever LiteLLM model you picked for chat. A specific model in `chat.utilityModel` / `chat.utilitySmallModel` always takes precedence. This setting does not affect which models appear in the picker.
 
 ### Settings that take a fully qualified model name
 
@@ -159,8 +161,9 @@ These settings present a dropdown of every available model (including your BYOK 
 
 ```jsonc
 {
-  // Keep this as "GitHub Copilot" so BYOK models are surfaced correctly.
-  "chat.byokUtilityModelDefault": "GitHub Copilot",
+  // Use your selected LiteLLM chat model for utility calls instead of Copilot.
+  // Values: "mainAgent" | "copilot" (default; requires Copilot sign-in) | "none" (error if unset).
+  "chat.byokUtilityModelDefault": "mainAgent",
 
   // Redirect Copilot-backed features to LiteLLM Connector models.
   // Use the fully qualified name from the Chat model picker.
@@ -182,6 +185,19 @@ Run **LiteLLM: Show Available Models** from the Command Palette after configurin
 
 The copied ID is the complete model ID shown by discovery, including the provider-group namespace. Use that value in settings such as `github.copilot.selectedCompletionModel`, `chat.utilityModel`, or `chat.utilitySmallModel`. The picker displays a friendly model name, but copies the complete routable ID.
 
+### What still requires Copilot
+
+Some surfaces have no BYOK routing in VS Code today, regardless of configuration:
+
+| Surface | Status |
+|---------|--------|
+| Next Edit Suggestions (`github.copilot.nextEditSuggestions.preferredModel`) | Copilot models only |
+| Execution / search subagents (`github.copilot.chat.executionSubagent.model`, `searchSubagent.model`) | Copilot models only |
+| Agents window subagents | BYOK main model works; BYOK models are not offered for subagents ([microsoft/vscode#333802](https://github.com/microsoft/vscode/issues/333802)) |
+| Copilot's SCM commit-message sparkle | Follows `chat.utilitySmallModel` / `chat.byokUtilityModelDefault` — see above. The connector's own **LiteLLM: Generate Commit Message** command talks to your LiteLLM model directly and never needs Copilot. |
+
+These are VS Code / Copilot Chat limitations, not connector limitations. Upstream tracking: [#326389](https://github.com/microsoft/vscode/issues/326389), [#335347](https://github.com/microsoft/vscode/issues/335347), [#333802](https://github.com/microsoft/vscode/issues/333802).
+
 > **Enterprise note:** For Copilot Business or Enterprise, organization administrators can control BYOK availability through Copilot policy settings. If your admin has disabled BYOK, these models will not appear even after configuration.
 
 ---
@@ -199,6 +215,9 @@ The optional **Inline Completions URL** is a full OpenAI-compatible FIM `/comple
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `litellm-connector.commitModelIdOverride` | string | `""` | Model ID for git commit message generation. Accepts the complete `litellm-connector/<group>/<model>` value copied from the model picker; the vendor prefix is normalized automatically. |
+| `litellm-connector.commitOutputTokenReserve` | number | `0` | Tokens reserved for the generated commit message when sizing the staged diff. `0` = adaptive (`1000 + 400/file + 40/hunk`), clamped to 1000–8000 |
+| `litellm-connector.commitSystemPromptOverride` | string | `""` | Override the system prompt used for git commit message generation. Leave empty to use the built-in default. |
+| `litellm-connector.commitMessagePromptOverride` | string | `""` | Override the commit message style/body prompt. Leave empty to use the built-in default. |
 | `litellm-connector.inactivityTimeout` | number | `60` | Seconds before connection is considered idle |
 | `litellm-connector.disableCaching` | boolean | `false` | When enabled, bypass LiteLLM caching for models that advertise support for the `cache` parameter |
 | `litellm-connector.disableQuotaToolRedaction` | boolean | `false` | Disable automatic tool removal on quota errors |
@@ -210,6 +229,7 @@ The optional **Inline Completions URL** is a full OpenAI-compatible FIM `/comple
 | `litellm-connector.discoveryCacheTtlMs` | number | `60000` | TTL (ms) for cached discovery responses. Set 0 to disable |
 | `litellm-connector.discoveryFireDebounceMs` | number | `250` | Debounce window (ms) for model-change notifications |
 | `litellm-connector.discoveryFireMinIntervalMs` | number | `2000` | Min interval (ms) between change notifications |
+| `litellm-connector.modelIdOverride` | string | `""` | **(Deprecated)** Force a specific LiteLLM model id for legacy workflows. Prefer the model picker or `commitModelIdOverride`. |
 
 > **Tip**: Most users won't need to touch these — the defaults work great! Caching bypass and model-card overrides are opt-in.
 
@@ -234,6 +254,8 @@ To supply an edit-tool hint when LiteLLM does not report it, configure it explic
 ```
 
 Omit edit-tool values to let VS Code choose its default editing strategy. The extension does not infer edit-tool support from model names or providers.
+
+> ⚠️ **Edit-tool hints require a proposed VS Code API.** Starting with VS Code **1.138** (stable), marketplace extensions can no longer use the `chatProvider` proposal, and setting any edit-tool value causes VS Code to reject the connector's entire model list for that provider group. Only use edit-tool values on VS Code Insiders, or when launching stable VS Code with `--enable-proposed-api GethNet.litellm-connector-copilot`. `toolCalling` and `imageInput` are unaffected.
 
 ### 🛠️ Help: Applying a Model Override
 
@@ -308,9 +330,10 @@ These settings are **not visible in the Settings UI** — they're for power user
 |---------|--------------|
 | **LiteLLM: Manage Configuration** | Open Language Models UI to add/edit provider groups |
 | **LiteLLM: Reload Models** | Manually refresh the model list |
-| **LiteLLM: Show Available Models** | See all discovered models |
-| **LiteLLM: Generate Commit Message** | Generate a commit message from staged changes |
+| **LiteLLM: Show Available Models** | See all discovered models and copy a fully qualified ID to the clipboard |
+| **Generate Commit Message** | Generate a commit message from staged changes. The SCM sparkle button appears in the Source Control view once `litellm-connector.commitModelIdOverride` is set. |
 | **LiteLLM: Set Log Level** | Change the extension's logging verbosity |
+| **LiteLLM: Reset All Configuration** | Remove all LiteLLM provider groups, API keys, and connector settings (asks for confirmation) |
 
 ---
 
@@ -335,6 +358,10 @@ These settings are **not visible in the Settings UI** — they're for power user
 2. Ensure your LiteLLM proxy is running and accessible
 3. Run **LiteLLM: Reload Models** to force refresh
 4. If stuck: manually remove LiteLLM provider groups via VS Code's Language Models settings, then re-add
+5. On VS Code 1.138+ stable, remove any edit-tool values (`find-replace`, `apply-patch`, …) from `litellm-connector.modelCapabilitiesOverrides` — they require a proposed API and blank the model list (see [Model-picker metadata](#model-picker-metadata))
+
+### "Sign in to use GitHub Copilot" appears when I'm using BYOK
+A background utility call (chat title, commit message, summary) is being routed to a Copilot model. Set `chat.byokUtilityModelDefault` to `"mainAgent"`, or point `chat.utilityModel` / `chat.utilitySmallModel` at a LiteLLM model. See [Using BYOK Without Copilot](#-using-byok-without-copilot).
 
 ### Connection fails / timeout errors
 - Check that your LiteLLM proxy is running

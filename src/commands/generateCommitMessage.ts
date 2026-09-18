@@ -1,16 +1,30 @@
 import * as vscode from "vscode";
 import type { LiteLLMCommitMessageProvider } from "../providers/liteLLMCommitProvider";
-import { deriveCapabilitiesFromModelInfo } from "../utils/modelCapabilities";
 import { GitUtils } from "../utils/gitUtils";
 import { Logger } from "../utils/logger";
+import { StructuredLogger } from "../observability/structuredLogger";
 import { showModelPicker } from "./modelPicker";
-import { calculateAvailableContext } from "../adapters/tokenUtils";
+import { countTokens } from "../adapters/tokenUtils";
+import {
+    computeDiffBudget,
+    computeOutputReserve,
+    countDiffBreadth,
+    resolveCommitContextWindow,
+} from "../utils/commitDiffBudget";
 import { COMMIT_MESSAGE_PROMPT, COMMIT_SYSTEM_PROMPT, resolvePrompt } from "../utils/prompts";
 import { stripMarkdownCodeBlocks } from "../utils";
 import type { TelemetryService } from "../telemetry/telemetryService";
 
+const COMMIT_CALLER = "commit-message";
+const DIFF_PREAMBLE = "Here is the diff:\n\n";
+
+async function selectCommitModel(modelId: string): Promise<vscode.LanguageModelChat | undefined> {
+    const models = await vscode.lm.selectChatModels({ id: modelId });
+    return models[0];
+}
+
 async function tryGenerateViaVSCodeModelRequest(
-    modelId: string,
+    selectedModel: vscode.LanguageModelChat | undefined,
     diff: string,
     systemPrompt: string,
     messagePrompt: string,
@@ -20,15 +34,13 @@ async function tryGenerateViaVSCodeModelRequest(
     // Route commit generation through VS Code's model request API first.
     // This forces VS Code to call our registered chat provider with the
     // provider-group configuration payload (`options.configuration`) attached.
-    const models = await vscode.lm.selectChatModels({ id: modelId });
-    const selectedModel = models[0];
     if (!selectedModel) {
         return undefined;
     }
 
     const messages: vscode.LanguageModelChatMessage[] = [
         vscode.LanguageModelChatMessage.User(systemPrompt),
-        vscode.LanguageModelChatMessage.User(`${messagePrompt}\n\nHere is the diff:\n\n${diff}`),
+        vscode.LanguageModelChatMessage.User(`${messagePrompt}\n\n${DIFF_PREAMBLE}${diff}`),
     ];
 
     const response = await selectedModel.sendRequest(
@@ -106,38 +118,68 @@ export function registerGenerateCommitMessageCommand(
                 return;
             }
 
-            // Check diff size with precise context calculation
-            const modelInfo = _provider.getModelInfo(modelId);
-            const capabilities = deriveCapabilitiesFromModelInfo(modelId, modelInfo);
-
-            // Calculate precise budget: MaxInput - MaxOutput - Static Prompts
-            const availableTokens = calculateAvailableContext(
-                capabilities.maxInputTokens,
-                modelInfo?.max_output_tokens || 2000, // Reserve space for the commit message
-                [systemPrompt, messagePrompt, "Here is the diff:\n\n"],
-                modelId,
-                modelInfo
-            );
-
-            const estimatedDiffTokens = diff.length / 4;
-            let processedDiff = diff;
-            let isTruncated = false;
-
-            if (estimatedDiffTokens > availableTokens) {
-                // Try to compact the diff first before hard truncation
-                processedDiff = GitUtils.compactDiff(diff, availableTokens);
-
-                // If still too large, it was already truncated within compactDiff if needed,
-                // but we check if it's different from original to show warning.
-                if (processedDiff.length < diff.length) {
-                    isTruncated = true;
-                    Logger.warn(
-                        `Diff compacted/truncated for ${modelId}. Available: ${availableTokens}, Original Estimated: ${estimatedDiffTokens}`
-                    );
-                }
+            let selectedModel: vscode.LanguageModelChat | undefined;
+            try {
+                selectedModel = await selectCommitModel(modelId);
+            } catch (selectErr) {
+                Logger.error("VS Code model selection failed", selectErr);
+                vscode.window.showErrorMessage(
+                    "Failed to generate commit message: " +
+                        (selectErr instanceof Error ? selectErr.message : String(selectErr))
+                );
+                return;
             }
 
+            const modelInfo = _provider.getModelInfo(modelId);
+            const maxInputTokens = resolveCommitContextWindow(selectedModel?.maxInputTokens, modelId, modelInfo);
+            const breadth = countDiffBreadth(diff);
+            const outputReserve = computeOutputReserve(breadth, config.commitOutputTokenReserve);
+            const budget = computeDiffBudget({
+                maxInputTokens,
+                outputReserve,
+                staticPrompts: [systemPrompt, messagePrompt, DIFF_PREAMBLE],
+                modelId,
+                modelInfo,
+            });
+            const estimatedDiffTokens = countTokens(diff, modelId, modelInfo);
+            let processedDiff = diff;
+            if (estimatedDiffTokens > budget) {
+                processedDiff = GitUtils.compactDiff(diff, budget, modelId, modelInfo);
+            }
+            const processedTokens = countTokens(processedDiff, modelId, modelInfo);
+            const isTruncated = processedDiff !== diff;
+
+            StructuredLogger.info(
+                "commit.diff_budget",
+                {
+                    maxInputTokens,
+                    outputReserve,
+                    budget,
+                    diffTokens: estimatedDiffTokens,
+                    files: breadth.files,
+                    hunks: breadth.hunks,
+                    compacted: isTruncated,
+                },
+                { model: modelId, caller: COMMIT_CALLER }
+            );
+
             if (isTruncated) {
+                StructuredLogger.warn(
+                    "commit.diff_compacted",
+                    {
+                        originalTokens: estimatedDiffTokens,
+                        resultTokens: processedTokens,
+                        budget,
+                    },
+                    { model: modelId, caller: COMMIT_CALLER }
+                );
+                telemetryService?.captureTrimExecuted(
+                    modelId,
+                    COMMIT_CALLER,
+                    estimatedDiffTokens,
+                    processedTokens,
+                    budget
+                );
                 vscode.window.showWarningMessage("The diff was truncated to fit within the model's context window.");
             }
 
@@ -179,7 +221,7 @@ export function registerGenerateCommitMessageCommand(
 
                         try {
                             generatedMessage = await tryGenerateViaVSCodeModelRequest(
-                                modelId,
+                                selectedModel,
                                 processedDiff,
                                 systemPrompt,
                                 messagePrompt,

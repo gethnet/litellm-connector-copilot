@@ -299,6 +299,9 @@ export interface LiteLLMConfig {
     /** Override for the commit-message style/body prompt. Empty/unset uses the built-in default. */
     commitMessagePromptOverride?: string;
 
+    /** Positive reply-token reserve for commit diff budgeting; zero selects the adaptive reserve. */
+    commitOutputTokenReserve?: number;
+
     /**
      * When true, forces all models to use the `/responses` endpoint instead of per-model mode selection.
      * This ensures consistent behavior across models, especially for those that require reasoning support.

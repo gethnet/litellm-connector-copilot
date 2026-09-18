@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import * as sinon from "sinon";
 import { GitUtils } from "../gitUtils";
 import type { GitAPI } from "../gitUtils";
+import { countTokens } from "../../adapters/tokenUtils";
 
 suite("GitUtils Unit Tests", () => {
     let sandbox: sinon.SinonSandbox;
@@ -22,15 +23,28 @@ suite("GitUtils Unit Tests", () => {
         assert.strictEqual(result, text);
     });
 
-    test("truncateToTokenLimit truncates text if exceeds limits", () => {
-        // Create a diff that is roughly 200 tokens (800 characters)
+    test("truncateToTokenLimit truncates text within the token limit", () => {
         const text = "a".repeat(800);
         const maxTokens = 100;
         const result = GitUtils.truncateToTokenLimit(text, maxTokens);
 
         assert.strictEqual(result.includes("[... Content truncated due to context limits ...]"), true);
-        // Truncated chars = 100 * 4 = 400
-        assert.strictEqual(result.length <= 400 + "[... Content truncated due to context limits ...]".length + 2, true);
+        assert.ok(result.length < text.length);
+        assert.ok(countTokens(result) <= maxTokens);
+    });
+
+    test("truncateToTokenLimit keeps the largest fitting prefix", () => {
+        const text = "a".repeat(800);
+        const marker = "\n\n[... Content truncated due to context limits ...]";
+        const result = GitUtils.truncateToTokenLimit(text, 100);
+        const keptChars = result.length - marker.length;
+        assert.ok(keptChars > 0);
+        assert.ok(countTokens(text.substring(0, keptChars + 1) + marker) > 100);
+    });
+
+    test("truncateToTokenLimit accepts a model id for token measurement", () => {
+        const result = GitUtils.truncateToTokenLimit("word ".repeat(400), 50, "gpt-4o");
+        assert.ok(countTokens(result, "gpt-4o") <= 50);
     });
 
     test("getGitAPI returns undefined if extension missing", async () => {
@@ -93,11 +107,12 @@ suite("GitUtils Unit Tests", () => {
 
             // Should contain changes, but may be truncated if 20 chars is too small
             // Let's use a more realistic limit for the test
-            const result2 = GitUtils.compactDiff(diff, 15); // 60 chars limit
+            const result2 = GitUtils.compactDiff(diff, 20);
             assert.ok(result2.includes("-old"), `Should include removed line. Result: ${result2}`);
             assert.ok(result2.includes("+new"), `Should include added line. Result: ${result2}`);
             assert.ok(!result2.includes("context1"), "Should NOT include context1");
             assert.ok(!result2.includes("context3"), "Should NOT include context3");
+            assert.ok(countTokens(result2) <= 20);
         });
 
         test("prioritizes hunk headers and changes over context", () => {
@@ -112,10 +127,11 @@ suite("GitUtils Unit Tests", () => {
                 ...Array<string>(50).fill(contextLine),
             ].join("\n");
 
-            const result = GitUtils.compactDiff(largeDiff, 20);
+            const result = GitUtils.compactDiff(largeDiff, 30);
             assert.ok(result.length < largeDiff.length);
             assert.ok(result.includes("-deleted line"));
             assert.ok(result.includes("+added line"));
+            assert.ok(countTokens(result) <= 30);
         });
 
         test("compactDiff removes context lines if too large", () => {
@@ -133,10 +149,25 @@ suite("GitUtils Unit Tests", () => {
                 " context 4";
 
             // Use 20 tokens (80 chars) to allow headers + changes but still force context removal
-            const result = GitUtils.compactDiff(diff, 20);
+            const result = GitUtils.compactDiff(diff, 25);
             assert.ok(!result.includes("context 1"));
             assert.ok(result.includes("-old line"));
             assert.ok(result.includes("+new line"));
+            assert.ok(countTokens(result) <= 25);
+        });
+
+        test("truncates when the compacted form exceeds the budget", () => {
+            const lines = Array.from({ length: 200 }, (_, i) => `+const line${i} = ${i};`);
+            const diff = ["--- a/file.ts", "+++ b/file.ts", "@@ -1,200 +1,200 @@", ...lines].join("\n");
+            const result = GitUtils.compactDiff(diff, 120);
+            assert.ok(result.includes("[... Content truncated due to context limits ...]"));
+            assert.ok(countTokens(result) <= 120);
+        });
+
+        test("truncates malformed content when compaction removes everything", () => {
+            const result = GitUtils.compactDiff("plain text ".repeat(100), 40);
+            assert.ok(result.startsWith("plain text"));
+            assert.ok(countTokens(result) <= 40);
         });
     });
 });

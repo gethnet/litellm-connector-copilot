@@ -40,6 +40,7 @@ export class ConfigManager {
     private static readonly SCM_COMMIT_MSG_MODEL_ID_KEY = "litellm-connector.commitModelIdOverride";
     private static readonly COMMIT_SYSTEM_PROMPT_OVERRIDE_KEY = "litellm-connector.commitSystemPromptOverride";
     private static readonly COMMIT_MESSAGE_PROMPT_OVERRIDE_KEY = "litellm-connector.commitMessagePromptOverride";
+    private static readonly COMMIT_OUTPUT_TOKEN_RESERVE_KEY = "litellm-connector.commitOutputTokenReserve";
     private static readonly FORCE_RESPONSES_ENDPOINT_KEY = "litellm-connector.forceResponsesEndpoint";
     private static readonly ALLOW_CHAT_COMPLETIONS_FALLBACK_KEY = "litellm-connector.allowChatCompletionsFallback";
     private static readonly DISPLAY_PRICING_IN_PICKER_KEY = "litellm-connector.displayPricingInPicker";
@@ -225,6 +226,16 @@ export class ConfigManager {
             ConfigManager.COMMIT_MESSAGE_PROMPT_OVERRIDE_KEY,
             ""
         );
+        const commitOutputTokenReserveRaw = workspaceConfig.get<unknown>(
+            ConfigManager.COMMIT_OUTPUT_TOKEN_RESERVE_KEY,
+            0
+        );
+        const commitOutputTokenReserve =
+            typeof commitOutputTokenReserveRaw === "number" &&
+            Number.isFinite(commitOutputTokenReserveRaw) &&
+            commitOutputTokenReserveRaw > 0
+                ? Math.floor(commitOutputTokenReserveRaw)
+                : 0;
         const forceResponsesEndpoint = workspaceConfig.get<boolean>(ConfigManager.FORCE_RESPONSES_ENDPOINT_KEY, false);
         const allowChatCompletionsFallback = workspaceConfig.get<boolean>(
             ConfigManager.ALLOW_CHAT_COMPLETIONS_FALLBACK_KEY,
@@ -261,6 +272,7 @@ export class ConfigManager {
             commitModelIdOverride: scmGitCompletionsModelId,
             commitSystemPromptOverride,
             commitMessagePromptOverride,
+            commitOutputTokenReserve,
             forceResponsesEndpoint,
             allowChatCompletionsFallback,
             displayPricingInPicker,
