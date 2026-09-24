@@ -31,6 +31,26 @@ import type { StreamingState } from "../adapters/streaming/liteLLMStreamInterpre
 import { emitPartsToVSCode } from "../adapters/streaming/vscodePartEmitter";
 import type { EffortFallbackCache } from "../utils/reasoningEffortFallback";
 import { StreamTokenCapture } from "../adapters/streaming/streamTokenCapture";
+import {
+    buildTerminalFingerprint,
+    createTerminalStats,
+    recordEmittedParts,
+} from "../adapters/streaming/streamTerminalFingerprint";
+import { requestHasThinkingBlocks } from "./base/thinkingBlockRetry";
+import type { OpenAIChatCompletionRequest } from "../types";
+
+/**
+ * Request-derived context handed to the stream fingerprint so an empty or
+ * truncated turn can be correlated with what we actually sent (continuity
+ * blocks present? deep agentic history?) without re-parsing the request.
+ */
+interface StreamRequestContext {
+    requestId: string;
+    model: string;
+    endpoint: string;
+    requestHadThinkingBlocks: boolean;
+    requestToolCallCount: number;
+}
 
 /**
  * Chat provider implementation for VS Code's LanguageModelChatProvider.
@@ -336,6 +356,20 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             // is the same single-source-of-truth read as above.
             const modelInfo = this._registry.getModelInfo(modelToUse.id);
             const requestBody = await this.buildOpenAIChatRequest(messages, modelToUse, options, modelInfo, caller);
+            // Snapshot the request shape for the terminal fingerprint BEFORE any
+            // retry path mutates the body: continuity blocks and agentic depth
+            // are the two request-side signals that separate a laundered
+            // continuity 400 from a classifier reject when a turn comes back empty.
+            const streamRequestContext: StreamRequestContext = {
+                requestId,
+                model: modelToUse.id,
+                endpoint: modelInfo?.mode ?? "chat",
+                requestHadThinkingBlocks: requestHasThinkingBlocks(requestBody as OpenAIChatCompletionRequest),
+                requestToolCallCount: requestBody.messages.reduce(
+                    (count, message) => count + (message.tool_calls?.length ?? 0),
+                    0
+                ),
+            };
             // The model id in `modelToUse` is the namespaced `<routing>/<raw>`
             // form VS Code hands us. The tokenizer heuristics (and the
             // `isParameterSupported` / `usageOptOutModels` lookups inside the
@@ -429,7 +463,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                                 caller,
                                 modelInfo
                             );
-                            await this.processStreamingResponse(stream, trackingProgress, token);
+                            await this.processStreamingResponse(stream, trackingProgress, token, streamRequestContext);
 
                             // Flush usage after processing the retried stream
 
@@ -499,7 +533,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 }
             }
 
-            await this.processStreamingResponse(stream, trackingProgress, token);
+            await this.processStreamingResponse(stream, trackingProgress, token, streamRequestContext);
 
             // Flush usage data if no upstream usage was seen during streaming
             // This ensures usage is always reported to VS Code
@@ -672,12 +706,20 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
     protected async processStreamingResponse(
         responseBody: ReadableStream<Uint8Array>,
         progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-        token: vscode.CancellationToken
+        token: vscode.CancellationToken,
+        requestContext?: StreamRequestContext
     ): Promise<void> {
         Logger.info(`[processStreamingResponse] Starting stream processing`);
         StructuredLogger.info("stream.processing_start", {
             timestamp: new Date().toISOString(),
         });
+
+        // Terminal fingerprint accumulator: condenses the whole turn into one
+        // classification event so empty/truncated turns are attributable
+        // (classifier reject vs upstream truncation vs bridge drop). Pure
+        // accumulation here; classification + logging happens in `finally`.
+        const terminalStats = createTerminalStats();
+        const streamStartedAt = Date.now();
 
         const config = await this._configManager.getConfig();
         const timeoutMs = (config.inactivityTimeout ?? 60) * 1000;
@@ -754,6 +796,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                     eventNumber: eventCount,
                     partCount: parts.length,
                 });
+                recordEmittedParts(terminalStats, parts);
                 emitPartsToVSCode(parts, progress);
             }
 
@@ -801,6 +844,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                         Logger.debug(
                             `[processStreamingResponse] Recovery emitted ${recoveredParts.length - 1} buffered tool calls`
                         );
+                        recordEmittedParts(terminalStats, recoveredParts);
                         emitPartsToVSCode(recoveredParts, progress);
                         StructuredLogger.info("stream.recovery_success", {
                             toolCallsFlushed: recoveredParts.filter((p) => p.type === "tool_call").length,
@@ -829,6 +873,27 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             if (watchdog) {
                 clearTimeout(watchdog);
             }
+            // One fingerprint per turn: warn for anything abnormal (empty,
+            // truncated, refusal, no terminal event), debug for healthy turns.
+            // This is the single grep target for attributing "nothing came
+            // back" reports — see streamTerminalFingerprint.ts for the rules.
+            const fingerprint = buildTerminalFingerprint(terminalStats, {
+                requestId: requestContext?.requestId ?? "no-request",
+                model: requestContext?.model ?? "unknown",
+                endpoint: requestContext?.endpoint ?? "unknown",
+                requestHadThinkingBlocks: requestContext?.requestHadThinkingBlocks ?? false,
+                requestToolCallCount: requestContext?.requestToolCallCount ?? 0,
+                durationMs: Date.now() - streamStartedAt,
+            });
+            StructuredLogger[fingerprint.level](
+                "stream.terminal_fingerprint",
+                { ...fingerprint.data, eventCount },
+                {
+                    requestId: requestContext?.requestId,
+                    model: requestContext?.model,
+                    endpoint: requestContext?.endpoint,
+                }
+            );
             Logger.debug(`[processStreamingResponse] Clearing streaming state (eventCount=${eventCount})`);
             StructuredLogger.debug("stream.state_cleared", {
                 eventCount,

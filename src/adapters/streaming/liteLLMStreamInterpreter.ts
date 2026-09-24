@@ -746,8 +746,17 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
             }
         }
     }
-    if (data.type === "response.completed") {
-        Logger.info(`[interpretStreamEvent] Received /responses response.completed event`);
+    // The Responses API defines three terminal events: response.completed,
+    // response.incomplete (output cut short: max_output_tokens, content_filter),
+    // and response.failed (upstream error surfaced with HTTP 200 on the stream).
+    // Bridged providers (azure_ai, GLM via LiteLLM) reach all three, and some
+    // put the incomplete/failed status on the completed frame instead of
+    // emitting the dedicated event. All three shapes share usage extraction and
+    // tool-call flushing; only the finish reason differs.
+    const isResponsesTerminal =
+        data.type === "response.completed" || data.type === "response.incomplete" || data.type === "response.failed";
+    if (isResponsesTerminal) {
+        Logger.info(`[interpretStreamEvent] Received /responses terminal event: ${String(data.type)}`);
         const response = data.response as { usage?: RawResponsesUsage } | undefined;
         responseParts.push({
             type: "response",
@@ -839,6 +848,31 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                 shape: "responses",
             });
             finishParts.push({ type: "finish", reason: "refusal" });
+        }
+
+        // Non-completed terminals: surface WHY the stream stopped instead of
+        // rendering a silently truncated "success". `incomplete_details.reason`
+        // carries the spec cause (max_output_tokens | content_filter); failed
+        // frames carry an `error` object. Both are otherwise invisible because
+        // payload logging truncates at ~200 chars. See Week-Review_09242026.
+        const isIncomplete = data.type === "response.incomplete" || responseStatus === "incomplete";
+        const isFailed = data.type === "response.failed" || responseStatus === "failed";
+        if (isIncomplete || isFailed) {
+            const incompleteDetails = responseRecord?.incomplete_details as { reason?: unknown } | undefined;
+            const incompleteReason =
+                typeof incompleteDetails?.reason === "string" ? incompleteDetails.reason : undefined;
+            const errorRecord = responseRecord?.error as { code?: unknown; message?: unknown } | undefined;
+            const reason = isFailed ? "failed" : (incompleteReason ?? "incomplete");
+            // Untruncated by design: this is the primary triage signal for
+            // "response stopped mid-answer" reports across all models.
+            StructuredLogger.warn("stream.responses_terminal_not_completed", {
+                terminalType: String(data.type),
+                status: responseStatus,
+                incompleteReason,
+                errorCode: typeof errorRecord?.code === "string" ? errorRecord.code : undefined,
+                errorMessage: typeof errorRecord?.message === "string" ? errorRecord.message : undefined,
+            });
+            finishParts.push({ type: "finish", reason });
         }
     }
     if (data.type === "response.output_item.done") {
