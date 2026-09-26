@@ -22,7 +22,12 @@ suite("streamTerminalFingerprint", () => {
         name,
         args: "{}",
     });
-    const usage = (promptTokens: number, completionTokens: number, reasoningTokens?: number): EmittedPart => ({
+    const usage = (
+        promptTokens: number,
+        completionTokens: number,
+        reasoningTokens?: number,
+        cachedTokens?: number
+    ): EmittedPart => ({
         type: "data",
         mimeType: "usage",
         value: {
@@ -31,6 +36,7 @@ suite("streamTerminalFingerprint", () => {
             ...(reasoningTokens !== undefined
                 ? { completion_tokens_details: { reasoning_tokens: reasoningTokens } }
                 : {}),
+            ...(cachedTokens !== undefined ? { prompt_tokens_details: { cached_tokens: cachedTokens } } : {}),
         },
     });
 
@@ -192,6 +198,42 @@ suite("streamTerminalFingerprint", () => {
         assert.strictEqual(fp.classification, "empty_response");
         assert.strictEqual(fp.data.reasoningTokens, 900);
         assert.strictEqual(fp.data.thinkingParts, 1);
+    });
+
+    test("cached prompt tokens ride along in the fingerprint", () => {
+        // A ~290k prompt answered in ~1.5s only makes physical sense with a big
+        // cache hit; carrying cachedTokens in the fingerprint lets the operator
+        // sanity-check the timing anomaly without hunting for the usage trace.
+        const stats = createTerminalStats();
+        recordEmittedParts(stats, [usage(289867, 8, 8, 289000), finish("incomplete")]);
+
+        const fp = buildTerminalFingerprint(stats, {
+            requestId: "r9",
+            model: "fable-5",
+            endpoint: "responses",
+            requestHadThinkingBlocks: false,
+            requestToolCallCount: 52,
+            durationMs: 1549,
+        });
+
+        assert.strictEqual(fp.data.cachedTokens, 289000);
+        assert.strictEqual(fp.classification, "truncated");
+    });
+
+    test("cachedTokens stays undefined when usage omits the prompt details block", () => {
+        const stats = createTerminalStats();
+        recordEmittedParts(stats, [usage(100, 10), finish("stop")]);
+
+        const fp = buildTerminalFingerprint(stats, {
+            requestId: "r10",
+            model: "m",
+            endpoint: "chat",
+            requestHadThinkingBlocks: false,
+            requestToolCallCount: 0,
+            durationMs: 100,
+        });
+
+        assert.strictEqual(fp.data.cachedTokens, undefined);
     });
 
     test("response part marks the terminal as seen even without a finish part", () => {

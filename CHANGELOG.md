@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### ✨ Features
+
+* **🚧 New `litellm-connector.disableLiteLLMResponseCaching` setting — proxy-level cache bypass**: LiteLLM's response cache was observed storing a truncated `/responses` result (stream broke upstream, bridge stamped `status: "incomplete"`) and replaying it byte-for-byte to every one of Copilot's silent retries, deterministically wedging the session. The existing `disableCaching` toggle could not help: it is model-gated, so the shared parameter strip removes the bypass whenever the model card's `supported_openai_params` lacks `cache` (the common case). The new toggle targets the **proxy** instead of the model — it stamps `extra_body.cache: { "no-cache": true, "no-store": true }` *after* the parameter strip, so no model card can defeat it: `no-cache` skips poisoned cache reads, `no-store` stops truncated turns from being cached at all. Anthropic prompt caching (`cache_control` breakpoints) is a separate mechanism and remains untouched, and the client's 400 strip-and-retry now also removes `no-store` for backends that reject cache controls. (`package.json`, `src/config/configManager.ts`, `src/providers/base/requestBuilder.ts`, `src/adapters/litellmClient.ts`, `src/types.ts`)
+
+### 🐛 Fixes
+
+* **🔎 Dump the sanitized terminal frame on abnormal `/responses` terminals**: When a bridge ends a stream with `status: "incomplete"`/`"failed"`, the real stop cause is often carried under nonstandard keys (observed live: Fable 5 cut after 8 reasoning tokens with `response.completed` + `status: "incomplete"` and no `incomplete_details.reason`) — invisible because payload logging truncates at ~200 chars and the warn event only extracted known fields. The interpreter now logs a `stream.responses_terminal_frame` warn containing the whole terminal `response` object with content-bearing fields stripped: `output[]` items are reduced to `{type, status}` summaries and the `instructions` system-prompt echo is dropped, while all unknown keys are preserved verbatim. (`src/adapters/streaming/terminalFrameDump.ts`, `src/adapters/streaming/liteLLMStreamInterpreter.ts`)
+* **📊 Carry `cachedTokens` in the stream terminal fingerprint**: `stream.terminal_fingerprint` now includes the prompt cache-hit size from the usage payload, so anomalies like a ~290k-token prompt answered in ~1.5s can be sanity-checked (large cache hit vs. fabricated usage) directly from the single triage event. (`src/adapters/streaming/streamTerminalFingerprint.ts`)
+
+### 🔙 Reverted
+
+* **🪟 Withdraw the Agents window manifest opt-in** (unreleased, dev builds only): declaring `capabilities.agentsWindow.supported: true` + the `agentsWindowActivation` proposal made things worse in practice — the Agents window now reported the model as *not registered*, whereas before the opt-in the models worked there (just without fine-grained control). Both manifest entries are removed; the per-user override `"extensions.supportAgentsWindow": { "GethNet.litellm-connector-copilot": true }` remains the recommended path. (`package.json`)
+
 ## [2.5.10] - 2026-09-18
 
 ### 🐛 Fixes

@@ -1,7 +1,7 @@
 {
 	"name": "litellm-connector-copilot",
 	"displayName": "LiteLLM Connector for Copilot",
-	"version": "2.5.11-dev1",
+	"version": "2.5.11-dev4",
 	"description": "An extension that integrates LiteLLM proxy into Copilot",
 	"categories": [
 		"AI",
@@ -287,6 +287,14 @@
 					"type": "boolean",
 					"default": false,
 					"description": "When enabled, bypass LiteLLM caching only for models whose supported OpenAI parameters include cache.",
+					"tags": [
+						"experimental"
+					]
+				},
+				"litellm-connector.disableLiteLLMResponseCaching": {
+					"type": "boolean",
+					"default": false,
+					"markdownDescription": "Bypass the **LiteLLM proxy response cache** on every request by sending `extra_body.cache: { \"no-cache\": true, \"no-store\": true }`. Unlike `#litellm-connector.disableCaching#`, this control targets the proxy itself and is applied regardless of the model card's supported parameters. Use when the proxy caches truncated/incomplete responses and replays them to retries. Anthropic prompt caching (`cache_control`) is unaffected.",
 					"tags": [
 						"experimental"
 					]

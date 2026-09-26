@@ -31,6 +31,8 @@ export interface TerminalStats {
     promptTokens: number | undefined;
     completionTokens: number | undefined;
     reasoningTokens: number | undefined;
+    /** Cache-hit size; contextualizes "huge prompt, instant response" timings. */
+    cachedTokens: number | undefined;
     /** True once any terminal signal was seen (finish part or /responses response part). */
     sawTerminalEvent: boolean;
 }
@@ -44,6 +46,7 @@ export function createTerminalStats(): TerminalStats {
         promptTokens: undefined,
         completionTokens: undefined,
         reasoningTokens: undefined,
+        cachedTokens: undefined,
         sawTerminalEvent: false,
     };
 }
@@ -52,6 +55,7 @@ interface UsageShape {
     prompt_tokens?: unknown;
     completion_tokens?: unknown;
     completion_tokens_details?: { reasoning_tokens?: unknown };
+    prompt_tokens_details?: { cached_tokens?: unknown };
 }
 
 /** Folds a batch of interpreter-emitted parts into the running stats. */
@@ -92,6 +96,10 @@ export function recordEmittedParts(stats: TerminalStats, parts: readonly Emitted
                 const reasoning = usage.completion_tokens_details?.reasoning_tokens;
                 if (typeof reasoning === "number") {
                     stats.reasoningTokens = reasoning;
+                }
+                const cached = usage.prompt_tokens_details?.cached_tokens;
+                if (typeof cached === "number") {
+                    stats.cachedTokens = cached;
                 }
                 break;
             }
@@ -134,6 +142,7 @@ export interface TerminalFingerprint {
         promptTokens: number | undefined;
         completionTokens: number | undefined;
         reasoningTokens: number | undefined;
+        cachedTokens: number | undefined;
         sawTerminalEvent: boolean;
         requestHadThinkingBlocks: boolean;
         requestToolCallCount: number;
@@ -186,6 +195,7 @@ export function buildTerminalFingerprint(stats: TerminalStats, context: Fingerpr
             promptTokens: stats.promptTokens,
             completionTokens: stats.completionTokens,
             reasoningTokens: stats.reasoningTokens,
+            cachedTokens: stats.cachedTokens,
             sawTerminalEvent: stats.sawTerminalEvent,
             requestHadThinkingBlocks: context.requestHadThinkingBlocks,
             requestToolCallCount: context.requestToolCallCount,

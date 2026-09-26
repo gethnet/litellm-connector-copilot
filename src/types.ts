@@ -269,7 +269,29 @@ export interface LiteLLMParams {
  */
 export interface LiteLLMConfig {
     inactivityTimeout?: number;
+    /**
+     * Model-gated cache bypass: adds `extra_body.cache["no-cache"]` only when
+     * the model card advertises `cache` in `supported_openai_params` (the
+     * shared parameter strip removes it otherwise). Kept for backwards
+     * compatibility; for proxy-level bypass see
+     * `disableLiteLLMResponseCaching`.
+     */
     disableCaching?: boolean;
+    /**
+     * Proxy-directed LiteLLM response-cache bypass. Adds
+     * `extra_body.cache: { "no-cache": true, "no-store": true }` AFTER the
+     * parameter strip so it cannot be removed by model cards that do not
+     * advertise `cache`. The control targets the LiteLLM proxy itself (which
+     * consumes `extra_body` before provider dispatch), not the model.
+     *
+     * Motivation: LiteLLM caches truncated/incomplete `/responses` results
+     * and replays them to identical retries, deterministically wedging
+     * agentic sessions (observed 2026-09-25). `no-cache` skips poisoned
+     * reads; `no-store` stops our responses from being cached at all.
+     * Anthropic prompt caching (`cache_control` breakpoints) is a separate
+     * mechanism and is unaffected.
+     */
+    disableLiteLLMResponseCaching?: boolean;
     disableQuotaToolRedaction?: boolean;
     /**
      * Enable/disable the model override system.
@@ -495,6 +517,8 @@ export interface OpenAIChatCompletionRequest {
         cache?: {
             /** Skip cache check, get fresh response */
             "no-cache"?: boolean;
+            /** Do not store this response in the proxy cache. */
+            "no-store"?: boolean;
         };
         [key: string]: unknown;
     };
@@ -565,6 +589,7 @@ export interface LiteLLMResponsesRequest {
     extra_body?: {
         cache?: {
             "no-cache"?: boolean;
+            "no-store"?: boolean;
         };
         [key: string]: unknown;
     };

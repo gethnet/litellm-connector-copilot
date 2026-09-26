@@ -281,6 +281,7 @@ export class LiteLLMClient {
                             const cache = eb.cache as Record<string, unknown>;
                             delete cache["no-cache"];
                             delete cache.no_cache;
+                            delete cache["no-store"];
                             if (Object.keys(cache).length === 0) {
                                 delete eb.cache;
                             }
@@ -303,12 +304,13 @@ export class LiteLLMClient {
                     // Some backends interpret top-level `cache` as an OpenAI param and reject it
                     delete bodyAny.cache;
 
-                    // Current LiteLLM format: extra_body.cache["no-cache"]
+                    // Current LiteLLM format: extra_body.cache["no-cache"] / ["no-store"]
                     if (strippedBody.extra_body && typeof strippedBody.extra_body === "object") {
                         const eb = strippedBody.extra_body as Record<string, unknown>;
                         const cache = eb.cache;
                         if (cache && typeof cache === "object") {
                             delete (cache as Record<string, unknown>)["no-cache"];
+                            delete (cache as Record<string, unknown>)["no-store"];
                         }
                         // If cache object is now empty, remove it
                         if (

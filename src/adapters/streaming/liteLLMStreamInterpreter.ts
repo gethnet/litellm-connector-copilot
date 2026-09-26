@@ -10,6 +10,7 @@ import {
     interpretResponsesReasoningEvent,
     type ResponsesReasoningState,
 } from "./responsesReasoningEvents";
+import { sanitizeTerminalFrame } from "./terminalFrameDump";
 
 export interface StreamingState {
     toolCallBuffers: Map<number, { id?: string; name?: string; args: string }>;
@@ -871,6 +872,13 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                 incompleteReason,
                 errorCode: typeof errorRecord?.code === "string" ? errorRecord.code : undefined,
                 errorMessage: typeof errorRecord?.message === "string" ? errorRecord.message : undefined,
+            });
+            // Full sanitized frame: bridges stash the real stop cause under
+            // nonstandard keys (observed: incomplete with NO reason from a
+            // LiteLLM bridge) that the selective extraction above misses.
+            // Content/system-prompt fields are stripped; see terminalFrameDump.
+            StructuredLogger.warn("stream.responses_terminal_frame", {
+                frame: sanitizeTerminalFrame(responseRecord),
             });
             finishParts.push({ type: "finish", reason });
         }
