@@ -170,6 +170,7 @@ Base URL + API key are configured through **VS Code's Language Models UI** (run 
 | `commitMessagePromptOverride` | `""` | Override the commit message style/body prompt. Leave empty for the built-in default. |
 | `inactivityTimeout` | `60` | Seconds before stream is considered idle |
 | `disableCaching` | `false` | When enabled, bypass LiteLLM caching for models that advertise support for the `cache` parameter |
+| `disableLiteLLMResponseCaching` | `false` | Bypass the LiteLLM proxy response cache on every request (`no-cache` + `no-store`), regardless of model card. Use when the proxy replays truncated/incomplete responses to retries |
 | `disableQuotaToolRedaction` | `false` | Disable automatic tool removal on quota errors |
 | `enableModelOverrides` | `false` | Enable model-card override rules |
 | `displayPricingInPicker` | `true` | Show model pricing in picker details, hovers, and cost metadata; native model-name rows remain price-free |

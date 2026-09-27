@@ -220,6 +220,7 @@ The optional **Inline Completions URL** is a full OpenAI-compatible FIM `/comple
 | `litellm-connector.commitMessagePromptOverride` | string | `""` | Override the commit message style/body prompt. Leave empty to use the built-in default. |
 | `litellm-connector.inactivityTimeout` | number | `60` | Seconds before connection is considered idle |
 | `litellm-connector.disableCaching` | boolean | `false` | When enabled, bypass LiteLLM caching for models that advertise support for the `cache` parameter |
+| `litellm-connector.disableLiteLLMResponseCaching` | boolean | `false` | Bypass the LiteLLM proxy response cache on every request (`no-cache` + `no-store`), regardless of model card. Use when the proxy replays truncated/incomplete responses to retries. Anthropic prompt caching is unaffected |
 | `litellm-connector.disableQuotaToolRedaction` | boolean | `false` | Disable automatic tool removal on quota errors |
 | `litellm-connector.enableModelOverrides` | boolean | `false` | Master toggle for user and bundled model-card overrides |
 | `litellm-connector.modelOverrides` | array | `[]` | User-supplied regex-based field overrides; only explicitly defined fields replace LiteLLM data |
