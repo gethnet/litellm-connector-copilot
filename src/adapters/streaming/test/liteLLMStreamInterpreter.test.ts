@@ -1081,6 +1081,147 @@ suite("Fable 5.1 Refusal Detection", () => {
     });
 });
 
+// The OpenAI Responses API defines three terminal events: response.completed,
+// response.incomplete, and response.failed. Bridged providers (azure_ai, GLM
+// via LiteLLM) reach all three with HTTP 200, so the interpreter must surface
+// non-completed terminals as explicit finish parts — otherwise a stream that
+// hit max_output_tokens or a content filter renders as a silently truncated
+// "success" (observed with Fable 5.x and GLM-5.3).
+suite("/responses Non-Completed Terminal Events", () => {
+    test("response.incomplete emits finish carrying the incomplete_details reason", () => {
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent(
+            {
+                type: "response.incomplete",
+                response: {
+                    status: "incomplete",
+                    incomplete_details: { reason: "max_output_tokens" },
+                    usage: { input_tokens: 500, output_tokens: 4096 },
+                },
+            },
+            state
+        );
+
+        const finish = parts.find((p) => p.type === "finish");
+        assert.ok(finish && finish.type === "finish", "incomplete terminal must emit a finish part");
+        if (finish && finish.type === "finish") {
+            assert.strictEqual(finish.reason, "max_output_tokens");
+        }
+
+        // Usage must still be captured so the truncated turn is billed/traced correctly.
+        const usage = parts.find((p) => p.type === "data");
+        assert.ok(usage && usage.type === "data", "incomplete terminal must still emit usage");
+    });
+
+    test("response.incomplete without a reason falls back to a generic incomplete finish", () => {
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent({ type: "response.incomplete", response: { status: "incomplete" } }, state);
+
+        const finish = parts.find((p) => p.type === "finish");
+        assert.ok(finish && finish.type === "finish");
+        if (finish && finish.type === "finish") {
+            assert.strictEqual(finish.reason, "incomplete");
+        }
+    });
+
+    test("response.failed emits an error finish carrying the upstream error message", () => {
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent(
+            {
+                type: "response.failed",
+                response: {
+                    status: "failed",
+                    error: { code: "server_error", message: "upstream provider rejected the request" },
+                },
+            },
+            state
+        );
+
+        const finish = parts.find((p) => p.type === "finish");
+        assert.ok(finish && finish.type === "finish", "failed terminal must emit a finish part");
+        if (finish && finish.type === "finish") {
+            assert.strictEqual(finish.reason, "failed");
+        }
+    });
+
+    test("response.completed with status incomplete surfaces the truncation reason", () => {
+        // Some bridges put the incomplete status on the completed frame rather
+        // than emitting a distinct response.incomplete event.
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent(
+            {
+                type: "response.completed",
+                response: {
+                    status: "incomplete",
+                    incomplete_details: { reason: "content_filter" },
+                    usage: { input_tokens: 100, output_tokens: 7 },
+                },
+            },
+            state
+        );
+
+        const finish = parts.find((p) => p.type === "finish");
+        assert.ok(finish && finish.type === "finish", "completed-with-incomplete-status must emit finish");
+        if (finish && finish.type === "finish") {
+            assert.strictEqual(finish.reason, "content_filter");
+        }
+    });
+
+    test("response.incomplete flushes buffered tool calls before finishing", () => {
+        // A truncated agentic turn may already hold complete buffered tool calls;
+        // dropping them would discard usable work.
+        const state = createInitialStreamingState();
+        interpretStreamEvent(
+            {
+                type: "response.output_tool_call.delta",
+                delta: { id: "call-trunc", name: "tool_t", arguments: '{"a":1}' },
+            },
+            state
+        );
+
+        const parts = interpretStreamEvent(
+            {
+                type: "response.incomplete",
+                response: { status: "incomplete", incomplete_details: { reason: "max_output_tokens" } },
+            },
+            state
+        );
+
+        const toolCall = parts.find((p) => p.type === "tool_call");
+        assert.ok(toolCall && toolCall.type === "tool_call", "buffered tool call must be flushed on incomplete");
+        if (toolCall && toolCall.type === "tool_call") {
+            assert.strictEqual(toolCall.name, "tool_t");
+        }
+        assert.strictEqual(state.responseToolCallBuffers.size, 0, "buffers cleared after incomplete flush");
+    });
+
+    test("plain response.completed does not fabricate a truncation finish", () => {
+        const state = createInitialStreamingState();
+
+        const parts = interpretStreamEvent(
+            {
+                type: "response.completed",
+                response: { status: "completed", usage: { input_tokens: 1, output_tokens: 2 } },
+            },
+            state
+        );
+
+        // A healthy completed frame must not be reported as truncated. (It may
+        // legitimately emit no finish part at all — only non-completed terminals
+        // are required to.)
+        const finish = parts.find((p) => p.type === "finish");
+        if (finish && finish.type === "finish") {
+            assert.notStrictEqual(finish.reason, "incomplete");
+            assert.notStrictEqual(finish.reason, "max_output_tokens");
+            assert.notStrictEqual(finish.reason, "content_filter");
+        }
+    });
+});
+
 suite("flushPendingBuffers Unit Tests", () => {
     test("flushes /responses-format tool calls and emits with reason: incomplete_stream_end", () => {
         const state = createInitialStreamingState();

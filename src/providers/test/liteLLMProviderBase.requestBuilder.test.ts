@@ -418,6 +418,81 @@ suite("RequestBuilder", () => {
         assert.deepStrictEqual(request.extra_body, { cache: { "no-cache": true } });
     });
 
+    test("disableLiteLLMResponseCaching adds no-cache + no-store AFTER the parameter strip (survives model cards without cache)", async () => {
+        // The proxy-level toggle addresses LiteLLM response-cache poisoning
+        // (observed 2026-09-25: truncated /responses result cached and replayed
+        // to every retry). It is directed at the PROXY, not the model, so the
+        // model-card strip must not be able to remove it — unlike the older
+        // model-gated disableCaching toggle.
+        configManager.getConfig.resolves({ disableLiteLLMResponseCaching: true });
+        const proxyBypassBuilder = new RequestBuilder({
+            configManager,
+            getReasoningEffort: () => undefined,
+            detectQuotaToolRedaction: (messages, tools) => ({ tools, confidence: "none" as const }),
+            // Real-strip mirror: removes extra_body.cache when the card lists
+            // params without "cache" — exactly the wolfram Fable 5 shape.
+            stripUnsupportedParametersFromRequest: (body) => {
+                const extraBody = body.extra_body;
+                if (extraBody && typeof extraBody === "object") {
+                    delete (extraBody as Record<string, unknown>).cache;
+                    if (Object.keys(extraBody).length === 0) {
+                        delete body.extra_body;
+                    }
+                }
+            },
+            isParameterSupported: (parameter) => parameter !== "cache",
+            getTelemetryOptions: () => ({ caller: "test", justification: undefined, modelConfiguration: {} }),
+            usageOptOutModels: new Set(),
+            extractRawModelName: (id: string) => id,
+        });
+        const model = {
+            id: "claude-fable-5",
+            maxInputTokens: 100,
+            maxOutputTokens: 50,
+        } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("hi")],
+                name: undefined,
+            },
+        ];
+
+        const request = await proxyBypassBuilder.buildOpenAIChatRequest(
+            messages,
+            model,
+            { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions,
+            { supported_openai_params: ["stream", "temperature"] }
+        );
+
+        assert.deepStrictEqual(request.extra_body, { cache: { "no-cache": true, "no-store": true } });
+    });
+
+    test("disableLiteLLMResponseCaching off leaves the request untouched", async () => {
+        configManager.getConfig.resolves({ disableLiteLLMResponseCaching: false });
+        const model = {
+            id: "claude-fable-5",
+            maxInputTokens: 100,
+            maxOutputTokens: 50,
+        } as vscode.LanguageModelChatInformation;
+        const messages: vscode.LanguageModelChatRequestMessage[] = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [new vscode.LanguageModelTextPart("hi")],
+                name: undefined,
+            },
+        ];
+
+        const request = await builder.buildOpenAIChatRequest(
+            messages,
+            model,
+            { modelOptions: {} } as vscode.ProvideLanguageModelChatResponseOptions,
+            undefined
+        );
+
+        assert.strictEqual(request.extra_body, undefined);
+    });
+
     test("buildOpenAIChatRequest serializes an explicitly selected none effort", async () => {
         configManager.getConfig.resolves({});
         const noneBuilder = new RequestBuilder({

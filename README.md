@@ -10,13 +10,13 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.5.10
+## 🆕 What's New in 2.5.11
 
-> Version 2.5.10 restores cache/reasoning token counts on `/responses`, stops edit-tool capability overrides from blanking the model list on VS Code 1.138 Stable, and sizes commit-message diffs against the model's real context window.
+> Version 2.5.11 makes failed and truncated responses visible instead of silently empty, and adds a proxy-level cache bypass so a cached failure can no longer wedge a session.
 
-- 📦 **Cache and reasoning tokens on `/responses`** — Every model routed via `/responses` previously reported `cached_tokens: 0` and `reasoning_tokens: 0` on every turn, even on healthy prompt-cache hits. The OpenAI Responses API names its usage breakdowns `input_tokens_details` / `output_tokens_details` (plural), but the stream interpreter only read the singular form, so the zero fallback was stamped into usage, costs, and telemetry. All three payload shapes (plural, singular bridge, and Anthropic root-level) are now normalized.
-- 🛡️ **Edit-tool overrides no longer blank the model list on Stable 1.138+** — VS Code 1.138 removed the experiment that granted proposed-API access to marketplace extensions; `editTools` capability overrides now require the `chatProvider` proposal and are suppressed (with a one-time warning) when it is not granted, instead of discarding the entire model list for the group. `toolCalling` and `imageInput` overrides are unaffected.
-- 📏 **Commit diffs sized against the real context window** — The commit-message generator now budgets the staged diff from the selected VS Code model's reported `maxInputTokens` (previously a stale 128k default), applies a single adaptive 1,000–8,000-token output reserve (`litellm-connector.commitOutputTokenReserve`), and measures the diff with the same heuristic tokenizer used for prompts, so small-context models stop overflowing.
+- 🚨 **Truncated and empty turns now surface as errors** — The VS Code language-model API has no finish-reason channel, so a stream that ended `incomplete`/`failed` (or produced nothing at all) looked like a *successful empty response* and VS Code silently retried it. Such turns now end with a clear error naming the cause, because server-side recovery (LiteLLM fallback models) is the intended handler — anything reaching the client means it did not engage. Turns that produced a tool call, and refusals, are never affected. Set `litellm-connector.disableAbnormalTerminationErrors` to return to log-only behavior.
+- 🚧 **Proxy response-cache bypass (`litellm-connector.disableLiteLLMResponseCaching`)** — A LiteLLM proxy was observed caching a truncated `/responses` result and replaying it byte-for-byte to every retry, deterministically wedging the session. The new toggle sends `no-cache` + `no-store` to the proxy on every request and, unlike the older model-gated `disableCaching`, cannot be stripped by model cards that don't advertise the `cache` parameter. Anthropic prompt caching is unaffected.
+- 🔎 **Deeper stream-failure triage** — Non-completed `/responses` terminals (`response.incomplete`, `response.failed`, and completed frames carrying `status: "incomplete"`) are handled instead of passing as successes; each turn emits one `stream.terminal_fingerprint` classification (with prompt cache-hit size), and abnormal terminals log the full sanitized terminal frame so nonstandard upstream stop reasons are visible.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
@@ -220,6 +220,8 @@ The optional **Inline Completions URL** is a full OpenAI-compatible FIM `/comple
 | `litellm-connector.commitMessagePromptOverride` | string | `""` | Override the commit message style/body prompt. Leave empty to use the built-in default. |
 | `litellm-connector.inactivityTimeout` | number | `60` | Seconds before connection is considered idle |
 | `litellm-connector.disableCaching` | boolean | `false` | When enabled, bypass LiteLLM caching for models that advertise support for the `cache` parameter |
+| `litellm-connector.disableLiteLLMResponseCaching` | boolean | `false` | Bypass the LiteLLM proxy response cache on every request (`no-cache` + `no-store`), regardless of model card. Use when the proxy replays truncated/incomplete responses to retries. Anthropic prompt caching is unaffected |
+| `litellm-connector.disableAbnormalTerminationErrors` | boolean | `false` | Log-only mode for truncated/empty/failed stream terminals instead of surfacing them as chat errors (restores legacy silent behavior where VS Code may quietly retry empty turns) |
 | `litellm-connector.disableQuotaToolRedaction` | boolean | `false` | Disable automatic tool removal on quota errors |
 | `litellm-connector.enableModelOverrides` | boolean | `false` | Master toggle for user and bundled model-card overrides |
 | `litellm-connector.modelOverrides` | array | `[]` | User-supplied regex-based field overrides; only explicitly defined fields replace LiteLLM data |

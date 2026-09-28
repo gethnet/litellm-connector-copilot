@@ -211,6 +211,12 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
             assert.strictEqual(request.top_p, undefined);
             const stream = new ReadableStream<Uint8Array>({
                 start(controller) {
+                    // A healthy turn needs productive output + a terminal
+                    // event, otherwise abnormal-termination surfacing throws.
+                    controller.enqueue(
+                        encoder.encode('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}\n\n')
+                    );
+                    controller.enqueue(encoder.encode('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'));
                     controller.enqueue(encoder.encode("data: [DONE]\n\n"));
                     controller.close();
                 },
@@ -295,6 +301,14 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
             async () =>
                 new ReadableStream<Uint8Array>({
                     start(controller) {
+                        // Healthy minimal turn: text + finish so the
+                        // abnormal-termination gate stays quiet.
+                        controller.enqueue(
+                            encoder.encode('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}\n\n')
+                        );
+                        controller.enqueue(
+                            encoder.encode('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n')
+                        );
                         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
                         controller.close();
                     },
@@ -800,6 +814,14 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                     encoder.encode(
                         'data: {"type":"response.output_item.done","item":{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"opaque-redacted-thinking"}}\n\n'
                     )
+                );
+                // Text + healthy terminal: a reasoning-only turn with no
+                // completed frame now classifies as empty_response and throws
+                // (abnormal-termination surfacing); this test is about
+                // metadata preservation, not termination behavior.
+                controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":"done"}\n\n'));
+                controller.enqueue(
+                    encoder.encode('data: {"type":"response.completed","response":{"status":"completed"}}\n\n')
                 );
                 controller.enqueue(encoder.encode("data: [DONE]\n\n"));
                 controller.close();
@@ -1358,6 +1380,152 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
                     (typedMetric.estimatedTotalCost ?? 0) === 0
                 );
             })
+        );
+    });
+
+    test("surfaces a truncated /responses terminal as a StreamAbnormalTerminationError", async () => {
+        // The 2026-09-25 capture shape: bridge sends response.completed with
+        // status "incomplete" after streaming only reasoning. Without the
+        // throw, Copilot sees a successful empty turn and silently retries.
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const providerWithConfig = provider as unknown as {
+            _configManager: { getConfig: () => Promise<unknown> };
+        };
+        sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            inactivityTimeout: 60,
+        });
+
+        const { ReadableStream } = await import("node:stream/web");
+        const encoder = new TextEncoder();
+        const makeStream = () =>
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(
+                        encoder.encode(
+                            'data: {"type":"response.completed","response":{"status":"incomplete","usage":{"input_tokens":311848,"output_tokens":1970}}}\n\n'
+                        )
+                    );
+                    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                    controller.close();
+                },
+            });
+
+        const providerTest = provider as unknown as {
+            resetStreamingState: () => void;
+            processStreamingResponse: (
+                stream: unknown,
+                progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+                token: vscode.CancellationToken
+            ) => Promise<void>;
+        };
+        providerTest.resetStreamingState();
+
+        const parts: vscode.LanguageModelResponsePart[] = [];
+        await assert.rejects(
+            providerTest.processStreamingResponse(
+                makeStream(),
+                { report: (part: vscode.LanguageModelResponsePart) => parts.push(part) },
+                new vscode.CancellationTokenSource().token
+            ),
+            (err: unknown) => {
+                assert.ok(err instanceof Error);
+                assert.strictEqual(err.name, "StreamAbnormalTerminationError");
+                assert.ok(err.message.includes("[litellm-connector:abnormal-termination]"));
+                assert.ok(err.message.includes("truncated"));
+                return true;
+            }
+        );
+    });
+
+    test("does not throw for a healthy /responses completed terminal with text output", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const providerWithConfig = provider as unknown as {
+            _configManager: { getConfig: () => Promise<unknown> };
+        };
+        sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            inactivityTimeout: 60,
+        });
+
+        const { ReadableStream } = await import("node:stream/web");
+        const encoder = new TextEncoder();
+        const makeStream = () =>
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(
+                        encoder.encode('data: {"type":"response.output_text.delta","delta":"Hello world"}\n\n')
+                    );
+                    controller.enqueue(
+                        encoder.encode(
+                            'data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":10,"output_tokens":3}}}\n\n'
+                        )
+                    );
+                    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                    controller.close();
+                },
+            });
+
+        const providerTest = provider as unknown as {
+            resetStreamingState: () => void;
+            processStreamingResponse: (
+                stream: unknown,
+                progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+                token: vscode.CancellationToken
+            ) => Promise<void>;
+        };
+        providerTest.resetStreamingState();
+
+        const parts: vscode.LanguageModelResponsePart[] = [];
+        await providerTest.processStreamingResponse(
+            makeStream(),
+            { report: (part: vscode.LanguageModelResponsePart) => parts.push(part) },
+            new vscode.CancellationTokenSource().token
+        );
+        assert.ok(parts.length > 0, "healthy turn emits parts and does not throw");
+    });
+
+    test("disableAbnormalTerminationErrors suppresses the throw (legacy silent behavior)", async () => {
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const providerWithConfig = provider as unknown as {
+            _configManager: { getConfig: () => Promise<unknown> };
+        };
+        sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            inactivityTimeout: 60,
+            disableAbnormalTerminationErrors: true,
+        });
+
+        const { ReadableStream } = await import("node:stream/web");
+        const encoder = new TextEncoder();
+        const makeStream = () =>
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(
+                        encoder.encode(
+                            'data: {"type":"response.completed","response":{"status":"incomplete","usage":{"input_tokens":100,"output_tokens":5}}}\n\n'
+                        )
+                    );
+                    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                    controller.close();
+                },
+            });
+
+        const providerTest = provider as unknown as {
+            resetStreamingState: () => void;
+            processStreamingResponse: (
+                stream: unknown,
+                progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+                token: vscode.CancellationToken
+            ) => Promise<void>;
+        };
+        providerTest.resetStreamingState();
+
+        // Must complete without throwing when the escape hatch is on.
+        await providerTest.processStreamingResponse(
+            makeStream(),
+            { report: () => undefined },
+            new vscode.CancellationTokenSource().token
         );
     });
 

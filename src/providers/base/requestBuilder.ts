@@ -45,15 +45,53 @@ export class RequestBuilder {
     }
 
     /**
+     * Proxy-directed LiteLLM response-cache bypass. Unlike the model-gated
+     * `disableCaching` path (which the parameter strip removes when the model
+     * card does not advertise `cache`), this control targets the LiteLLM
+     * proxy itself: `extra_body` is consumed by the proxy before provider
+     * dispatch and never reaches the upstream model, so the card's supported
+     * parameter list is irrelevant. It is therefore applied AFTER the strip.
+     *
+     * `no-cache` skips cache reads (avoids replaying a poisoned entry);
+     * `no-store` prevents this response from being written to the cache at
+     * all. Both are needed: LiteLLM has been observed caching truncated
+     * `/responses` results (status "incomplete") and re-serving them to every
+     * identical retry, deterministically wedging agentic sessions.
+     *
+     * If a non-LiteLLM backend rejects the field, the client's existing 400
+     * strip-and-retry handles `no-cache`/`cache` mentions, so this fails soft.
+     */
+    private addProxyCacheBypassIfEnabled(
+        requestBody: OpenAIChatCompletionRequest,
+        disableLiteLLMResponseCaching: boolean
+    ): void {
+        if (!disableLiteLLMResponseCaching) {
+            return;
+        }
+
+        requestBody.extra_body = {
+            ...requestBody.extra_body,
+            cache: {
+                ...(requestBody.extra_body?.cache ?? {}),
+                "no-cache": true,
+                "no-store": true,
+            },
+        };
+    }
+
+    /**
      * Applies the shared finalization tail every chat request body needs,
      * regardless of which message pipeline produced it.
      *
      * Order is load-bearing and must not be rearranged:
      *
-     * 1. LiteLLM response-cache bypass goes on first so the parameter strip can
-     *    remove `cache` for backends that reject it.
+     * 1. The model-gated cache bypass (`disableCaching`) goes on first so the
+     *    parameter strip can remove `cache` for backends that reject it.
      * 2. Unsupported parameters are stripped against the model card.
-     * 3. Anthropic prompt caching is applied *after* the strip, because the
+     * 3. The proxy-directed bypass (`disableLiteLLMResponseCaching`) is applied
+     *    AFTER the strip because it targets the LiteLLM proxy, not the model —
+     *    a card that doesn't list `cache` must not be able to defeat it.
+     * 4. Anthropic prompt caching is applied after the strip, because the
      *    strip only knows the card's advertised parameters and would otherwise
      *    drop a `cache_control` field it does not recognize.
      *
@@ -64,6 +102,7 @@ export class RequestBuilder {
         requestBody: OpenAIChatCompletionRequest,
         rawModelId: string,
         disableCaching: boolean,
+        disableLiteLLMResponseCaching: boolean,
         modelInfo?: LiteLLMModelInfo
     ): PromptCachePolicySummary {
         this.addCacheBypassIfEnabled(requestBody, disableCaching);
@@ -72,6 +111,7 @@ export class RequestBuilder {
             modelInfo,
             rawModelId
         );
+        this.addProxyCacheBypassIfEnabled(requestBody, disableLiteLLMResponseCaching);
 
         const promptCachePolicy = applyPromptCachePolicy(requestBody.messages, rawModelId, modelInfo);
         if (promptCachePolicy.path1) {
@@ -192,7 +232,13 @@ export class RequestBuilder {
             // If model doesn't support tool_choice, omit it entirely
         }
 
-        this.finalizeRequestBody(requestBody, rawModelId, config.disableCaching === true, modelInfo);
+        this.finalizeRequestBody(
+            requestBody,
+            rawModelId,
+            config.disableCaching === true,
+            config.disableLiteLLMResponseCaching === true,
+            modelInfo
+        );
         return requestBody;
     }
 }
