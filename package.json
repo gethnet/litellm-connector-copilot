@@ -299,6 +299,14 @@
 						"experimental"
 					]
 				},
+				"litellm-connector.disableAbnormalTerminationErrors": {
+					"type": "boolean",
+					"default": false,
+					"markdownDescription": "When enabled, truncated/empty/failed stream terminals are only logged instead of surfaced as chat errors. Restores the legacy silent behavior in which VS Code may quietly retry empty turns. Leave disabled so upstream truncations, transport drops, and unrecovered proxy failures are visible in chat.",
+					"tags": [
+						"experimental"
+					]
+				},
 				"litellm-connector.enableModelOverrides": {
 					"type": "boolean",
 					"default": false,

@@ -101,6 +101,20 @@ suite("ConfigManager Unit Tests", () => {
         assert.strictEqual(config.disableLiteLLMResponseCaching, true);
     });
 
+    test("getConfig defaults disableAbnormalTerminationErrors to false (surfacing on)", async () => {
+        const config = await configManager.getConfig();
+
+        assert.strictEqual(config.disableAbnormalTerminationErrors, false);
+    });
+
+    test("getConfig reads disableAbnormalTerminationErrors when enabled", async () => {
+        settingsMap.set("litellm-connector.disableAbnormalTerminationErrors", true);
+
+        const config = await configManager.getConfig();
+
+        assert.strictEqual(config.disableAbnormalTerminationErrors, true);
+    });
+
     test("getConfig reads modelCapabilitiesOverrides", async () => {
         settingsMap.set("litellm-connector.modelCapabilitiesOverrides", {
             "gpt-4o": "toolCalling, imageInput",

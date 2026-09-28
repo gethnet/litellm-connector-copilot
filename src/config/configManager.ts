@@ -34,6 +34,8 @@ export class ConfigManager {
     private static readonly INACTIVITY_TIMEOUT_KEY = "litellm-connector.inactivityTimeout";
     private static readonly DISABLE_CACHING_KEY = "litellm-connector.disableCaching";
     private static readonly DISABLE_LITELLM_RESPONSE_CACHING_KEY = "litellm-connector.disableLiteLLMResponseCaching";
+    private static readonly DISABLE_ABNORMAL_TERMINATION_ERRORS_KEY =
+        "litellm-connector.disableAbnormalTerminationErrors";
     private static readonly DISABLE_QUOTA_TOOL_REDACTION_KEY = "litellm-connector.disableQuotaToolRedaction";
     private static readonly KEY_MODEL_OVERRIDES_ENABLE = "litellm-connector.enableModelOverrides";
     private static readonly MODEL_CAPABILITIES_OVERRIDES_KEY = "litellm-connector.modelCapabilitiesOverrides";
@@ -189,6 +191,10 @@ export class ConfigManager {
             ConfigManager.DISABLE_LITELLM_RESPONSE_CACHING_KEY,
             false
         );
+        const disableAbnormalTerminationErrors = workspaceConfig.get<boolean>(
+            ConfigManager.DISABLE_ABNORMAL_TERMINATION_ERRORS_KEY,
+            false
+        );
         const disableQuotaToolRedaction = workspaceConfig.get<boolean>(
             ConfigManager.DISABLE_QUOTA_TOOL_REDACTION_KEY,
             false
@@ -271,6 +277,7 @@ export class ConfigManager {
             inactivityTimeout,
             disableCaching,
             disableLiteLLMResponseCaching,
+            disableAbnormalTerminationErrors,
             disableQuotaToolRedaction,
             enableModelOverrides,
             modelCapabilitiesOverrides,

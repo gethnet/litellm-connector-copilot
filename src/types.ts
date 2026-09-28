@@ -292,6 +292,14 @@ export interface LiteLLMConfig {
      * mechanism and is unaffected.
      */
     disableLiteLLMResponseCaching?: boolean;
+    /**
+     * Escape hatch for abnormal-termination surfacing. When true, truncated/
+     * empty/failed stream terminals are logged (fingerprint + frame dump) but
+     * NOT converted into thrown errors — restoring the pre-2.5.11 silent
+     * behavior where Copilot may quietly retry empty turns. Default: false
+     * (surfacing on).
+     */
+    disableAbnormalTerminationErrors?: boolean;
     disableQuotaToolRedaction?: boolean;
     /**
      * Enable/disable the model override system.

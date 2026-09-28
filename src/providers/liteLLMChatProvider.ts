@@ -36,6 +36,11 @@ import {
     createTerminalStats,
     recordEmittedParts,
 } from "../adapters/streaming/streamTerminalFingerprint";
+import type { TerminalFingerprint } from "../adapters/streaming/streamTerminalFingerprint";
+import {
+    evaluateAbnormalTermination,
+    StreamAbnormalTerminationError,
+} from "../adapters/streaming/streamAbnormalTermination";
 import { requestHasThinkingBlocks } from "./base/thinkingBlockRetry";
 import type { OpenAIChatCompletionRequest } from "../types";
 
@@ -636,6 +641,23 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             const errorStack = err instanceof Error ? err.stack : undefined;
             const errorName = err instanceof Error ? err.constructor.name : typeof err;
 
+            // Abnormal-termination errors are already user-facing and fully
+            // classified: record the failure metric but rethrow untouched so
+            // the sentinel-anchored message reaches VS Code verbatim (no
+            // "LiteLLM Error (...)" rewrapping).
+            if (err instanceof StreamAbnormalTerminationError) {
+                LiteLLMTelemetry.reportMetric({
+                    requestId,
+                    model: model.id,
+                    durationMs: LiteLLMTelemetry.endTimer(startTime),
+                    tokensIn,
+                    status: "failure" as const,
+                    error: `abnormal_termination:${err.classification}`,
+                    caller,
+                });
+                throw err;
+            }
+
             if (errorMessage.includes("LiteLLM API error")) {
                 const statusMatch = errorMessage.match(/error: (\d+)/);
                 const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : 400;
@@ -717,9 +739,21 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         // Terminal fingerprint accumulator: condenses the whole turn into one
         // classification event so empty/truncated turns are attributable
         // (classifier reject vs upstream truncation vs bridge drop). Pure
-        // accumulation here; classification + logging happens in `finally`.
+        // accumulation here; classification happens once — either at normal
+        // stream end (where abnormal turns are converted into thrown errors)
+        // or in `finally` for error paths — and is always logged in `finally`.
         const terminalStats = createTerminalStats();
         const streamStartedAt = Date.now();
+        let fingerprint: TerminalFingerprint | undefined;
+        const computeFingerprint = (): TerminalFingerprint =>
+            buildTerminalFingerprint(terminalStats, {
+                requestId: requestContext?.requestId ?? "no-request",
+                model: requestContext?.model ?? "unknown",
+                endpoint: requestContext?.endpoint ?? "unknown",
+                requestHadThinkingBlocks: requestContext?.requestHadThinkingBlocks ?? false,
+                requestToolCallCount: requestContext?.requestToolCallCount ?? 0,
+                durationMs: Date.now() - streamStartedAt,
+            });
 
         const config = await this._configManager.getConfig();
         const timeoutMs = (config.inactivityTimeout ?? 60) * 1000;
@@ -805,7 +839,44 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 eventCount,
                 reason: "stream_ended",
             });
+
+            // Abnormal-termination surfacing: the LM provider API has no
+            // finish-reason channel, so a truncated/empty/failed terminal must
+            // end the turn as a thrown error — otherwise Copilot sees a
+            // successful empty turn and silently retries the identical request
+            // (observed replaying a poisoned proxy cache 3×, 2026-09-25).
+            // Server-side recovery (LiteLLM fallback chains) is the intended
+            // handler; anything abnormal reaching this point means it did not
+            // engage. Decision rules live in streamAbnormalTermination.ts.
+            fingerprint = computeFingerprint();
+            const abnormal = evaluateAbnormalTermination(fingerprint);
+            if (abnormal) {
+                if (config.disableAbnormalTerminationErrors === true) {
+                    // Escape hatch: operator chose the legacy silent behavior.
+                    // The fingerprint/frame-dump logging still records the turn.
+                    StructuredLogger.warn("stream.abnormal_termination_suppressed", {
+                        classification: abnormal.classification,
+                        finishReasons: abnormal.finishReasons,
+                        reason: "disableAbnormalTerminationErrors",
+                    });
+                } else {
+                    StructuredLogger.warn("stream.abnormal_termination_surfaced", {
+                        classification: abnormal.classification,
+                        finishReasons: abnormal.finishReasons,
+                        textChars: terminalStats.textChars,
+                        eventCount,
+                    });
+                    throw abnormal;
+                }
+            }
         } catch (error: unknown) {
+            // Our own abnormal-termination signal: already logged at warn with
+            // full classification; it is not a transport failure and must not
+            // trigger the buffered-tool-call recovery below (tool-call turns
+            // never classify abnormal in the first place).
+            if (error instanceof StreamAbnormalTerminationError) {
+                throw error;
+            }
             Logger.error(`[processStreamingResponse] Stream processing failed after ${eventCount} events`, {
                 error: error instanceof Error ? error.message : String(error),
                 stack: error instanceof Error ? error.stack : undefined,
@@ -877,17 +948,12 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             // truncated, refusal, no terminal event), debug for healthy turns.
             // This is the single grep target for attributing "nothing came
             // back" reports — see streamTerminalFingerprint.ts for the rules.
-            const fingerprint = buildTerminalFingerprint(terminalStats, {
-                requestId: requestContext?.requestId ?? "no-request",
-                model: requestContext?.model ?? "unknown",
-                endpoint: requestContext?.endpoint ?? "unknown",
-                requestHadThinkingBlocks: requestContext?.requestHadThinkingBlocks ?? false,
-                requestToolCallCount: requestContext?.requestToolCallCount ?? 0,
-                durationMs: Date.now() - streamStartedAt,
-            });
-            StructuredLogger[fingerprint.level](
+            // Reuse the fingerprint computed at normal stream end when
+            // available; error paths (throws mid-stream) compute it here.
+            const finalFingerprint = fingerprint ?? computeFingerprint();
+            StructuredLogger[finalFingerprint.level](
                 "stream.terminal_fingerprint",
-                { ...fingerprint.data, eventCount },
+                { ...finalFingerprint.data, eventCount },
                 {
                     requestId: requestContext?.requestId,
                     model: requestContext?.model,
