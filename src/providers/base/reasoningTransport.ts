@@ -1,20 +1,11 @@
 import type { ChatReasoningTransportFields, LiteLLMModelInfo } from "../../types";
+import { isConfirmedAdaptiveClaudeFamily } from "../../utils/modelCapabilities";
 
 export type ParameterSupport = (
     parameter: string,
     modelInfo: LiteLLMModelInfo | undefined,
     modelId?: string
 ) => boolean;
-
-const CONFIRMED_ADAPTIVE_CLAUDE_FAMILIES: readonly RegExp[] = [
-    /(?:^|\/)claude[-_.]?opus[-_.]?(?:4[-_.]?8|[5-9]|[1-9]\d+)(?:[-_.]|$)/i,
-    /(?:^|\/)claude[-_.]?sonnet[-_.]?(?:[5-9]|[1-9]\d+)(?:[-_.]|$)/i,
-    /(?:^|\/)claude[-_.]?fable[-_.]?(?:[5-9]|[1-9]\d+)(?:[-_.]|$)/i,
-];
-
-function isConfirmedAdaptiveClaudeFamily(modelId: string): boolean {
-    return CONFIRMED_ADAPTIVE_CLAUDE_FAMILIES.some((pattern) => pattern.test(modelId));
-}
 
 function shouldUseAdaptiveThinking(
     modelId: string,

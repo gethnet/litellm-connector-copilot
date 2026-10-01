@@ -72,7 +72,7 @@ import {
     buildReasoningEffortConfigurationSchema,
     getSupportedReasoningEfforts,
     derivePickerCategory,
-    hostGrantsChatProviderProposal,
+    hostGrantsApiProposal,
     type CapabilityHostPolicy,
 } from "../utils/modelCapabilities";
 import { deriveGroupNameFromUrl } from "../utils";
@@ -258,9 +258,17 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
     private getCapabilityHostPolicy(): CapabilityHostPolicy {
         if (!this._capabilityHostPolicy) {
             const ext = vscode.extensions?.getExtension?.(LiteLLMProviderRegistry.EXTENSION_ID);
-            const allowEditTools = hostGrantsChatProviderProposal(ext?.packageJSON);
-            this._capabilityHostPolicy = { allowEditTools };
-            StructuredLogger.debug("discovery.capability_host_policy", { allowEditTools, extensionFound: !!ext });
+            const allowEditTools = hostGrantsApiProposal(ext?.packageJSON, "chatProvider");
+            // apiType/adaptiveThinking are guarded by
+            // checkProposedApiEnabled('languageModelCapabilities') in the ext
+            // host (VS Code 1.141+); same blank-picker failure mode as editTools.
+            const allowReasoningCapabilityFields = hostGrantsApiProposal(ext?.packageJSON, "languageModelCapabilities");
+            this._capabilityHostPolicy = { allowEditTools, allowReasoningCapabilityFields };
+            StructuredLogger.debug("discovery.capability_host_policy", {
+                allowEditTools,
+                allowReasoningCapabilityFields,
+                extensionFound: !!ext,
+            });
         }
         return this._capabilityHostPolicy;
     }
@@ -911,6 +919,11 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             version: "1.0",
             maxInputTokens: derived.maxInputTokens,
             maxOutputTokens: derived.maxOutputTokens,
+            // The true total context window (input + output). VS Code 1.139+
+            // displays this independently of maxInputTokens, whose value here
+            // already has the output reserve subtracted — without this field
+            // the picker under-reports the window by maxOutputTokens.
+            maxContextWindowTokens: derived.rawContextWindow,
             capabilities,
             tags,
             isUserSelectable: true,

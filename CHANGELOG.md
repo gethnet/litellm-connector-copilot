@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### ✨ Features
+
+* **🧠🔁 Declare reasoning-replay capabilities so VS Code 1.141+ preserves thinking across turns**: VS Code #338874 makes Copilot's historical-thinking replay gate provider-capability-driven. Models now declare `capabilities.apiType` (`Responses` for `/responses`-mode models, `Messages` for adaptive-thinking models such as Claude Fable/Opus/Sonnet 5+, `ChatCompletions` otherwise) and `capabilities.adaptiveThinking`, which lets the host replay earlier-turn reasoning to LiteLLM-backed models — directly addressing the Anthropic thinking-continuity 400 → empty-completed → stuck-session failure chain. The fields are gated on the `languageModelCapabilities` proposal grant (fail-closed suppression, same picker-survival mechanism as `editTools`), so Stable hosts that withhold the proposal are unaffected. The adaptive-family detection is now shared between capability derivation and the reasoning transport (`isConfirmedAdaptiveClaudeFamily`), and `includeEncryptedThinking` on incoming requests is logged for 1.141 replay validation. (`src/utils/modelCapabilities.ts`, `src/providers/liteLLMProviderRegistry.ts`, `src/providers/base/reasoningTransport.ts`, `src/providers/liteLLMChatProvider.ts`)
+
+* **📏 Report the true context window via `maxContextWindowTokens`**: the picker previously displayed `maxInputTokens` — which already has the output reserve subtracted — as if it were the whole context window, under-reporting every model by its output budget. Model info now carries the raw LiteLLM context window in `maxContextWindowTokens` (VS Code 1.139+ displays it independently; older hosts ignore the optional field). (`src/providers/liteLLMProviderRegistry.ts`)
+
 ## [2.5.11] - 2026-09-28
 
 ### ✨ Features

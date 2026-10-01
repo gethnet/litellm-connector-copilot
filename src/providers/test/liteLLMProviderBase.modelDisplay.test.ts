@@ -847,4 +847,106 @@ suite("LiteLLM model display", () => {
         assert.strictEqual(models[0].family, "Staging Proxy/gpt-4o");
         assert.strictEqual((models[0] as unknown as { vendor: string }).vendor, "openai");
     });
+
+    /**
+     * Drives discovery for a single model and returns the picker info object.
+     * Seeds the registry's capability host policy directly (same seam as the
+     * editTools tests) because the shared registry caches the policy and the
+     * real value depends on the test host's proposal grants.
+     */
+    async function discoverSingleModel(
+        modelInfo: Record<string, unknown>,
+        hostPolicy: { allowEditTools: boolean; allowReasoningCapabilityFields: boolean }
+    ): Promise<vscode.LanguageModelChatInformation> {
+        const mockSecrets = {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+            onDidChange: (_listener: unknown) => ({ dispose() {} }),
+        } as unknown as vscode.SecretStorage;
+        const provider = new LiteLLMChatProvider(mockSecrets, "test-agent");
+        const providerInternals = provider as unknown as {
+            _registry: {
+                _capabilityHostPolicy?: { allowEditTools: boolean; allowReasoningCapabilityFields: boolean };
+            };
+        };
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({
+            data: [{ model_name: "test-model", model_info: modelInfo }],
+        });
+        providerInternals._registry._capabilityHostPolicy = hostPolicy;
+        try {
+            const models = await provider.discoverModels(
+                {
+                    silent: true,
+                    configuration: { baseUrl: "https://proxy.example.com", apiKey: "test-key" },
+                },
+                new vscode.CancellationTokenSource().token
+            );
+            return models[0];
+        } finally {
+            providerInternals._registry._capabilityHostPolicy = undefined;
+        }
+    }
+
+    // VS Code 1.139+ accepts `maxContextWindowTokens` on LanguageModelChatInformation
+    // (ungated in the ext host). Without it the picker displays the input budget as
+    // if it were the whole context window, which misrepresents models whose
+    // window ≠ maxInput + maxOutput.
+    test("populates maxContextWindowTokens from the LiteLLM context window", async () => {
+        const model = await discoverSingleModel(
+            {
+                key: "example/test-model",
+                litellm_provider: "openai",
+                mode: "chat",
+                max_input_tokens: 200000,
+                max_output_tokens: 32000,
+            },
+            { allowEditTools: false, allowReasoningCapabilityFields: false }
+        );
+
+        const info = model as unknown as { maxContextWindowTokens?: number };
+        // rawContextWindow = max_input_tokens (the LiteLLM field is the total window);
+        // the derived maxInputTokens already subtracts the output reserve.
+        assert.strictEqual(info.maxContextWindowTokens, 200000);
+        assert.strictEqual(model.maxInputTokens, 168000);
+    });
+
+    test("declares Responses apiType when the host grants the languageModelCapabilities proposal", async () => {
+        const model = await discoverSingleModel(
+            {
+                key: "example/test-model",
+                litellm_provider: "openai",
+                mode: "responses",
+                max_input_tokens: 128000,
+                max_output_tokens: 16000,
+            },
+            { allowEditTools: false, allowReasoningCapabilityFields: true }
+        );
+
+        const caps = model.capabilities as unknown as { apiType?: number; adaptiveThinking?: boolean };
+        assert.strictEqual(caps.apiType, 2, "Responses = 2 per LanguageModelChatApiType");
+        assert.strictEqual(caps.adaptiveThinking, undefined);
+    });
+
+    test("suppresses apiType/adaptiveThinking when the host withholds the languageModelCapabilities proposal", async () => {
+        // Emitting the gated fields without the proposal grant throws inside
+        // `$provideLanguageModelChatInfo` and blanks the entire model list, so
+        // the suppression path is picker-survival, not a cosmetic nicety.
+        const model = await discoverSingleModel(
+            {
+                key: "example/test-model",
+                litellm_provider: "anthropic",
+                mode: "chat",
+                supports_adaptive_thinking: true,
+                supported_openai_params: ["thinking", "tools"],
+                max_input_tokens: 128000,
+                max_output_tokens: 16000,
+            },
+            { allowEditTools: false, allowReasoningCapabilityFields: false }
+        );
+
+        const caps = model.capabilities as unknown as { apiType?: number; adaptiveThinking?: boolean };
+        assert.strictEqual(caps.apiType, undefined);
+        assert.strictEqual(caps.adaptiveThinking, undefined);
+    });
 });

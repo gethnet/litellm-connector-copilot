@@ -96,6 +96,7 @@ suite("Model Tags Unit Tests", () => {
             supportsUrlContext: false,
             supportsReasoningEffort: false,
             supportsThinking: false,
+            supportsAdaptiveThinking: false,
             endpointMode: "chat" as const,
             maxInputTokens: 4096,
             maxOutputTokens: 2048,
