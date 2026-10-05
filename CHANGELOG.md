@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### 🐛 Fixes
+
+* **🧭 Resolve Copilot harness group-qualified model IDs**: The Agents window can pass model IDs in `vendor/group/modelId` form, while the connector routes models by its registered backend/model ID. The registry now resolves the wrapper only when it uniquely matches a complete registered ID, preserving group labels with spaces, slashes, Unicode, and special characters without guessing on ambiguous or unknown IDs. Request bodies continue to send the raw LiteLLM model name. (`src/providers/base/registeredModelId.ts`, `src/providers/liteLLMProviderRegistry.ts`)
+
 ### ✨ Features
 
 * **🧠🔁 Declare reasoning-replay capabilities so VS Code 1.141+ preserves thinking across turns**: VS Code #338874 makes Copilot's historical-thinking replay gate provider-capability-driven. Models now declare `capabilities.apiType` (`Responses` for `/responses`-mode models, `Messages` for adaptive-thinking models such as Claude Fable/Opus/Sonnet 5+, `ChatCompletions` otherwise) and `capabilities.adaptiveThinking`, which lets the host replay earlier-turn reasoning to LiteLLM-backed models — directly addressing the Anthropic thinking-continuity 400 → empty-completed → stuck-session failure chain. The fields are gated on the `languageModelCapabilities` proposal grant (fail-closed suppression, same picker-survival mechanism as `editTools`), so Stable hosts that withhold the proposal are unaffected. The adaptive-family detection is now shared between capability derivation and the reasoning transport (`isConfirmedAdaptiveClaudeFamily`), and `includeEncryptedThinking` on incoming requests is logged for 1.141 replay validation. (`src/utils/modelCapabilities.ts`, `src/providers/liteLLMProviderRegistry.ts`, `src/providers/base/reasoningTransport.ts`, `src/providers/liteLLMChatProvider.ts`)

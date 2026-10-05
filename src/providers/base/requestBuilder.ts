@@ -129,10 +129,11 @@ export class RequestBuilder {
     ): Promise<OpenAIChatCompletionRequest> {
         const config = await this.configManager.getConfig();
 
-        // `model.id` is the namespaced `<routing>/<raw>` form VS Code hands
-        // us at response time. The LiteLLM request body, the capability
-        // lookup, the parameter-supported probes, and the usage-opt-out
-        // set all need the RAW model name (the part after the first `/`).
+        // The base binds this dependency to registry-backed raw-name resolution.
+        // Known host vendor/group wrappers resolve to the same canonical entry;
+        // ambiguous or unknown vendor wrappers fail before a wire body is built.
+        // Legacy unwrapped misses retain the registry's first-slash fallback.
+        // LiteLLM request bodies and parameter/tokenizer family probes need raw names.
         const rawModelId = this.extractRawModelName(model.id);
 
         const toolRedaction = this.detectQuotaToolRedaction(
