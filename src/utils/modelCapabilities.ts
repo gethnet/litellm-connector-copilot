@@ -2,6 +2,39 @@ import type * as vscode from "vscode";
 import type { LiteLLMModelInfo, ModelCapabilityOverride, SupportedReasoningEffort } from "../types";
 import { getDefaultEffort, getEffectiveEfforts } from "../config/modelOverrides";
 
+/**
+ * Claude families confirmed to use provider-side adaptive thinking that cannot
+ * be suppressed (thinking runs even at effort "none"). Shared by the
+ * transport-side gate in `providers/base/reasoningTransport.ts` and the
+ * capability derivation below so the two can never disagree about which
+ * families are adaptive.
+ */
+const CONFIRMED_ADAPTIVE_CLAUDE_FAMILIES: readonly RegExp[] = [
+    /(?:^|\/)claude[-_.]?opus[-_.]?(?:4[-_.]?8|[5-9]|[1-9]\d+)(?:[-_.]|$)/i,
+    /(?:^|\/)claude[-_.]?sonnet[-_.]?(?:[5-9]|[1-9]\d+)(?:[-_.]|$)/i,
+    /(?:^|\/)claude[-_.]?fable[-_.]?(?:[5-9]|[1-9]\d+)(?:[-_.]|$)/i,
+];
+
+export function isConfirmedAdaptiveClaudeFamily(modelId: string): boolean {
+    return CONFIRMED_ADAPTIVE_CLAUDE_FAMILIES.some((pattern) => pattern.test(modelId));
+}
+
+/**
+ * Numeric mirror of the upstream `vscode.LanguageModelChatApiType` enum
+ * (proposed API `languageModelCapabilities`, VS Code 1.141+). The values are
+ * defined by VS Code (`ChatCompletions = 1, Responses = 2, Messages = 3`).
+ *
+ * Mirrored locally instead of read from the `vscode` namespace because this
+ * module imports `vscode` as types only, and because on hosts that have not
+ * shipped the proposal the runtime enum is `undefined` — the numeric wire
+ * values are the stable contract, not the runtime object.
+ */
+export const LANGUAGE_MODEL_CHAT_API_TYPES = {
+    chatCompletions: 1 as vscode.LanguageModelChatApiType,
+    responses: 2 as vscode.LanguageModelChatApiType,
+    messages: 3 as vscode.LanguageModelChatApiType,
+} as const;
+
 export interface DerivedModelCapabilities {
     supportsTools: boolean;
     supportsVision: boolean;
@@ -22,6 +55,14 @@ export interface DerivedModelCapabilities {
     // Add reasoning_effort and thinking from supported_openai_params
     supportsReasoningEffort: boolean;
     supportsThinking: boolean;
+    /**
+     * Whether the model uses provider-side adaptive thinking (explicit
+     * `supports_adaptive_thinking` flag or a confirmed adaptive Claude
+     * family), gated on `thinking` being an advertised request parameter.
+     * Drives `capabilities.adaptiveThinking` so the VS Code host replays
+     * earlier-turn thinking to the provider (VS Code #338874).
+     */
+    supportsAdaptiveThinking: boolean;
     endpointMode: "chat" | "responses" | "completions";
     maxInputTokens: number;
     maxOutputTokens: number;
@@ -73,6 +114,12 @@ export function deriveCapabilitiesFromModelInfo(
     // Check if reasoning_effort and thinking appear in supported_openai_params
     const supportsReasoningEffort = supportedParams.includes("reasoning_effort");
     const supportsThinking = supportedParams.includes("thinking");
+    // Mirrors the transport gate in reasoningTransport.ts: adaptive thinking
+    // requires the `thinking` parameter to be advertised AND either the
+    // explicit LiteLLM capability flag or a confirmed adaptive Claude family.
+    const supportsAdaptiveThinking =
+        supportsThinking &&
+        (modelInfo?.supports_adaptive_thinking === true || isConfirmedAdaptiveClaudeFamily(modelId));
 
     const supportsStreaming = supportsNativeStreaming || supportedParams.includes("stream");
 
@@ -98,6 +145,7 @@ export function deriveCapabilitiesFromModelInfo(
         supportsUrlContext,
         supportsReasoningEffort,
         supportsThinking,
+        supportsAdaptiveThinking,
         endpointMode: (modelInfo?.mode as "chat" | "responses" | "completions") ?? "chat",
         maxInputTokens,
         maxOutputTokens,
@@ -115,9 +163,17 @@ export function deriveCapabilitiesFromModelInfo(
  * installs on VS Code Stable ≥ 1.138 never receive the proposal (the extension is
  * not in `product.json#extensionEnabledApiProposals`), so callers must derive
  * this from the live host state via {@link hostGrantsChatProviderProposal}.
+ *
+ * `allowReasoningCapabilityFields` — whether `capabilities.apiType` and
+ * `capabilities.adaptiveThinking` may be emitted. The extension host guards
+ * those fields with `checkProposedApiEnabled('languageModelCapabilities')`
+ * (VS Code 1.141+); emitting them without the grant throws inside
+ * `$provideLanguageModelChatInfo` and blanks the whole model list, exactly
+ * like `editTools`. Optional and fail-closed: `undefined` means "omit".
  */
 export interface CapabilityHostPolicy {
     allowEditTools: boolean;
+    allowReasoningCapabilityFields?: boolean;
 }
 
 /**
@@ -134,12 +190,17 @@ export interface CapabilityHostPolicy {
  * Accepts `unknown` because `packageJSON` is untyped; any shape other than a
  * string array containing `"chatProvider"` is treated as "not granted".
  */
-export function hostGrantsChatProviderProposal(packageJSON: unknown): boolean {
+export function hostGrantsApiProposal(packageJSON: unknown, proposal: string): boolean {
     if (typeof packageJSON !== "object" || packageJSON === null) {
         return false;
     }
     const proposals = (packageJSON as Record<string, unknown>).enabledApiProposals;
-    return Array.isArray(proposals) && proposals.includes("chatProvider");
+    return Array.isArray(proposals) && proposals.includes(proposal);
+}
+
+/** Back-compat wrapper over {@link hostGrantsApiProposal} for the chatProvider grant. */
+export function hostGrantsChatProviderProposal(packageJSON: unknown): boolean {
+    return hostGrantsApiProposal(packageJSON, "chatProvider");
 }
 
 export function capabilitiesToVSCode(
@@ -152,11 +213,31 @@ export function capabilitiesToVSCode(
               (["find-replace", "multi-find-replace", "apply-patch", "code-rewrite"] as const).includes(tool)
           )
         : undefined;
+    // apiType tells the host which reasoning blocks are replayable back to us
+    // (VS Code #338874): /responses-mode models replay unconditionally;
+    // chat-mode adaptive models are bridged by LiteLLM onto the Anthropic
+    // Messages API, where replay requires `adaptiveThinking`. Plain chat-mode
+    // models declare ChatCompletions; completions-mode models have no chat
+    // protocol to declare. Both fields are proposal-gated — see
+    // {@link CapabilityHostPolicy.allowReasoningCapabilityFields}.
+    let apiType: vscode.LanguageModelChatApiType | undefined;
+    if (hostPolicy.allowReasoningCapabilityFields === true && derived.endpointMode !== "completions") {
+        apiType =
+            derived.endpointMode === "responses"
+                ? LANGUAGE_MODEL_CHAT_API_TYPES.responses
+                : derived.supportsAdaptiveThinking
+                  ? LANGUAGE_MODEL_CHAT_API_TYPES.messages
+                  : LANGUAGE_MODEL_CHAT_API_TYPES.chatCompletions;
+    }
+    const adaptiveThinking =
+        hostPolicy.allowReasoningCapabilityFields === true && derived.supportsAdaptiveThinking ? true : undefined;
     return {
         // VS Code currently supports these two main ones.
         toolCalling: overrides?.toolCalling ?? derived.supportsTools,
         imageInput: overrides?.imageInput ?? derived.supportsVision,
         ...(editTools && editTools.length > 0 ? { editTools } : {}),
+        ...(apiType !== undefined ? { apiType } : {}),
+        ...(adaptiveThinking !== undefined ? { adaptiveThinking } : {}),
     };
 }
 

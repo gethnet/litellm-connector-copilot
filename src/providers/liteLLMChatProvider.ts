@@ -286,6 +286,19 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         Logger.trace(
             `Chat request: received model id="${model.id}" name="${model.name}" hasOptionsConfig=${(options as { configuration?: unknown }).configuration !== undefined}`
         );
+        // VS Code 1.141+ sets includeEncryptedThinking when the host intends to
+        // replay the opaque reasoning state (signatures / encrypted blocks) we
+        // emit back on later requests. We already preserve that state on every
+        // ThinkingPart unconditionally, so no request shaping changes here —
+        // this log exists to verify replay engagement during 1.141 validation.
+        const includeEncryptedThinking = (options as { includeEncryptedThinking?: boolean }).includeEncryptedThinking;
+        if (includeEncryptedThinking !== undefined) {
+            StructuredLogger.debug(
+                "request.include_encrypted_thinking",
+                { includeEncryptedThinking },
+                { requestId, model: model.id }
+            );
+        }
 
         // <Line of Code>; // TODO: Remove by v2.3 if still commented
         // let reservedOutputTokensForRequest: number | undefined;

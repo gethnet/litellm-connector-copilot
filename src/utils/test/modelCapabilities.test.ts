@@ -1,13 +1,16 @@
 import * as assert from "assert";
 import {
     capabilitiesToVSCode,
+    deriveCapabilitiesFromModelInfo,
     getModelTags,
     formatModelDisplayLabel,
     getSupportedReasoningEfforts,
     getDefaultReasoningEffort,
     buildReasoningEffortConfigurationSchema,
     derivePickerCategory,
+    hostGrantsApiProposal,
     hostGrantsChatProviderProposal,
+    LANGUAGE_MODEL_CHAT_API_TYPES,
     type DerivedModelCapabilities,
     type ExtendedModelInformation,
 } from "../modelCapabilities";
@@ -34,6 +37,7 @@ suite("modelCapabilities", () => {
                 supportsUrlContext: false,
                 supportsReasoningEffort: false,
                 supportsThinking: false,
+                supportsAdaptiveThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -63,6 +67,7 @@ suite("modelCapabilities", () => {
                 supportsUrlContext: false,
                 supportsReasoningEffort: false,
                 supportsThinking: false,
+                supportsAdaptiveThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -93,6 +98,7 @@ suite("modelCapabilities", () => {
                 supportsUrlContext: false,
                 supportsReasoningEffort: false,
                 supportsThinking: false,
+                supportsAdaptiveThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -123,6 +129,7 @@ suite("modelCapabilities", () => {
                 supportsUrlContext: false,
                 supportsReasoningEffort: false,
                 supportsThinking: false,
+                supportsAdaptiveThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -153,6 +160,7 @@ suite("modelCapabilities", () => {
                 supportsUrlContext: false,
                 supportsReasoningEffort: false,
                 supportsThinking: false,
+                supportsAdaptiveThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -183,6 +191,7 @@ suite("modelCapabilities", () => {
                 supportsUrlContext: false,
                 supportsReasoningEffort: false,
                 supportsThinking: false,
+                supportsAdaptiveThinking: false,
                 endpointMode: "chat",
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -215,6 +224,7 @@ suite("modelCapabilities", () => {
                 supportsUrlContext: false,
                 supportsReasoningEffort: false,
                 supportsThinking: false,
+                supportsAdaptiveThinking: false,
                 endpointMode: "chat",
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -250,6 +260,7 @@ suite("modelCapabilities", () => {
                 supportsUrlContext: false,
                 supportsReasoningEffort: false,
                 supportsThinking: false,
+                supportsAdaptiveThinking: false,
                 endpointMode: "chat",
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -322,6 +333,7 @@ suite("modelCapabilities", () => {
                 supportsUrlContext: false,
                 supportsReasoningEffort: false,
                 supportsThinking: false,
+                supportsAdaptiveThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -352,6 +364,7 @@ suite("modelCapabilities", () => {
                 supportsUrlContext: false,
                 supportsReasoningEffort: false,
                 supportsThinking: false,
+                supportsAdaptiveThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -382,6 +395,7 @@ suite("modelCapabilities", () => {
                 supportsUrlContext: false,
                 supportsReasoningEffort: false,
                 supportsThinking: false,
+                supportsAdaptiveThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -412,6 +426,7 @@ suite("modelCapabilities", () => {
                 supportsUrlContext: false,
                 supportsReasoningEffort: false,
                 supportsThinking: false,
+                supportsAdaptiveThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100,
                 maxOutputTokens: 100,
@@ -440,6 +455,7 @@ suite("modelCapabilities", () => {
                 supportsUrlContext: false,
                 supportsReasoningEffort: false,
                 supportsThinking: false,
+                supportsAdaptiveThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100,
                 maxOutputTokens: 100,
@@ -470,6 +486,7 @@ suite("modelCapabilities", () => {
                 supportsUrlContext: false,
                 supportsReasoningEffort: false,
                 supportsThinking: false,
+                supportsAdaptiveThinking: false,
                 endpointMode: "chat" as const,
                 maxInputTokens: 100000,
                 maxOutputTokens: 16000,
@@ -753,6 +770,7 @@ suite("modelCapabilities", () => {
             supportsUrlContext: false,
             supportsReasoningEffort: false,
             supportsThinking: false,
+            supportsAdaptiveThinking: false,
             endpointMode: "chat",
             maxInputTokens: 100,
             maxOutputTokens: 50,
@@ -799,6 +817,142 @@ suite("modelCapabilities", () => {
             assert.ok(
                 result === undefined || typeof result === "string",
                 `expected string | undefined, got ${typeof result}`
+            );
+        });
+    });
+
+    // The host replays historical thinking to a provider only when the provider
+    // declares its request protocol (VS Code #338874, 1.141). `adaptiveThinking`
+    // derivation is the capability-side mirror of the transport-side
+    // `shouldUseAdaptiveThinking` gate in reasoningTransport.ts: `thinking`
+    // must be an advertised request parameter AND the model must either declare
+    // `supports_adaptive_thinking` or match a confirmed adaptive Claude family.
+    suite("supportsAdaptiveThinking derivation", () => {
+        test("true when supports_adaptive_thinking is declared and thinking is an advertised param", () => {
+            const derived = deriveCapabilitiesFromModelInfo("backend/custom-model", {
+                supports_adaptive_thinking: true,
+                supported_openai_params: ["thinking"],
+            } as LiteLLMModelInfo);
+            assert.strictEqual(derived.supportsAdaptiveThinking, true);
+        });
+
+        test("true for a confirmed adaptive Claude family (claude-fable-5) without the explicit flag", () => {
+            const derived = deriveCapabilitiesFromModelInfo("backend/claude-fable-5", {
+                supported_openai_params: ["thinking"],
+            } as LiteLLMModelInfo);
+            assert.strictEqual(derived.supportsAdaptiveThinking, true);
+        });
+
+        test("false when thinking is not an advertised param even with the explicit flag", () => {
+            const derived = deriveCapabilitiesFromModelInfo("backend/custom-model", {
+                supports_adaptive_thinking: true,
+                supported_openai_params: ["tools"],
+            } as LiteLLMModelInfo);
+            assert.strictEqual(derived.supportsAdaptiveThinking, false);
+        });
+
+        test("false for an ordinary model", () => {
+            const derived = deriveCapabilitiesFromModelInfo("backend/gpt-4o", {
+                supported_openai_params: ["tools", "reasoning_effort"],
+            } as LiteLLMModelInfo);
+            assert.strictEqual(derived.supportsAdaptiveThinking, false);
+        });
+    });
+
+    // `capabilities.apiType` / `capabilities.adaptiveThinking` are validated by
+    // the extension host with `checkProposedApiEnabled('languageModelCapabilities')`
+    // (VS Code 1.141+). Emitting them when the host withheld the proposal throws
+    // inside `$provideLanguageModelChatInfo` and blanks the whole model list —
+    // the exact failure mode already guarded for `editTools`. Default is
+    // fail-closed: fields are omitted unless the policy explicitly allows them.
+    suite("capabilitiesToVSCode reasoning capability fields (apiType/adaptiveThinking)", () => {
+        function makeDerived(overrides: Partial<DerivedModelCapabilities> = {}): DerivedModelCapabilities {
+            return {
+                supportsTools: true,
+                supportsVision: false,
+                supportsStreaming: true,
+                supportsReasoning: true,
+                supportsPdf: false,
+                supportsAudioInput: false,
+                supportsAudioOutput: false,
+                supportsComputerUse: false,
+                supportsFunctionCalling: true,
+                supportsToolChoice: true,
+                supportsSystemMessages: false,
+                supportsResponseSchema: false,
+                supportsPromptCaching: false,
+                supportsWebSearch: false,
+                supportsUrlContext: false,
+                supportsReasoningEffort: true,
+                supportsThinking: true,
+                supportsAdaptiveThinking: false,
+                endpointMode: "chat",
+                maxInputTokens: 100000,
+                maxOutputTokens: 16000,
+                rawContextWindow: 128000,
+                ...overrides,
+            };
+        }
+        const allow = { allowEditTools: true, allowReasoningCapabilityFields: true };
+
+        test("declares Responses apiType for a /responses-mode model when the host allows the fields", () => {
+            const caps = capabilitiesToVSCode(makeDerived({ endpointMode: "responses" }), undefined, allow);
+            assert.strictEqual(caps.apiType, LANGUAGE_MODEL_CHAT_API_TYPES.responses);
+            assert.strictEqual(caps.adaptiveThinking, undefined);
+        });
+
+        test("declares Messages apiType + adaptiveThinking for an adaptive-thinking chat-mode model", () => {
+            // LiteLLM bridges chat-completions requests for these models onto the
+            // Anthropic Messages API; `Messages + adaptiveThinking` is what makes
+            // the host replay earlier-turn thinking (toolCalling.tsx gate).
+            const caps = capabilitiesToVSCode(makeDerived({ supportsAdaptiveThinking: true }), undefined, allow);
+            assert.strictEqual(caps.apiType, LANGUAGE_MODEL_CHAT_API_TYPES.messages);
+            assert.strictEqual(caps.adaptiveThinking, true);
+        });
+
+        test("declares ChatCompletions apiType for a plain chat-mode model", () => {
+            const caps = capabilitiesToVSCode(makeDerived(), undefined, allow);
+            assert.strictEqual(caps.apiType, LANGUAGE_MODEL_CHAT_API_TYPES.chatCompletions);
+            assert.strictEqual(caps.adaptiveThinking, undefined);
+        });
+
+        test("omits apiType for a completions-mode model (not a chat protocol)", () => {
+            const caps = capabilitiesToVSCode(makeDerived({ endpointMode: "completions" }), undefined, allow);
+            assert.strictEqual(caps.apiType, undefined);
+        });
+
+        test("omits both fields when the host withholds the languageModelCapabilities proposal", () => {
+            const caps = capabilitiesToVSCode(makeDerived({ supportsAdaptiveThinking: true }), undefined, {
+                allowEditTools: true,
+                allowReasoningCapabilityFields: false,
+            });
+            assert.strictEqual(caps.apiType, undefined);
+            assert.strictEqual(caps.adaptiveThinking, undefined);
+        });
+
+        test("omits both fields under the default host policy (fail closed)", () => {
+            const caps = capabilitiesToVSCode(makeDerived({ supportsAdaptiveThinking: true }));
+            assert.strictEqual(caps.apiType, undefined);
+            assert.strictEqual(caps.adaptiveThinking, undefined);
+        });
+    });
+
+    suite("hostGrantsApiProposal", () => {
+        test("returns true only when the effective enabledApiProposals lists the requested proposal", () => {
+            const packageJSON = { enabledApiProposals: ["chatProvider", "languageModelCapabilities"] };
+            assert.strictEqual(hostGrantsApiProposal(packageJSON, "languageModelCapabilities"), true);
+            assert.strictEqual(hostGrantsApiProposal(packageJSON, "languageModelSystem"), false);
+        });
+
+        test("returns false for missing or malformed packageJSON", () => {
+            assert.strictEqual(hostGrantsApiProposal(undefined, "languageModelCapabilities"), false);
+            assert.strictEqual(hostGrantsApiProposal({}, "languageModelCapabilities"), false);
+            assert.strictEqual(
+                hostGrantsApiProposal(
+                    { enabledApiProposals: "languageModelCapabilities" },
+                    "languageModelCapabilities"
+                ),
+                false
             );
         });
     });

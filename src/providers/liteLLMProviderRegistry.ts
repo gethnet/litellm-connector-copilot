@@ -1,65 +1,18 @@
 /**
- * BackendRegistry — the single source of truth for backends and their
- * associated models.
+ * BackendRegistry owns per-group discovery, routing, change detection and
+ * capability caches. Discovery uses a TTL-bound URL/API-key-hash cache;
+ * registry writes remain internal to the discovery ingress.
  *
- * This class owns:
- *  1. **Discovery**: a stateless per-group `/model/info` fetch that runs on
- *     every `discoverModels` call. There is no model-list cache: each call
- *     is a fresh HTTP request, and the response is namespaced into
- *     `<routingIdentity>/<rawModelName>` ids.
- *  2. **Storage**: an in-memory map of (namespaced id) → {baseUrl, apiKey,
- *     rawModelName, routingIdentity}, plus a per-backend view of the last
- *     delivered model list (used solely for change detection).
- *  3. **Change detection**: emits `onDidChange` when a backend's model set
- *     actually differs from the prior delivery, so VS Code only refreshes
- *     the picker when the set has really changed.
- *  4. **Capability caches**: per-model `LiteLLMModelInfo` and derived
- *     capabilities. These are populated as a side effect of discovery and
- *     feed the request hot path. They are NOT a model-list cache — they
- *     cache the capability info for known models.
+ * Canonical keys are `<routingIdentity>/<rawModelName>`: routing uses the
+ * URL hostname, and raw names retain every backend-supplied slash segment.
+ * Exact routing reads are O(1). Compatibility reads may scan registered
+ * full keys to resolve a unique `litellm-connector/<group>/<canonical>`
+ * wrapper; the opaque group label never selects credentials by itself.
  *
- * Public surface (read + ingress)
- * --------------------------------
- *  - `discoverModels(options, token)` — the only way for VS Code (or any
- *    consumer) to fetch a model list and populate the registry.
- *  - `lookup(id)` — resolve a namespaced id to its routing entry.
- *  - `findBackendForRawName(name)` — workspace-override routing lookup.
- *  - `extractRawName(id)` — strip the routing prefix from a namespaced id.
- *  - `getModelInfo(id)` / `getDerivedCapabilities(id)` — read the
- *    capability caches populated during discovery.
- *  - `size()` — number of distinct backends currently registered.
- *  - `clear()` — wipe the routing table (call on user-initiated reload).
- *  - `clearCaches()` — wipe the capability caches + backoff controller.
- *  - `onDidChange` — fires when a backend's model set changes.
- *
- * Internal surface (write)
- * ------------------------
- *  - `setModelsForBackend(...)` — internal write, called only by
- *    `discoverInternal`. Not part of the public contract.
- *  - `getModelsForBackend(baseUrl)` / `getModelIdsForBackend(baseUrl)` —
- *    internal read, used only by `discoverInternal` for change detection.
- *
- * Why merge discovery into the registry?
- * --------------------------------------
- * The previous design kept `ModelDiscovery` as a separate class and the
- * registry as a pure data structure. That meant the base provider had to
- * call `modelDiscovery.discover(...)`, then `registry.setModelsForBackend`,
- * then check `registry.getModelIdsForBackend` for change detection — a
- * three-step orchestration that was easy to get wrong (write-before-compare
- * silently broke change detection). With the merge, `discoverModels` is
- * the only call site that needs to know the write protocol exists, and
- * consumers see a single ingress that returns the model list, updates the
- * registry, and fires the change event as a unit.
- *
- * Per-group namespacing
- * ---------------------
- * The namespaced id format `<routingIdentity>/<rawModelName>` is the
- * keystone of multi-backend support: it lets the response path look up
- * routing in O(1) by id, with no per-backend scan and no ambiguity when
- * two backends advertise the same raw model name. The routing identity is
- * the URL hostname (with the user-entered group name as fallback); the
- * raw model name is the part after the first `/` in the id, preserved
- * unchanged from what the backend returned.
+ * Routing and capability reads share that resolver. Raw extraction rejects
+ * unknown or ambiguous vendor wrappers; legacy unwrapped fallbacks retain
+ * their first-slash semantics. See AGENTS.md for the public-read/internal-
+ * write contract and the discovery/change-detection lifecycle.
  */
 import * as vscode from "vscode";
 import type { LanguageModelChatInformation } from "vscode";
@@ -72,7 +25,7 @@ import {
     buildReasoningEffortConfigurationSchema,
     getSupportedReasoningEfforts,
     derivePickerCategory,
-    hostGrantsChatProviderProposal,
+    hostGrantsApiProposal,
     type CapabilityHostPolicy,
 } from "../utils/modelCapabilities";
 import { deriveGroupNameFromUrl } from "../utils";
@@ -91,6 +44,7 @@ import {
     formatPricingForTooltip,
 } from "../utils/pricingCalculator";
 import { resolveCompletionsUrl } from "./base/completionsUrl";
+import { HARNESS_MODEL_VENDOR_PREFIX, resolveRegisteredModelId } from "./base/registeredModelId";
 
 /**
  * Cached result from a /model/info discovery call.
@@ -258,9 +212,17 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
     private getCapabilityHostPolicy(): CapabilityHostPolicy {
         if (!this._capabilityHostPolicy) {
             const ext = vscode.extensions?.getExtension?.(LiteLLMProviderRegistry.EXTENSION_ID);
-            const allowEditTools = hostGrantsChatProviderProposal(ext?.packageJSON);
-            this._capabilityHostPolicy = { allowEditTools };
-            StructuredLogger.debug("discovery.capability_host_policy", { allowEditTools, extensionFound: !!ext });
+            const allowEditTools = hostGrantsApiProposal(ext?.packageJSON, "chatProvider");
+            // apiType/adaptiveThinking are guarded by
+            // checkProposedApiEnabled('languageModelCapabilities') in the ext
+            // host (VS Code 1.141+); same blank-picker failure mode as editTools.
+            const allowReasoningCapabilityFields = hostGrantsApiProposal(ext?.packageJSON, "languageModelCapabilities");
+            this._capabilityHostPolicy = { allowEditTools, allowReasoningCapabilityFields };
+            StructuredLogger.debug("discovery.capability_host_policy", {
+                allowEditTools,
+                allowReasoningCapabilityFields,
+                extensionFound: !!ext,
+            });
         }
         return this._capabilityHostPolicy;
     }
@@ -349,7 +311,8 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
      * the per-group BYOK config on the chat call.
      */
     public lookup(id: string): RegistryEntry | undefined {
-        const entry = this.entries.get(id);
+        const registeredId = resolveRegisteredModelId(id, this.entries);
+        const entry = registeredId === undefined ? undefined : this.entries.get(registeredId);
         if (entry) {
             Logger.trace(
                 `LiteLLMProviderRegistry.lookup HIT: id="${id}" -> baseUrl="${entry.baseUrl}" rawModelName="${entry.rawModelName}" routingIdentity="${entry.routingIdentity}"`
@@ -385,19 +348,22 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
     }
 
     /**
-     * Splits a namespaced id into its routing identity and raw model name
-     * parts. The split is on the FIRST `/` because raw model names from
-     * LiteLLM commonly contain slashes (e.g. `azure_ai/gpt-5.4-mini`).
-     *
-     * - `<routing>/<raw>` → `{routingIdentity: "<routing>", rawModelName: "<raw>"}`
-     * - `<raw>` (no `/`) → `{routingIdentity: "", rawModelName: "<raw>"}`
+     * Prefer a registered raw name, preserving nested backend model paths.
+     * Unknown vendor wrappers must not become wire model names by guessing.
+     * Legacy unwrapped IDs intentionally retain the old first-slash fallback.
      */
     public extractRawName(id: string): string {
-        const slash = id.indexOf("/");
-        if (slash < 0) {
-            return id;
+        const registeredId = resolveRegisteredModelId(id, this.entries);
+        if (registeredId !== undefined) {
+            return this.entries.get(registeredId)!.rawModelName;
         }
-        return id.slice(slash + 1);
+        if (id.startsWith(HARNESS_MODEL_VENDOR_PREFIX)) {
+            throw vscode.LanguageModelError.NotFound(
+                "The selected LiteLLM model ID is unknown or ambiguous. Reload models and select the model again."
+            );
+        }
+        const slash = id.indexOf("/");
+        return slash < 0 ? id : id.slice(slash + 1);
     }
 
     /**
@@ -421,7 +387,8 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
      * been seen (or has been cleared).
      */
     public getModelInfo(id: string): LiteLLMModelInfo | undefined {
-        return this.modelInfoCache.get(id);
+        const registeredId = resolveRegisteredModelId(id, this.entries);
+        return this.modelInfoCache.get(registeredId ?? id);
     }
 
     /**
@@ -429,7 +396,8 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
      * discovery for this id, or `undefined` if the id has not been seen.
      */
     public getDerivedCapabilities(id: string): ReturnType<typeof deriveCapabilitiesFromModelInfo> | undefined {
-        return this.derivedCapabilitiesCache.get(id);
+        const registeredId = resolveRegisteredModelId(id, this.entries);
+        return this.derivedCapabilitiesCache.get(registeredId ?? id);
     }
 
     /**
@@ -539,7 +507,7 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             this.entries.set(model.id, {
                 baseUrl,
                 apiKey,
-                rawModelName: this.extractRawName(model.id),
+                rawModelName: model.id.slice(model.id.indexOf("/") + 1),
                 routingIdentity,
                 ...(modelWithCompletionUrl.completionsUrl
                     ? { completionsUrl: modelWithCompletionUrl.completionsUrl }
@@ -911,6 +879,11 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             version: "1.0",
             maxInputTokens: derived.maxInputTokens,
             maxOutputTokens: derived.maxOutputTokens,
+            // The true total context window (input + output). VS Code 1.139+
+            // displays this independently of maxInputTokens, whose value here
+            // already has the output reserve subtracted — without this field
+            // the picker under-reports the window by maxOutputTokens.
+            maxContextWindowTokens: derived.rawContextWindow,
             capabilities,
             tags,
             isUserSelectable: true,
