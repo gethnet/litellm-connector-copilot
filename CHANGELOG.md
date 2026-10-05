@@ -4,9 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.13] - 2026-10-05
+
+### 🩹 Backfilled release notes
+
+* **📦 2.5.13 release prep** — `2.5.12` was tagged from a release prep commit that merged #157 without updating `CHANGELOG.md`, `README.md`, or `README.marketplace.md`. The 2.5.12 draft was never promoted to Marketplace/Open VSX; the tag and draft release on `rel/v2.5.12` were left intact for forensic record. Per the release-prep convention a new release under the same code tree is now prepared as `2.5.13` with the corrected release notes so the published Marketplace listing, GitHub Release page, and in-repo `CHANGELOG.md` all agree on what shipped in `67df261` (Copilot harness group-qualified model IDs, reasoning replay capabilities for VS Code 1.141+, and true context window reporting). No code changed between 2.5.12 and 2.5.13. (`package.json`, `CHANGELOG.md`, `README.md`, `README.marketplace.md`)
+
+### 🧹 Chores
+
+* **🚀 Promote release version**: `2.5.12` → `2.5.13`. (`package.json`)
+
+## [2.5.12] - 2026-10-05
+
 ### 🐛 Fixes
 
-* **🧭 Resolve Copilot harness group-qualified model IDs**: The Agents window can pass model IDs in `vendor/group/modelId` form, while the connector routes models by its registered backend/model ID. The registry now resolves the wrapper only when it uniquely matches a complete registered ID, preserving group labels with spaces, slashes, Unicode, and special characters without guessing on ambiguous or unknown IDs. Request bodies continue to send the raw LiteLLM model name. (`src/providers/base/registeredModelId.ts`, `src/providers/liteLLMProviderRegistry.ts`)
+* **🧭 Resolve Copilot harness group-qualified model IDs (#157)**: The Agents window can pass model IDs in `vendor/group/modelId` form, while the connector routes models by its registered backend/model ID. The registry now resolves the wrapper only when it uniquely matches a complete registered ID, preserving group labels with spaces, slashes, Unicode, and special characters without guessing on ambiguous or unknown IDs. Request bodies continue to send the raw LiteLLM model name. (`src/providers/base/registeredModelId.ts`, `src/providers/liteLLMProviderRegistry.ts`)
 
 ### ✨ Features
 
