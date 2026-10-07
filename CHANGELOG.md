@@ -2,11 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2.5.14] - 2026-10-07
 
 ### 🐛 Fixes
 
 * **📏 Preserve LiteLLM input/output limits in model metadata (#159)**: Discovery and the picker no longer subtract the output maximum from an independent input maximum. Explicit combined context metadata takes precedence without summing independent maxima; local request preparation applies safety margins and the actual output cap before sending. Commit diff shaping now requests its prepared output cap and avoids a duplicate reserve.
+
+### 🧹 Chores
+
+* **🚀 Promote release version**: `2.5.13` → `2.5.14`. (`package.json`)
 
 ## [2.5.13] - 2026-10-05
 
