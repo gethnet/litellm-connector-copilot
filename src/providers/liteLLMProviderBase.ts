@@ -8,12 +8,8 @@ import type {
 
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../types";
 import { convertMessages, convertTools } from "../utils";
-import {
-    trimMessagesToFitBudget,
-    estimateToolTokens,
-    isContextOverflowError,
-    countTokens,
-} from "../adapters/tokenUtils";
+import { getRequestInputTokenBudget, resolveRequestOutputCap } from "../adapters/requestTokenBudget";
+import { trimMessagesToFitBudget, isContextOverflowError, countTokens } from "../adapters/tokenUtils";
 import { ConfigManager } from "../config/configManager";
 import { Logger } from "../utils/logger";
 import type { TelemetryService } from "../telemetry/telemetryService";
@@ -764,12 +760,16 @@ export abstract class LiteLLMProviderBase {
             Logger.warn("[sendRequestWithRetry] Context overflow detected, retrying with aggressive trim", err);
 
             const toolConfig = convertTools(options);
-            const hardBudget = Math.max(1, model.maxInputTokens - estimateToolTokens(toolConfig.tools));
+            const outputCap = resolveRequestOutputCap(model, request.max_tokens, modelInfo);
+            // Preserve existing hard-budget retry policy (no new 85% ratio).
+            // The trimmer owns tool cost once; only raw explicit context reserves output.
+            const hardBudget = getRequestInputTokenBudget(model, modelInfo, outputCap);
             const trimmedMessages = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo, hardBudget);
+            const retryOptions = { ...options, modelOptions: { ...options.modelOptions, max_tokens: outputCap } };
             const rebuiltRequest = await this.buildOpenAIChatRequest(
                 trimmedMessages,
                 model,
-                options,
+                retryOptions,
                 modelInfo,
                 caller
             );

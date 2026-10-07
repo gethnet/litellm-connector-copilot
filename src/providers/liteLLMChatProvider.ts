@@ -18,9 +18,9 @@ import {
     countOpenAIChatMessagesTokens,
     countTokens,
     estimateToolTokens,
-    getReservedOutputTokens,
     getTotalTokenLimit,
 } from "../adapters/tokenUtils";
+import { getPreparedOutputCap } from "../adapters/requestTokenBudget";
 import { decodeSSE } from "../adapters/sse/sseDecoder";
 import {
     createInitialStreamingState,
@@ -364,14 +364,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 `Chat request: modelToUse.id="${modelToUse.id}" rawModelName="${this.getRawModelName(modelToUse.id)}"`
             );
 
-            // Capability lookup goes directly to the BackendRegistry. The
-            // `modelToUse.id` is either the namespaced id VS Code handed us
-            // or, when `modelIdOverride` rewrote it, the raw model name; the
-            // registry's `lookup` will return `undefined` for the raw-name
-            // case and `getModelInfo` will also return `undefined` for it
-            // (capabilities are stored under the namespaced key), so the
-            // request builder will use the override path's defaults. This
-            // is the same single-source-of-truth read as above.
+            // Registry reads resolve canonical IDs and unique raw-name overrides.
+            // A remaining raw-card miss cannot prove combined capacity from the
+            // connector's maxContextWindowTokens display fallback.
             const modelInfo = this._registry.getModelInfo(modelToUse.id);
             const requestBody = await this.buildOpenAIChatRequest(messages, modelToUse, options, modelInfo, caller);
             // Snapshot the request shape for the terminal fingerprint BEFORE any
@@ -398,10 +393,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             const estimatedTransportInputTokens =
                 countOpenAIChatMessagesTokens(requestBody.messages, rawModelIdForTokenizers, modelInfo) +
                 estimateToolTokens(requestBody.tools);
-            const reservedOutputTokens = getReservedOutputTokens(modelToUse, requestBody.max_tokens, {
-                estimatedInputTokens: estimatedTransportInputTokens,
-                modelInfo,
-            });
+            const reservedOutputTokens = getPreparedOutputCap(requestBody);
             const totalTokenMax = getTotalTokenLimit(modelToUse, modelInfo);
             // <Line of Code>; // TODO: Remove by v2.3 if still commented
             // reservedOutputTokensForRequest = reservedOutputTokens;

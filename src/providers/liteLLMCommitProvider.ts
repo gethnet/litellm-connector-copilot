@@ -10,6 +10,7 @@ import { createInitialStreamingState, interpretStreamEvent } from "../adapters/s
 import { COMMIT_MESSAGE_PROMPT, COMMIT_SYSTEM_PROMPT, resolvePrompt } from "../utils/prompts";
 import { stripMarkdownCodeBlocks } from "../utils";
 import type { EffortFallbackCache } from "../utils/reasoningEffortFallback";
+import { deriveCapabilitiesFromModelInfo } from "../utils/modelCapabilities";
 
 /**
  * Provider for generating Git commit messages using LiteLLM.
@@ -219,6 +220,9 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
         // this call site.
         const models: vscode.LanguageModelChatInformation[] = [];
         for (const [id, entry] of this.registryEntries(this._registry)) {
+            const limits =
+                this._registry.getDerivedCapabilities(id) ??
+                deriveCapabilitiesFromModelInfo(id, this._registry.getModelInfo(id));
             models.push({
                 id,
                 name: id,
@@ -226,8 +230,9 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
                 version: "1.0",
                 tooltip: `Provider: ${id} via ${entry.baseUrl}`,
                 detail: entry.baseUrl,
-                maxInputTokens: 0,
-                maxOutputTokens: 0,
+                maxInputTokens: limits.maxInputTokens,
+                maxOutputTokens: limits.maxOutputTokens,
+                maxContextWindowTokens: limits.rawContextWindow,
                 capabilities: { toolCalling: true, imageInput: false },
             });
         }

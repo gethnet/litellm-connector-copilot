@@ -64,8 +64,11 @@ export interface DerivedModelCapabilities {
      */
     supportsAdaptiveThinking: boolean;
     endpointMode: "chat" | "responses" | "completions";
+    /** Raw independent input maximum (field-selection fallback only). */
     maxInputTokens: number;
+    /** Raw independent output maximum; no request reserve is deducted. */
     maxOutputTokens: number;
+    /** Explicit context, or direct input/legacy display fallback (not proven total). */
     rawContextWindow: number;
 }
 
@@ -123,9 +126,14 @@ export function deriveCapabilitiesFromModelInfo(
 
     const supportsStreaming = supportsNativeStreaming || supportedParams.includes("stream");
 
-    const rawLimit = modelInfo?.max_input_tokens ?? modelInfo?.context_window_tokens ?? modelInfo?.max_tokens ?? 128000;
+    // Discovery projects metadata only. Request-specific arithmetic belongs
+    // in adapters/requestTokenBudget.ts and must never enter these caches.
+    const maxInputTokens =
+        modelInfo?.max_input_tokens ?? modelInfo?.context_window_tokens ?? modelInfo?.max_tokens ?? 128000;
     const maxOutputTokens = modelInfo?.max_output_tokens ?? 16000;
-    const maxInputTokens = Math.max(1, rawLimit - maxOutputTokens);
+    // Independent maxima do not prove their sum is a total context window.
+    const rawContextWindow =
+        modelInfo?.context_window_tokens ?? modelInfo?.max_input_tokens ?? modelInfo?.max_tokens ?? 128000;
 
     return {
         supportsTools,
@@ -149,7 +157,7 @@ export function deriveCapabilitiesFromModelInfo(
         endpointMode: (modelInfo?.mode as "chat" | "responses" | "completions") ?? "chat",
         maxInputTokens,
         maxOutputTokens,
-        rawContextWindow: rawLimit,
+        rawContextWindow,
     };
 }
 

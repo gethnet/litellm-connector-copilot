@@ -5,6 +5,8 @@ import { Logger } from "../utils/logger";
 import { StructuredLogger } from "../observability/structuredLogger";
 import { showModelPicker } from "./modelPicker";
 import { countTokens } from "../adapters/tokenUtils";
+import { resolveRequestOutputCap } from "../adapters/requestTokenBudget";
+import { deriveCapabilitiesFromModelInfo } from "../utils/modelCapabilities";
 import {
     computeDiffBudget,
     computeOutputReserve,
@@ -28,6 +30,7 @@ async function tryGenerateViaVSCodeModelRequest(
     diff: string,
     systemPrompt: string,
     messagePrompt: string,
+    outputCap: number,
     token: vscode.CancellationToken,
     onProgress: (chunk: string) => void
 ): Promise<string | undefined> {
@@ -47,7 +50,7 @@ async function tryGenerateViaVSCodeModelRequest(
         messages,
         {
             justification: "Generate a concise git commit message from staged changes.",
-            modelOptions: {},
+            modelOptions: { max_tokens: outputCap },
         },
         token
     );
@@ -133,7 +136,14 @@ export function registerGenerateCommitMessageCommand(
             const modelInfo = _provider.getModelInfo(modelId);
             const maxInputTokens = resolveCommitContextWindow(selectedModel?.maxInputTokens, modelId, modelInfo);
             const breadth = countDiffBreadth(diff);
-            const outputReserve = computeOutputReserve(breadth, config.commitOutputTokenReserve);
+            // Early diff shaping is request preparation. LanguageModelChat
+            // exposes input but not output/combined limits; the registered
+            // chat provider performs final authoritative validation on send.
+            const outputReserve = resolveRequestOutputCap(
+                deriveCapabilitiesFromModelInfo(modelId, modelInfo),
+                computeOutputReserve(breadth, config.commitOutputTokenReserve),
+                modelInfo
+            );
             const budget = computeDiffBudget({
                 maxInputTokens,
                 outputReserve,
@@ -225,6 +235,7 @@ export function registerGenerateCommitMessageCommand(
                                 processedDiff,
                                 systemPrompt,
                                 messagePrompt,
+                                outputReserve,
                                 token,
                                 (chunk) => {
                                     accumulatedText += chunk;

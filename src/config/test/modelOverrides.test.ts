@@ -489,7 +489,7 @@ suite("modelOverrides", () => {
         assert.ok(loggerWarnStub.called, "invalid mode/token values should warn");
     });
 
-    test("mode and token overrides feed derived prompt budget for equal-limit cards", () => {
+    test("token overrides preserve independent input metadata for equal-limit cards", () => {
         const override = {
             match: "^grok-4\\.5$",
             max_output_tokens: 128000,
@@ -507,8 +507,9 @@ suite("modelOverrides", () => {
 
         assert.strictEqual(patched?.max_output_tokens, 128000);
         assert.strictEqual(derived.maxOutputTokens, 128000);
-        assert.strictEqual(derived.maxInputTokens, 372000);
+        assert.strictEqual(derived.maxInputTokens, 500000);
         assert.strictEqual(derived.rawContextWindow, 500000);
+        assert.strictEqual(upstream.max_output_tokens, 500000);
     });
 
     test("mode override is visible on cached model info used for endpoint selection", () => {

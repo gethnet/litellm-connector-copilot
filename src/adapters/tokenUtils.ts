@@ -4,6 +4,7 @@ import { isAnthropicModel } from "../utils/modelUtils";
 import { StructuredLogger } from "../observability/structuredLogger";
 import { selectTokenizer } from "./tokenizers/selectTokenizer";
 import type { TelemetryService } from "../telemetry/telemetryService";
+import { getRequestInputTokenBudget } from "./requestTokenBudget";
 
 // Token estimation constants for binary media types
 // These are conservative estimates to avoid context window overflow
@@ -47,6 +48,31 @@ export function estimateMediaTokenCost(mimeType: string, dataLength: number): nu
     return 0;
 }
 
+/** Count only media so finalized wire text/tool metadata can be added without duplication. */
+export function countMessageMediaTokens(messages: readonly vscode.LanguageModelChatRequestMessage[]): number {
+    const countPart = (part: unknown): number => {
+        if (typeof part !== "object" || part === null) {
+            return 0;
+        }
+        if (
+            "mimeType" in part &&
+            typeof part.mimeType === "string" &&
+            "data" in part &&
+            part.data instanceof Uint8Array
+        ) {
+            return estimateMediaTokenCost(part.mimeType, part.data.length);
+        }
+        if ("content" in part && Array.isArray(part.content)) {
+            return part.content.reduce<number>((sum, nested: unknown) => sum + countPart(nested), 0);
+        }
+        return 0;
+    };
+    return messages.reduce(
+        (sum, message) => sum + message.content.reduce<number>((cost, part) => cost + countPart(part), 0),
+        0
+    );
+}
+
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16000;
 export const DEFAULT_CONTEXT_LENGTH = 128000;
 const SMART_OUTPUT_RESERVATION_MIN = 16000;
@@ -82,8 +108,9 @@ export function getStaticPromptTokenCount(prompt: string, modelId?: string, mode
 }
 
 /**
- * Calculates the available context window for a specific task.
- * Formula: Context Window = Max Input - Max Output - System Prompts - Safety Buffer
+ * Prepares a task's content budget from its independent input maximum.
+ * Output reduces capacity only when explicit combined context is supplied.
+ * Static prompt counts and safety apply to this request-local value only.
  */
 export function calculateAvailableContext(
     maxInput: number,
@@ -98,7 +125,8 @@ export function calculateAvailableContext(
         totalStaticTokens += getStaticPromptTokenCount(prompt, modelId, modelInfo);
     }
 
-    const available = maxInput - maxOutput - totalStaticTokens;
+    const inputBudget = getRequestInputTokenBudget({ maxInputTokens: maxInput }, modelInfo, maxOutput);
+    const available = inputBudget - totalStaticTokens;
     return Math.max(0, Math.floor(available * (1 - safetyBuffer)));
 }
 
@@ -203,11 +231,15 @@ export function getReservedOutputTokens(
  * Resolves the total token window for the model.
  */
 export function getTotalTokenLimit(model: vscode.LanguageModelChatInformation, modelInfo?: LiteLLMModelInfo): number {
-    const rawLimit = modelInfo?.max_input_tokens ?? modelInfo?.context_window_tokens ?? modelInfo?.max_tokens;
-    if (typeof rawLimit === "number" && rawLimit > 0) {
-        return rawLimit;
-    }
-    return Math.max(1, model.maxInputTokens + model.maxOutputTokens);
+    // Usage/display projection only: no arithmetic and no inferred sum.
+    return (
+        modelInfo?.context_window_tokens ??
+        modelInfo?.max_input_tokens ??
+        modelInfo?.max_tokens ??
+        model.maxContextWindowTokens ??
+        model.maxInputTokens ??
+        DEFAULT_CONTEXT_LENGTH
+    );
 }
 
 /**
@@ -265,23 +297,26 @@ export function trimMessagesToFitBudget(
     hardBudgetOverride?: number
 ): readonly vscode.LanguageModelChatRequestMessage[] {
     const toolTokenCount = estimateToolTokens(tools);
-    const tokenLimit = Math.max(1, model.maxInputTokens);
+    const tokenLimit =
+        hardBudgetOverride === undefined
+            ? getRequestInputTokenBudget(model, modelInfo, model.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS)
+            : model.maxInputTokens;
 
     const budgetLimit =
         hardBudgetOverride !== undefined
-            ? Math.max(1, Math.floor(hardBudgetOverride))
+            ? Math.max(0, Math.floor(hardBudgetOverride))
             : (() => {
                   // Apply a flat safety buffer to avoid context overflow due to tokenizer variance,
                   // provider-side framing, and other hidden tokens.
                   //
                   // This is intentionally applied to *all* models (not just Anthropic) because
                   // overflow failures are catastrophic and the 5% reduction is a small tradeoff.
-                  const bufferedLimit = Math.max(1, Math.floor(tokenLimit * 0.95));
+                  const bufferedLimit = Math.max(0, Math.floor(tokenLimit * 0.95));
 
                   // Keep an additional small margin for Anthropic-style models which tend to be
                   // stricter about context limits.
                   return isAnthropicModel(model.id, modelInfo)
-                      ? Math.max(1, Math.floor(bufferedLimit * 0.98))
+                      ? Math.max(0, Math.floor(bufferedLimit * 0.98))
                       : bufferedLimit;
               })();
 
@@ -327,7 +362,7 @@ export function trimMessagesToFitBudget(
         lastMessage.content[0].value.trim().toLowerCase() === "continue";
 
     if (systemMessage) {
-        const sysTokens = estimateSingleMessageTokens(systemMessage);
+        const sysTokens = estimateSingleMessageTokens(systemMessage, model.id, modelInfo);
         if (sysTokens > budget) {
             throw new Error("Message exceeds token limit.");
         }
@@ -337,7 +372,7 @@ export function trimMessagesToFitBudget(
 
     for (let i = remaining.length - 1; i >= 0; i--) {
         const msg = remaining[i];
-        const msgTokens = estimateSingleMessageTokens(msg);
+        const msgTokens = estimateSingleMessageTokens(msg, model.id, modelInfo);
 
         // If it's a continuation, we MUST include the immediately preceding assistant message
         // to provide context for where to resume.

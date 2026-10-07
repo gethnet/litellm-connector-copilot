@@ -1,8 +1,14 @@
 import type * as vscode from "vscode";
 import { convertMessages, convertTools, validateRequest } from "../../utils";
-import { trimMessagesToFitBudget } from "../../adapters/tokenUtils";
+import {
+    trimMessagesToFitBudget,
+    countOpenAIChatMessagesTokens,
+    countMessageMediaTokens,
+    estimateToolTokens,
+} from "../../adapters/tokenUtils";
+import { getRequestInputTokenBudget, resolveRequestOutputCap } from "../../adapters/requestTokenBudget";
 import { StructuredLogger } from "../../observability/structuredLogger";
-import { isFable51Family } from "../../utils/modelUtils";
+import { isAnthropicModel, isFable51Family } from "../../utils/modelUtils";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, OpenAIFunctionToolDef } from "../../types";
 import type { RequestBuilderDeps } from "./types";
 import { resolveChatReasoningTransport } from "./reasoningTransport";
@@ -148,7 +154,11 @@ export class RequestBuilder {
         // today. It is consumed by the base for logging/telemetry already;
         // this call site only needs the (possibly redacted) tool list.
         const toolConfig = convertTools({ ...options, tools: toolRedaction.tools });
-        const messagesToUse = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo);
+        const mo = (options.modelOptions as Record<string, unknown>) ?? {};
+        const outputCap = resolveRequestOutputCap(model, mo.max_tokens, modelInfo);
+        const safetyRatio = isAnthropicModel(rawModelId, modelInfo) ? 0.95 * 0.98 : 0.95;
+        const inputBudget = getRequestInputTokenBudget(model, modelInfo, outputCap, safetyRatio);
+        const messagesToUse = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo, inputBudget);
         const openaiMessages = convertMessages(messagesToUse, {
             attachPromptCacheControl: modelSupportsPromptCacheControl(rawModelId, modelInfo),
         });
@@ -161,16 +171,11 @@ export class RequestBuilder {
             modelInfo,
             this.isParameterSupported
         );
-        const mo = (options.modelOptions as Record<string, unknown>) ?? {};
-
         const requestBody: OpenAIChatCompletionRequest = {
             model: rawModelId,
             messages: openaiMessages,
             stream: true,
-            max_tokens:
-                typeof mo.max_tokens === "number"
-                    ? Math.min(mo.max_tokens, model.maxOutputTokens)
-                    : model.maxOutputTokens,
+            max_tokens: outputCap,
             ...reasoningTransport,
         };
 
@@ -240,6 +245,16 @@ export class RequestBuilder {
             config.disableLiteLLMResponseCaching === true,
             modelInfo
         );
+        // The trimmer intentionally protects final/continuation content.
+        // Reject known oversized wire input instead of amputating it. Transport
+        // text/metadata and source media have disjoint costs: add, do not max.
+        const transportInputTokens =
+            countOpenAIChatMessagesTokens(requestBody.messages, rawModelId, modelInfo) +
+            countMessageMediaTokens(messagesToUse) +
+            estimateToolTokens(requestBody.tools);
+        if (transportInputTokens > inputBudget) {
+            throw new Error("Message exceeds token limit.");
+        }
         return requestBody;
     }
 }

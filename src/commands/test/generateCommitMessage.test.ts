@@ -302,6 +302,8 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         await handler();
 
         const breadth = countDiffBreadth(largeDiff);
+        const sentOptions = sendRequest.firstCall.args[1] as { modelOptions: { max_tokens?: number } };
+        assert.strictEqual(sentOptions.modelOptions.max_tokens, computeOutputReserve(breadth));
         const budget = computeDiffBudget({
             maxInputTokens: 8000,
             outputReserve: computeOutputReserve(breadth),
@@ -316,6 +318,36 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         assert.ok(warnStub.calledWith(sinon.match("truncated")));
         assert.strictEqual(telemetry.captureTrimExecuted.calledOnce, true);
         assert.strictEqual(telemetry.captureTrimExecuted.firstCall.args[1], "commit-message");
+    });
+
+    test("commit request clamps its prepared output target to known raw output metadata", async () => {
+        const register = sandbox.stub(vscode.commands, "registerCommand");
+        registerGenerateCommitMessageCommand(mockProvider);
+        const handler = register.firstCall.args[1] as () => Promise<void>;
+        mockProvider.getConfigManager.returns({
+            getConfig: async () => ({ commitModelIdOverride: "m", commitOutputTokenReserve: 8000 }),
+        } as unknown as ConfigManager);
+        const info = Object.freeze({ max_input_tokens: 8000, max_output_tokens: 500, context_window_tokens: 8500 });
+        mockProvider.getModelInfo.returns(info);
+        sandbox.stub(GitUtils, "getStagedDiff").resolves("diff --git a/a b/a\n@@ -1 +1 @@\n+x");
+        sandbox.stub(GitUtils, "getGitAPI").resolves({
+            repositories: [{ inputBox: { value: "", placeholder: "", enabled: true } }],
+        } as unknown as never);
+        const sendRequest = sandbox.stub().resolves({
+            stream: (async function* () {
+                yield new vscode.LanguageModelTextPart("fix: a");
+            })(),
+        });
+        (vscode.lm.selectChatModels as unknown as sinon.SinonStub).resolves([{ maxInputTokens: 8000, sendRequest }]);
+        sandbox
+            .stub(vscode.window, "withProgress")
+            .callsFake(async (_options, task) =>
+                task({ report: () => {} }, new vscode.CancellationTokenSource().token)
+            );
+        await handler();
+        const sent = sendRequest.firstCall.args[1] as { modelOptions: { max_tokens: number } };
+        assert.strictEqual(sent.modelOptions.max_tokens, 500);
+        assert.strictEqual(info.max_output_tokens, 500);
     });
 
     test("handler handles empty diff correctly", async () => {

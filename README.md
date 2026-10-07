@@ -220,7 +220,7 @@ The optional **Inline Completions URL** is a full OpenAI-compatible FIM `/comple
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `litellm-connector.commitModelIdOverride` | string | `""` | Model ID for git commit message generation. Accepts the complete `litellm-connector/<group>/<model>` value copied from the model picker; the vendor prefix is normalized automatically. |
-| `litellm-connector.commitOutputTokenReserve` | number | `0` | Tokens reserved for the generated commit message when sizing the staged diff. `0` = adaptive (`1000 + 400/file + 40/hunk`), clamped to 1000–8000 |
+| `litellm-connector.commitOutputTokenReserve` | number | `0` | Requested commit output cap used during diff preparation, also capped to the known model output maximum. `0` = adaptive (`1000 + 400/file + 40/hunk`), target clamped to 1000–8000. Output consumes explicit combined context, not an independent input maximum twice. |
 | `litellm-connector.commitSystemPromptOverride` | string | `""` | Override the system prompt used for git commit message generation. Leave empty to use the built-in default. |
 | `litellm-connector.commitMessagePromptOverride` | string | `""` | Override the commit message style/body prompt. Leave empty to use the built-in default. |
 | `litellm-connector.inactivityTimeout` | number | `60` | Seconds before connection is considered idle |
@@ -306,7 +306,7 @@ Only fields included in the matching rule are changed; omitted fields remain exa
 
 In the first example, only `supports_none_reasoning_effort` is corrected for `claude-opus-4-8`. Other fields stay exactly as LiteLLM reported them. To explicitly disable a field, set it to `false`; to replace a `null` value, define the field in the override.
 
-The second example corrects endpoint routing by setting `mode` to `chat`, `responses`, or `completions`. The third example patches raw LiteLLM token fields (`max_output_tokens`, and optionally `max_input_tokens` / `max_tokens` / `context_window_tokens`) before the connector derives VS Code prompt/output budgets, and also hides unsupported `none` effort.
+The second example corrects endpoint routing by setting `mode` to `chat`, `responses`, or `completions`. The third example patches raw LiteLLM token fields (`max_output_tokens`, and optionally `max_input_tokens` / `max_tokens` / `context_window_tokens`) before the connector projects VS Code input/output metadata, and also hides unsupported `none` effort. Input and output maxima are displayed directly; no output reserve is subtracted during discovery. Only explicit `context_window_tokens` establishes combined capacity. Context display selects `context_window_tokens`, then `max_input_tokens`, then legacy `max_tokens`; legacy `max_tokens` often means output maximum and is only a compatibility fallback, never proof of a total. Request preparation separately enforces raw and host independent ceilings and any explicit raw combined window using the actual output cap.
 
 The fourth example sets `supportedOpenaiParams` to the **complete** desired `supported_openai_params` list (full replace, not a merge). When present, that list drives request parameter filtering and wins over static family denylists such as the built-in `gpt-5` temperature strip. An empty list explicitly reports that no parameters are supported; omit the field entirely to keep LiteLLM's reported list unchanged.
 

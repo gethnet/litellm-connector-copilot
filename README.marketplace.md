@@ -170,7 +170,7 @@ Base URL + API key are configured through **VS Code's Language Models UI** (run 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `commitModelIdOverride` | `""` | Model ID for commit message generation. Accepts the complete `litellm-connector/<group>/<model>` value copied from the model picker; the vendor prefix is normalized automatically. |
-| `commitOutputTokenReserve` | `0` | Tokens reserved for the generated commit message when sizing the staged diff. `0` = adaptive (`1000 + 400/file + 40/hunk`), clamped to 1000–8000 |
+| `commitOutputTokenReserve` | `0` | Requested commit output cap used during diff preparation, also capped to the known model output maximum. `0` = adaptive (`1000 + 400/file + 40/hunk`), target clamped to 1000–8000. Output consumes explicit combined context, not an independent input maximum twice. |
 | `commitSystemPromptOverride` | `""` | Override the system prompt used for git commit message generation. Leave empty for the built-in default. |
 | `commitMessagePromptOverride` | `""` | Override the commit message style/body prompt. Leave empty for the built-in default. |
 | `inactivityTimeout` | `60` | Seconds before stream is considered idle |

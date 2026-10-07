@@ -156,7 +156,7 @@ This repository is a **VS Code extension**. Agents must follow these rules when 
 - **Backend grouping**: each `LanguageModelChatInformation` must set `category: { label, order }` — `label` is the user-visible group heading in the picker (typically the backend / group name), and `order` is the deterministic display order. Without this, models from multiple backends collapse into a single ungrouped list.
 - **Reasoning effort picker (`group: "navigation"`)**: when a model supports reasoning, its `configurationSchema.properties.reasoningEffort` must include `group: "navigation"`. Only navigation-grouped properties are surfaced as inline picker actions in VS Code 1.120; without it the effort selector is hidden behind the secondary settings UI and users cannot change effort from the chat picker.
 - **Reasoning replay capability declaration (VS Code 1.141+)**: `capabilitiesToVSCode()` in `src/utils/modelCapabilities.ts` declares `capabilities.apiType` (`Responses` for `/responses`-mode models, `Messages` for adaptive-thinking chat-mode models, `ChatCompletions` otherwise) and `capabilities.adaptiveThinking`. These drive Copilot's historical-thinking replay gate (upstream #338874). Both fields are guarded by `checkProposedApiEnabled('languageModelCapabilities')` in the ext host, so the registry's `CapabilityHostPolicy.allowReasoningCapabilityFields` (derived from the host-rewritten `enabledApiProposals`, same mechanism as `editTools`) suppresses them fail-closed when the proposal is withheld — emitting them without the grant blanks the entire model list.
-- **True context window**: every model info sets `maxContextWindowTokens` (the raw LiteLLM context window) — `maxInputTokens` already has the output reserve subtracted, so without this field VS Code 1.139+ under-reports the window.
+- **Token-limit metadata versus request budgets**: discovery/display/cached capabilities preserve LiteLLM input and output maxima without arithmetic. `maxContextWindowTokens` selects `context_window_tokens`, then `max_input_tokens`, then legacy `max_tokens` (display fallback only); independent input/output maxima are never summed. Only raw `context_window_tokens` proves combined capacity: legacy `max_tokens` often means output maximum and must never trigger subtraction. `src/adapters/requestTokenBudget.ts` owns local pre-send budgets enforcing raw and host independent ceilings and the actual requested output cap against explicit raw combined context. Canonical registry reads resolve unique raw-name overrides; remaining metadata misses never promote connector display fallbacks to totals. Post-build usage consumes the prepared cap.
 
 ### Architecture & data flow (extension)
 
@@ -306,7 +306,7 @@ All incoming requests (chat or completions) flow through this pipeline:
    - Completions: wrap prompt string as user message
 2. **Validate**: Get model info, check if model exists and is configured
 3. **Filter Parameters**: Strip unsupported params via `KNOWN_PARAMETER_LIMITATIONS`
-4. **Trim**: Ensure messages fit within `model.maxInputTokens` budget
+4. **Prepare request budget and trim**: Resolve the actual output cap, constrain local input by explicit combined context when supplied, apply safety margins, and charge tools once. Never change raw model info or cached capability limits; reject oversized protected input before transport.
 5. **Detect Errors**: Check for quota failures, apply tool redaction if needed
 6. **Route**: Send to appropriate endpoint via `LiteLLMClient.getEndpoint()`
 7. **Process Response**: Extract completion text or stream response parts
@@ -327,8 +327,8 @@ Keep this pipeline shared unless the change is intentionally protocol-specific a
 - **Cost tracking**: completions reuse the same pricing/token snapshot pipeline so estimated request costs are reported consistently with chat.
 
 #### Commit-Message Diff Budgeting (`src/utils/commitDiffBudget.ts`)
-- The commit command resolves the chat model once and uses `LanguageModelChat.maxInputTokens` as the context window, with derived capabilities only as a fallback.
-- `countDiffBreadth`, `computeOutputReserve`, and `computeDiffBudget` own adaptive reserve and token-measured diff budgeting; the output reserve is subtracted exactly once.
+- The commit command resolves the chat model once and uses `LanguageModelChat.maxInputTokens` as the independent input maximum, with raw derived limits only as a fallback.
+- `countDiffBreadth`, `computeOutputReserve`, and `computeDiffBudget` own early request-specific diff shaping. The adaptive output target is sent as `modelOptions.max_tokens`; it constrains explicit combined context but is not subtracted again from an independent input maximum. The registered chat provider performs final authoritative budgeting before transport, including when the commit provider's separate registry has no metadata.
 - `GitUtils.compactDiff` and `truncateToTokenLimit` accept optional model details and guarantee that the returned diff fits the requested token budget.
 
 #### Configuration Flow (v1.120+, per-group)

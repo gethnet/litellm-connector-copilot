@@ -86,14 +86,14 @@ suite("commitDiffBudget", () => {
     });
 
     suite("computeDiffBudget", () => {
-        test("subtracts reserve and prompt tokens once, then applies the margin", () => {
+        test("subtracts prompts but not output from an independent input maximum", () => {
             const budget = computeDiffBudget({
                 maxInputTokens: 8000,
                 outputReserve: 1440,
                 staticPrompts: ["a".repeat(350)],
                 modelId: "test-model",
             });
-            assert.strictEqual(budget, 5814);
+            assert.strictEqual(budget, 7110);
         });
         test("sums tokens across static prompts", () => {
             const budget = computeDiffBudget({
@@ -102,7 +102,7 @@ suite("commitDiffBudget", () => {
                 staticPrompts: ["a".repeat(350), "b".repeat(700)],
                 modelId: "test-model",
             });
-            assert.strictEqual(budget, 6030);
+            assert.strictEqual(budget, 6930);
         });
         test("never returns a negative budget", () => {
             assert.strictEqual(
@@ -133,10 +133,10 @@ suite("commitDiffBudget", () => {
             assert.strictEqual(resolveCommitContextWindow(8000.7, "test-model", undefined), 8000);
         });
         test("falls back to derived capabilities for unusable reported values", () => {
-            assert.strictEqual(resolveCommitContextWindow(undefined, "test-model", undefined), 112000);
-            assert.strictEqual(resolveCommitContextWindow(0, "test-model", undefined), 112000);
-            assert.strictEqual(resolveCommitContextWindow(-1, "test-model", undefined), 112000);
-            assert.strictEqual(resolveCommitContextWindow(Number.NaN, "test-model", undefined), 112000);
+            assert.strictEqual(resolveCommitContextWindow(undefined, "test-model", undefined), 128000);
+            assert.strictEqual(resolveCommitContextWindow(0, "test-model", undefined), 128000);
+            assert.strictEqual(resolveCommitContextWindow(-1, "test-model", undefined), 128000);
+            assert.strictEqual(resolveCommitContextWindow(Number.NaN, "test-model", undefined), 128000);
         });
         test("honours LiteLLM model info in the fallback", () => {
             assert.strictEqual(
@@ -144,8 +144,26 @@ suite("commitDiffBudget", () => {
                     max_input_tokens: 32000,
                     max_output_tokens: 4000,
                 }),
-                28000
+                32000
             );
+        });
+        test("commit preparation reserves the actual output cap only against explicit combined context", () => {
+            const base = {
+                maxInputTokens: 8000,
+                outputReserve: 1440,
+                staticPrompts: ["a".repeat(350)],
+                modelId: "test-model",
+            };
+            assert.strictEqual(
+                computeDiffBudget({ ...base, modelInfo: { max_input_tokens: 8000, context_window_tokens: 8000 } }),
+                5814
+            );
+            assert.strictEqual(
+                computeDiffBudget({ ...base, outputReserve: 1000, modelInfo: { context_window_tokens: 8000 } }),
+                6210
+            );
+            assert.strictEqual(computeDiffBudget({ ...base, modelInfo: { context_window_tokens: 9000 } }), 6714);
+            assert.strictEqual(computeDiffBudget({ ...base, modelInfo: { context_window_tokens: 1000 } }), 0);
         });
     });
 });

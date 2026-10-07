@@ -388,7 +388,11 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
      */
     public getModelInfo(id: string): LiteLLMModelInfo | undefined {
         const registeredId = resolveRegisteredModelId(id, this.entries);
-        return this.modelInfoCache.get(registeredId ?? id);
+        if (registeredId !== undefined || this.modelInfoCache.has(id)) {
+            return this.modelInfoCache.get(registeredId ?? id);
+        }
+        const matches = this.getAllModels().filter((model) => this.lookup(model.id)?.rawModelName === id);
+        return matches.length === 1 ? this.modelInfoCache.get(matches[0].id) : undefined;
     }
 
     /**
@@ -879,10 +883,9 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
             version: "1.0",
             maxInputTokens: derived.maxInputTokens,
             maxOutputTokens: derived.maxOutputTokens,
-            // The true total context window (input + output). VS Code 1.139+
-            // displays this independently of maxInputTokens, whose value here
-            // already has the output reserve subtracted — without this field
-            // the picker under-reports the window by maxOutputTokens.
+            // Explicit context metadata wins; without it use a direct,
+            // non-inflating fallback, never the sum of independent maxima.
+            // This display value is not a request-preparation budget.
             maxContextWindowTokens: derived.rawContextWindow,
             capabilities,
             tags,
