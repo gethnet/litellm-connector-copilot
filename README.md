@@ -10,16 +10,11 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.5.12
+## 🆕 What's New in 2.5.14
 
-> Version 2.5.12 adds Copilot harness compatibility for group-qualified model IDs, declares reasoning replay capabilities for VS Code 1.141+, and reports each model's true context window.
+> Version 2.5.14 preserves LiteLLM's independent input and output limits in model metadata, preventing model discovery and the picker from incorrectly subtracting the output limit from the input maximum.
 
-- 🧭 **Copilot harness group-qualified model IDs** — The Agents window may identify a model as `litellm-connector/<group>/<backend>/<model>`. The connector now resolves that ID against its registered models and sends the backend's raw model name to LiteLLM. Group names are compared literally, so spaces, slashes, Unicode, and punctuation are supported; unknown or ambiguous IDs are not guessed.
-- 🧠🔁 **Reasoning replay on VS Code 1.141+** — Models now declare their API type and adaptive-thinking capability when the host grants the required proposal, allowing Copilot to replay reasoning across turns. The fields are withheld when the host does not grant the proposal.
-- 📏 **True context window in the picker** — Model metadata now reports the raw context window separately from the input budget, avoiding under-reporting by the reserved output allowance.
-- 🚨 **Truncated and empty turns now surface as errors** — The VS Code language-model API has no finish-reason channel, so a stream that ended `incomplete`/`failed` (or produced nothing at all) looked like a *successful empty response* and VS Code silently retried it. Such turns now end with a clear error naming the cause, because server-side recovery (LiteLLM fallback models) is the intended handler — anything reaching the client means it did not engage. Turns that produced a tool call, and refusals, are never affected. Set `litellm-connector.disableAbnormalTerminationErrors` to return to log-only behavior.
-- 🚧 **Proxy response-cache bypass (`litellm-connector.disableLiteLLMResponseCaching`)** — A LiteLLM proxy was observed caching a truncated `/responses` result and replaying it byte-for-byte to every retry, deterministically wedging the session. The new toggle sends `no-cache` + `no-store` to the proxy on every request and, unlike the older model-gated `disableCaching`, cannot be stripped by model cards that don't advertise the `cache` parameter. Anthropic prompt caching is unaffected.
-- 🔎 **Deeper stream-failure triage** — Non-completed `/responses` terminals (`response.incomplete`, `response.failed`, and completed frames carrying `status: "incomplete"`) are handled instead of passing as successes; each turn emits one `stream.terminal_fingerprint` classification (with prompt cache-hit size), and abnormal terminals log the full sanitized terminal frame so nonstandard upstream stop reasons are visible.
+- 📏 **Preserve independent input/output limits** — The model picker now reports LiteLLM's input and output maxima without deriving one from the other. An explicit combined context window is honored when provided, while local request preparation still applies safety margins and the requested output cap before sending. Commit diff shaping uses the prepared output cap without reserving it twice.
 
 > ℹ️ **2.5.13 release prep — backfilled release notes**: the published code shipped on `2.5.13` (the same code tree previously tagged `rel/v2.5.12`). `rel/v2.5.12` was left intact for forensic record but its draft was never promoted to Marketplace/Open VSX; the marketplace listing, GitHub Release page, and in-repo `CHANGELOG.md` are otherwise identical between 2.5.12 and 2.5.13. (`CHANGELOG.md`)
 
@@ -220,7 +215,7 @@ The optional **Inline Completions URL** is a full OpenAI-compatible FIM `/comple
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `litellm-connector.commitModelIdOverride` | string | `""` | Model ID for git commit message generation. Accepts the complete `litellm-connector/<group>/<model>` value copied from the model picker; the vendor prefix is normalized automatically. |
-| `litellm-connector.commitOutputTokenReserve` | number | `0` | Tokens reserved for the generated commit message when sizing the staged diff. `0` = adaptive (`1000 + 400/file + 40/hunk`), clamped to 1000–8000 |
+| `litellm-connector.commitOutputTokenReserve` | number | `0` | Requested commit output cap used during diff preparation, also capped to the known model output maximum. `0` = adaptive (`1000 + 400/file + 40/hunk`), target clamped to 1000–8000. Output consumes explicit combined context, not an independent input maximum twice. |
 | `litellm-connector.commitSystemPromptOverride` | string | `""` | Override the system prompt used for git commit message generation. Leave empty to use the built-in default. |
 | `litellm-connector.commitMessagePromptOverride` | string | `""` | Override the commit message style/body prompt. Leave empty to use the built-in default. |
 | `litellm-connector.inactivityTimeout` | number | `60` | Seconds before connection is considered idle |
@@ -306,7 +301,7 @@ Only fields included in the matching rule are changed; omitted fields remain exa
 
 In the first example, only `supports_none_reasoning_effort` is corrected for `claude-opus-4-8`. Other fields stay exactly as LiteLLM reported them. To explicitly disable a field, set it to `false`; to replace a `null` value, define the field in the override.
 
-The second example corrects endpoint routing by setting `mode` to `chat`, `responses`, or `completions`. The third example patches raw LiteLLM token fields (`max_output_tokens`, and optionally `max_input_tokens` / `max_tokens` / `context_window_tokens`) before the connector derives VS Code prompt/output budgets, and also hides unsupported `none` effort.
+The second example corrects endpoint routing by setting `mode` to `chat`, `responses`, or `completions`. The third example patches raw LiteLLM token fields (`max_output_tokens`, and optionally `max_input_tokens` / `max_tokens` / `context_window_tokens`) before the connector projects VS Code input/output metadata, and also hides unsupported `none` effort. Input and output maxima are displayed directly; no output reserve is subtracted during discovery. Only explicit `context_window_tokens` establishes combined capacity. Context display selects `context_window_tokens`, then `max_input_tokens`, then legacy `max_tokens`; legacy `max_tokens` often means output maximum and is only a compatibility fallback, never proof of a total. Request preparation separately enforces raw and host independent ceilings and any explicit raw combined window using the actual output cap.
 
 The fourth example sets `supportedOpenaiParams` to the **complete** desired `supported_openai_params` list (full replace, not a merge). When present, that list drives request parameter filtering and wins over static family denylists such as the built-in `gpt-5` temperature strip. An empty list explicitly reports that no parameters are supported; omit the field entirely to keep LiteLLM's reported list unchanged.
 

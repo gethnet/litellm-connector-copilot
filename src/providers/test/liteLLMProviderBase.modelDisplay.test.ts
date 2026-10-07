@@ -190,7 +190,7 @@ suite("LiteLLM model display", () => {
                 "Output: $5.00/1M tokens\n" +
                 "Cache read: $0.10/1M tokens\n" +
                 "Cache write: $1.25/1M tokens\n" +
-                "Limits: input 4,096 tokens, output 4,096 tokens"
+                "Limits: input 8,192 tokens, output 4,096 tokens"
         );
         assert.strictEqual(info.multiplierNumeric, 5);
         assert.strictEqual(info.warningText, undefined);
@@ -888,27 +888,25 @@ suite("LiteLLM model display", () => {
         }
     }
 
-    // VS Code 1.139+ accepts `maxContextWindowTokens` on LanguageModelChatInformation
-    // (ungated in the ext host). Without it the picker displays the input budget as
-    // if it were the whole context window, which misrepresents models whose
-    // window ≠ maxInput + maxOutput.
-    test("populates maxContextWindowTokens from the LiteLLM context window", async () => {
+    // VS Code 1.139+ accepts `maxContextWindowTokens` independently of the
+    // input and output maxima. Independent limits must remain raw metadata.
+    test("preserves independent LiteLLM input/output limits and explicit context (#159)", async () => {
         const model = await discoverSingleModel(
             {
                 key: "example/test-model",
                 litellm_provider: "openai",
                 mode: "chat",
-                max_input_tokens: 200000,
-                max_output_tokens: 32000,
+                max_input_tokens: 229376,
+                max_output_tokens: 32768,
+                context_window_tokens: 262144,
             },
             { allowEditTools: false, allowReasoningCapabilityFields: false }
         );
 
         const info = model as unknown as { maxContextWindowTokens?: number };
-        // rawContextWindow = max_input_tokens (the LiteLLM field is the total window);
-        // the derived maxInputTokens already subtracts the output reserve.
-        assert.strictEqual(info.maxContextWindowTokens, 200000);
-        assert.strictEqual(model.maxInputTokens, 168000);
+        assert.strictEqual(info.maxContextWindowTokens, 262144);
+        assert.strictEqual(model.maxInputTokens, 229376);
+        assert.strictEqual(model.maxOutputTokens, 32768);
     });
 
     test("declares Responses apiType when the host grants the languageModelCapabilities proposal", async () => {

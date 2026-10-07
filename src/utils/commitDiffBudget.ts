@@ -1,6 +1,7 @@
 import type { LiteLLMModelInfo } from "../types";
 import { countTokens } from "../adapters/tokenUtils";
 import { deriveCapabilitiesFromModelInfo } from "./modelCapabilities";
+import { getRequestInputTokenBudget } from "../adapters/requestTokenBudget";
 
 export interface DiffBreadth {
     files: number;
@@ -59,12 +60,18 @@ export function computeDiffBudget(input: DiffBudgetInput): number {
         (total, prompt) => total + countTokens(prompt, input.modelId, input.modelInfo),
         0
     );
-    return Math.max(
-        0,
-        Math.floor((input.maxInputTokens - input.outputReserve - staticTokens) * DIFF_BUDGET_SAFETY_RATIO)
+    // This is early request preparation, not discovery/display. The command
+    // sends outputReserve as its actual output cap; independent input is not
+    // reduced again, while an explicit combined window still constrains it.
+    const inputBudget = getRequestInputTokenBudget(
+        { maxInputTokens: input.maxInputTokens },
+        input.modelInfo,
+        input.outputReserve
     );
+    return Math.max(0, Math.floor((inputBudget - staticTokens) * DIFF_BUDGET_SAFETY_RATIO));
 }
 
+/** Compatibility name: returns the selected model's input maximum, not a total window. */
 export function resolveCommitContextWindow(
     reportedMaxInputTokens: number | undefined,
     modelId: string,

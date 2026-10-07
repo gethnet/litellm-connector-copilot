@@ -11,6 +11,7 @@ import {
     calculateAvailableContext,
     getStaticPromptTokenCount,
     getReservedOutputTokens,
+    getTotalTokenLimit,
     isContextOverflowError,
 } from "../tokenUtils";
 import type { LiteLLMModelInfo, OpenAIFunctionToolDef } from "../../types";
@@ -293,12 +294,35 @@ suite("TokenUtils Unit Tests", () => {
         );
     });
 
-    test("calculateAvailableContext computes correctly with buffer", () => {
-        // Mock getStaticPromptTokenCount or use values from selectTokenizer (default)
-        const available = calculateAvailableContext(1000, 200, ["static"], "m");
-        // "static" is 6 chars -> 2 tokens. Total static: 2.
-        // 1000 - 200 - 2 = 798. Buffer 0.05 -> 798 * 0.95 = 758.1 -> 758.
-        assert.strictEqual(available, 758);
+    test("calculateAvailableContext treats maxInput as independent input", () => {
+        assert.strictEqual(calculateAvailableContext(1000, 200, ["static"], "m"), 948);
+        assert.strictEqual(calculateAvailableContext(1000, 200, ["static"], "m", { context_window_tokens: 1000 }), 758);
+    });
+
+    test("total window selects metadata and never sums independent maxima", () => {
+        const model = {
+            id: "m",
+            maxInputTokens: 229376,
+            maxOutputTokens: 32768,
+        } as vscode.LanguageModelChatInformation;
+        assert.strictEqual(getTotalTokenLimit(model), 229376);
+        assert.strictEqual(
+            getTotalTokenLimit(model, { max_input_tokens: 229376, context_window_tokens: 262144, max_tokens: 999999 }),
+            262144
+        );
+        assert.strictEqual(getTotalTokenLimit(model, { max_input_tokens: 229376 }), 229376);
+        assert.strictEqual(
+            getTotalTokenLimit(model, { max_input_tokens: 200000, max_output_tokens: 8192, max_tokens: 8192 }),
+            200000
+        );
+        assert.strictEqual(getTotalTokenLimit(model, { max_tokens: 8192 }), 8192);
+        assert.strictEqual(
+            getReservedOutputTokens(model, 4096, {
+                estimatedInputTokens: 229000,
+                modelInfo: { max_input_tokens: 229376 },
+            }),
+            4096
+        );
     });
 
     test("getStaticPromptTokenCount uses cache", () => {
