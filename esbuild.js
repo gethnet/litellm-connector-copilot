@@ -40,7 +40,11 @@ const shared = {
     define: {
         "process.env.NODE_ENV": JSON.stringify(production ? "production" : "development"),
     },
-    external: ["vscode"],
+    // posthog-node lazily `import()`s @opentelemetry/api for an optional error-tracking
+    // feature we don't use; it's an optional peer dep we don't install, so esbuild must not
+    // try to resolve/bundle it (the dynamic import stays unresolved at runtime, which is fine
+    // since that code path is never invoked without the package present).
+    external: ["vscode", "@opentelemetry/api"],
     metafile: true,
 };
 

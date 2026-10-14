@@ -64,10 +64,6 @@ interface StreamRequestContext {
  * endpoint routing) is implemented in LiteLLMProviderBase.
  */
 export class LiteLLMChatProvider extends LiteLLMProviderBase implements LanguageModelChatProvider {
-    // Streaming state
-    private _streamingState: StreamingState = createInitialStreamingState();
-    private _tokenCapture?: StreamTokenCapture;
-
     constructor(secrets: vscode.SecretStorage, userAgent: string, effortFallbackCache?: EffortFallbackCache) {
         super(secrets, userAgent, effortFallbackCache);
     }
@@ -238,7 +234,6 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         progress: Progress<LanguageModelResponsePart>,
         token: CancellationToken
     ): Promise<void> {
-        this.resetStreamingState();
         const startTime = LiteLLMTelemetry.startTimer();
         const requestId = Math.random().toString(36).substring(7);
         this._reviewPromptService?.recordChatRequestStarted();
@@ -312,8 +307,10 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         // `StreamTokenCapture` uses the model id for `countTokens` heuristics
         // (tokenizer family lookup). The namespaced id breaks those heuristics,
         // so we hand it the raw model name instead.
-        this._tokenCapture = new StreamTokenCapture(this.getRawModelName(model.id), progress, modelInfo);
-        const tokenCapture = this._tokenCapture;
+        // Local, not an instance field: the provider is a singleton shared across concurrent
+        // chats, so storing this on `this` let one in-flight request's usage capture overwrite
+        // another's (issue: shared-state race across concurrent provideLanguageModelChatResponse calls).
+        const tokenCapture = new StreamTokenCapture(this.getRawModelName(model.id), progress, modelInfo);
         const trackingProgress = tokenCapture.progress;
 
         try {
@@ -547,23 +544,9 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
 
             // Flush usage data if no upstream usage was seen during streaming
             // This ensures usage is always reported to VS Code
-            const capture = this._tokenCapture;
-            if (capture) {
-                capture.flushUsage();
-            }
+            tokenCapture.flushUsage();
 
-            const snapshot = capture?.getSnapshot() ?? {
-                promptTokens: tokensIn ?? 0,
-                cachedTokens: 0,
-                cacheCreationInputTokens: 0,
-                systemPromptTokens: 0,
-                completionTokens: 0,
-                reasoningTokens: 0,
-                toolTokens: 0,
-                acceptedPredictionTokens: 0,
-                rejectedPredictionTokens: 0,
-                sawUpstreamUsage: false,
-            };
+            const snapshot = tokenCapture.getSnapshot();
             const tokensOut = Math.max(snapshot.completionTokens, snapshot.toolTokens);
             const tokensInForTelemetry = snapshot.promptTokens ?? tokensIn;
             const reasoningTokens = snapshot.reasoningTokens || undefined;
@@ -712,18 +695,6 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         }
     }
 
-    protected resetStreamingState(): void {
-        // Reset the streaming buffers (tool call state)
-        // but NOT _tokenCapture, which is needed for usage reporting after the stream ends
-        this._streamingState = createInitialStreamingState();
-    }
-
-    protected clearAllStreamingState(): void {
-        // Complete reset including token capture (used only when aborting/cancelling)
-        this._streamingState = createInitialStreamingState();
-        this._tokenCapture = undefined;
-    }
-
     /**
      * Processes an SSE streaming response from LiteLLM and emits VS Code response parts.
      *
@@ -736,6 +707,12 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         token: vscode.CancellationToken,
         requestContext?: StreamRequestContext
     ): Promise<void> {
+        // Local, not an instance field: the provider is a singleton shared across concurrent
+        // chats, so a shared `_streamingState` field let one in-flight request's tool-call
+        // buffers/dedup set be reset or mutated by a sibling request's stream loop, which could
+        // drop a real tool call as a false "duplicate" of another request's identical call id.
+        const state: StreamingState = createInitialStreamingState();
+
         Logger.info(`[processStreamingResponse] Starting stream processing`);
         StructuredLogger.info("stream.processing_start", {
             timestamp: new Date().toISOString(),
@@ -820,14 +797,8 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                 }
                 const json = jsonResult.value;
 
-                // Ensure streaming state is initialized (e.g. if processStreamingResponse is called directly in tests)
-                if (!this._streamingState) {
-                    Logger.trace(`[processStreamingResponse] Initializing streaming state on first event`);
-                    this.resetStreamingState();
-                }
-
                 Logger.trace(`[processStreamingResponse] Event #${eventCount}: Interpreting event`);
-                const parts = interpretStreamEvent(json, this._streamingState);
+                const parts = interpretStreamEvent(json, state);
                 Logger.trace(
                     `[processStreamingResponse] Event #${eventCount}: Got ${parts.length} parts, emitting to VS Code`
                 );
@@ -899,21 +870,19 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                     error.message.includes("stream ended") ||
                     error.message.includes("unexpected end"));
 
-            if (isStreamEndError && this._streamingState && eventCount > 0) {
+            if (isStreamEndError && eventCount > 0) {
                 Logger.info(
                     `[processStreamingResponse] Attempting recovery: flushing ${eventCount} buffered tool calls`
                 );
                 StructuredLogger.info("stream.recovery_attempt", {
                     reason: "stream_incomplete",
                     eventCount,
-                    hasBufferedCalls:
-                        this._streamingState.responseToolCallBuffers.size > 0 ||
-                        this._streamingState.toolCallBuffers.size > 0,
+                    hasBufferedCalls: state.responseToolCallBuffers.size > 0 || state.toolCallBuffers.size > 0,
                 });
 
                 try {
                     // Flush all pending buffers and emit them
-                    const recoveredParts = flushPendingBuffers(this._streamingState);
+                    const recoveredParts = flushPendingBuffers(state);
                     // recoveredParts includes at least the finish part, so check length > 1
                     if (recoveredParts.length > 1) {
                         // -1 because last part is finish
@@ -965,13 +934,6 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                     endpoint: requestContext?.endpoint,
                 }
             );
-            Logger.debug(`[processStreamingResponse] Clearing streaming state (eventCount=${eventCount})`);
-            StructuredLogger.debug("stream.state_cleared", {
-                eventCount,
-            });
-            // Always reset streaming state on stream completion (success or error)
-            // to prevent stale buffers from corrupting subsequent requests
-            this.resetStreamingState();
         }
     }
 

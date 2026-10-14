@@ -620,27 +620,16 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         assert.deepStrictEqual(decoded, ['{"choices":[{"delta":{"content":"Hello"}}]}']);
 
         // Exercise the streaming pipeline directly (deterministic unit test).
-        // We MUST reset the streaming state so that the internal _streamingState is initialized.
+        // `processStreamingResponse` now creates its own request-local streaming state, so no
+        // setup is needed here beyond accessing the protected method for testing.
         const providerAsChat = provider as LiteLLMChatProvider;
-        // Accessing protected members for testing
         const providerTest = providerAsChat as unknown as {
-            resetStreamingState: () => void;
-            _streamingState: unknown;
             processStreamingResponse: (
                 stream: AsyncIterable<string>,
                 progress: vscode.Progress<vscode.LanguageModelResponsePart>,
                 token: vscode.CancellationToken
             ) => Promise<void>;
         };
-
-        if (typeof providerTest.resetStreamingState === "function") {
-            providerTest.resetStreamingState();
-        } else if (providerTest._streamingState === undefined) {
-            // Fallback for older versions or if the method is truly private and not exposed via any
-            const { createInitialStreamingState } =
-                await import("../../adapters/streaming/liteLLMStreamInterpreter.js");
-            (providerTest as { _streamingState: unknown })._streamingState = createInitialStreamingState();
-        }
 
         await providerTest.processStreamingResponse(
             makeStream() as unknown as AsyncIterable<string>,
@@ -707,14 +696,12 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         const progress = { report: (part: vscode.LanguageModelResponsePart) => parts.push(part) };
 
         const providerTest = provider as unknown as {
-            resetStreamingState: () => void;
             processStreamingResponse: (
                 stream: ReadableStream<Uint8Array>,
                 progress: vscode.Progress<vscode.LanguageModelResponsePart>,
                 token: vscode.CancellationToken
             ) => Promise<void>;
         };
-        providerTest.resetStreamingState();
 
         const started = Date.now();
         await providerTest.processStreamingResponse(makeStream(), progress, tokenSource.token);
@@ -1383,6 +1370,133 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         );
     });
 
+    test("concurrent provideLanguageModelChatResponse calls on one provider instance do not share tool-call state", async () => {
+        // Regression test for the shared-singleton race: `_streamingState`/`_tokenCapture` used to
+        // be instance fields reset at the top of `provideLanguageModelChatResponse`, so two
+        // concurrent requests on the same provider instance would stomp on each other's buffers.
+        // Both streams below emit a tool call with the SAME id ("call_1") — the exact collision
+        // shape that got one call's tool call dropped as a "duplicate" of the other's.
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const providerInternals = provider as unknown as {
+            _configManager: {
+                getConfig: () => Promise<{ url: string }>;
+                convertProviderConfiguration: (
+                    groupName: string,
+                    configuration: Record<string, unknown>
+                ) => { backendName: string; baseUrl: string; apiKey: string } | undefined;
+            };
+            _registry: {
+                setModelsForBackend: (
+                    baseUrl: string,
+                    apiKey: string,
+                    routingIdentity: string,
+                    models: vscode.LanguageModelChatInformation[]
+                ) => void;
+            };
+            sendRequestWithRetry: (typeof LiteLLMChatProvider.prototype)["sendRequestWithRetry"];
+        };
+
+        sandbox.stub(providerInternals._configManager, "getConfig").resolves({ url: "http://localhost:4000" });
+
+        const modelA: vscode.LanguageModelChatInformation = {
+            id: "concurrent-a",
+            name: "concurrent-a",
+            tooltip: "",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 1000,
+            maxOutputTokens: 1000,
+            capabilities: { toolCalling: true, imageInput: false },
+        };
+        const modelB: vscode.LanguageModelChatInformation = { ...modelA, id: "concurrent-b", name: "concurrent-b" };
+
+        providerInternals._registry.setModelsForBackend("http://localhost:4000", "test-api-key", "localhost:4000", [
+            modelA,
+            modelB,
+        ]);
+        sandbox.stub(providerInternals._configManager, "convertProviderConfiguration").returns({
+            backendName: "localhost:4000",
+            baseUrl: "http://localhost:4000",
+            apiKey: "test-api-key",
+            client: {} as never,
+        } as never);
+
+        const encoder = new TextEncoder();
+        const makeToolCallStream = (toolName: string) =>
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(
+                        encoder.encode(
+                            `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"${toolName}","arguments":"{}"}}]}}]}\n\n`
+                        )
+                    );
+                    controller.enqueue(encoder.encode('data: {"choices":[{"finish_reason":"tool_calls"}]}\n\n'));
+                    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                    controller.close();
+                },
+            });
+
+        sandbox.stub(providerInternals, "sendRequestWithRetry").callsFake(async (_request, _messages, model) => {
+            return model.id === "concurrent-a" ? makeToolCallStream("tool_from_a") : makeToolCallStream("tool_from_b");
+        });
+
+        const buildMessages = (): vscode.LanguageModelChatRequestMessage[] => [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                name: undefined,
+                content: [new vscode.LanguageModelTextPart("hi")],
+            },
+        ];
+        const buildOptions = (): vscode.ProvideLanguageModelChatResponseOptions =>
+            ({
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+                configuration: { baseUrl: "http://localhost:4000", apiKey: "test-api-key" } as unknown as Record<
+                    string,
+                    unknown
+                >,
+            }) as unknown as vscode.ProvideLanguageModelChatResponseOptions;
+
+        const partsA: vscode.LanguageModelResponsePart[] = [];
+        const partsB: vscode.LanguageModelResponsePart[] = [];
+
+        // Fired without awaiting either individually: both calls run concurrently on the SAME
+        // provider instance, which is what reproduces the shared-state corruption on unfixed code.
+        await Promise.all([
+            provider.provideLanguageModelChatResponse(
+                modelA,
+                buildMessages(),
+                buildOptions(),
+                { report: (part) => partsA.push(part) },
+                new vscode.CancellationTokenSource().token
+            ),
+            provider.provideLanguageModelChatResponse(
+                modelB,
+                buildMessages(),
+                buildOptions(),
+                { report: (part) => partsB.push(part) },
+                new vscode.CancellationTokenSource().token
+            ),
+        ]);
+
+        const toolCallPartsFrom = (parts: vscode.LanguageModelResponsePart[]) =>
+            parts.filter(
+                (p): p is vscode.LanguageModelToolCallPart =>
+                    p instanceof vscode.LanguageModelToolCallPart ||
+                    typeof (p as unknown as Record<string, unknown>)?.name === "string"
+            );
+
+        const toolCallsA = toolCallPartsFrom(partsA);
+        const toolCallsB = toolCallPartsFrom(partsB);
+
+        assert.strictEqual(toolCallsA.length, 1, "Call A's tool call must not be dropped as a duplicate of call B's");
+        assert.strictEqual(toolCallsB.length, 1, "Call B's tool call must not be dropped as a duplicate of call A's");
+        assert.strictEqual(toolCallsA[0].name, "tool_from_a");
+        assert.strictEqual(toolCallsB[0].name, "tool_from_b");
+    });
+
     test("surfaces a truncated /responses terminal as a StreamAbnormalTerminationError", async () => {
         // The 2026-09-25 capture shape: bridge sends response.completed with
         // status "incomplete" after streaming only reasoning. Without the
@@ -1412,14 +1526,12 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
             });
 
         const providerTest = provider as unknown as {
-            resetStreamingState: () => void;
             processStreamingResponse: (
                 stream: unknown,
                 progress: vscode.Progress<vscode.LanguageModelResponsePart>,
                 token: vscode.CancellationToken
             ) => Promise<void>;
         };
-        providerTest.resetStreamingState();
 
         const parts: vscode.LanguageModelResponsePart[] = [];
         await assert.rejects(
@@ -1467,14 +1579,12 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
             });
 
         const providerTest = provider as unknown as {
-            resetStreamingState: () => void;
             processStreamingResponse: (
                 stream: unknown,
                 progress: vscode.Progress<vscode.LanguageModelResponsePart>,
                 token: vscode.CancellationToken
             ) => Promise<void>;
         };
-        providerTest.resetStreamingState();
 
         const parts: vscode.LanguageModelResponsePart[] = [];
         await providerTest.processStreamingResponse(
@@ -1512,14 +1622,12 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
             });
 
         const providerTest = provider as unknown as {
-            resetStreamingState: () => void;
             processStreamingResponse: (
                 stream: unknown,
                 progress: vscode.Progress<vscode.LanguageModelResponsePart>,
                 token: vscode.CancellationToken
             ) => Promise<void>;
         };
-        providerTest.resetStreamingState();
 
         // Must complete without throwing when the escape hatch is on.
         await providerTest.processStreamingResponse(
