@@ -10,13 +10,13 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.5.14
+## 🆕 What's New in 2.5.15
 
-> Version 2.5.14 preserves LiteLLM's independent input and output limits in model metadata, preventing model discovery and the picker from incorrectly subtracting the output limit from the input maximum.
+> Version 2.5.15 fixes corrupted tool calls when multiple chats run at the same time, and ships packaging cleanup for local builds.
 
-- 📏 **Preserve independent input/output limits** — The model picker now reports LiteLLM's input and output maxima without deriving one from the other. An explicit combined context window is honored when provided, while local request preparation still applies safety margins and the requested output cap before sending. Commit diff shaping uses the prepared output cap without reserving it twice.
+- 🔀 **Fix concurrent chat request corruption** — The chat provider is a singleton, but its streaming parse buffers and token accounting were shared instance fields that concurrent requests reset and overwrote mid-stream, intermittently dropping a valid tool call and surfacing it as `empty_response (reason: tool_calls)`. Both are now request-local, so in-flight chats can no longer interfere with each other. Bug report **and** fix by [@kud-csi](https://github.com/kud-csi) — thank you! 🙏
 
-> ℹ️ **2.5.13 release prep — backfilled release notes**: the published code shipped on `2.5.13` (the same code tree previously tagged `rel/v2.5.12`). `rel/v2.5.12` was left intact for forensic record but its draft was never promoted to Marketplace/Open VSX; the marketplace listing, GitHub Release page, and in-repo `CHANGELOG.md` are otherwise identical between 2.5.12 and 2.5.13. (`CHANGELOG.md`)
+> ℹ️ **2.5.14 unchanged from its release notes** — no backfill or corrections this cycle.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 

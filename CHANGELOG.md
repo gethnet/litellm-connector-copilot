@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.15] - 2026-10-14
+
+### 🐛 Fixes
+
+* **🔀 Fix shared streaming state corrupting concurrent chat requests (#162)**: `LiteLLMChatProvider` is a singleton registered once with VS Code, but it kept per-stream parsing state (`_streamingState`) and token accounting (`_tokenCapture`) as **instance fields**, reset at the top of each call. Concurrent chats on the same provider instance could interleave and clobber each other's buffered tool-call state, intermittently dropping a valid tool call and surfacing it as `empty_response (reason: tool_calls)`. Both are now request-local: `processStreamingResponse` creates its own streaming state per invocation, `provideLanguageModelChatResponse` builds a local `StreamTokenCapture`, and the now-redundant `resetStreamingState()`/`clearAllStreamingState()` reset hooks are removed — there is nothing left to reset once state cannot leak between calls. A deterministic regression test reproduces the collision (two concurrent requests streaming tool calls that share the same id but carry different function names) and fails on the unfixed code. Bug report and fix by [@kud-csi](https://github.com/kud-csi). (`src/providers/liteLLMChatProvider.ts`, `src/providers/test/chatProvider.test.ts`)
+
+### 🧹 Chores
+
+* **🛠️ Externalize `@opentelemetry/api` in the esbuild bundle config**: `posthog-node` lazily `import()`s `@opentelemetry/api` for an optional error-tracking feature the extension does not use, and the package is not installed — so local packaging (`vsce package`) failed trying to resolve it. The bundler now externalizes it alongside `vscode`; the dynamic import stays unresolved at runtime, which is safe because that code path is never invoked without the package present. (`esbuild.js`)
+* **🚀 Promote release version**: `2.5.14` → `2.5.15`. (`package.json`)
+
 ## [2.5.14] - 2026-10-07
 
 ### 🐛 Fixes
