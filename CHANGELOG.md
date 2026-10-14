@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.16] - 2026-10-14
+
+### 🛠️ Fixes
+
+* **🏪 Restore Marketplace publishing — shrink the extension icon under the gallery's 1 MB cap**: The `rel/v2.5.15` Marketplace publish failed 3× (with 60 s backoff) on `The provided icon image exceeds the maximum allowed file size of 1024 KB` — the first release rejected by a server-side enforcement change (the identical 1.5 MB `assets/logo.png`, unchanged since the initial commit, had published successfully through 2.5.14 the week before). Open VSX accepted 2.5.15, so the registries were skewed: 2.5.15 remains permanently unavailable on the Marketplace while 2.5.16 ships there with a re-encoded icon. The logo is quantized to a 256-color palette at the same 1024×1024 resolution — 1.5 MB → 104 KB with no visible change. Releasing as a new version rather than re-tagging 2.5.15, whose VSIX is already immutable on Open VSX and whose tag pipeline has already run. (`assets/logo.png`)
+
+### 🧹 Chores
+
+* **🚀 Promote release version**: `2.5.15` → `2.5.16`. (`package.json`)
+
 ## [2.5.15] - 2026-10-14
 
 ### 🐛 Fixes

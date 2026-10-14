@@ -10,13 +10,13 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.5.15
+## 🆕 What's New in 2.5.16
 
-> Version 2.5.15 fixes corrupted tool calls when multiple chats run at the same time, and ships packaging cleanup for local builds.
+> Version 2.5.16 restores VS Code Marketplace publishing (2.5.15 was rejected by a new Marketplace icon size limit; Open VSX was unaffected and already has 2.5.15).
 
-- 🔀 **Fix concurrent chat request corruption** — The chat provider is a singleton, but its streaming parse buffers and token accounting were shared instance fields that concurrent requests reset and overwrote mid-stream, intermittently dropping a valid tool call and surfacing it as `empty_response (reason: tool_calls)`. Both are now request-local, so in-flight chats can no longer interfere with each other. Bug report **and** fix by [@kud-csi](https://github.com/kud-csi) — thank you! 🙏
+- 🏪 **Marketplace publish fixed** — The extension icon is re-encoded from 1.5 MB to 104 KB (same 1024×1024 image, no visible change), clearing the Marketplace gallery's new 1 MB icon cap that rejected 2.5.15. Marketplace users can now update from 2.5.14 directly to 2.5.16.
 
-> ℹ️ **2.5.14 unchanged from its release notes** — no backfill or corrections this cycle.
+> ℹ️ **2.5.15 never shipped on the Marketplace** — Open VSX has 2.5.15; the Marketplace skips it and jumps 2.5.14 → 2.5.16. Users on either registry get the 2.5.15 concurrent-chat fix.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
