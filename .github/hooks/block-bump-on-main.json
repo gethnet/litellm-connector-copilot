@@ -3,7 +3,7 @@
         "PreToolUse": [
             {
                 "type": "command",
-                "command": "./scripts/block-bump-on-main.sh",
+                "command": "node ./scripts/hooks/block-bump-on-main.mjs",
                 "timeout": 15
             }
         ]

@@ -3,14 +3,14 @@
    /* "Stop": [
       {
         "type": "command",
-        "command": "./scripts/post-session-validation.sh",
+        "command": "node ./scripts/hooks/post-session-validation.mjs",
         "timeout": 300
       }
     ],
     "SubagentStop": [
       {
         "type": "command",
-        "command": "./scripts/post-session-validation.sh",
+        "command": "node ./scripts/hooks/post-session-validation.mjs",
         "timeout": 300
       }
     ] */
