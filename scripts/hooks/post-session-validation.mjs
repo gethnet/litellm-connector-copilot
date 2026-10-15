@@ -17,14 +17,14 @@ const CHECKS = [
 ];
 
 function runCheck({ name, cmd }) {
-	console.error(`Running ${name}...`);
+	process.stderr.write(`Running ${name}...\n`);
 	// shell: true resolves `npm` to npm.cmd on Windows.
 	const result = spawnSync(cmd, { shell: true, encoding: "utf8", windowsHide: true });
 	if (result.status === 0) {
-		console.error(`PASS ${name}`);
+		process.stderr.write(`PASS ${name}\n`);
 		return true;
 	}
-	console.error(`FAIL ${name}:\n${result.stdout ?? ""}${result.stderr ?? ""}`);
+	process.stderr.write(`FAIL ${name}:\n${result.stdout ?? ""}${result.stderr ?? ""}\n`);
 	return false;
 }
 
