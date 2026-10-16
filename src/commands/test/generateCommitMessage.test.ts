@@ -414,6 +414,15 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
             assert.strictEqual(sendRequest.callCount, 1);
             assert.ok(errorStub.calledWith(sinon.match("provider fail")));
         });
+
+        test("reports a thrown non-Error value without retrying", async () => {
+            const sendRequest = sandbox.stub().callsFake(() => Promise.reject("plain string failure"));
+
+            const { errorStub } = await runWithSendRequest(sendRequest);
+
+            assert.strictEqual(sendRequest.callCount, 1);
+            assert.ok(errorStub.calledWith(sinon.match("plain string failure")));
+        });
     });
 
     test("commit request clamps its prepared output target to known raw output metadata", async () => {
