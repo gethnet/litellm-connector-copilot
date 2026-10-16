@@ -10,13 +10,14 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.5.16
+## 🆕 What's New in 2.5.17
 
-> Version 2.5.16 restores VS Code Marketplace publishing (2.5.15 was rejected by a new Marketplace icon size limit; Open VSX was unaffected and already has 2.5.15).
+> Version 2.5.17 makes token budgets fit real backend tokenizers: local estimates now self-calibrate from the server's own usage counts, and commit generation verifies the exact diff size with LiteLLM before sending.
 
-- 🏪 **Marketplace publish fixed** — The extension icon is re-encoded from 1.5 MB to 104 KB (same 1024×1024 image, no visible change), clearing the Marketplace gallery's new 1 MB icon cap that rejected 2.5.15. Marketplace users can now update from 2.5.14 directly to 2.5.16.
+- 🎯 **Calibrated token counting** — The heuristic estimator undercounts dense code and diffs on some backends (~1.37× on vLLM), silently overflowing context windows the picker said were fine. Every request's `usage.prompt_tokens` now teaches a per-model correction factor (clamped ×1.0–×2.0 — estimates only inflate, never shrink), applied everywhere tokens are counted: chat trimming, commit diff budgeting, `provideTokenCount`, and telemetry. It converges within a few requests and adds no bundled tokenizer, so the web build stays lean.
+- 🛠️ **Commit overflow retry** — Generating a commit message from a huge staged diff no longer hard-fails with a context-window 400: the command retries up to 2 times on overflow, shrinking the diff ×0.75 per attempt. On top of that, the compacted diff is now verified against LiteLLM's exact token counter before sending and recompacted once if the server says it's still too big.
 
-> ℹ️ **2.5.15 never shipped on the Marketplace** — Open VSX has 2.5.15; the Marketplace skips it and jumps 2.5.14 → 2.5.16. Users on either registry get the 2.5.15 concurrent-chat fix.
+> ℹ️ **Both defenses stack** — calibration is the first line (budgets fit on the first request); the remote recount and the retry loop are the backstop. Bug report and original fix by [@kud-csi](https://github.com/kud-csi) — thank you! 🙏
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
