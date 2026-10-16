@@ -320,6 +320,85 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
         assert.strictEqual(telemetry.captureTrimExecuted.firstCall.args[1], "commit-message");
     });
 
+    suite("context overflow retry", () => {
+        const OVERFLOW_MESSAGE = "Context window exceeded. The conversation is too long for this model.";
+
+        function sentDiffAt(sendRequest: sinon.SinonStub, call: number): string {
+            const messages = sendRequest.getCall(call).args[0] as { content: { value: string }[] }[];
+            const body = messages[1].content[0].value;
+            return body.substring(body.indexOf(DIFF_PREAMBLE) + DIFF_PREAMBLE.length);
+        }
+
+        /** Runs the command against a large diff with the given sendRequest stub. */
+        async function runWithSendRequest(
+            sendRequest: sinon.SinonStub
+        ): Promise<{ inputBox: { value: string }; errorStub: sinon.SinonStub }> {
+            const registerStub = sandbox.stub(vscode.commands, "registerCommand");
+            registerGenerateCommitMessageCommand(mockProvider as unknown as LiteLLMCommitMessageProvider);
+            const handler = registerStub.firstCall.args[1] as () => Promise<void>;
+            mockProvider.getConfigManager.returns({
+                getConfig: async () => ({ commitModelIdOverride: "test-model" }),
+            } as unknown as ConfigManager);
+            mockProvider.getModelInfo.returns(undefined);
+            sandbox.stub(GitUtils, "getStagedDiff").resolves(buildLargeDiff(3, 350));
+            const inputBox = { value: "", placeholder: "", enabled: true };
+            sandbox.stub(GitUtils, "getGitAPI").resolves({ repositories: [{ inputBox }] } as unknown as never);
+            (vscode.lm.selectChatModels as unknown as sinon.SinonStub).resolves([
+                { maxInputTokens: 8000, sendRequest },
+            ]);
+            sandbox.stub(vscode.window, "showWarningMessage");
+            const errorStub = sandbox.stub(vscode.window, "showErrorMessage");
+            sandbox
+                .stub(vscode.window, "withProgress")
+                .callsFake(async (_options, task) =>
+                    task({ report: () => {} }, new vscode.CancellationTokenSource().token)
+                );
+            await handler();
+            return { inputBox, errorStub };
+        }
+
+        function streamOf(text: string): { stream: AsyncIterable<vscode.LanguageModelTextPart> } {
+            return {
+                stream: (async function* () {
+                    yield new vscode.LanguageModelTextPart(text);
+                })(),
+            };
+        }
+
+        test("resends a smaller diff after a context overflow", async () => {
+            const sendRequest = sandbox.stub();
+            sendRequest.onFirstCall().rejects(new Error(OVERFLOW_MESSAGE));
+            sendRequest.onSecondCall().resolves(streamOf("fix: shrink diff"));
+
+            const { inputBox, errorStub } = await runWithSendRequest(sendRequest);
+
+            assert.strictEqual(sendRequest.callCount, 2);
+            assert.ok(sentDiffAt(sendRequest, 1).length < sentDiffAt(sendRequest, 0).length);
+            assert.strictEqual(inputBox.value, "fix: shrink diff");
+            assert.ok(errorStub.notCalled);
+        });
+
+        test("gives up after two retries and reports the overflow", async () => {
+            const sendRequest = sandbox.stub().rejects(new Error(OVERFLOW_MESSAGE));
+
+            const { errorStub } = await runWithSendRequest(sendRequest);
+
+            assert.strictEqual(sendRequest.callCount, 3);
+            assert.ok(sentDiffAt(sendRequest, 2).length < sentDiffAt(sendRequest, 1).length);
+            assert.strictEqual(errorStub.callCount, 1);
+            assert.ok(errorStub.calledWith(sinon.match("Context window exceeded")));
+        });
+
+        test("does not retry errors that are not context overflows", async () => {
+            const sendRequest = sandbox.stub().rejects(new Error("provider fail"));
+
+            const { errorStub } = await runWithSendRequest(sendRequest);
+
+            assert.strictEqual(sendRequest.callCount, 1);
+            assert.ok(errorStub.calledWith(sinon.match("provider fail")));
+        });
+    });
+
     test("commit request clamps its prepared output target to known raw output metadata", async () => {
         const register = sandbox.stub(vscode.commands, "registerCommand");
         registerGenerateCommitMessageCommand(mockProvider);

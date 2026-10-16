@@ -19,6 +19,16 @@ import type { TelemetryService } from "../telemetry/telemetryService";
 
 const COMMIT_CALLER = "commit-message";
 const DIFF_PREAMBLE = "Here is the diff:\n\n";
+// Servers report a capped token count on overflow, so shrink the diff by a fixed factor instead of calibrating.
+const MAX_OVERFLOW_RETRIES = 2;
+const OVERFLOW_SHRINK_FACTOR = 0.75;
+
+function isOverflowFailure(err: unknown): boolean {
+    return (
+        err instanceof Error &&
+        /context window exceeded|maximum context length|context length exceeded/i.test(err.message)
+    );
+}
 
 async function selectCommitModel(modelId: string): Promise<vscode.LanguageModelChat | undefined> {
     const models = await vscode.lm.selectChatModels({ id: modelId });
@@ -144,7 +154,7 @@ export function registerGenerateCommitMessageCommand(
                 computeOutputReserve(breadth, config.commitOutputTokenReserve),
                 modelInfo
             );
-            const budget = computeDiffBudget({
+            let budget = computeDiffBudget({
                 maxInputTokens,
                 outputReserve,
                 staticPrompts: [systemPrompt, messagePrompt, DIFF_PREAMBLE],
@@ -229,27 +239,50 @@ export function registerGenerateCommitMessageCommand(
                         let accumulatedText = "";
                         let generatedMessage: string | undefined;
 
-                        try {
-                            generatedMessage = await tryGenerateViaVSCodeModelRequest(
-                                selectedModel,
-                                processedDiff,
-                                systemPrompt,
-                                messagePrompt,
-                                outputReserve,
-                                token,
-                                (chunk) => {
-                                    accumulatedText += chunk;
-                                    const filtered = accumulatedText.replace(/^```(?:\w+)?\s*/, "").replace(/```$/, "");
-                                    inputBox.value = filtered;
+                        for (let retries = 0; ; retries++) {
+                            try {
+                                generatedMessage = await tryGenerateViaVSCodeModelRequest(
+                                    selectedModel,
+                                    processedDiff,
+                                    systemPrompt,
+                                    messagePrompt,
+                                    outputReserve,
+                                    token,
+                                    (chunk) => {
+                                        accumulatedText += chunk;
+                                        const filtered = accumulatedText
+                                            .replace(/^```(?:\w+)?\s*/, "")
+                                            .replace(/```$/, "");
+                                        inputBox.value = filtered;
+                                    }
+                                );
+                                break;
+                            } catch (vscodeRouteErr) {
+                                if (
+                                    isOverflowFailure(vscodeRouteErr) &&
+                                    retries < MAX_OVERFLOW_RETRIES &&
+                                    !token.isCancellationRequested
+                                ) {
+                                    budget = Math.floor(budget * OVERFLOW_SHRINK_FACTOR);
+                                    processedDiff = GitUtils.compactDiff(diff, budget, modelId, modelInfo);
+                                    accumulatedText = "";
+                                    inputBox.value = "";
+                                    StructuredLogger.warn(
+                                        "commit.diff_overflow_retry",
+                                        { attempt: retries + 1, budget },
+                                        { model: modelId, caller: COMMIT_CALLER }
+                                    );
+                                    continue;
                                 }
-                            );
-                        } catch (vscodeRouteErr) {
-                            Logger.error("VS Code model request route failed", vscodeRouteErr);
-                            vscode.window.showErrorMessage(
-                                "Failed to generate commit message: " +
-                                    (vscodeRouteErr instanceof Error ? vscodeRouteErr.message : String(vscodeRouteErr))
-                            );
-                            return;
+                                Logger.error("VS Code model request route failed", vscodeRouteErr);
+                                vscode.window.showErrorMessage(
+                                    "Failed to generate commit message: " +
+                                        (vscodeRouteErr instanceof Error
+                                            ? vscodeRouteErr.message
+                                            : String(vscodeRouteErr))
+                                );
+                                return;
+                            }
                         }
 
                         if (generatedMessage === undefined) {
