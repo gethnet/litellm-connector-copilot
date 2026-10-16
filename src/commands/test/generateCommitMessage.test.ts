@@ -10,6 +10,7 @@ import type { TelemetryService } from "../../telemetry/telemetryService";
 import { countTokens } from "../../adapters/tokenUtils";
 import { computeDiffBudget, computeOutputReserve, countDiffBreadth } from "../../utils/commitDiffBudget";
 import { COMMIT_MESSAGE_PROMPT, COMMIT_SYSTEM_PROMPT } from "../../utils/prompts";
+import { StructuredLogger } from "../../observability/structuredLogger";
 
 const DIFF_PREAMBLE = "Here is the diff:\n\n";
 
@@ -422,6 +423,87 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
 
             assert.strictEqual(sendRequest.callCount, 1);
             assert.ok(errorStub.calledWith(sinon.match("plain string failure")));
+        });
+    });
+
+    suite("remote diff recount", () => {
+        function streamOf(text: string): { stream: AsyncIterable<vscode.LanguageModelTextPart> } {
+            return {
+                stream: (async function* () {
+                    yield new vscode.LanguageModelTextPart(text);
+                })(),
+            };
+        }
+
+        /** Runs the command against a large diff with the given remoteCountTokens behavior. */
+        async function runWithRemoteCount(
+            remoteBehavior: (modelId: string, text: string) => Promise<number | undefined>
+        ): Promise<{
+            inputBox: { value: string };
+            sendRequest: sinon.SinonStub;
+            compactDiff: sinon.SinonStub;
+        }> {
+            const sendRequest = sandbox.stub().resolves(streamOf("fix: recount diff"));
+            // callThrough keeps the real compaction behavior while tracking invocations.
+            const compactDiff = sandbox.stub(GitUtils, "compactDiff").callThrough();
+            const registerStub = sandbox.stub(vscode.commands, "registerCommand");
+            registerGenerateCommitMessageCommand(mockProvider as unknown as LiteLLMCommitMessageProvider);
+            const handler = registerStub.firstCall.args[1] as () => Promise<void>;
+            mockProvider.getConfigManager.returns({
+                getConfig: async () => ({ commitModelIdOverride: "test-model" }),
+            } as unknown as ConfigManager);
+            mockProvider.getModelInfo.returns(undefined);
+            mockProvider.remoteCountTokens.callsFake(remoteBehavior);
+            sandbox.stub(GitUtils, "getStagedDiff").resolves(buildLargeDiff(3, 350));
+            const inputBox = { value: "", placeholder: "", enabled: true };
+            sandbox.stub(GitUtils, "getGitAPI").resolves({ repositories: [{ inputBox }] } as unknown as never);
+            (vscode.lm.selectChatModels as unknown as sinon.SinonStub).resolves([
+                { maxInputTokens: 8000, sendRequest },
+            ]);
+            sandbox.stub(vscode.window, "showWarningMessage");
+            sandbox
+                .stub(vscode.window, "withProgress")
+                .callsFake(async (_options, task) =>
+                    task({ report: () => {} }, new vscode.CancellationTokenSource().token)
+                );
+            await handler();
+            return { inputBox, sendRequest, compactDiff };
+        }
+
+        test("remote recount is skipped when remoteCountTokens returns undefined", async () => {
+            const { inputBox, sendRequest, compactDiff } = await runWithRemoteCount(async () => undefined);
+
+            // Blocked route / timeout → heuristic path: exactly the one initial
+            // compaction, a single send, and successful generation.
+            assert.strictEqual(compactDiff.callCount, 1);
+            assert.strictEqual(sendRequest.callCount, 1);
+            assert.strictEqual(inputBox.value, "fix: recount diff");
+        });
+
+        test("remote recount shrinks the budget and recompacts when server count exceeds budget", async () => {
+            const recountWarns: unknown[][] = [];
+            const logWarn = sandbox.stub(StructuredLogger, "warn").callsFake((event: string, data: unknown) => {
+                recountWarns.push([event, data]);
+            });
+            try {
+                // Server says the compacted diff is 1.5× the local estimate —
+                // far over the budget the local count thought it fit.
+                const { inputBox, sendRequest, compactDiff } = await runWithRemoteCount(
+                    async (_modelId: string, text: string) => Math.ceil(countTokens(text, "test-model") * 1.5)
+                );
+
+                // compactDiff runs twice: initial compaction + one remote-triggered recompact.
+                assert.strictEqual(compactDiff.callCount, 2);
+                // The recompact passes a smaller budget than the initial compaction.
+                assert.ok(compactDiff.secondCall.args[1] < compactDiff.firstCall.args[1]);
+                assert.strictEqual(sendRequest.callCount, 1);
+                assert.strictEqual(inputBox.value, "fix: recount diff");
+                // The #166 recount warn is emitted exactly once.
+                const matched = recountWarns.filter(([event]) => event === "commit.diff_remote_recount");
+                assert.strictEqual(matched.length, 1);
+            } finally {
+                logWarn.restore();
+            }
         });
     });
 

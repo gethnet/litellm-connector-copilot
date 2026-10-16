@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { countTokens } from "../tokenUtils";
+import { recordCalibrationObservation } from "../tokenizers/tokenCalibration";
 import type {
     LiteLLMModelInfo,
     OpenAIUsageCompletionTokenDetails,
@@ -115,6 +116,15 @@ export class StreamTokenCapture {
 
     getSnapshot(): TokenSnapshot {
         const hasUpstream = this._sawUpstreamUsage && this._upstream !== undefined;
+
+        // Usage-feedback calibration (#166): compare the backend's authoritative
+        // prompt count against the calibrated local estimate that was used for
+        // this request. The calibration module's multiplicative update is
+        // self-correcting, so feeding it the calibrated estimate is correct.
+        if (hasUpstream && typeof this._upstream?.prompt_tokens === "number") {
+            recordCalibrationObservation(this._modelId, this._upstream.prompt_tokens, this._estimatedPromptTokens);
+        }
+
         const promptDetails: OpenAIUsagePromptTokenDetails | undefined = this._upstream?.prompt_tokens_details;
         const completionDetails: OpenAIUsageCompletionTokenDetails | undefined =
             this._upstream?.completion_tokens_details;

@@ -375,6 +375,46 @@ export abstract class LiteLLMProviderBase {
     }
 
     /**
+     * Best-effort EXACT token count via LiteLLM `/utils/token_counter` (#166).
+     *
+     * Resolves the backend from the registry (same fallback the response path
+     * uses when VS Code doesn't pass per-group config). Returns `undefined` on
+     * ANY failure — missing registry entry, blocked route, timeout — so callers
+     * always keep the calibrated heuristic as the fallback. Web-safe: plain fetch.
+     *
+     * @param modelId namespaced `<routing>/<raw>` model id
+     * @param text the exact text to count
+     * @param timeoutMs give up after this long (default 3000ms)
+     */
+    public async remoteCountTokens(modelId: string, text: string, timeoutMs = 3000): Promise<number | undefined> {
+        try {
+            const entry = this._registry.lookup(modelId);
+            if (!entry) {
+                return undefined;
+            }
+            const rawModelId = this.getRawModelName(modelId);
+            const cfg = await this._configManager.getConfig();
+            const client = new LiteLLMClient(
+                { url: entry.baseUrl, key: entry.apiKey, disableCaching: cfg.disableCaching },
+                this.userAgent
+            );
+            const cts = new vscode.CancellationTokenSource();
+            const timer = setTimeout(() => cts.cancel(), timeoutMs);
+            try {
+                const result = await client.countTokens({ model: rawModelId, prompt: text }, cts.token);
+                return typeof result?.token_count === "number" ? result.token_count : undefined;
+            } finally {
+                clearTimeout(timer);
+                cts.dispose();
+            }
+        } catch {
+            // Best-effort by contract: blocked route (/utils/token_counter not
+            // in allowed_routes), network failure, or timeout → heuristic fallback.
+            return undefined;
+        }
+    }
+
+    /**
      * Fetches the model list from the LiteLLM proxy for a specific group.
      *
      * Thin pass-through to the `BackendRegistry.discoverModels` ingress.

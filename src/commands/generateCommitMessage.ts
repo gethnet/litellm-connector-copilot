@@ -167,7 +167,26 @@ export function registerGenerateCommitMessageCommand(
             if (estimatedDiffTokens > budget) {
                 processedDiff = GitUtils.compactDiff(diff, budget, modelId, modelInfo);
             }
-            const processedTokens = countTokens(processedDiff, modelId, modelInfo);
+            let processedTokens = countTokens(processedDiff, modelId, modelInfo);
+
+            // Remote exact-count verification (#166): the heuristic undercounts
+            // dense diffs on some backend tokenizers (~1.37× observed, #164).
+            // Ask the proxy for the authoritative count of what we are about to
+            // send; on undercount, shrink by the measured ratio and recompact
+            // once. Best-effort — undefined (blocked route/timeout) keeps the
+            // heuristic path, and the #165 overflow retry remains the backstop.
+            const remoteTokens = await _provider.remoteCountTokens(modelId, processedDiff);
+            if (remoteTokens !== undefined && remoteTokens > budget && processedTokens > 0) {
+                const ratio = remoteTokens / processedTokens;
+                budget = Math.floor(budget / ratio);
+                processedDiff = GitUtils.compactDiff(diff, budget, modelId, modelInfo);
+                processedTokens = countTokens(processedDiff, modelId, modelInfo);
+                StructuredLogger.warn(
+                    "commit.diff_remote_recount",
+                    { remoteTokens, ratio: Number(ratio.toFixed(3)), budget },
+                    { model: modelId, caller: COMMIT_CALLER }
+                );
+            }
             const isTruncated = processedDiff !== diff;
 
             StructuredLogger.info(

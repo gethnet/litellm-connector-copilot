@@ -8,5 +8,3 @@ export interface Tokenizer {
     countTokens(text: string): TokenizationResult;
     countMessageTokens(message: LanguageModelChatRequestMessage): TokenizationResult;
 }
-
-export type TokenizationStrategy = "heuristic" | "tiktoken";

@@ -2,7 +2,8 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import * as sinon from "sinon";
 import { LiteLLMChatProvider } from "../";
-import type { ConfigManager } from "../../config/configManager";
+import { ConfigManager } from "../../config/configManager";
+import { LiteLLMClient } from "../../adapters/litellmClient";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../../types";
 import { createMockSecrets } from "../../test/utils/testMocks";
 import { EffortFallbackCache } from "../../utils/reasoningEffortFallback";
@@ -2063,6 +2064,78 @@ suite("LiteLLMProviderBase", () => {
             });
             // No assertion — the test verifies the path doesn't throw and returns a number.
             assert.ok(true);
+        });
+    });
+
+    suite("remoteCountTokens", () => {
+        const counterModel: vscode.LanguageModelChatInformation = {
+            id: "gpt-4",
+            name: "gpt-4",
+            tooltip: "",
+            family: "litellm",
+            version: "1.0.0",
+            maxInputTokens: 1000,
+            maxOutputTokens: 1000,
+            capabilities: { toolCalling: true, imageInput: false },
+        };
+
+        /** Seeds the provider's registry with a known namespaced id entry. */
+        function seedRegistry(provider: LiteLLMChatProvider): void {
+            const internals = provider as unknown as {
+                _registry: {
+                    setModelsForBackend: (
+                        baseUrl: string,
+                        apiKey: string,
+                        routingIdentity: string,
+                        models: vscode.LanguageModelChatInformation[]
+                    ) => void;
+                };
+            };
+            internals._registry.setModelsForBackend("https://conduit.example", "k", "group", [
+                { ...counterModel, id: "group/model", name: "model" },
+            ]);
+        }
+
+        test("remoteCountTokens returns undefined when the registry has no entry", async () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const result = await provider.remoteCountTokens("unknown/model", "some text");
+            assert.strictEqual(result, undefined);
+        });
+
+        test("remoteCountTokens returns the server count on success", async () => {
+            // The provider's ConfigManager is a real instance; stub its getConfig
+            // so the LiteLLMClient construction reads a known config shape.
+            const getConfigStub = sandbox.stub(ConfigManager.prototype, "getConfig").resolves({});
+            const counter = sandbox.stub(LiteLLMClient.prototype, "countTokens").resolves({ token_count: 4242 });
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            // Seed the provider's registry via the internal write seam (tests
+            // cast through unknown to a typed seam per the registry contract).
+            seedRegistry(provider);
+            try {
+                const result = await provider.remoteCountTokens("group/model", "text");
+                assert.strictEqual(result, 4242);
+                sinon.assert.calledOnce(counter);
+                assert.strictEqual(counter.firstCall.args[0].model, "model");
+            } finally {
+                counter.restore();
+                getConfigStub.restore();
+                provider["_registry"].dispose();
+            }
+        });
+
+        test("remoteCountTokens returns undefined when the client call throws", async () => {
+            const getConfigStub = sandbox.stub(ConfigManager.prototype, "getConfig").resolves({});
+            const counter = sandbox.stub(LiteLLMClient.prototype, "countTokens").rejects(new Error("blocked route"));
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            seedRegistry(provider);
+            try {
+                const result = await provider.remoteCountTokens("group/model", "text");
+                assert.strictEqual(result, undefined);
+            } finally {
+                counter.restore();
+                getConfigStub.restore();
+                provider["_registry"].dispose();
+            }
         });
     });
 

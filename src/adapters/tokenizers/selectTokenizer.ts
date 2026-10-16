@@ -2,20 +2,19 @@ import type { LiteLLMModelInfo } from "../../types";
 import { HeuristicTokenizer } from "./heuristicTokenizer";
 import type { Tokenizer } from "./types";
 
-export function selectTokenizer(modelId: string, modelInfo?: LiteLLMModelInfo): Tokenizer {
-    // OpenAI and compatible models (most LiteLLM proxies) use Tiktoken (cl100k_base)
-    const provider = modelInfo?.litellm_provider || "";
-    const isOpenAICompatible =
-        provider === "openai" ||
-        provider === "azure" ||
-        modelId.startsWith("gpt-") ||
-        modelId.startsWith("text-embedding-");
-
-    if (isOpenAICompatible) {
-        return new HeuristicTokenizer();
-    }
-
-    // For other providers (Anthropic, Google, etc.), we still use heuristic
-    // until we add their specific tokenizers.
+/**
+ * Tokenizer selection — currently heuristic-only, by design.
+ *
+ * History (#45/#47/#166): js-tiktoken shipped in v1.4.1 and was removed after
+ * it crashed the extension host; its ~22 MB BPE tables are also prohibitive
+ * for the web build (`dist/web/extension.js`). Accuracy is instead achieved by
+ * per-model usage-feedback calibration applied in `countTokens`
+ * (see `tokenCalibration.ts`) plus best-effort remote exact counts via
+ * LiteLLM `/utils/token_counter`. Do not reintroduce a bundled tokenizer.
+ *
+ * The signature keeps `modelId`/`modelInfo` so future per-family strategies
+ * can slot in without touching the many call sites.
+ */
+export function selectTokenizer(_modelId: string, _modelInfo?: LiteLLMModelInfo): Tokenizer {
     return new HeuristicTokenizer();
 }

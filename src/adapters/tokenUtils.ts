@@ -3,6 +3,7 @@ import type { LiteLLMModelInfo, OpenAIChatMessage } from "../types";
 import { isAnthropicModel } from "../utils/modelUtils";
 import { StructuredLogger } from "../observability/structuredLogger";
 import { selectTokenizer } from "./tokenizers/selectTokenizer";
+import { getCalibrationFactor } from "./tokenizers/tokenCalibration";
 import type { TelemetryService } from "../telemetry/telemetryService";
 import { getRequestInputTokenBudget } from "./requestTokenBudget";
 
@@ -100,6 +101,9 @@ const staticPromptTokenCache = new Map<string, number>();
 export function getStaticPromptTokenCount(prompt: string, modelId?: string, modelInfo?: LiteLLMModelInfo): number {
     const cacheKey = `${modelId || "default"}-${prompt.length}`;
     if (staticPromptTokenCache.has(cacheKey)) {
+        // NOTE(#166): cached counts embed the calibration factor at first
+        // computation. Static prompts are small (≪ the 5% trim buffer), so
+        // factor drift on cached entries is deliberately tolerated.
         return staticPromptTokenCache.get(cacheKey)!;
     }
     const count = countTokens(prompt, modelId, modelInfo);
@@ -139,17 +143,23 @@ export function countTokens(
     modelInfo?: LiteLLMModelInfo
 ): number {
     const tokenizer = selectTokenizer(modelId || "default", modelInfo);
+    // Per-model usage-feedback correction (#166): inflates the heuristic
+    // toward observed backend tokenizer behavior. 1.0 when uncalibrated,
+    // never below 1.0 (budgets only shrink — the safe direction).
+    const factor = getCalibrationFactor(modelId || "default");
+    const applyFactor = (tokens: number): number => Math.ceil(tokens * factor);
+
     if (typeof input === "string") {
-        return tokenizer.countTokens(input).tokens;
+        return applyFactor(tokenizer.countTokens(input).tokens);
     }
     if (Array.isArray(input)) {
         let total = 0;
         for (const m of input) {
             total += tokenizer.countMessageTokens(m).tokens;
         }
-        return total;
+        return applyFactor(total);
     }
-    return tokenizer.countMessageTokens(input as vscode.LanguageModelChatRequestMessage).tokens;
+    return applyFactor(tokenizer.countMessageTokens(input as vscode.LanguageModelChatRequestMessage).tokens);
 }
 
 /**
@@ -191,7 +201,9 @@ export function countOpenAIChatMessagesTokens(
         }
     }
 
-    return total;
+    // Same per-model calibration correction as countTokens (#166): the transport
+    // estimate must track the calibrated heuristic or trimming would under-trim.
+    return Math.ceil(total * getCalibrationFactor(modelId || "default"));
 }
 
 /**

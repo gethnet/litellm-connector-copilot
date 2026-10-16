@@ -15,6 +15,7 @@ import {
     isContextOverflowError,
 } from "../tokenUtils";
 import type { LiteLLMModelInfo, OpenAIFunctionToolDef } from "../../types";
+import { recordCalibrationObservation, resetCalibration } from "../tokenizers/tokenCalibration";
 
 suite("TokenUtils Unit Tests", () => {
     test("countTokens handles strings, single messages, and message arrays", () => {
@@ -447,5 +448,30 @@ suite("TokenUtils Unit Tests", () => {
             "thinking_blocks" in (retainedAssistant as unknown as Record<string, unknown>),
             "thinking_blocks must be preserved when no front trimming occurred"
         );
+    });
+});
+
+suite("countTokens calibration application", () => {
+    setup(() => {
+        resetCalibration();
+    });
+    teardown(() => {
+        resetCalibration();
+    });
+
+    test("countTokens inflates by the learned factor for the model", () => {
+        const text = "x".repeat(3500); // heuristic: 1000 tokens
+        const base = countTokens(text, "calib-model");
+        // Drive the factor up: upstream says 2x our estimate, repeatedly.
+        for (let i = 0; i < 30; i++) {
+            recordCalibrationObservation("calib-model", base * 2, countTokens(text, "calib-model"));
+        }
+        const calibrated = countTokens(text, "calib-model");
+        assert.ok(calibrated > base, `calibrated ${calibrated} should exceed base ${base}`);
+    });
+
+    test("countTokens is unchanged for uncalibrated models", () => {
+        const text = "hello world";
+        assert.strictEqual(countTokens(text, "untouched-model"), countTokens(text, "other-model"));
     });
 });

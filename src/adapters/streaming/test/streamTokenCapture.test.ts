@@ -2,6 +2,7 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import { StreamTokenCapture } from "../streamTokenCapture";
 import { calculateRequestCost } from "../../../utils/pricingCalculator";
+import { getCalibrationFactor, resetCalibration } from "../../tokenizers/tokenCalibration";
 
 suite("StreamTokenCapture", () => {
     function createInnerProgress(): {
@@ -94,6 +95,22 @@ suite("StreamTokenCapture", () => {
         const usage = parts.find((p) => p instanceof vscode.LanguageModelDataPart) as vscode.LanguageModelDataPart;
         assert.ok(usage, "expected forwarded usage data part");
         assert.strictEqual(usage.mimeType, "usage");
+    });
+
+    test("getSnapshot records a calibration observation from upstream usage", () => {
+        resetCalibration();
+        const { progress } = createInnerProgress();
+        const capture = new StreamTokenCapture("calib-capture-model", progress);
+        capture.setEstimatedPromptTokens(1000);
+        // Simulate upstream usage arriving on the stream via the usage
+        // DataPart path (the same mechanism the neighboring tests use).
+        capture.progress.report(asUsagePart({ prompt_tokens: 1500, completion_tokens: 10, total_tokens: 1510 }));
+        capture.getSnapshot();
+        assert.ok(
+            getCalibrationFactor("calib-capture-model") > 1.0,
+            "upstream prompt count above the local estimate must raise the calibration factor"
+        );
+        resetCalibration();
     });
 
     test("forwards every part to inner progress", () => {

@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### ✨ Features
+
+* **🎯 Calibrated token counting + remote exact counts (#166)**: token estimates now self-correct per model from upstream `usage.prompt_tokens` (multiplicative factor, clamped ×1.0–×2.0 — budgets only shrink), applied in the single `countTokens` entry point so chat trimming, commit diff budgeting, `provideTokenCount`, and telemetry all benefit. The commit command additionally verifies the compacted diff against LiteLLM's `/utils/token_counter` before sending and recompacts once on undercount (best-effort; heuristic fallback when the route is blocked). No bundled tokenizer — web build stays lean. (`src/adapters/tokenizers/tokenCalibration.ts`, `src/adapters/tokenUtils.ts`, `src/adapters/streaming/streamTokenCapture.ts`, `src/providers/liteLLMProviderBase.ts`, `src/commands/generateCommitMessage.ts`)
+
 ### 🐛 Fixes
 
 * **🛠️ Retry commit generation with a smaller diff on context overflow (#164)**: Generating a commit message from a large, dense staged diff could fail with a context-window 400 — the heuristic token estimate undercounts dense diffs (observed ~1.37× on vLLM), and the server's capped overflow error can't be used to calibrate it, so the provider-level "aggressive trim" resend was identical and failed the same way. The commit command now retries up to 2 times on overflow, shrinking the diff budget ×0.75 each attempt and recompacting from the original diff, so the prompt fits instead of hard-failing. This is a last-line-of-defense mitigation; estimator accuracy across all token-counting surfaces is tracked in #166. Bug report and fix by [@kud-csi](https://github.com/kud-csi). (`src/commands/generateCommitMessage.ts`, `src/commands/test/generateCommitMessage.test.ts`)
