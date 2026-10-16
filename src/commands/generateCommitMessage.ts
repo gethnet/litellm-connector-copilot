@@ -24,9 +24,10 @@ const MAX_OVERFLOW_RETRIES = 2;
 const OVERFLOW_SHRINK_FACTOR = 0.75;
 
 function isOverflowFailure(err: unknown): boolean {
+    // `context\s*window\s*exceeded` also matches LiteLLM's backend-agnostic `ContextWindowExceededError`.
     return (
         err instanceof Error &&
-        /context window exceeded|maximum context length|context length exceeded/i.test(err.message)
+        /context\s*window\s*exceeded|maximum context length|context length exceeded/i.test(err.message)
     );
 }
 

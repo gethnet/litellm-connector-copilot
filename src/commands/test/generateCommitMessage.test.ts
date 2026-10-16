@@ -389,6 +389,23 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
             assert.ok(errorStub.calledWith(sinon.match("Context window exceeded")));
         });
 
+        test("retries on the raw LiteLLM ContextWindowExceededError name used by non-vLLM backends", async () => {
+            const sendRequest = sandbox.stub();
+            sendRequest
+                .onFirstCall()
+                .rejects(
+                    new Error(
+                        'LiteLLM API error: 400 Bad Request {"error":{"message":"litellm.ContextWindowExceededError"}}'
+                    )
+                );
+            sendRequest.onSecondCall().resolves(streamOf("fix: shrink diff"));
+
+            const { inputBox } = await runWithSendRequest(sendRequest);
+
+            assert.strictEqual(sendRequest.callCount, 2);
+            assert.strictEqual(inputBox.value, "fix: shrink diff");
+        });
+
         test("does not retry errors that are not context overflows", async () => {
             const sendRequest = sandbox.stub().rejects(new Error("provider fail"));
 
