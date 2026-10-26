@@ -247,7 +247,9 @@ export class LiteLLMClient {
                     const paramName = paramMatch[1];
                     Logger.info(`Stripping specific parameter: ${paramName}`);
                     const rootParam = paramName.split(".")[0];
-                    delete stripedAsAny[rootParam];
+                    if (!["input", "messages", "model"].includes(rootParam)) {
+                        delete stripedAsAny[rootParam];
+                    }
                     if (rootParam === "cache_control") {
                         this.stripPromptCacheControls(strippedBody);
                     }
