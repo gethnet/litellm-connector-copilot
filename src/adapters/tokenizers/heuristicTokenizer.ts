@@ -1,7 +1,14 @@
 import type { LanguageModelChatRequestMessage } from "vscode";
+import { LanguageModelTextPart } from "vscode";
+import type { ResponsesReasoningItem } from "../../types";
 import type { Tokenizer, TokenizationResult } from "./types";
 import { StructuredLogger } from "../../observability/structuredLogger";
 import { estimateMediaTokenCost } from "../tokenUtils";
+import {
+    hasResponsesReasoningMetadata,
+    readResponsesReasoningItem,
+    RESPONSES_REASONING_METADATA,
+} from "../reasoningContinuity";
 
 export class HeuristicTokenizer implements Tokenizer {
     static STRUCTURED_LOGGER_ENABLED = true;
@@ -28,13 +35,57 @@ export class HeuristicTokenizer implements Tokenizer {
         if (typeof message.content === "string") {
             total += this.countTokens(message.content).tokens;
         } else {
-            for (const part of message.content) {
+            // The host can keep display deltas separate or merge them into the metadata carrier.
+            // Only the canonical summary is replayed upstream; charge each segment exactly as
+            // the transport guard does, never the ciphertext or matching display values.
+            const nativeItems = message.content.map((part) => this.getNativeReasoningItem(part));
+            const nativeIds = new Set(nativeItems.flatMap((item) => (item ? [item.id] : [])));
+            for (const [index, part] of message.content.entries()) {
+                const item = nativeItems[index];
+                if (item) {
+                    total += item.summary.reduce((sum, summary) => sum + this.countTokens(summary.text).tokens, 0);
+                    continue;
+                }
+                if (
+                    typeof part === "object" &&
+                    part !== null &&
+                    !(part instanceof LanguageModelTextPart) &&
+                    "value" in part &&
+                    "id" in part &&
+                    typeof part.id === "string" &&
+                    nativeIds.has(part.id) &&
+                    !hasResponsesReasoningMetadata(part)
+                ) {
+                    continue;
+                }
                 total += this.countPartTokens(part);
                 // Images are typically handled with a fixed cost or safety margin in the caller
             }
         }
         // Add overhead for roles/formatting (OpenAI-ish)
         return { tokens: total };
+    }
+
+    private getNativeReasoningItem(part: unknown): ResponsesReasoningItem | undefined {
+        if (
+            part instanceof LanguageModelTextPart ||
+            typeof part !== "object" ||
+            part === null ||
+            !("metadata" in part)
+        ) {
+            return undefined;
+        }
+        const metadata = part.metadata;
+        if (typeof metadata !== "object" || metadata === null || !(RESPONSES_REASONING_METADATA in metadata)) {
+            return undefined;
+        }
+        const envelope = metadata[RESPONSES_REASONING_METADATA];
+        if (typeof envelope !== "object" || envelope === null || !("version" in envelope) || envelope.version !== 1) {
+            return undefined;
+        }
+        // Token counting has no target backend scope. Valid replay metadata is conservatively
+        // charged here; provenance checks and any scope-based omission belong to conversion.
+        return "item" in envelope ? readResponsesReasoningItem(envelope.item) : undefined;
     }
 
     private countPartTokens(part: unknown): number {

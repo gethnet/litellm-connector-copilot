@@ -1,6 +1,8 @@
 import type { V2EmittedPart as EmittedPart } from "../../providers/v2Types";
 import { Logger } from "../../utils/logger";
 import { StructuredLogger } from "../../observability/structuredLogger";
+import { readResponsesReasoningItem, RESPONSES_REASONING_METADATA } from "../reasoningContinuity";
+import type { ReasoningScope } from "../reasoningContinuity";
 
 /**
  * Real LiteLLM /responses reasoning event names.
@@ -22,14 +24,17 @@ import { StructuredLogger } from "../../observability/structuredLogger";
  * (response.output_reasoning.delta, raw Anthropic content_block_*) never fired.
  */
 export interface ResponsesReasoningState {
+    /** Request-local provenance; never shared between concurrent streams. */
+    source?: ReasoningScope;
     /** Open reasoning item id from output_item.added; undefined once closed. */
     currentReasoningItemId: string | undefined;
     /** Display mode attached to deltas; mirrors the chat-path thinking contract. */
     currentThinkingDisplay: "summarized" | "omitted" | undefined;
 }
 
-export function createResponsesReasoningState(): ResponsesReasoningState {
+export function createResponsesReasoningState(source?: ReasoningScope): ResponsesReasoningState {
     return {
+        source,
         currentReasoningItemId: undefined,
         currentThinkingDisplay: undefined,
     };
@@ -81,7 +86,14 @@ export function interpretResponsesReasoningEvent(json: unknown, state: Responses
             preview: data.delta.slice(0, 100),
             display: state.currentThinkingDisplay,
         });
-        return [{ type: "thinking", value: data.delta, metadata }];
+        return [
+            {
+                type: "thinking",
+                value: data.delta,
+                id: typeof data.item_id === "string" ? data.item_id : state.currentReasoningItemId,
+                metadata,
+            },
+        ];
     }
 
     // Terminal `.done` events for summary text: the visible text already
@@ -107,6 +119,23 @@ export function interpretResponsesReasoningEvent(json: unknown, state: Responses
     if (data.type === "response.output_item.done" && isReasoningItem(data.item)) {
         const itemId = typeof data.item.id === "string" ? data.item.id : undefined;
         state.currentReasoningItemId = undefined;
+        if (state.source) {
+            const item = readResponsesReasoningItem(data.item);
+            if (!item) {
+                return [];
+            }
+            // Preserve encrypted-only items too: empty summary is valid and needs no visible delta.
+            return [
+                {
+                    type: "thinking",
+                    value: "",
+                    id: item.id,
+                    metadata: {
+                        [RESPONSES_REASONING_METADATA]: { version: 1, source: { ...state.source }, item },
+                    },
+                },
+            ];
+        }
         const encrypted = typeof data.item.encrypted_content === "string" ? data.item.encrypted_content : undefined;
         const signature = typeof data.item.signature === "string" ? data.item.signature : undefined;
         Logger.debug(`[responsesReasoning] Reasoning block closed (${itemId ?? "unknown id"})`);

@@ -175,6 +175,12 @@ export function countOpenAIChatMessagesTokens(
     let total = 0;
 
     for (const message of messages) {
+        // Count replayed summary text, not ciphertext bytes (those are not a token estimate).
+        for (const item of message.responses_reasoning ?? []) {
+            for (const part of item.summary) {
+                total += tokenizer.countTokens(part.text).tokens;
+            }
+        }
         if (typeof message.content === "string") {
             total += tokenizer.countTokens(message.content).tokens;
         } else if (Array.isArray(message.content)) {

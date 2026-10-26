@@ -9,6 +9,9 @@ import type {
 } from "./types";
 import { applyEphemeralCacheControl } from "./utils/promptCacheControl";
 import { Logger } from "./utils/logger";
+import { extractResponsesReasoning, hasResponsesReasoningMetadata } from "./adapters/reasoningContinuity";
+import type { ReasoningScope } from "./adapters/reasoningContinuity";
+import type { ResponsesReasoningItem } from "./types";
 import { isBinaryContentMimeType, toBinaryContentItem } from "./adapters/dataUriContentItem";
 
 /**
@@ -383,7 +386,12 @@ function extractOpaqueThinkingBlock(part: unknown, precedingThinkingText: string
  */
 export function convertMessages(
     messages: readonly vscode.LanguageModelChatRequestMessage[],
-    options: { attachPromptCacheControl?: boolean } = {}
+    options: {
+        attachPromptCacheControl?: boolean;
+        reasoningScope?: ReasoningScope;
+        /** Native routes drop untyped legacy opaque state; it cannot be proven to belong here. */
+        nativeResponses?: boolean;
+    } = {}
 ): OpenAIChatMessage[] {
     const out: OpenAIChatMessage[] = [];
     for (const m of messages) {
@@ -397,6 +405,7 @@ export function convertMessages(
         const toolCalls: OpenAIToolCall[] = [];
         const toolResults: { callId: string; content: string; hasCacheControlMarker: boolean }[] = [];
         const thinkingBlocks: OpenAIThinkingBlock[] = [];
+        const responsesReasoning: ResponsesReasoningItem[] = [];
         let hasCacheControlMarker = false;
         // Streaming splits a thinking block into adjacent visible-text deltas
         // followed by a signature metadata part. This accumulator binds a
@@ -454,6 +463,20 @@ export function convertMessages(
                 const result = collectToolResultText(part as { content?: readonly unknown[] });
                 toolResults.push({ callId, ...result });
             } else {
+                if (hasResponsesReasoningMetadata(part)) {
+                    const item = extractResponsesReasoning(part, options.reasoningScope);
+                    if (role === "assistant" && item) {
+                        responsesReasoning.push(item);
+                    }
+                    // A mismatched/malformed native item must never fall through as an Anthropic signature.
+                    pendingThinkingText = "";
+                    continue;
+                }
+                if (options.nativeResponses) {
+                    // Old sessions lost their native IDs/provenance. Keep text/tools, omit only opaque state.
+                    pendingThinkingText = "";
+                    continue;
+                }
                 const thinkingBlock = extractOpaqueThinkingBlock(part, pendingThinkingText);
                 if (thinkingBlock) {
                     thinkingBlocks.push(thinkingBlock);
@@ -483,6 +506,7 @@ export function convertMessages(
                 content: messageContent || undefined,
                 tool_calls: toolCalls,
                 ...(thinkingBlocks.length > 0 ? { thinking_blocks: thinkingBlocks } : {}),
+                ...(responsesReasoning.length > 0 ? { responses_reasoning: responsesReasoning } : {}),
             });
             emittedAssistantToolCall = true;
         }
@@ -500,7 +524,7 @@ export function convertMessages(
         }
 
         const text = textParts.join("");
-        if (text || contentItems.length > 0 || thinkingBlocks.length > 0) {
+        if (text || contentItems.length > 0 || thinkingBlocks.length > 0 || responsesReasoning.length > 0) {
             if (role === "system" || role === "user" || (role === "assistant" && !emittedAssistantToolCall)) {
                 const messageContent = buildMessageContent(
                     textParts,
@@ -514,12 +538,18 @@ export function convertMessages(
                 ) {
                     applyEphemeralCacheControl(messageContent);
                 }
-                if (messageContent || (role === "assistant" && thinkingBlocks.length > 0)) {
+                if (
+                    messageContent ||
+                    (role === "assistant" && (thinkingBlocks.length > 0 || responsesReasoning.length > 0))
+                ) {
                     out.push({
                         role: role || "user",
                         content: messageContent,
                         ...(role === "assistant" && thinkingBlocks.length > 0
                             ? { thinking_blocks: thinkingBlocks }
+                            : {}),
+                        ...(role === "assistant" && responsesReasoning.length > 0
+                            ? { responses_reasoning: responsesReasoning }
                             : {}),
                     });
                 }

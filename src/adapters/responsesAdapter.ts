@@ -9,6 +9,8 @@ import type {
 } from "../types";
 import { normalizeToolCallId } from "../utils";
 import { Logger } from "../utils/logger";
+import { isNativeResponsesModel, readResponsesReasoningItem } from "./reasoningContinuity";
+import type { LiteLLMModelInfo } from "../types";
 
 function getResponsesReasoningEffort(effort: OpenAIChatCompletionRequest["reasoning_effort"]): string | undefined {
     if (typeof effort === "string") {
@@ -108,8 +110,12 @@ function toMessageInputItem(
  * @param requestBody The original chat/completions request body
  * @returns Transformed request body for the responses endpoint
  */
-export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequest): LiteLLMResponsesRequest {
+export function transformToResponsesFormat(
+    requestBody: OpenAIChatCompletionRequest,
+    modelInfo?: LiteLLMModelInfo
+): LiteLLMResponsesRequest {
     const messages = requestBody.messages;
+    const nativeResponses = isNativeResponsesModel(requestBody.model, modelInfo);
     const inputArray: LiteLLMResponseInputItem[] = [];
     let instructions: string | undefined;
 
@@ -156,13 +162,21 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
                 inputArray.push(userMessage);
             }
         } else if (msg.role === "assistant") {
+            if (nativeResponses && Array.isArray(msg.responses_reasoning)) {
+                for (const value of msg.responses_reasoning) {
+                    const item = readResponsesReasoningItem(value);
+                    if (item) {
+                        inputArray.push(item);
+                    }
+                }
+            }
             // Assistant content (if any) becomes ONE message item; thinking blocks
             // and tool calls are appended after it as their own input items.
             const assistantMessage = toMessageInputItem("assistant", msg.content);
             if (assistantMessage) {
                 inputArray.push(assistantMessage);
             }
-            if (Array.isArray(msg.thinking_blocks)) {
+            if (!nativeResponses && Array.isArray(msg.thinking_blocks)) {
                 for (const block of msg.thinking_blocks) {
                     if (block.type === "thinking") {
                         // Emit a `reasoning` input item carrying the visible thinking summary
@@ -280,6 +294,7 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
     const responsesBody: LiteLLMResponsesRequest = {
         model: requestBody.model,
         input: finalInputArray,
+        ...(nativeResponses ? { include: ["reasoning.encrypted_content"] as ["reasoning.encrypted_content"] } : {}),
         cache_control: requestBody.cache_control,
         stream: requestBody.stream,
         instructions,

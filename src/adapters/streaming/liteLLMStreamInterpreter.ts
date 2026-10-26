@@ -11,6 +11,7 @@ import {
     type ResponsesReasoningState,
 } from "./responsesReasoningEvents";
 import { sanitizeTerminalFrame } from "./terminalFrameDump";
+import type { ReasoningScope } from "../reasoningContinuity";
 
 export interface StreamingState {
     toolCallBuffers: Map<number, { id?: string; name?: string; args: string }>;
@@ -35,7 +36,7 @@ export interface StreamingState {
     responsesReasoning: ResponsesReasoningState;
 }
 
-export function createInitialStreamingState(): StreamingState {
+export function createInitialStreamingState(reasoningScope?: ReasoningScope): StreamingState {
     return {
         toolCallBuffers: new Map(),
         completedToolCallIndices: new Set(),
@@ -46,7 +47,7 @@ export function createInitialStreamingState(): StreamingState {
         mergeReasoningContentInChoices: false,
         anonymousResponseToolName: undefined,
         anonymousResponseToolArgs: "",
-        responsesReasoning: createResponsesReasoningState(),
+        responsesReasoning: createResponsesReasoningState(reasoningScope),
     };
 }
 

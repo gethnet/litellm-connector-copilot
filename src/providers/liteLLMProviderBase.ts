@@ -8,6 +8,8 @@ import type {
 
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../types";
 import { convertMessages, convertTools } from "../utils";
+import { ReasoningScopeResolver } from "./base/reasoningScope";
+import type { ReasoningScope } from "../adapters/reasoningContinuity";
 import { getRequestInputTokenBudget, resolveRequestOutputCap } from "../adapters/requestTokenBudget";
 import { trimMessagesToFitBudget, isContextOverflowError, countTokens } from "../adapters/tokenUtils";
 import { ConfigManager } from "../config/configManager";
@@ -91,6 +93,7 @@ export abstract class LiteLLMProviderBase {
 
     private readonly _requestBuilder: RequestBuilder;
     private readonly _transport: Transport;
+    private readonly _reasoningScopeResolver = new ReasoningScopeResolver();
     protected readonly _effortFallbackCache: EffortFallbackCache;
     // Per-session memo of models that have rejected `stream_options.include_usage`
     // on a live upstream call. NOT a model-info cache: it cannot be corrupted by
@@ -136,6 +139,7 @@ export abstract class LiteLLMProviderBase {
             getTelemetryOptions: this.getTelemetryOptions.bind(this),
             usageOptOutModels: this._usageOptOutModels,
             extractRawModelName: (modelId: string) => this.getRawModelName(modelId),
+            resolveReasoningScope: (options, model) => this.getReasoningScope(options, model),
         };
         this._requestBuilder = new RequestBuilder(requestBuilderDeps);
 
@@ -549,9 +553,10 @@ export abstract class LiteLLMProviderBase {
         model: LanguageModelChatInformation,
         options: ProvideLanguageModelChatResponseOptions,
         modelInfo?: LiteLLMModelInfo,
-        caller?: string
+        caller?: string,
+        reasoningScope?: ReasoningScope
     ): Promise<OpenAIChatCompletionRequest> {
-        return this._requestBuilder.buildOpenAIChatRequest(messages, model, options, modelInfo, caller);
+        return this._requestBuilder.buildOpenAIChatRequest(messages, model, options, modelInfo, caller, reasoningScope);
     }
 
     /**
@@ -843,6 +848,19 @@ export abstract class LiteLLMProviderBase {
                 throw retryErr;
             }
         }
+    }
+
+    /** Resolve replay provenance from the same call-time credentials used by transport. */
+    protected async getReasoningScope(
+        options: vscode.ProvideLanguageModelChatResponseOptions,
+        model: vscode.LanguageModelChatInformation
+    ): Promise<ReasoningScope | undefined> {
+        const configuration = await this.getCallTimeConfiguration(options, model);
+        const group =
+            typeof configuration?.groupName === "string"
+                ? configuration.groupName
+                : (this._registry.lookup(model.id)?.routingIdentity ?? model.id);
+        return this._reasoningScopeResolver.resolve(this.getRawModelName(model.id), configuration, group);
     }
 
     /**

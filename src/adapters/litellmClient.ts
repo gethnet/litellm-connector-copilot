@@ -191,10 +191,28 @@ export class LiteLLMClient {
         modelInfo?: LiteLLMModelInfo
     ): Promise<ReadableStream<Uint8Array>> {
         const endpoint = this.getEndpoint(mode);
-        let body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest = request;
+        let body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest;
 
         if (endpoint === "/responses") {
-            body = transformToResponsesFormat(request);
+            body = transformToResponsesFormat(request, modelInfo);
+        } else {
+            // Responses continuity is an internal sidecar, not a chat-completions wire field.
+            body = {
+                ...request,
+                messages: request.messages
+                    .filter(
+                        (message) =>
+                            !message.responses_reasoning ||
+                            !!message.content ||
+                            !!message.tool_calls?.length ||
+                            !!message.thinking_blocks?.length
+                    )
+                    .map((message) => {
+                        const copy = { ...message };
+                        delete copy.responses_reasoning;
+                        return copy;
+                    }),
+            };
         }
 
         Logger.trace(`Sending chat request to ${endpoint}`, { model: request.model });

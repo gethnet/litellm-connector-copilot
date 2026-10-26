@@ -58,6 +58,15 @@ export type OpenAIThinkingBlock =
           data: string;
       };
 
+/** Native Responses continuity is not an Anthropic thinking signature. */
+export interface ResponsesReasoningItem {
+    type: "reasoning";
+    id: string;
+    summary: { type: "summary_text"; text: string }[];
+    encrypted_content: string;
+    status?: "in_progress" | "completed" | "incomplete";
+}
+
 /**
  * OpenAI-style chat message used for router requests.
  */
@@ -74,6 +83,8 @@ export interface OpenAIChatMessage {
      * Every block must therefore be a complete discriminated wire object.
      */
     thinking_blocks?: OpenAIThinkingBlock[];
+    /** Internal sidecar; projected into input[] only on /responses, never sent as chat JSON. */
+    responses_reasoning?: ResponsesReasoningItem[];
 }
 
 /**
@@ -568,6 +579,7 @@ export type LiteLLMResponsesContentItem =
 export interface LiteLLMResponsesRequest {
     model: string;
     input: LiteLLMResponseInputItem[];
+    include?: ["reasoning.encrypted_content"];
     /** Preserved from the chat-shaped request for eligible responses-routed cards. */
     cache_control?: OpenAICacheControl;
     instructions?: string;

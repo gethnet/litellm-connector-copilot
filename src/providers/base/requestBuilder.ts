@@ -14,6 +14,9 @@ import type { RequestBuilderDeps } from "./types";
 import { resolveChatReasoningTransport } from "./reasoningTransport";
 import { applyPromptCachePolicy, modelSupportsPromptCacheControl } from "../../utils/promptCacheControl";
 import type { PromptCachePolicySummary } from "../../utils/promptCacheControl";
+import { isNativeResponsesModel } from "../../adapters/reasoningContinuity";
+import type { ReasoningScope } from "../../adapters/reasoningContinuity";
+import { omitResponsesReasoningFromHistory } from "./reasoningHistory";
 
 export class RequestBuilder {
     private readonly configManager: RequestBuilderDeps["configManager"];
@@ -24,6 +27,7 @@ export class RequestBuilder {
     private readonly getTelemetryOptions: RequestBuilderDeps["getTelemetryOptions"];
     private readonly usageOptOutModels: RequestBuilderDeps["usageOptOutModels"];
     private readonly extractRawModelName: RequestBuilderDeps["extractRawModelName"];
+    private readonly resolveReasoningScope: RequestBuilderDeps["resolveReasoningScope"];
 
     constructor(deps: RequestBuilderDeps) {
         this.configManager = deps.configManager;
@@ -34,6 +38,7 @@ export class RequestBuilder {
         this.getTelemetryOptions = deps.getTelemetryOptions;
         this.usageOptOutModels = deps.usageOptOutModels;
         this.extractRawModelName = deps.extractRawModelName;
+        this.resolveReasoningScope = deps.resolveReasoningScope;
     }
 
     private addCacheBypassIfEnabled(requestBody: OpenAIChatCompletionRequest, disableCaching: boolean): void {
@@ -131,7 +136,8 @@ export class RequestBuilder {
         model: vscode.LanguageModelChatInformation,
         options: vscode.ProvideLanguageModelChatResponseOptions,
         modelInfo?: LiteLLMModelInfo,
-        _caller?: string
+        _caller?: string,
+        reasoningScope?: ReasoningScope
     ): Promise<OpenAIChatCompletionRequest> {
         const config = await this.configManager.getConfig();
 
@@ -158,9 +164,17 @@ export class RequestBuilder {
         const outputCap = resolveRequestOutputCap(model, mo.max_tokens, modelInfo);
         const safetyRatio = isAnthropicModel(rawModelId, modelInfo) ? 0.95 * 0.98 : 0.95;
         const inputBudget = getRequestInputTokenBudget(model, modelInfo, outputCap, safetyRatio);
-        const messagesToUse = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo, inputBudget);
+        const history = modelInfo?.mode === "responses" ? messages : omitResponsesReasoningFromHistory(messages);
+        const messagesToUse = trimMessagesToFitBudget(history, toolConfig.tools, model, modelInfo, inputBudget);
+        // Callers that already resolved provenance (the chat stream) pass it in so
+        // history conversion and stream capture share exactly one scope.
+        const nativeResponses = isNativeResponsesModel(rawModelId, modelInfo);
         const openaiMessages = convertMessages(messagesToUse, {
             attachPromptCacheControl: modelSupportsPromptCacheControl(rawModelId, modelInfo),
+            nativeResponses,
+            reasoningScope: nativeResponses
+                ? (reasoningScope ?? (await this.resolveReasoningScope?.(options, model)))
+                : undefined,
         });
         validateRequest(messagesToUse);
 

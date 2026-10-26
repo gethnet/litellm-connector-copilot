@@ -70,6 +70,8 @@ suite("thinkingBlockRetry", () => {
             new Error("LiteLLM API error: 400 Bad Request\nunknown parameter: thinking_blocks"),
             new Error("LiteLLM API error: 400 Bad Request\nmessages.1.content.0.thinking.signature: invalid value"),
             new Error("LiteLLM API error: 400 Bad Request\nmessages.1.content.0.type: Field required"),
+            new Error("LiteLLM API error: 400 Bad Request\ninvalid_encrypted_content"),
+            new Error("LiteLLM API error: 400 Bad Request\nThe encrypted content could not be verified"),
         ];
 
         for (const error of errors) {
@@ -84,6 +86,8 @@ suite("thinkingBlockRetry", () => {
             httpError("rate limited", 429),
             httpError("context length exceeded", 400),
             httpError("internal server error mentioning thinking", 500),
+            httpError("invalid_encrypted_content", 429),
+            httpError("Invalid reasoning effort", 400),
             new Error("network timeout while sending thinking_blocks"),
             new Error("No baseUrl provided in call-time configuration"),
         ];

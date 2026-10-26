@@ -4,7 +4,7 @@ import type { OpenAIChatCompletionRequest, OpenAIChatMessage } from "../../types
  * Pure helpers for one-shot recovery from model-switch continuity rejection.
  *
  * These functions own only detection, redaction, and retry classification of
- * prior-turn `thinking_blocks`. They never touch top-level native reasoning
+ * prior-turn `thinking_blocks` and native `responses_reasoning`. They never touch top-level native reasoning
  * fields (`reasoning_effort`, adaptive `thinking`, `output_config`) so the
  * live retry coordinator can redact continuity without regressing native
  * reasoning transport.
@@ -47,24 +47,27 @@ function getErrorText(error: unknown): string {
 
 /**
  * Returns `true` only when at least one assistant message carries a non-empty
- * `thinking_blocks` array. Used to gate the continuity retry so requests that
+ * continuity array. Used to gate the continuity retry so requests that
  * never carried continuity are never redacted.
  */
 export function requestHasThinkingBlocks(request: OpenAIChatCompletionRequest): boolean {
     return request.messages.some(
-        (message) => Array.isArray(message.thinking_blocks) && message.thinking_blocks.length > 0
+        (message) =>
+            (Array.isArray(message.thinking_blocks) && message.thinking_blocks.length > 0) ||
+            (Array.isArray(message.responses_reasoning) && message.responses_reasoning.length > 0)
     );
 }
 
 function stripThinkingBlocksFromMessages(messages: readonly OpenAIChatMessage[]): OpenAIChatMessage[] {
     return messages.map((message) => {
-        if (!Array.isArray(message.thinking_blocks) || message.thinking_blocks.length === 0) {
+        if (!message.thinking_blocks?.length && !message.responses_reasoning?.length) {
             return message;
         }
         // Shallow-copy the message and remove only the continuity field so the
         // caller's original message array and all other fields stay intact.
         const copy: OpenAIChatMessage = { ...message };
         delete copy.thinking_blocks;
+        delete copy.responses_reasoning;
         return copy;
     });
 }
@@ -130,9 +133,16 @@ export function isThinkingBlockRetryableError(error: unknown): boolean {
         text.includes("prefix_binding_mismatch") ||
         text.includes("model_binding_mismatch");
 
+    // Ciphertext can become unusable after an account/session change. Keep the HTTP 400 gate
+    // and the coordinator's one-shot limit; arbitrary reasoning parameter errors do not qualify.
+    const identifiesEncryptedContentRejection =
+        text.includes("invalid_encrypted_content") ||
+        (/encrypted[_ ]content/.test(text) && /invalid|could not be verified|cannot be decrypted/.test(text));
+
     return (
         (identifiesThinking && identifiesRejection) ||
         identifiesMissingBlockDiscriminant ||
-        identifiesFable51PrefixMismatch
+        identifiesFable51PrefixMismatch ||
+        identifiesEncryptedContentRejection
     );
 }

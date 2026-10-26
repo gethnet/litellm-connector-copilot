@@ -1,7 +1,7 @@
 import * as assert from "assert";
 import { LiteLLMClient } from "../litellmClient";
 import * as sinon from "sinon";
-import type { LiteLLMModelInfo, LiteLLMModelInfoResponse } from "../../types";
+import type { LiteLLMModelInfo, LiteLLMModelInfoResponse, OpenAIChatCompletionRequest } from "../../types";
 
 suite("LiteLLM Client Unit Tests", () => {
     const config = { url: "http://localhost:4000", key: "test-key" };
@@ -14,6 +14,83 @@ suite("LiteLLM Client Unit Tests", () => {
 
     teardown(() => {
         sandbox.restore();
+    });
+
+    test("chat projection removes Responses sidecars and their empty messages without mutating history", async () => {
+        const request: OpenAIChatCompletionRequest = {
+            model: "chatgpt/gpt-6.1-sol",
+            messages: [
+                {
+                    role: "assistant",
+                    responses_reasoning: [
+                        { type: "reasoning", id: "rs_test", summary: [], encrypted_content: "SYNTHETIC" },
+                    ],
+                },
+                { role: "assistant", content: "visible", responses_reasoning: [] },
+                { role: "user", content: "continue" },
+            ],
+        };
+        const before = JSON.stringify(request);
+        const fetchStub = sandbox.stub(global, "fetch").resolves(new Response("data: [DONE]\n\n"));
+        await new LiteLLMClient(config, userAgent).chat(request, "chat");
+        const body = JSON.parse(String(fetchStub.firstCall.args[1]?.body)) as OpenAIChatCompletionRequest;
+        assert.deepStrictEqual(body.messages, [
+            { role: "assistant", content: "visible" },
+            { role: "user", content: "continue" },
+        ]);
+        assert.strictEqual(JSON.stringify(request), before);
+    });
+
+    test("native alias uses provider metadata and never sends legacy signatures as Responses ciphertext", async () => {
+        const fetchStub = sandbox.stub(global, "fetch").resolves(new Response("data: [DONE]\n\n"));
+        await new LiteLLMClient(config, userAgent).chat(
+            {
+                model: "my-private-model-alias",
+                messages: [
+                    {
+                        role: "assistant",
+                        content: "visible",
+                        thinking_blocks: [
+                            { type: "thinking", thinking: "old summary", signature: "UNKNOWN_OLD_STATE" },
+                        ],
+                    },
+                ],
+            },
+            "responses",
+            undefined,
+            { provider: "chatgpt" }
+        );
+        const body = JSON.parse(String(fetchStub.firstCall.args[1]?.body)) as {
+            input: { type: string }[];
+            include: string[];
+        };
+        assert.ok(!body.input.some((entry) => entry.type === "reasoning"));
+        assert.deepStrictEqual(body.include, ["reasoning.encrypted_content"]);
+    });
+
+    test("OpenAI-compatible third-party Responses routes preserve bridge signatures", async () => {
+        const fetchStub = sandbox.stub(global, "fetch").resolves(new Response("data: [DONE]\n\n"));
+        await new LiteLLMClient(config, userAgent).chat(
+            {
+                model: "qwen3-coder-480b-a35b-instruct",
+                messages: [
+                    {
+                        role: "assistant",
+                        thinking_blocks: [{ type: "thinking", thinking: "summary", signature: "BRIDGE_SIGNATURE" }],
+                    },
+                    { role: "user", content: "next" },
+                ],
+            },
+            "responses",
+            undefined,
+            { provider: "openai", mode: "responses" }
+        );
+        const body = JSON.parse(String(fetchStub.firstCall.args[1]?.body)) as {
+            include?: string[];
+            input: { type: string; encrypted_content?: string }[];
+        };
+        assert.strictEqual(body.include, undefined);
+        assert.ok(body.input.some((entry) => entry.encrypted_content === "BRIDGE_SIGNATURE"));
     });
 
     test("unsupported nested Responses field never causes retry to drop required input", async () => {

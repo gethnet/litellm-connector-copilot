@@ -2,6 +2,7 @@ import type * as vscode from "vscode";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../../types";
 import type { LiteLLMClient } from "../../adapters/litellmClient";
 import type { ConfigManager as configMgr } from "../../config/configManager";
+import type { ReasoningScope } from "../../adapters/reasoningContinuity";
 
 export interface RequestBuilderDeps {
     configManager: configMgr;
@@ -41,6 +42,10 @@ export interface RequestBuilderDeps {
      * are keyed on the raw model family.
      */
     extractRawModelName: (modelId: string) => string;
+    resolveReasoningScope?: (
+        options: vscode.ProvideLanguageModelChatResponseOptions,
+        model: vscode.LanguageModelChatInformation
+    ) => Promise<ReasoningScope | undefined>;
 }
 
 export interface TransportDeps {

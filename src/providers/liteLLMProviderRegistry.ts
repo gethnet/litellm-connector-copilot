@@ -779,8 +779,19 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
         if (forceResponsesEndpoint && modelInfo?.mode === "chat") {
             modelInfo = { ...modelInfo, mode: "responses" as const };
         }
+        // Native-reasoning detection needs the provider of an aliased model, which often
+        // lives only in litellm_params. Cache it for the request path only: picker
+        // vendor/description below must keep reading the original card.
+        const effectiveProvider =
+            modelInfo?.provider ??
+            entry.litellm_params?.provider ??
+            modelInfo?.litellm_provider ??
+            entry.litellm_params?.custom_llm_provider;
 
-        this.modelInfoCache.set(modelId, modelInfo);
+        this.modelInfoCache.set(
+            modelId,
+            effectiveProvider && !modelInfo?.provider ? { ...modelInfo, provider: effectiveProvider } : modelInfo
+        );
         const derived = deriveCapabilitiesFromModelInfo(modelId, modelInfo);
         this.derivedCapabilitiesCache.set(modelId, derived);
 
