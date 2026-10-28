@@ -7,7 +7,7 @@ import { createMockSecrets } from "../../test/utils/testMocks";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../../types";
 
 interface RetryAccess {
-    getCallTimeConfiguration(): Promise<Record<string, unknown>>;
+    _callContext: { getCallTimeConfiguration(): Promise<Record<string, unknown>> };
     buildOpenAIChatRequest(
         messages: readonly vscode.LanguageModelChatRequestMessage[],
         model: vscode.LanguageModelChatInformation,
@@ -36,7 +36,7 @@ suite("Shared provider overflow budgets (#159)", () => {
             try {
                 const provider = new Provider(createMockSecrets(), "test");
                 const access = provider as unknown as RetryAccess;
-                sandbox.stub(access, "getCallTimeConfiguration").resolves({});
+                sandbox.stub(access._callContext, "getCallTimeConfiguration").resolves({});
                 const build = sandbox
                     .stub(access, "buildOpenAIChatRequest")
                     .resolves({ model: "m", messages: [{ role: "user", content: "recent" }], max_tokens: 400 });

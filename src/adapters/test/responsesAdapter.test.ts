@@ -1,9 +1,65 @@
 import * as assert from "assert";
-import { transformToResponsesFormat } from "../responsesAdapter";
+import { toChatCompletionsWireRequest, transformToResponsesFormat } from "../responsesAdapter";
 import { normalizeToolCallId } from "../../utils";
-import type { OpenAIFunctionToolDef, OpenAIChatMessage, LiteLLMResponsesContentItem } from "../../types";
+import type {
+    OpenAIChatCompletionRequest,
+    OpenAIFunctionToolDef,
+    OpenAIChatMessage,
+    LiteLLMResponsesContentItem,
+} from "../../types";
 
 suite("Responses Adapter Unit Tests", () => {
+    test("chat wire projection is pure and preserves text, tools, media and bridge state", () => {
+        const item = { type: "reasoning" as const, id: "rs_original", summary: [], encrypted_content: "PRIVATE_STATE" };
+        const request: OpenAIChatCompletionRequest = {
+            model: "chatgpt/model",
+            reasoningContext: {
+                policy: "native",
+                scope: { model: "chatgpt/model", backend: "https://proxy.example", authorization: "SESSION_HASH" },
+            },
+            messages: [
+                { role: "assistant", content: [], responses_reasoning: [item] },
+                { role: "assistant", content: "visible", responses_reasoning: [item] },
+                {
+                    role: "assistant",
+                    tool_calls: [{ id: "tool-id", type: "function", function: { name: "read", arguments: "{}" } }],
+                    responses_reasoning: [item],
+                },
+                {
+                    role: "assistant",
+                    thinking_blocks: [{ type: "thinking", thinking: "bridge", signature: "BRIDGE_STATE" }],
+                    responses_reasoning: [],
+                },
+                { role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AA==" } }] },
+            ],
+        };
+        const before = JSON.stringify(request);
+        const wire = toChatCompletionsWireRequest(request);
+        assert.deepStrictEqual(
+            wire.messages,
+            request.messages.slice(1).map((message) => {
+                const copy = { ...message };
+                delete copy.responses_reasoning;
+                return copy;
+            })
+        );
+        assert.ok(!JSON.stringify(wire).includes("reasoningContext"));
+        assert.ok(!JSON.stringify(wire).includes("SESSION_HASH"));
+        assert.ok(!JSON.stringify(wire).includes("PRIVATE_STATE"));
+        assert.strictEqual(JSON.stringify(request), before);
+    });
+
+    test("Responses projection uses the prepared reasoning decision instead of reclassifying metadata", () => {
+        const request: OpenAIChatCompletionRequest = {
+            model: "private-alias",
+            messages: [{ role: "user", content: "hello" }],
+            reasoningContext: { policy: "native" },
+        };
+        const wire = transformToResponsesFormat(request, { provider: "openai", supports_reasoning: false });
+        assert.deepStrictEqual(wire.include, ["reasoning.encrypted_content"]);
+        assert.ok(!("reasoningContext" in wire));
+    });
+
     test("transformToResponsesFormat preserves cache bypass extra_body", () => {
         const body = transformToResponsesFormat({
             model: "cache-capable-model",

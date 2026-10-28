@@ -8,8 +8,9 @@ import type {
 
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../types";
 import { convertMessages, convertTools } from "../utils";
-import { ReasoningScopeResolver } from "./base/reasoningScope";
-import type { ReasoningScope } from "../adapters/reasoningContinuity";
+import { createReasoningCallContext } from "./base/reasoningScope";
+import type { ReasoningCallContext } from "./base/reasoningScope";
+import type { ReasoningRequestContext } from "../adapters/reasoningContinuity";
 import { getRequestInputTokenBudget, resolveRequestOutputCap } from "../adapters/requestTokenBudget";
 import { trimMessagesToFitBudget, isContextOverflowError, countTokens } from "../adapters/tokenUtils";
 import { ConfigManager } from "../config/configManager";
@@ -49,7 +50,6 @@ import {
     isParameterSupported as isParameterSupportedImpl,
     stripUnsupportedParametersFromRequest as stripUnsupportedParametersFromRequestImpl,
 } from "./base/parameterFiltering";
-import { resolveCallTimeConfiguration } from "./base/callConfig";
 import { LRUCache } from "../utils/lruCache";
 import { AuditTrail } from "../observability/auditTrail";
 
@@ -93,7 +93,7 @@ export abstract class LiteLLMProviderBase {
 
     private readonly _requestBuilder: RequestBuilder;
     private readonly _transport: Transport;
-    private readonly _reasoningScopeResolver = new ReasoningScopeResolver();
+    protected readonly _callContext: ReasoningCallContext;
     protected readonly _effortFallbackCache: EffortFallbackCache;
     // Per-session memo of models that have rejected `stream_options.include_usage`
     // on a live upstream call. NOT a model-info cache: it cannot be corrupted by
@@ -122,6 +122,11 @@ export abstract class LiteLLMProviderBase {
                 this._onModernConfigurationDetected?.();
             },
         });
+        this._callContext = createReasoningCallContext({
+            configManager: this._configManager,
+            registry: this._registry,
+            extractRawModelName: (id) => this.getRawModelName(id),
+        });
 
         // Forward the registry's `onDidChange` event to VS Code so the
         // picker refreshes when a backend's model set actually changes.
@@ -139,7 +144,7 @@ export abstract class LiteLLMProviderBase {
             getTelemetryOptions: this.getTelemetryOptions.bind(this),
             usageOptOutModels: this._usageOptOutModels,
             extractRawModelName: (modelId: string) => this.getRawModelName(modelId),
-            resolveReasoningScope: (options, model) => this.getReasoningScope(options, model),
+            resolveReasoningScope: this._callContext.getReasoningScope,
         };
         this._requestBuilder = new RequestBuilder(requestBuilderDeps);
 
@@ -554,9 +559,16 @@ export abstract class LiteLLMProviderBase {
         options: ProvideLanguageModelChatResponseOptions,
         modelInfo?: LiteLLMModelInfo,
         caller?: string,
-        reasoningScope?: ReasoningScope
+        reasoningContext?: ReasoningRequestContext
     ): Promise<OpenAIChatCompletionRequest> {
-        return this._requestBuilder.buildOpenAIChatRequest(messages, model, options, modelInfo, caller, reasoningScope);
+        return this._requestBuilder.buildOpenAIChatRequest(
+            messages,
+            model,
+            options,
+            modelInfo,
+            caller,
+            reasoningContext
+        );
     }
 
     /**
@@ -795,7 +807,7 @@ export abstract class LiteLLMProviderBase {
                 token,
                 caller,
                 modelInfo,
-                await this.getCallTimeConfiguration(options, model)
+                await this._callContext.getCallTimeConfiguration(options, model)
             );
         } catch (err) {
             if (!isContextOverflowError(err)) {
@@ -816,7 +828,8 @@ export abstract class LiteLLMProviderBase {
                 model,
                 retryOptions,
                 modelInfo,
-                caller
+                caller,
+                request.reasoningContext
             );
             // If continuity was already redacted on the outer retry, the rebuilt
             // request (which re-reads the original history) would reintroduce
@@ -835,7 +848,7 @@ export abstract class LiteLLMProviderBase {
                     token,
                     caller,
                     modelInfo,
-                    await this.getCallTimeConfiguration(options, model)
+                    await this._callContext.getCallTimeConfiguration(options, model)
                 );
             } catch (retryErr) {
                 if (isContextOverflowError(retryErr)) {
@@ -848,42 +861,6 @@ export abstract class LiteLLMProviderBase {
                 throw retryErr;
             }
         }
-    }
-
-    /** Resolve replay provenance from the same call-time credentials used by transport. */
-    protected async getReasoningScope(
-        options: vscode.ProvideLanguageModelChatResponseOptions,
-        model: vscode.LanguageModelChatInformation
-    ): Promise<ReasoningScope | undefined> {
-        const configuration = await this.getCallTimeConfiguration(options, model);
-        const group =
-            typeof configuration?.groupName === "string"
-                ? configuration.groupName
-                : (this._registry.lookup(model.id)?.routingIdentity ?? model.id);
-        return this._reasoningScopeResolver.resolve(this.getRawModelName(model.id), configuration, group);
-    }
-
-    /**
-     * Resolves the per-group configuration for a response-time call.
-     *
-     * Delegates to the pure {@link ../base/callConfig callConfig} module, which
-     * owns the `options.configuration` trust heuristic and the registry
-     * fallback. Kept as a private method (rather than called inline) so tests
-     * can exercise the resolution via the test-access seam.
-     *
-     * See `resolveCallTimeConfiguration` for the full invariant documentation,
-     * including why an empty `options.configuration` object must NOT be
-     * trusted and how the workspace ergonomic toggles are merged onto both
-     * resolution paths.
-     */
-    private async getCallTimeConfiguration(
-        options: vscode.ProvideLanguageModelChatResponseOptions,
-        model: vscode.LanguageModelChatInformation
-    ): Promise<Record<string, unknown> | undefined> {
-        return resolveCallTimeConfiguration(options, model, {
-            configManager: this._configManager,
-            registry: this._registry,
-        });
     }
 
     /**

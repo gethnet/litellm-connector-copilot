@@ -9,6 +9,7 @@ import type {
 } from "./types";
 import { applyEphemeralCacheControl } from "./utils/promptCacheControl";
 import { Logger } from "./utils/logger";
+import { StructuredLogger } from "./observability/structuredLogger";
 import { extractResponsesReasoning, hasResponsesReasoningMetadata } from "./adapters/reasoningContinuity";
 import type { ReasoningScope } from "./adapters/reasoningContinuity";
 import type { ResponsesReasoningItem } from "./types";
@@ -307,6 +308,18 @@ interface ThinkingMetadata {
     redactedData?: unknown;
 }
 
+function hasOpaqueThinkingMetadata(part: unknown): boolean {
+    if (!part || typeof part !== "object") {
+        return false;
+    }
+    const metadata = (part as ThinkingInputPart).metadata;
+    if (!metadata || typeof metadata !== "object") {
+        return false;
+    }
+    const { encrypted_content, signature, redactedData } = metadata as ThinkingMetadata;
+    return [encrypted_content, signature, redactedData].some((value) => typeof value === "string" && value.length > 0);
+}
+
 /**
  * Extracts visible thinking text from a part's `value` field.
  *
@@ -381,6 +394,7 @@ function extractOpaqueThinkingBlock(part: unknown, precedingThinkingText: string
 
 /**
  * Convert VS Code chat request messages into OpenAI-compatible message objects.
+ * Emits one debug summary of dropped native/legacy continuity per conversion, without payloads or scope hashes.
  * @param messages The VS Code chat messages to convert.
  * @returns OpenAI-compatible messages array.
  */
@@ -394,6 +408,8 @@ export function convertMessages(
     } = {}
 ): OpenAIChatMessage[] {
     const out: OpenAIChatMessage[] = [];
+    let droppedNativeItems = 0;
+    let droppedLegacyItems = 0;
     for (const m of messages) {
         // `lmcr_toString` returns "system" | "user" | "assistant" for the supported
         // VS Code roles, which matches `Exclude<OpenAIChatRole, "tool">` exactly.
@@ -467,6 +483,8 @@ export function convertMessages(
                     const item = extractResponsesReasoning(part, options.reasoningScope);
                     if (role === "assistant" && item) {
                         responsesReasoning.push(item);
+                    } else {
+                        droppedNativeItems += 1;
                     }
                     // A mismatched/malformed native item must never fall through as an Anthropic signature.
                     pendingThinkingText = "";
@@ -474,6 +492,9 @@ export function convertMessages(
                 }
                 if (options.nativeResponses) {
                     // Old sessions lost their native IDs/provenance. Keep text/tools, omit only opaque state.
+                    if (hasOpaqueThinkingMetadata(part)) {
+                        droppedLegacyItems += 1;
+                    }
                     pendingThinkingText = "";
                     continue;
                 }
@@ -555,6 +576,9 @@ export function convertMessages(
                 }
             }
         }
+    }
+    if (droppedNativeItems || droppedLegacyItems) {
+        StructuredLogger.debug("request.reasoning_history_filtered", { droppedNativeItems, droppedLegacyItems });
     }
     return out;
 }

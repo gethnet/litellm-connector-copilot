@@ -3,8 +3,10 @@ import {
     createReasoningScope,
     extractResponsesReasoning,
     isNativeResponsesModel,
+    readResponsesReasoningEnvelope,
     readResponsesReasoningItem,
     RESPONSES_REASONING_METADATA,
+    thinkingPartId,
 } from "../reasoningContinuity";
 
 suite("Native Responses reasoning continuity", () => {
@@ -27,11 +29,31 @@ suite("Native Responses reasoning continuity", () => {
             ["openai/gpt-5.4", { provider: "openai", key: "mistral-31-24b" }],
         ];
         for (const [model, info] of native) {
-            assert.strictEqual(isNativeResponsesModel(model, info), true, model);
+            assert.strictEqual(isNativeResponsesModel(model, { ...info, supports_reasoning: true }), true, model);
         }
         for (const [model, info] of bridged) {
-            assert.strictEqual(isNativeResponsesModel(model, info), false, model);
+            assert.strictEqual(isNativeResponsesModel(model, { ...info, supports_reasoning: true }), false, model);
         }
+    });
+
+    test("native reasoning requires an explicit supports_reasoning: true", () => {
+        // Real LiteLLM cards list `reasoning_effort` in supported_openai_params for gpt-4o,
+        // gpt-4.1 and gpt-3.5 too (supports_reasoning: null), so that param proves nothing.
+        const cardLike = { supported_openai_params: ["reasoning_effort", "temperature", "tools"] };
+        for (const model of ["openai/gpt-4o", "openai/gpt-4.1", "chatgpt/gpt-6.1-sol"]) {
+            for (const supports_reasoning of [undefined, null, false]) {
+                assert.strictEqual(isNativeResponsesModel(model, { ...cardLike, supports_reasoning }), false, model);
+            }
+        }
+        // A lone effort flag (live: openai/gpt-5-search-api) is not proof either.
+        assert.strictEqual(
+            isNativeResponsesModel("openai/gpt-5-search-api", { ...cardLike, supports_minimal_reasoning_effort: true }),
+            false
+        );
+        assert.strictEqual(
+            isNativeResponsesModel("openai/gpt-5-nano", { ...cardLike, supports_reasoning: true }),
+            true
+        );
     });
 
     test("scope fails closed without authorization or with an unsafe backend URL", () => {
@@ -78,6 +100,26 @@ suite("Native Responses reasoning continuity", () => {
             { ...item, summary: [{ type: "text", text: "wrong" }] },
         ]) {
             assert.strictEqual(readResponsesReasoningItem(invalid), undefined);
+        }
+    });
+
+    test("unscoped envelope parsing validates the item but never authorizes replay", () => {
+        const item = { type: "reasoning", id: "rs_valid", summary: [], encrypted_content: "STATE" };
+        const part = { metadata: { [RESPONSES_REASONING_METADATA]: { version: 1, item } } };
+        assert.deepStrictEqual(readResponsesReasoningEnvelope(part)?.item, item);
+        assert.strictEqual(
+            extractResponsesReasoning(part, createReasoningScope("chatgpt/model", "https://proxy.example", "g", "s")),
+            undefined
+        );
+        for (const value of [null, [], {}, { version: 2, item }, { version: 1, item: { ...item, summary: [null] } }]) {
+            assert.strictEqual(
+                readResponsesReasoningEnvelope({ metadata: { [RESPONSES_REASONING_METADATA]: value } }),
+                undefined
+            );
+        }
+        assert.strictEqual(thinkingPartId({ id: "rs_valid", value: "delta" }), "rs_valid");
+        for (const value of [null, [], { id: "rs_valid" }, { id: 1, value: "delta" }]) {
+            assert.strictEqual(thinkingPartId(value), undefined);
         }
     });
 });

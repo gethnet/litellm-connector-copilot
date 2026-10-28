@@ -5,7 +5,7 @@ import { createReasoningScope, RESPONSES_REASONING_METADATA } from "../../../ada
 import { countOpenAIChatMessagesTokens, countTokens, trimMessagesToFitBudget } from "../../../adapters/tokenUtils";
 import { ConfigManager } from "../../../config/configManager";
 import { createMockSecrets } from "../../../test/utils/testMocks";
-import type { ResponsesReasoningItem } from "../../../types";
+import type { LiteLLMModelInfo, ResponsesReasoningItem } from "../../../types";
 import { convertMessages } from "../../../utils";
 import { RequestBuilder } from "../requestBuilder";
 import type { RequestBuilderDeps } from "../types";
@@ -68,37 +68,75 @@ suite("Native reasoning token budget", () => {
         assert.ok(transportTokens(trimmed) <= budget);
     });
 
-    test("chat routes omit native-only history before trimming so it cannot cause a false overflow", async () => {
-        const sandbox = sinon.createSandbox();
-        const configManager = new ConfigManager(createMockSecrets());
-        sandbox.stub(configManager, "getConfig").resolves({});
-        const deps: RequestBuilderDeps = {
-            configManager,
-            getReasoningEffort: () => undefined,
-            detectQuotaToolRedaction: (_messages, tools) => ({ tools, confidence: "none" }),
-            stripUnsupportedParametersFromRequest: () => {},
-            isParameterSupported: () => false,
-            getTelemetryOptions: () => ({}),
-            usageOptOutModels: new Set(),
-            extractRawModelName: () => model.id,
-        };
-        const large = { ...item, summary: [{ type: "summary_text" as const, text: "x".repeat(35000) }] };
-        const messages = [assistant("", true, large), text(vscode.LanguageModelChatMessageRole.User, "continue")];
-        try {
-            const request = await new RequestBuilder(deps).buildOpenAIChatRequest(
+    suite("request builder", () => {
+        const options = { toolMode: vscode.LanguageModelChatToolMode.Auto, requestInitiator: "test" };
+        let sandbox: sinon.SinonSandbox;
+
+        setup(() => {
+            sandbox = sinon.createSandbox();
+        });
+
+        teardown(() => sandbox.restore());
+
+        function builder(resolveReasoningScope?: RequestBuilderDeps["resolveReasoningScope"]): RequestBuilder {
+            const configManager = new ConfigManager(createMockSecrets());
+            sandbox.stub(configManager, "getConfig").resolves({});
+            return new RequestBuilder({
+                configManager,
+                getReasoningEffort: () => undefined,
+                detectQuotaToolRedaction: (_messages, tools) => ({ tools, confidence: "none" }),
+                stripUnsupportedParametersFromRequest: () => {},
+                isParameterSupported: () => false,
+                getTelemetryOptions: () => ({}),
+                usageOptOutModels: new Set(),
+                extractRawModelName: () => model.id,
+                resolveReasoningScope,
+            });
+        }
+
+        test("routes that will not replay drop native history before trimming, including emptied messages", async () => {
+            const large = { ...item, summary: [{ type: "summary_text" as const, text: "x".repeat(35000) }] };
+            const initial = assistant("", true, large);
+            const reasoningOnly = { ...initial, content: initial.content.slice(0, -1) };
+            const messages = [
+                text(vscode.LanguageModelChatMessageRole.User, "earlier"),
+                reasoningOnly,
+                initial,
+                text(vscode.LanguageModelChatMessageRole.User, "continue"),
+            ];
+            // chat route, explicit false, unknown capability, third-party OpenAI-compatible bridge
+            for (const info of [
+                { mode: "chat", supports_reasoning: true },
+                { mode: "responses", supports_reasoning: false },
+                { mode: "responses" },
+                { mode: "responses", provider: "openai", key: "qwen3", supports_reasoning: true },
+            ]) {
+                const request = await builder().buildOpenAIChatRequest(messages, model, options, info);
+                assert.deepStrictEqual(request.messages, [
+                    { role: "user", content: "earlier" },
+                    { role: "assistant", content: "Answer" },
+                    { role: "user", content: "continue" },
+                ]);
+            }
+        });
+
+        test("request context resolves even an absent scope once and survives rebuild without reclassification", async () => {
+            const resolveScope = sandbox.stub().resolves(undefined);
+            const instance = builder(resolveScope);
+            const messages = [text(vscode.LanguageModelChatMessageRole.User, "continue")];
+            const info: LiteLLMModelInfo = { mode: "responses", supports_reasoning: true };
+            const request = await instance.buildOpenAIChatRequest(messages, model, options, info);
+            assert.deepStrictEqual(request.reasoningContext, { policy: "native", scope: undefined });
+            const rebuilt = await instance.buildOpenAIChatRequest(
                 messages,
                 model,
-                { toolMode: vscode.LanguageModelChatToolMode.Auto, requestInitiator: "test" },
-                { mode: "chat", provider: "openai" },
+                options,
+                { ...info, supports_reasoning: false },
                 undefined,
-                scope
+                request.reasoningContext
             );
-            assert.deepStrictEqual(request.messages, [
-                { role: "assistant", content: "Answer" },
-                { role: "user", content: "continue" },
-            ]);
-        } finally {
-            sandbox.restore();
-        }
+            assert.strictEqual(rebuilt.reasoningContext, request.reasoningContext);
+            sinon.assert.calledOnce(resolveScope);
+        });
     });
 });

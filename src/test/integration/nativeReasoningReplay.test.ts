@@ -1,5 +1,7 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
+import * as sinon from "sinon";
+import { StructuredLogger } from "../../observability/structuredLogger";
 import { convertMessages, normalizeToolCallId } from "../../utils";
 import { transformToResponsesFormat } from "../../adapters/responsesAdapter";
 import { createInitialStreamingState, interpretStreamEvent } from "../../adapters/streaming/liteLLMStreamInterpreter";
@@ -53,7 +55,12 @@ suite("Native Responses reasoning replay", () => {
             ],
             { nativeResponses: true, reasoningScope: target }
         );
-        return { model: target.model, messages, reasoning_effort: "high" };
+        return {
+            model: target.model,
+            messages,
+            reasoning_effort: "high",
+            reasoningContext: { policy: "native", scope: target },
+        };
     }
 
     const reasoningInputs = (request: OpenAIChatCompletionRequest) =>
@@ -103,6 +110,7 @@ suite("Native Responses reasoning replay", () => {
     test("native routes drop untyped legacy signatures but keep visible content", () => {
         const body = transformToResponsesFormat({
             model,
+            reasoningContext: { policy: "native" },
             messages: [
                 {
                     role: "assistant",
@@ -144,6 +152,38 @@ suite("Native Responses reasoning replay", () => {
             { nativeResponses: true, reasoningScope: scope }
         );
         assert.deepStrictEqual(messages, []);
+    });
+
+    test("conversion summarizes dropped scope and legacy state once without logging payloads", () => {
+        const debug = sinon.stub(StructuredLogger, "debug");
+        try {
+            const legacy = {
+                value: "summary",
+                metadata: { signature: "PRIVATE_LEGACY_STATE" },
+            } as vscode.LanguageModelThinkingPart;
+            convertMessages(
+                [
+                    {
+                        role: vscode.LanguageModelChatMessageRole.Assistant,
+                        name: undefined,
+                        content: [...streamedHistory([item, { ...item, id: "rs_second" }]), legacy, legacy],
+                    },
+                ],
+                { nativeResponses: true, reasoningScope: { ...scope, authorization: "OTHER_SESSION" } }
+            );
+            const summaries = debug.getCalls().filter((call) => call.args[0] === "request.reasoning_history_filtered");
+            assert.strictEqual(summaries.length, 1);
+            assert.deepStrictEqual(summaries[0].args, [
+                "request.reasoning_history_filtered",
+                {
+                    droppedNativeItems: 2,
+                    droppedLegacyItems: 2,
+                },
+            ]);
+            assert.ok(!JSON.stringify(debug.args).includes("PRIVATE_LEGACY_STATE"));
+        } finally {
+            debug.restore();
+        }
     });
 
     test("continuity recovery strips native items without touching effort or history", () => {

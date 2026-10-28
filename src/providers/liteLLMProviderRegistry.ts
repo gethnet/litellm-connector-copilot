@@ -385,6 +385,8 @@ export class LiteLLMProviderRegistry implements vscode.Disposable {
      * Returns the per-model `LiteLLMModelInfo` cached during the most
      * recent discovery for this id, or `undefined` if the id has not
      * been seen (or has been cleared).
+     * Request metadata may enrich `provider` from litellm_params (including custom_llm_provider)
+     * when the card omits it. This effective routing provenance does not change the raw picker card/vendor.
      */
     public getModelInfo(id: string): LiteLLMModelInfo | undefined {
         const registeredId = resolveRegisteredModelId(id, this.entries);

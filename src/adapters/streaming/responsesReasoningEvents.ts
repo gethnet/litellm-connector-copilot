@@ -64,6 +64,7 @@ function isReasoningItem(item: unknown): item is ReasoningAddedOrDoneItem {
  * own (the caller must continue its own handling for those frames — notably
  * `output_item.added`/`output_item.done` with non-reasoning items, which the
  * interpreter's tool-call branches must still see).
+ * Logs block closure at debug and invalid native item shape flags at warn; never logs opaque state.
  */
 export function interpretResponsesReasoningEvent(json: unknown, state: ResponsesReasoningState): EmittedPart[] {
     const data = asRecord(json);
@@ -119,9 +120,22 @@ export function interpretResponsesReasoningEvent(json: unknown, state: Responses
     if (data.type === "response.output_item.done" && isReasoningItem(data.item)) {
         const itemId = typeof data.item.id === "string" ? data.item.id : undefined;
         state.currentReasoningItemId = undefined;
+        const encrypted = typeof data.item.encrypted_content === "string" ? data.item.encrypted_content : undefined;
+        const signature = typeof data.item.signature === "string" ? data.item.signature : undefined;
+        Logger.debug(`[responsesReasoning] Reasoning block closed (${itemId ?? "unknown id"})`);
+        StructuredLogger.debug("stream.responses_reasoning_block_closed", {
+            itemId,
+            hasEncryptedContent: !!encrypted,
+            hasSignature: !!signature,
+        });
         if (state.source) {
             const item = readResponsesReasoningItem(data.item);
             if (!item) {
+                StructuredLogger.warn("stream.responses_reasoning_item_invalid", {
+                    hasId: !!itemId,
+                    idPrefixOk: itemId?.startsWith("rs_") === true,
+                    hasEncrypted: !!encrypted,
+                });
                 return [];
             }
             // Preserve encrypted-only items too: empty summary is valid and needs no visible delta.
@@ -136,14 +150,6 @@ export function interpretResponsesReasoningEvent(json: unknown, state: Responses
                 },
             ];
         }
-        const encrypted = typeof data.item.encrypted_content === "string" ? data.item.encrypted_content : undefined;
-        const signature = typeof data.item.signature === "string" ? data.item.signature : undefined;
-        Logger.debug(`[responsesReasoning] Reasoning block closed (${itemId ?? "unknown id"})`);
-        StructuredLogger.debug("stream.responses_reasoning_block_closed", {
-            itemId,
-            hasEncryptedContent: !!encrypted,
-            hasSignature: !!signature,
-        });
         if (!encrypted && !signature) {
             // Visible text already streamed; no opaque state to preserve.
             return [];

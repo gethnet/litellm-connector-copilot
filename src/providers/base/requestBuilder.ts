@@ -14,8 +14,8 @@ import type { RequestBuilderDeps } from "./types";
 import { resolveChatReasoningTransport } from "./reasoningTransport";
 import { applyPromptCachePolicy, modelSupportsPromptCacheControl } from "../../utils/promptCacheControl";
 import type { PromptCachePolicySummary } from "../../utils/promptCacheControl";
-import { isNativeResponsesModel } from "../../adapters/reasoningContinuity";
-import type { ReasoningScope } from "../../adapters/reasoningContinuity";
+import { resolveReasoningReplayPolicy } from "../../adapters/reasoningContinuity";
+import type { ReasoningRequestContext } from "../../adapters/reasoningContinuity";
 import { omitResponsesReasoningFromHistory } from "./reasoningHistory";
 
 export class RequestBuilder {
@@ -137,7 +137,7 @@ export class RequestBuilder {
         options: vscode.ProvideLanguageModelChatResponseOptions,
         modelInfo?: LiteLLMModelInfo,
         _caller?: string,
-        reasoningScope?: ReasoningScope
+        reasoningContext?: ReasoningRequestContext
     ): Promise<OpenAIChatCompletionRequest> {
         const config = await this.configManager.getConfig();
 
@@ -164,17 +164,27 @@ export class RequestBuilder {
         const outputCap = resolveRequestOutputCap(model, mo.max_tokens, modelInfo);
         const safetyRatio = isAnthropicModel(rawModelId, modelInfo) ? 0.95 * 0.98 : 0.95;
         const inputBudget = getRequestInputTokenBudget(model, modelInfo, outputCap, safetyRatio);
-        const history = modelInfo?.mode === "responses" ? messages : omitResponsesReasoningFromHistory(messages);
+        if (!reasoningContext) {
+            let policy = resolveReasoningReplayPolicy(rawModelId, modelInfo);
+            if (modelInfo?.mode !== "responses" && policy === "native") {
+                policy = "omit";
+            }
+            reasoningContext = {
+                policy,
+                scope: policy === "native" ? await this.resolveReasoningScope?.(options, model) : undefined,
+            };
+        }
+        // Native state that will not be replayed must not consume the trimming budget.
+        const history =
+            reasoningContext.policy === "native" && reasoningContext.scope
+                ? messages
+                : omitResponsesReasoningFromHistory(messages);
         const messagesToUse = trimMessagesToFitBudget(history, toolConfig.tools, model, modelInfo, inputBudget);
-        // Callers that already resolved provenance (the chat stream) pass it in so
-        // history conversion and stream capture share exactly one scope.
-        const nativeResponses = isNativeResponsesModel(rawModelId, modelInfo);
+        // The same resolved context survives retries and tags stream capture; unknown scope is not re-resolved.
         const openaiMessages = convertMessages(messagesToUse, {
             attachPromptCacheControl: modelSupportsPromptCacheControl(rawModelId, modelInfo),
-            nativeResponses,
-            reasoningScope: nativeResponses
-                ? (reasoningScope ?? (await this.resolveReasoningScope?.(options, model)))
-                : undefined,
+            nativeResponses: reasoningContext.policy !== "bridge",
+            reasoningScope: reasoningContext.policy === "native" ? reasoningContext.scope : undefined,
         });
         validateRequest(messagesToUse);
 
@@ -191,6 +201,7 @@ export class RequestBuilder {
             stream: true,
             max_tokens: outputCap,
             ...reasoningTransport,
+            reasoningContext,
         };
 
         if (!this.usageOptOutModels.has(rawModelId)) {

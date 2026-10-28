@@ -16,14 +16,22 @@ export interface ResponsesReasoningEnvelope {
     item: ResponsesReasoningItem;
 }
 
+export type ReasoningReplayPolicy = "native" | "bridge" | "omit";
+
+/** Internal, request-local decision shared by conversion, wire projection and stream capture. */
+export interface ReasoningRequestContext {
+    policy: ReasoningReplayPolicy;
+    scope?: ReasoningScope;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
     return value !== null && typeof value === "object" && !Array.isArray(value)
         ? (value as Record<string, unknown>)
         : undefined;
 }
 
-/** OpenAI-compatible transport is not proof that its model implements native encrypted reasoning. */
-export function isNativeResponsesModel(model: string, info?: LiteLLMModelInfo): boolean {
+/** OpenAI-compatible transport alone cannot distinguish native OpenAI from third-party bridges. */
+function hasNativeResponsesProvenance(model: string, info?: LiteLLMModelInfo): boolean {
     const provider = info?.provider ?? info?.litellm_provider;
     if (provider === "chatgpt") {
         return true;
@@ -40,6 +48,24 @@ export function isNativeResponsesModel(model: string, info?: LiteLLMModelInfo): 
     const family = canonical.replace(/^(?:openai|chatgpt)\/(?:responses\/)?/, "");
     const openAITransport = provider === "openai" || model.startsWith("openai/") || canonical.startsWith("openai/");
     return openAITransport && /^(?:gpt-\d|o[1-9]\d*(?:-|$))/.test(family);
+}
+
+/**
+ * Requires an explicit `supports_reasoning: true` from the model card, not a model-name list.
+ * Derived hints are deliberately ignored: LiteLLM lists `reasoning_effort` in
+ * `supported_openai_params` for non-reasoning models too (gpt-4o, gpt-4.1, gpt-3.5), so it
+ * cannot gate `include: reasoning.encrypted_content`. Unknown support fails closed.
+ */
+export function isNativeResponsesModel(model: string, info?: LiteLLMModelInfo): boolean {
+    return hasNativeResponsesProvenance(model, info) && info?.supports_reasoning === true;
+}
+
+export function resolveReasoningReplayPolicy(model: string, info?: LiteLLMModelInfo): ReasoningReplayPolicy {
+    if (!hasNativeResponsesProvenance(model, info)) {
+        return "bridge";
+    }
+    // A native model without proven reasoning support must not fall back to synthetic bridge IDs.
+    return isNativeResponsesModel(model, info) ? "native" : "omit";
 }
 
 export function createReasoningScope(
@@ -105,13 +131,31 @@ export function hasResponsesReasoningMetadata(part: unknown): boolean {
     return !!metadata && Object.prototype.hasOwnProperty.call(metadata, RESPONSES_REASONING_METADATA);
 }
 
-export function extractResponsesReasoning(part: unknown, target?: ReasoningScope): ResponsesReasoningItem | undefined {
+/** Structural thinking ID, not proof of native provenance; text parts are excluded by callers. */
+export function thinkingPartId(part: unknown): string | undefined {
+    const record = asRecord(part);
+    return record && "value" in record && typeof record.id === "string" ? record.id : undefined;
+}
+
+/** Unscoped validation for token counting. Only extractResponsesReasoning authorizes replay. */
+export function readResponsesReasoningEnvelope(
+    part: unknown
+): { version: 1; source: unknown; item: ResponsesReasoningItem } | undefined {
     const metadata = asRecord(asRecord(part)?.metadata);
     const envelope = asRecord(metadata?.[RESPONSES_REASONING_METADATA]);
+    if (envelope?.version !== 1) {
+        return undefined;
+    }
+    const item = readResponsesReasoningItem(envelope.item);
+    return item ? { version: 1, source: envelope.source, item } : undefined;
+}
+
+export function extractResponsesReasoning(part: unknown, target?: ReasoningScope): ResponsesReasoningItem | undefined {
+    const envelope = readResponsesReasoningEnvelope(part);
     const source = asRecord(envelope?.source);
     if (
         !target ||
-        envelope?.version !== 1 ||
+        !envelope ||
         source?.model !== target.model ||
         source?.backend !== target.backend ||
         source?.group !== target.group ||
@@ -120,5 +164,5 @@ export function extractResponsesReasoning(part: unknown, target?: ReasoningScope
     ) {
         return undefined;
     }
-    return readResponsesReasoningItem(envelope.item);
+    return envelope.item;
 }

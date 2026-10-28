@@ -1,4 +1,7 @@
 import * as assert from "assert";
+import * as sinon from "sinon";
+import { StructuredLogger } from "../../../observability/structuredLogger";
+import { createReasoningScope } from "../../reasoningContinuity";
 import {
     createResponsesReasoningState,
     interpretResponsesReasoningEvent,
@@ -16,6 +19,39 @@ declare const test: (name: string, fn: () => void) => void;
  * litellm/responses/litellm_completion_transformation/streaming_iterator.py.
  */
 suite("ResponsesReasoningEvents - real LiteLLM /responses sequence", () => {
+    test("invalid native reasoning warns with shape flags only and still records block closure", () => {
+        const sandbox = sinon.createSandbox();
+        const warn = sandbox.stub(StructuredLogger, "warn");
+        const debug = sandbox.stub(StructuredLogger, "debug");
+        const source = createReasoningScope("chatgpt/model", "https://proxy.example", undefined, "session")!;
+        try {
+            const state = createResponsesReasoningState(source);
+            state.currentReasoningItemId = "rs_open";
+            assert.deepStrictEqual(
+                interpretResponsesReasoningEvent(
+                    {
+                        type: "response.output_item.done",
+                        item: { type: "reasoning", id: "bad-id", summary: [], encrypted_content: "PRIVATE_STATE" },
+                    },
+                    state
+                ),
+                []
+            );
+            assert.strictEqual(state.currentReasoningItemId, undefined);
+            assert.ok(
+                warn.calledOnceWithExactly("stream.responses_reasoning_item_invalid", {
+                    hasId: true,
+                    idPrefixOk: false,
+                    hasEncrypted: true,
+                })
+            );
+            assert.ok(debug.calledWith("stream.responses_reasoning_block_closed"));
+            assert.ok(!JSON.stringify(warn.args).includes("PRIVATE_STATE"));
+        } finally {
+            sandbox.restore();
+        }
+    });
+
     test("reasoning_summary_text.delta emits a thinking part with the delta text", () => {
         const state = createResponsesReasoningState();
         const parts = interpretResponsesReasoningEvent(

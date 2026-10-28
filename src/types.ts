@@ -1,3 +1,5 @@
+import type { ReasoningRequestContext } from "./adapters/reasoningContinuity";
+
 /**
  * OpenAI function-call entry emitted by assistant messages.
  */
@@ -492,6 +494,8 @@ export interface LiteLLMTokenCounterResponse {
 export interface OpenAIChatCompletionRequest {
     model: string;
     messages: OpenAIChatMessage[];
+    /** Internal only; endpoint adapters remove this context before serializing a wire body. */
+    reasoningContext?: ReasoningRequestContext;
     /** Anthropic Path 1: ask the provider to advance the automatic cache point. */
     cache_control?: OpenAICacheControl;
     stream?: boolean;
@@ -576,10 +580,12 @@ export type LiteLLMResponsesContentItem =
  * them was a silent no-op and — for `max_tokens` — meant the output cap was
  * never enforced on this route. Use `max_output_tokens` instead (issue #154).
  */
+export type ResponsesIncludable = "reasoning.encrypted_content";
+
 export interface LiteLLMResponsesRequest {
     model: string;
     input: LiteLLMResponseInputItem[];
-    include?: ["reasoning.encrypted_content"];
+    include?: ResponsesIncludable[];
     /** Preserved from the chat-shaped request for eligible responses-routed cards. */
     cache_control?: OpenAICacheControl;
     instructions?: string;

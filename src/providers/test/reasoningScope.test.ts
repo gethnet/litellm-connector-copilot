@@ -3,14 +3,11 @@ import * as sinon from "sinon";
 import * as vscode from "vscode";
 import { LiteLLMChatProvider } from "../liteLLMChatProvider";
 import { ConfigManager } from "../../config/configManager";
-import type { ReasoningScope } from "../../adapters/reasoningContinuity";
+import type { ReasoningCallContext } from "../base/reasoningScope";
 import { createMockSecrets } from "../../test/utils/testMocks";
 
 interface ScopeTestAccess {
-    getReasoningScope(
-        options: vscode.ProvideLanguageModelChatResponseOptions,
-        model: vscode.LanguageModelChatInformation
-    ): Promise<ReasoningScope | undefined>;
+    _callContext: ReasoningCallContext;
     _registry: {
         lookup(id: string): { baseUrl: string; apiKey: string; rawModelName: string; routingIdentity: string };
         dispose(): void;
@@ -56,18 +53,18 @@ suite("Reasoning scope from call-time configuration", () => {
     });
 
     test("is stable for one account across config sources and host-wrapped IDs", async () => {
-        const direct = await access.getReasoningScope(options("ACCOUNT_A"), model);
+        const direct = await access._callContext.getReasoningScope(options("ACCOUNT_A"), model);
         assert.ok(direct);
         assert.ok(!JSON.stringify(direct).includes("ACCOUNT_A"), "credentials never enter history");
-        assert.deepStrictEqual(await access.getReasoningScope(options(" ACCOUNT_A "), model), direct);
-        assert.deepStrictEqual(await access.getReasoningScope(options(), model), direct);
+        assert.deepStrictEqual(await access._callContext.getReasoningScope(options(" ACCOUNT_A "), model), direct);
+        assert.deepStrictEqual(await access._callContext.getReasoningScope(options(), model), direct);
         const wrapped = { ...model, id: `litellm-connector/Team/${model.id}` };
-        assert.deepStrictEqual(await access.getReasoningScope(options("ACCOUNT_A"), wrapped), direct);
+        assert.deepStrictEqual(await access._callContext.getReasoningScope(options("ACCOUNT_A"), wrapped), direct);
     });
 
     test("differs per account and per provider session", async () => {
-        const first = await access.getReasoningScope(options("ACCOUNT_A"), model);
-        assert.notDeepStrictEqual(await access.getReasoningScope(options("ACCOUNT_B"), model), first);
-        assert.notDeepStrictEqual(await provider().getReasoningScope(options("ACCOUNT_A"), model), first);
+        const first = await access._callContext.getReasoningScope(options("ACCOUNT_A"), model);
+        assert.notDeepStrictEqual(await access._callContext.getReasoningScope(options("ACCOUNT_B"), model), first);
+        assert.notDeepStrictEqual(await provider()._callContext.getReasoningScope(options("ACCOUNT_A"), model), first);
     });
 });

@@ -8,8 +8,9 @@ import type {
     LiteLLMTokenCounterRequest,
     LiteLLMTokenCounterResponse,
 } from "../types";
-import { transformToResponsesFormat } from "./responsesAdapter";
+import { toChatCompletionsWireRequest, transformToResponsesFormat } from "./responsesAdapter";
 import { Logger } from "../utils/logger";
+import { StructuredLogger } from "../observability/structuredLogger";
 import { isAnthropicModel } from "../utils/modelUtils";
 import { stripCacheBreakpoints } from "../utils/promptCacheControl";
 import type { TelemetryService } from "../telemetry/telemetryService";
@@ -183,6 +184,7 @@ export class LiteLLMClient {
 
     /**
      * Sends a chat request to the LiteLLM proxy.
+     * Warns on protected required parameters and debugs skipped no-op compatibility retries.
      */
     async chat(
         request: OpenAIChatCompletionRequest,
@@ -196,23 +198,7 @@ export class LiteLLMClient {
         if (endpoint === "/responses") {
             body = transformToResponsesFormat(request, modelInfo);
         } else {
-            // Responses continuity is an internal sidecar, not a chat-completions wire field.
-            body = {
-                ...request,
-                messages: request.messages
-                    .filter(
-                        (message) =>
-                            !message.responses_reasoning ||
-                            !!message.content ||
-                            !!message.tool_calls?.length ||
-                            !!message.thinking_blocks?.length
-                    )
-                    .map((message) => {
-                        const copy = { ...message };
-                        delete copy.responses_reasoning;
-                        return copy;
-                    }),
-            };
+            body = toChatCompletionsWireRequest(request);
         }
 
         Logger.trace(`Sending chat request to ${endpoint}`, { model: request.model });
@@ -265,7 +251,13 @@ export class LiteLLMClient {
                     const paramName = paramMatch[1];
                     Logger.info(`Stripping specific parameter: ${paramName}`);
                     const rootParam = paramName.split(".")[0];
-                    if (!["input", "messages", "model"].includes(rootParam)) {
+                    if (["input", "messages", "model"].includes(rootParam)) {
+                        StructuredLogger.warn(
+                            "request.protected_parameter_retained",
+                            { rootParam },
+                            { model: request.model, endpoint }
+                        );
+                    } else {
                         delete stripedAsAny[rootParam];
                     }
                     if (rootParam === "cache_control") {
@@ -352,15 +344,22 @@ export class LiteLLMClient {
                 // we might want to strip common problematic ones if they exist,
                 // but for now we rely on the regex match above.
 
-                response = await this.fetchWithRateLimit(
-                    `${this.config.url}${endpoint}`,
-                    {
-                        method: "POST",
-                        headers: headers,
-                        body: JSON.stringify(strippedBody),
-                    },
-                    { token }
-                );
+                const strippedJson = JSON.stringify(strippedBody);
+                const headersChanged =
+                    JSON.stringify(headers) !== JSON.stringify(this.getHeaders(request.model, modelInfo, body));
+                if (strippedJson !== JSON.stringify(body) || headersChanged) {
+                    response = await this.fetchWithRateLimit(
+                        `${this.config.url}${endpoint}`,
+                        { method: "POST", headers, body: strippedJson },
+                        { token }
+                    );
+                } else {
+                    StructuredLogger.debug(
+                        "request.parameter_retry_skipped",
+                        { reason: "unchanged_request" },
+                        { model: request.model, endpoint }
+                    );
+                }
             }
         }
 

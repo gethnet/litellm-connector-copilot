@@ -118,10 +118,12 @@ interface BaseTestAccess {
         modelInfo?: LiteLLMModelInfo,
         configuration?: Record<string, unknown>
     ) => Promise<ReadableStream<Uint8Array>>;
-    getCallTimeConfiguration: (
-        options: vscode.ProvideLanguageModelChatResponseOptions,
-        model: vscode.LanguageModelChatInformation
-    ) => Promise<Record<string, unknown> | undefined>;
+    _callContext: {
+        getCallTimeConfiguration: (
+            options: vscode.ProvideLanguageModelChatResponseOptions,
+            model: vscode.LanguageModelChatInformation
+        ) => Promise<Record<string, unknown> | undefined>;
+    };
     applyReasoningEffort: (
         request: OpenAIChatCompletionRequest,
         effort: OpenAIChatCompletionRequest["reasoning_effort"] | undefined
@@ -1603,7 +1605,7 @@ suite("LiteLLMProviderBase", () => {
             const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
             const optionsConfig = { baseUrl: "https://from-options", apiKey: "k-options" };
             const modelConfig = { baseUrl: "https://from-model", apiKey: "k-model" };
-            const result = await access(provider).getCallTimeConfiguration(
+            const result = await access(provider)._callContext.getCallTimeConfiguration(
                 { configuration: optionsConfig } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
                 {
                     id: "m",
@@ -1635,7 +1637,7 @@ suite("LiteLLMProviderBase", () => {
                 rawModelName: "m",
                 routingIdentity: "",
             });
-            const result = await access(provider).getCallTimeConfiguration(
+            const result = await access(provider)._callContext.getCallTimeConfiguration(
                 {} as vscode.ProvideLanguageModelChatResponseOptions,
                 {
                     id: "m",
@@ -1653,7 +1655,7 @@ suite("LiteLLMProviderBase", () => {
 
         test("returns undefined when neither options nor model carry configuration", async () => {
             const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
-            const result = await access(provider).getCallTimeConfiguration(
+            const result = await access(provider)._callContext.getCallTimeConfiguration(
                 {} as vscode.ProvideLanguageModelChatResponseOptions,
                 {
                     id: "m",

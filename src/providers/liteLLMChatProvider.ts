@@ -43,8 +43,7 @@ import {
 } from "../adapters/streaming/streamAbnormalTermination";
 import { requestHasThinkingBlocks } from "./base/thinkingBlockRetry";
 import type { OpenAIChatCompletionRequest } from "../types";
-import type { ReasoningScope } from "../adapters/reasoningContinuity";
-import { isNativeResponsesModel } from "../adapters/reasoningContinuity";
+import type { ReasoningRequestContext } from "../adapters/reasoningContinuity";
 
 /**
  * Request-derived context handed to the stream fingerprint so an empty or
@@ -52,7 +51,7 @@ import { isNativeResponsesModel } from "../adapters/reasoningContinuity";
  * blocks present? deep agentic history?) without re-parsing the request.
  */
 interface StreamRequestContext {
-    reasoningScope?: ReasoningScope;
+    reasoningContext?: ReasoningRequestContext;
     requestId: string;
     model: string;
     endpoint: string;
@@ -368,25 +367,13 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
             // A remaining raw-card miss cannot prove combined capacity from the
             // connector's maxContextWindowTokens display fallback.
             const modelInfo = this._registry.getModelInfo(modelToUse.id);
-            // Resolve native replay provenance once: the same scope filters history
-            // in the request and tags the reasoning items captured from this stream.
-            const reasoningScope = isNativeResponsesModel(this.getRawModelName(modelToUse.id), modelInfo)
-                ? await this.getReasoningScope(options, modelToUse)
-                : undefined;
-            const requestBody = await this.buildOpenAIChatRequest(
-                messages,
-                modelToUse,
-                options,
-                modelInfo,
-                caller,
-                reasoningScope
-            );
+            const requestBody = await this.buildOpenAIChatRequest(messages, modelToUse, options, modelInfo, caller);
             // Snapshot the request shape for the terminal fingerprint BEFORE any
             // retry path mutates the body: continuity blocks and agentic depth
             // are the two request-side signals that separate a laundered
             // continuity 400 from a classifier reject when a turn comes back empty.
             const streamRequestContext: StreamRequestContext = {
-                reasoningScope,
+                reasoningContext: requestBody.reasoningContext,
                 requestId,
                 model: modelToUse.id,
                 endpoint: modelInfo?.mode ?? "chat",
@@ -727,7 +714,7 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         // chats, so a shared `_streamingState` field let one in-flight request's tool-call
         // buffers/dedup set be reset or mutated by a sibling request's stream loop, which could
         // drop a real tool call as a false "duplicate" of another request's identical call id.
-        const state: StreamingState = createInitialStreamingState(requestContext?.reasoningScope);
+        const state: StreamingState = createInitialStreamingState(requestContext?.reasoningContext?.scope);
 
         Logger.info(`[processStreamingResponse] Starting stream processing`);
         StructuredLogger.info("stream.processing_start", {

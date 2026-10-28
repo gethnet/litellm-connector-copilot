@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### 🐛 Fixes
+
+* **🧠 Preserve native ChatGPT/OpenAI reasoning across turns (#169)**: Keep original `rs_...` items on `/responses` instead of rebuilding invalid `reasoning_N` IDs. Encrypted replay requires confirmed reasoning capability and matching backend/model/group/account/session; unsupported or unknown native routes retain text/tools without opaque state. Summaries count once toward the budget, and rejected encrypted continuity gets one retry without it. Bug report and fix by [@bn45hkurr0y4](https://github.com/bn45hkurr0y4).
+* **🛡️ Keep required request fields on parameter rejection (#169)**: Never strip `input`, `messages` or `model` after a nested-field 400, and skip compatibility retries when neither body nor headers changed. Fix by [@bn45hkurr0y4](https://github.com/bn45hkurr0y4).
+
 ## [2.5.17] - 2026-10-16
 
 ### ✨ Features

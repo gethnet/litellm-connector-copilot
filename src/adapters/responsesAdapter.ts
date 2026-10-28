@@ -9,8 +9,28 @@ import type {
 } from "../types";
 import { normalizeToolCallId } from "../utils";
 import { Logger } from "../utils/logger";
-import { isNativeResponsesModel, readResponsesReasoningItem } from "./reasoningContinuity";
+import { resolveReasoningReplayPolicy, readResponsesReasoningItem } from "./reasoningContinuity";
 import type { LiteLLMModelInfo } from "../types";
+
+/** Pure chat wire projection: native sidecars and the request context are never API fields. */
+export function toChatCompletionsWireRequest(request: OpenAIChatCompletionRequest): OpenAIChatCompletionRequest {
+    const body = { ...request };
+    delete body.reasoningContext;
+    body.messages = request.messages
+        .map((message) => {
+            const copy = { ...message };
+            delete copy.responses_reasoning;
+            return copy;
+        })
+        .filter(
+            (message, index) =>
+                !request.messages[index].responses_reasoning ||
+                (Array.isArray(message.content) ? message.content.length > 0 : !!message.content) ||
+                !!message.tool_calls?.length ||
+                !!message.thinking_blocks?.length
+        );
+    return body;
+}
 
 function getResponsesReasoningEffort(effort: OpenAIChatCompletionRequest["reasoning_effort"]): string | undefined {
     if (typeof effort === "string") {
@@ -115,7 +135,8 @@ export function transformToResponsesFormat(
     modelInfo?: LiteLLMModelInfo
 ): LiteLLMResponsesRequest {
     const messages = requestBody.messages;
-    const nativeResponses = isNativeResponsesModel(requestBody.model, modelInfo);
+    // Prepared requests carry the builder's decision. Direct adapter/client callers resolve it here once.
+    const policy = requestBody.reasoningContext?.policy ?? resolveReasoningReplayPolicy(requestBody.model, modelInfo);
     const inputArray: LiteLLMResponseInputItem[] = [];
     let instructions: string | undefined;
 
@@ -162,7 +183,7 @@ export function transformToResponsesFormat(
                 inputArray.push(userMessage);
             }
         } else if (msg.role === "assistant") {
-            if (nativeResponses && Array.isArray(msg.responses_reasoning)) {
+            if (policy === "native" && Array.isArray(msg.responses_reasoning)) {
                 for (const value of msg.responses_reasoning) {
                     const item = readResponsesReasoningItem(value);
                     if (item) {
@@ -176,7 +197,7 @@ export function transformToResponsesFormat(
             if (assistantMessage) {
                 inputArray.push(assistantMessage);
             }
-            if (!nativeResponses && Array.isArray(msg.thinking_blocks)) {
+            if (policy === "bridge" && Array.isArray(msg.thinking_blocks)) {
                 for (const block of msg.thinking_blocks) {
                     if (block.type === "thinking") {
                         // Emit a `reasoning` input item carrying the visible thinking summary
@@ -294,7 +315,7 @@ export function transformToResponsesFormat(
     const responsesBody: LiteLLMResponsesRequest = {
         model: requestBody.model,
         input: finalInputArray,
-        ...(nativeResponses ? { include: ["reasoning.encrypted_content"] as ["reasoning.encrypted_content"] } : {}),
+        ...(policy === "native" ? { include: ["reasoning.encrypted_content"] } : {}),
         cache_control: requestBody.cache_control,
         stream: requestBody.stream,
         instructions,

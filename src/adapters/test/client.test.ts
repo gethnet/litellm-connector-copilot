@@ -2,6 +2,7 @@ import * as assert from "assert";
 import { LiteLLMClient } from "../litellmClient";
 import * as sinon from "sinon";
 import type { LiteLLMModelInfo, LiteLLMModelInfoResponse, OpenAIChatCompletionRequest } from "../../types";
+import { StructuredLogger } from "../../observability/structuredLogger";
 
 suite("LiteLLM Client Unit Tests", () => {
     const config = { url: "http://localhost:4000", key: "test-key" };
@@ -16,56 +17,20 @@ suite("LiteLLM Client Unit Tests", () => {
         sandbox.restore();
     });
 
-    test("chat projection removes Responses sidecars and their empty messages without mutating history", async () => {
-        const request: OpenAIChatCompletionRequest = {
-            model: "chatgpt/gpt-6.1-sol",
-            messages: [
-                {
-                    role: "assistant",
-                    responses_reasoning: [
-                        { type: "reasoning", id: "rs_test", summary: [], encrypted_content: "SYNTHETIC" },
-                    ],
-                },
-                { role: "assistant", content: "visible", responses_reasoning: [] },
-                { role: "user", content: "continue" },
-            ],
-        };
-        const before = JSON.stringify(request);
-        const fetchStub = sandbox.stub(global, "fetch").resolves(new Response("data: [DONE]\n\n"));
-        await new LiteLLMClient(config, userAgent).chat(request, "chat");
-        const body = JSON.parse(String(fetchStub.firstCall.args[1]?.body)) as OpenAIChatCompletionRequest;
-        assert.deepStrictEqual(body.messages, [
-            { role: "assistant", content: "visible" },
-            { role: "user", content: "continue" },
-        ]);
-        assert.strictEqual(JSON.stringify(request), before);
-    });
-
-    test("native alias uses provider metadata and never sends legacy signatures as Responses ciphertext", async () => {
+    test("chat endpoint sends the projected wire body", async () => {
+        // Projection details are unit-tested in responsesAdapter.test; this only proves the client uses it.
         const fetchStub = sandbox.stub(global, "fetch").resolves(new Response("data: [DONE]\n\n"));
         await new LiteLLMClient(config, userAgent).chat(
             {
-                model: "my-private-model-alias",
-                messages: [
-                    {
-                        role: "assistant",
-                        content: "visible",
-                        thinking_blocks: [
-                            { type: "thinking", thinking: "old summary", signature: "UNKNOWN_OLD_STATE" },
-                        ],
-                    },
-                ],
+                model: "m",
+                messages: [{ role: "assistant", content: "visible", responses_reasoning: [] }],
+                reasoningContext: { policy: "omit" },
             },
-            "responses",
-            undefined,
-            { provider: "chatgpt" }
+            "chat"
         );
-        const body = JSON.parse(String(fetchStub.firstCall.args[1]?.body)) as {
-            input: { type: string }[];
-            include: string[];
-        };
-        assert.ok(!body.input.some((entry) => entry.type === "reasoning"));
-        assert.deepStrictEqual(body.include, ["reasoning.encrypted_content"]);
+        const body = JSON.parse(String(fetchStub.firstCall.args[1]?.body)) as OpenAIChatCompletionRequest;
+        assert.deepStrictEqual(body.messages, [{ role: "assistant", content: "visible" }]);
+        assert.ok(!("reasoningContext" in body));
     });
 
     test("OpenAI-compatible third-party Responses routes preserve bridge signatures", async () => {
@@ -83,7 +48,7 @@ suite("LiteLLM Client Unit Tests", () => {
             },
             "responses",
             undefined,
-            { provider: "openai", mode: "responses" }
+            { provider: "openai", mode: "responses", supports_reasoning: true }
         );
         const body = JSON.parse(String(fetchStub.firstCall.args[1]?.body)) as {
             include?: string[];
@@ -93,16 +58,63 @@ suite("LiteLLM Client Unit Tests", () => {
         assert.ok(body.input.some((entry) => entry.encrypted_content === "BRIDGE_SIGNATURE"));
     });
 
-    test("unsupported nested Responses field never causes retry to drop required input", async () => {
+    test("non-reasoning and unknown native models send neither include nor opaque reasoning", async () => {
+        const fetchStub = sandbox.stub(global, "fetch").callsFake(async () => new Response("data: [DONE]\n\n"));
+        for (const model of ["openai/gpt-4o", "openai/gpt-4.1", "chatgpt/gpt-6.1-sol"]) {
+            for (const supports_reasoning of [false, undefined]) {
+                await new LiteLLMClient(config, userAgent).chat(
+                    {
+                        model,
+                        messages: [
+                            {
+                                role: "assistant",
+                                content: "visible",
+                                responses_reasoning: [
+                                    { type: "reasoning", id: "rs_old", summary: [], encrypted_content: "NATIVE" },
+                                ],
+                                thinking_blocks: [{ type: "thinking", thinking: "old", signature: "LEGACY" }],
+                            },
+                        ],
+                    },
+                    "responses",
+                    undefined,
+                    // Real card shape: LiteLLM lists reasoning_effort even for non-reasoning gpt-4o.
+                    { supports_reasoning, supported_openai_params: ["reasoning_effort", "temperature"] }
+                );
+                const body = JSON.parse(String(fetchStub.lastCall.args[1]?.body)) as {
+                    input: { type: string }[];
+                    include?: string[];
+                };
+                assert.strictEqual(body.include, undefined, model);
+                assert.deepStrictEqual(body.input, [{ type: "message", role: "assistant", content: "visible" }]);
+            }
+        }
+    });
+
+    test("parameter retry keeps protected roots and never resends an unchanged body", async () => {
         const fetchStub = sandbox.stub(global, "fetch");
-        fetchStub.onFirstCall().resolves(new Response("Unknown parameter: input.0.encrypted_content", { status: 400 }));
-        fetchStub.onSecondCall().resolves(new Response("data: [DONE]\n\n"));
-        await new LiteLLMClient(config, userAgent).chat(
-            { model: "chatgpt/gpt-6.1-sol", messages: [{ role: "user", content: "continue" }] },
-            "responses"
-        );
-        const body = JSON.parse(String(fetchStub.secondCall.args[1]?.body)) as { input?: unknown };
-        assert.ok(Array.isArray(body.input));
+        const warn = sandbox.stub(StructuredLogger, "warn");
+        for (const [mode, param] of [
+            ["responses", "input.0.encrypted_content"],
+            ["chat", "messages.0.content"],
+            ["chat", "model"],
+            ["chat", "nonexistent_option"],
+        ]) {
+            fetchStub.resetHistory();
+            fetchStub.resolves(new Response(`Unknown parameter: ${param}`, { status: 400 }));
+            await assert.rejects(
+                () =>
+                    new LiteLLMClient(config, userAgent).chat(
+                        { model: "chatgpt/gpt-6.1-sol", messages: [{ role: "user", content: "continue" }] },
+                        mode
+                    ),
+                /LiteLLM API error: 400/
+            );
+            assert.strictEqual(fetchStub.callCount, 1, `${param}: an unchanged body cannot fix the rejection`);
+        }
+        for (const rootParam of ["input", "messages", "model"]) {
+            assert.ok(warn.calledWith("request.protected_parameter_retained", { rootParam }));
+        }
     });
 
     test("getHeaders includes Authorization and X-API-Key", () => {
