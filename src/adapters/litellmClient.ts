@@ -10,6 +10,7 @@ import type {
 } from "../types";
 import { transformToResponsesFormat } from "./responsesAdapter";
 import { Logger } from "../utils/logger";
+import { StructuredLogger } from "../observability/structuredLogger";
 import { isAnthropicModel } from "../utils/modelUtils";
 import { stripCacheBreakpoints } from "../utils/promptCacheControl";
 import type { TelemetryService } from "../telemetry/telemetryService";
@@ -194,7 +195,7 @@ export class LiteLLMClient {
         let body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest = request;
 
         if (endpoint === "/responses") {
-            body = transformToResponsesFormat(request);
+            body = transformToResponsesFormat(request, modelInfo);
         }
 
         Logger.trace(`Sending chat request to ${endpoint}`, { model: request.model });
@@ -247,7 +248,15 @@ export class LiteLLMClient {
                     const paramName = paramMatch[1];
                     Logger.info(`Stripping specific parameter: ${paramName}`);
                     const rootParam = paramName.split(".")[0];
-                    delete stripedAsAny[rootParam];
+                    if (["input", "messages", "model"].includes(rootParam)) {
+                        StructuredLogger.warn(
+                            "transport.unsupported_param_root_protected",
+                            { paramName, rootParam },
+                            { model: request.model, endpoint }
+                        );
+                    } else {
+                        delete stripedAsAny[rootParam];
+                    }
                     if (rootParam === "cache_control") {
                         this.stripPromptCacheControls(strippedBody);
                     }

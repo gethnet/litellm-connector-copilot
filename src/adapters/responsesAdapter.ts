@@ -1,14 +1,17 @@
 import type {
     OpenAIChatCompletionRequest,
     OpenAIChatMessage,
+    OpenAIThinkingBlock,
     LiteLLMResponsesRequest,
     LiteLLMResponsesContentItem,
     LiteLLMResponseInputItem,
     LiteLLMResponseTool,
     OpenAIChatMessageContentItem,
+    LiteLLMModelInfo,
 } from "../types";
 import { normalizeToolCallId } from "../utils";
 import { Logger } from "../utils/logger";
+import { StructuredLogger } from "../observability/structuredLogger";
 
 function getResponsesReasoningEffort(effort: OpenAIChatCompletionRequest["reasoning_effort"]): string | undefined {
     if (typeof effort === "string") {
@@ -108,10 +111,19 @@ function toMessageInputItem(
  * @param requestBody The original chat/completions request body
  * @returns Transformed request body for the responses endpoint
  */
-export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequest): LiteLLMResponsesRequest {
+export function transformToResponsesFormat(
+    requestBody: OpenAIChatCompletionRequest,
+    modelInfo?: LiteLLMModelInfo
+): LiteLLMResponsesRequest {
     const messages = requestBody.messages;
     const inputArray: LiteLLMResponseInputItem[] = [];
     let instructions: string | undefined;
+    let nativeReasoningReplayed = 0;
+    const nativeModelName = (modelInfo?.key ?? requestBody.model).replace(/^(?:openai|chatgpt)\/(?:responses\/)?/, "");
+    const isNativeOpenAIResponses =
+        modelInfo?.provider === "chatgpt" ||
+        ((modelInfo?.provider === "openai" || requestBody.model.startsWith("chatgpt/")) &&
+            /^(?:gpt-\d|o[1-9]\d*(?:-|$))/.test(nativeModelName));
 
     const toolCallIdMap = new Map<string, string>();
 
@@ -156,40 +168,67 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
                 inputArray.push(userMessage);
             }
         } else if (msg.role === "assistant") {
-            // Assistant content (if any) becomes ONE message item; thinking blocks
-            // and tool calls are appended after it as their own input items.
+            const thinkingBlocks = Array.isArray(msg.thinking_blocks) ? msg.thinking_blocks : [];
+            // Native OpenAI reasoning must precede its assistant message and use
+            // the original rs_ id. Only id-less bridged blocks retain the legacy
+            // synthetic-id path below, preserving their existing transport shape.
+            const nativeBlocks = thinkingBlocks.filter(
+                (block): block is Extract<OpenAIThinkingBlock, { type: "thinking" }> =>
+                    isNativeOpenAIResponses &&
+                    block.type === "thinking" &&
+                    !!block.id &&
+                    /^rs_[A-Za-z0-9_-]+$/.test(block.id)
+            );
+            nativeReasoningReplayed += nativeBlocks.length;
+            for (const block of nativeBlocks) {
+                if (!block.id) {
+                    continue;
+                }
+                inputArray.push({
+                    type: "reasoning",
+                    id: block.id,
+                    summary: [{ type: "summary_text", text: block.thinking }],
+                    encrypted_content: block.signature,
+                });
+            }
+            // Assistant content (if any) becomes ONE message item; id-less
+            // bridged thinking blocks and tool calls follow as separate items.
             const assistantMessage = toMessageInputItem("assistant", msg.content);
             if (assistantMessage) {
                 inputArray.push(assistantMessage);
             }
-            if (Array.isArray(msg.thinking_blocks)) {
-                for (const block of msg.thinking_blocks) {
-                    if (block.type === "thinking") {
-                        // Emit a `reasoning` input item carrying the visible thinking summary
-                        // and the encrypted signature. Anthropic uses the signature to verify
-                        // the thinking block was actually produced by the model.
-                        inputArray.push({
-                            type: "reasoning",
-                            id: `reasoning_${inputArray.length}`,
-                            summary: [{ type: "summary_text", text: block.thinking }],
-                            encrypted_content: block.signature,
-                        } as unknown as LiteLLMResponseInputItem);
-                        Logger.trace(
-                            `[responsesAdapter] Preserving thinking_block (${block.thinking.length} chars, sig ${block.signature.length} bytes)`
-                        );
-                    } else {
-                        // redacted_thinking block: opaque data, no text. The API still
-                        // requires it to be passed back unchanged.
-                        inputArray.push({
-                            type: "reasoning",
-                            id: `reasoning_${inputArray.length}`,
-                            summary: [],
-                            encrypted_content: block.data,
-                        } as unknown as LiteLLMResponseInputItem);
-                        Logger.trace(
-                            `[responsesAdapter] Preserving redacted_thinking block (${block.data.length} bytes)`
-                        );
+            for (const block of thinkingBlocks) {
+                if (block.type === "thinking") {
+                    if (nativeBlocks.includes(block)) {
+                        continue;
                     }
+                    if (isNativeOpenAIResponses) {
+                        continue;
+                    }
+                    // Anthropic bridges do not provide an OpenAI rs_ id and keep
+                    // the legacy synthetic identifier expected by that pathway.
+                    inputArray.push({
+                        type: "reasoning",
+                        id: `reasoning_${inputArray.length}`,
+                        summary: [{ type: "summary_text", text: block.thinking }],
+                        encrypted_content: block.signature,
+                    });
+                    Logger.trace(
+                        `[responsesAdapter] Preserving thinking_block (${block.thinking.length} chars, sig ${block.signature.length} bytes)`
+                    );
+                } else {
+                    if (isNativeOpenAIResponses) {
+                        continue;
+                    }
+                    // Redacted bridge blocks have no OpenAI item id; preserve the
+                    // existing bridge representation and its ordering.
+                    inputArray.push({
+                        type: "reasoning",
+                        id: `reasoning_${inputArray.length}`,
+                        summary: [],
+                        encrypted_content: block.data,
+                    });
+                    Logger.trace(`[responsesAdapter] Preserving redacted_thinking block (${block.data.length} bytes)`);
                 }
             }
             if (msg.tool_calls) {
@@ -277,9 +316,24 @@ export function transformToResponsesFormat(requestBody: OpenAIChatCompletionRequ
     // filtered by LiteLLM as unknown — so sending them was a silent no-op and the
     // output cap was never enforced on this route. `max_output_tokens` is the
     // Responses-API name for the cap (issue #154).
+    // `include` is an OpenAI native reasoning feature, not a generic Responses
+    // parameter. Require both known provider/family and explicit capability.
+    const includeEncryptedReasoning =
+        isNativeOpenAIResponses &&
+        modelInfo?.supports_reasoning === true &&
+        !/^(?:gpt-4o|gpt-4\.1)(?:-|$)/.test(nativeModelName);
+    if (nativeReasoningReplayed > 0 || includeEncryptedReasoning) {
+        StructuredLogger.debug(
+            "responses.native_reasoning_replay",
+            { replayed: nativeReasoningReplayed, include: includeEncryptedReasoning },
+            { model: requestBody.model, endpoint: "/responses" }
+        );
+    }
+
     const responsesBody: LiteLLMResponsesRequest = {
         model: requestBody.model,
         input: finalInputArray,
+        ...(includeEncryptedReasoning ? { include: ["reasoning.encrypted_content"] } : {}),
         cache_control: requestBody.cache_control,
         stream: requestBody.stream,
         instructions,

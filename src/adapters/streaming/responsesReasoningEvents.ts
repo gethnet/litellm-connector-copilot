@@ -126,7 +126,9 @@ export function interpretResponsesReasoningEvent(json: unknown, state: Responses
         if (signature) {
             metadata.signature = signature;
         }
-        return [{ type: "thinking", value: "", metadata }];
+        // Preserve the upstream id: native Responses reasoning cannot be replayed
+        // with a synthesized id on the next turn.
+        return [{ type: "thinking", value: "", id: itemId, metadata }];
     }
 
     // Not a reasoning event this module owns.

@@ -91,6 +91,7 @@ export function stripThinkingBlocksFromRequest(request: OpenAIChatCompletionRequ
  *   (`messages.N.content.M.type: Field required`) — a narrow compatibility
  *   exception for the exact shape produced when the prior serializer omitted
  *   the `type` discriminant.
+ * - OpenAI `/responses` id/ciphertext rejections from prior-turn reasoning.
  *
  * Authentication, authorization, quota, cancellation, overflow, 5xx, network,
  * and configuration failures are intentionally excluded so the retry cannot
@@ -130,9 +131,17 @@ export function isThinkingBlockRetryableError(error: unknown): boolean {
         text.includes("prefix_binding_mismatch") ||
         text.includes("model_binding_mismatch");
 
+    // Pre-fix histories and stale cross-model ciphertext are both recoverable
+    // by the existing one-shot continuity strip-and-retry.
+    const identifiesOpenAIResponsesRejection =
+        text.includes("expected an id that begins with rs") ||
+        text.includes("invalid_encrypted_content") ||
+        (/encrypted[_ ]content/.test(text) && /invalid|could not be verified|cannot be decrypted/.test(text));
+
     return (
         (identifiesThinking && identifiesRejection) ||
         identifiesMissingBlockDiscriminant ||
-        identifiesFable51PrefixMismatch
+        identifiesFable51PrefixMismatch ||
+        identifiesOpenAIResponsesRejection
     );
 }

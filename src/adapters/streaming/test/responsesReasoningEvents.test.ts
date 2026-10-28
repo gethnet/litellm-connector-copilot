@@ -78,6 +78,7 @@ suite("ResponsesReasoningEvents - real LiteLLM /responses sequence", () => {
         if (part.type === "thinking") {
             assert.strictEqual(part.value, "");
             assert.strictEqual(part.metadata?.encrypted_content, "opaque-sig");
+            assert.strictEqual(part.id, "rs_1");
         }
         // Block is closed after done
         assert.strictEqual(state.currentReasoningItemId, undefined);

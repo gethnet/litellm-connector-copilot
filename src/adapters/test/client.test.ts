@@ -16,6 +16,23 @@ suite("LiteLLM Client Unit Tests", () => {
         sandbox.restore();
     });
 
+    test("unsupported nested Responses field never causes retry to drop required input", async () => {
+        const fetchStub = sandbox.stub(global, "fetch");
+        fetchStub.onFirstCall().resolves(new Response("Unknown parameter: input.0.encrypted_content", { status: 400 }));
+        fetchStub.onSecondCall().resolves(new Response("data: [DONE]\n\n"));
+        await new LiteLLMClient(config, userAgent).chat(
+            {
+                model: "chatgpt/gpt-6.1-sol",
+                messages: [{ role: "user", content: "continue" }],
+                extra_body: { cache: { "no-cache": true } },
+            },
+            "responses"
+        );
+        const body = JSON.parse(String(fetchStub.secondCall.args[1]?.body)) as { input?: unknown; model?: unknown };
+        assert.ok(Array.isArray(body.input), "input must survive the strip-and-retry");
+        assert.strictEqual(body.model, "chatgpt/gpt-6.1-sol");
+    });
+
     test("getHeaders includes Authorization and X-API-Key", () => {
         const client = new LiteLLMClient(config, userAgent);
         // @ts-expect-error - accessing private method for testing

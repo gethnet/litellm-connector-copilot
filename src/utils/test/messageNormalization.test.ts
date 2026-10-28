@@ -136,6 +136,40 @@ suite("Message Normalization", () => {
             ]);
         });
 
+        test("carries a native rs_ item id from the metadata part onto the thinking block", () => {
+            const messages = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    content: [
+                        { value: "native reasoning summary" },
+                        { value: "", id: "rs_abc123", metadata: { encrypted_content: "ENC" } },
+                        new vscode.LanguageModelTextPart("Visible answer"),
+                    ],
+                },
+            ];
+
+            const out = convertMessages(messages as unknown as vscode.LanguageModelChatRequestMessage[]);
+
+            assert.deepStrictEqual(out[0].thinking_blocks, [
+                { type: "thinking", thinking: "native reasoning summary", signature: "ENC", id: "rs_abc123" },
+            ]);
+        });
+
+        test("ignores non-rs_ part ids so bridged providers keep the legacy block shape", () => {
+            const messages = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    content: [{ value: "thought", id: "thought-1", metadata: { signature: "SIG" } }],
+                },
+            ];
+
+            const out = convertMessages(messages as unknown as vscode.LanguageModelChatRequestMessage[]);
+
+            assert.deepStrictEqual(out[0].thinking_blocks, [
+                { type: "thinking", thinking: "thought", signature: "SIG" },
+            ]);
+        });
+
         test("omits a signature-only block instead of serializing an invalid native block", () => {
             const messages = [
                 {

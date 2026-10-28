@@ -300,6 +300,154 @@ suite("Responses Adapter Unit Tests", () => {
         assert.ok(!JSON.stringify(body.input).includes('"thinking":"opaque-redacted-thinking"'));
     });
 
+    test("replays native reasoning with its original rs_ id before the assistant message", () => {
+        const nativeBlock = {
+            type: "thinking" as const,
+            thinking: "Summary",
+            signature: "ENC",
+            id: "rs_original_123",
+        };
+        const request = {
+            model: "chatgpt/gpt-6.1-sol",
+            messages: [
+                {
+                    role: "assistant" as const,
+                    content: "Visible answer",
+                    thinking_blocks: [nativeBlock],
+                    tool_calls: [
+                        { id: "call_1", type: "function" as const, function: { name: "read_file", arguments: "{}" } },
+                    ],
+                },
+            ],
+        };
+        const body = transformToResponsesFormat(request, {
+            provider: "chatgpt",
+            key: "gpt-6.1-sol",
+            supports_reasoning: true,
+        });
+
+        assert.deepStrictEqual(
+            body.input.map((item) => item.type),
+            ["reasoning", "message", "function_call"]
+        );
+        assert.deepStrictEqual(body.input[0], {
+            type: "reasoning",
+            id: "rs_original_123",
+            summary: [{ type: "summary_text", text: "Summary" }],
+            encrypted_content: "ENC",
+        });
+        assert.deepStrictEqual(body.include, ["reasoning.encrypted_content"]);
+        assert.ok(!JSON.stringify(body.input).includes("reasoning_"));
+    });
+
+    test("recognizes namespaced native model ids when discovery metadata is unavailable", () => {
+        const body = transformToResponsesFormat({
+            model: "chatgpt/gpt-6.1-sol",
+            messages: [
+                {
+                    role: "assistant",
+                    content: "Visible answer",
+                    thinking_blocks: [
+                        { type: "thinking", thinking: "Summary", signature: "ENC", id: "rs_original_123" },
+                    ],
+                },
+            ],
+        });
+
+        assert.deepStrictEqual(body.input, [
+            {
+                type: "reasoning",
+                id: "rs_original_123",
+                summary: [{ type: "summary_text", text: "Summary" }],
+                encrypted_content: "ENC",
+            },
+            { type: "message", role: "assistant", content: "Visible answer" },
+        ]);
+    });
+
+    test("keeps bridge reasoning on the legacy path even when LiteLLM assigns an rs_ id", () => {
+        const body = transformToResponsesFormat(
+            {
+                model: "qwen3-coder-480b-a35b-instruct",
+                messages: [
+                    {
+                        role: "assistant",
+                        thinking_blocks: [
+                            { type: "thinking", thinking: "Bridge summary", signature: "BRIDGE_SIG", id: "rs_bridge" },
+                        ],
+                    },
+                ],
+            },
+            { provider: "openai", key: "qwen3-coder-480b-a35b-instruct", supports_reasoning: true }
+        );
+
+        assert.deepStrictEqual(body.input[0], {
+            type: "reasoning",
+            id: "reasoning_0",
+            summary: [{ type: "summary_text", text: "Bridge summary" }],
+            encrypted_content: "BRIDGE_SIG",
+        });
+        assert.strictEqual(body.include, undefined);
+    });
+
+    test("does not invent an id for legacy reasoning on a native OpenAI route", () => {
+        const body = transformToResponsesFormat(
+            {
+                model: "chatgpt/gpt-6.1-sol",
+                messages: [
+                    {
+                        role: "assistant",
+                        content: "Visible answer",
+                        thinking_blocks: [{ type: "thinking", thinking: "Old summary", signature: "OLD_STATE" }],
+                    },
+                ],
+            },
+            { provider: "chatgpt", key: "gpt-6.1-sol", supports_reasoning: true }
+        );
+
+        assert.deepStrictEqual(body.input, [{ type: "message", role: "assistant", content: "Visible answer" }]);
+    });
+
+    test("does not invent an id for legacy redacted reasoning on a native OpenAI route", () => {
+        const body = transformToResponsesFormat(
+            {
+                model: "chatgpt/gpt-6.1-sol",
+                messages: [
+                    {
+                        role: "assistant",
+                        content: "Visible answer",
+                        thinking_blocks: [{ type: "redacted_thinking", data: "OLD_STATE" }],
+                    },
+                ],
+            },
+            { provider: "chatgpt", key: "gpt-6.1-sol", supports_reasoning: true }
+        );
+
+        assert.deepStrictEqual(body.input, [{ type: "message", role: "assistant", content: "Visible answer" }]);
+    });
+
+    test("requests encrypted reasoning only for explicitly reasoning-capable models", () => {
+        const request = { model: "openai/gpt-4o", messages: [{ role: "user" as const, content: "hi" }] };
+        assert.strictEqual(transformToResponsesFormat(request).include, undefined);
+        assert.strictEqual(transformToResponsesFormat(request, { supports_reasoning: false }).include, undefined);
+        assert.strictEqual(
+            transformToResponsesFormat(request, {
+                provider: "openai",
+                key: "gpt-4o",
+                supports_reasoning: true,
+            }).include,
+            undefined,
+            "a known non-reasoning GPT family must not receive the include parameter"
+        );
+        assert.deepStrictEqual(
+            transformToResponsesFormat(
+                { ...request, model: "openai/gpt-5.4" },
+                { provider: "openai", key: "gpt-5.4", supports_reasoning: true }
+            ).include,
+            ["reasoning.encrypted_content"]
+        );
+    });
+
     test("transformToResponsesFormat synthesizes name from tool definitions", () => {
         const body = transformToResponsesFormat({
             model: "m",

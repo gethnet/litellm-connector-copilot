@@ -295,7 +295,13 @@ function sanitizeSchema(input: unknown, propName?: string): Record<string, unkno
 
 interface ThinkingInputPart {
     value?: unknown;
+    id?: unknown;
     metadata?: unknown;
+}
+
+/** Only native OpenAI Responses ids are portable; host-generated ids are ignored. */
+function nativeReasoningId(part: ThinkingInputPart): string | undefined {
+    return typeof part.id === "string" && /^rs_[A-Za-z0-9_-]+$/.test(part.id) ? part.id : undefined;
 }
 
 interface ThinkingMetadata {
@@ -373,7 +379,13 @@ function extractOpaqueThinkingBlock(part: unknown, precedingThinkingText: string
     }
 
     const thinking = extractThinkingText(part) ?? precedingThinkingText;
-    return thinking.length > 0 ? { type: "thinking", thinking, signature: opaqueState } : undefined;
+    if (thinking.length === 0) {
+        return undefined;
+    }
+    const id = nativeReasoningId(candidate);
+    return id
+        ? { type: "thinking", thinking, signature: opaqueState, id }
+        : { type: "thinking", thinking, signature: opaqueState };
 }
 
 /**

@@ -52,6 +52,8 @@ export type OpenAIThinkingBlock =
           type: "thinking";
           thinking: string;
           signature: string;
+          /** Original native Responses reasoning id; absent for bridged blocks. */
+          id?: string;
       }
     | {
           type: "redacted_thinking";
@@ -568,6 +570,8 @@ export type LiteLLMResponsesContentItem =
 export interface LiteLLMResponsesRequest {
     model: string;
     input: LiteLLMResponseInputItem[];
+    /** Request encrypted reasoning state only from reasoning-capable models. */
+    include?: "reasoning.encrypted_content"[];
     /** Preserved from the chat-shaped request for eligible responses-routed cards. */
     cache_control?: OpenAICacheControl;
     instructions?: string;
