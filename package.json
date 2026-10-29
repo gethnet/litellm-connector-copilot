@@ -1,7 +1,7 @@
 {
 	"name": "litellm-connector-copilot",
 	"displayName": "LiteLLM Connector for Copilot",
-	"version": "2.5.18-dev1",
+	"version": "2.5.18",
 	"description": "An extension that integrates LiteLLM proxy into Copilot",
 	"categories": [
 		"AI",
@@ -37,7 +37,8 @@
 	"contributors": [
 		"amwdrizz",
 		"FPA-DavidTai",
-		"kud-csi"
+		"kud-csi",
+		"bn45hkurr0y4"
 	],
 	"publisher": "GethNet",
 	"main": "./dist/extension.js",

@@ -10,14 +10,13 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.5.17
+## 🆕 What's New in 2.5.18
 
-> Version 2.5.17 makes token budgets fit real backend tokenizers: local estimates now self-calibrate from the server's own usage counts, and commit generation verifies the exact diff size with LiteLLM before sending.
+> Version 2.5.18 restores reliable multi-turn `/responses` chats for native ChatGPT/OpenAI reasoning models by preserving their required upstream reasoning identifiers.
 
-- 🎯 **Calibrated token counting** — The heuristic estimator undercounts dense code and diffs on some backends (~1.37× on vLLM), silently overflowing context windows the picker said were fine. Every request's `usage.prompt_tokens` now teaches a per-model correction factor (clamped ×1.0–×2.0 — estimates only inflate, never shrink), applied everywhere tokens are counted: chat trimming, commit diff budgeting, `provideTokenCount`, and telemetry. It converges within a few requests and adds no bundled tokenizer, so the web build stays lean.
-- 🛠️ **Commit overflow retry** — Generating a commit message from a huge staged diff no longer hard-fails with a context-window 400: the command retries up to 2 times on overflow, shrinking the diff ×0.75 per attempt. On top of that, the compacted diff is now verified against LiteLLM's exact token counter before sending and recompacted once if the server says it's still too big.
+- 🧠 **Native OpenAI reasoning replay** — Follow-up turns for native ChatGPT/OpenAI reasoning models on `/responses` now reuse the original `rs_…` reasoning ID instead of an invalid synthesized ID. The connector asks for encrypted reasoning only from confirmed native reasoning models, replays it before the associated assistant turn, and uses the existing one-shot continuity retry to recover old or mismatched history without losing visible text or tool calls.
 
-> ℹ️ **Both defenses stack** — calibration is the first line (budgets fit on the first request); the remote recount and the retry loop are the backstop. Bug report and original fix by [@kud-csi](https://github.com/kud-csi) — thank you! 🙏
+> ℹ️ **Credit** — Bug report, root-cause analysis, and original fix by [@bn45hkurr0y4](https://github.com/bn45hkurr0y4) in [#170](https://github.com/gethnet/litellm-connector-copilot/issues/170) and [#169](https://github.com/gethnet/litellm-connector-copilot/pull/169). Thank you! 🙏
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 

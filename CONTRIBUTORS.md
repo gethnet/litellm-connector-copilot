@@ -1,7 +1,7 @@
 # Contributors ✨
 
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-3-orange.svg?style=flat-square)](#-contributors)
+[![All Contributors](https://img.shields.io/badge/all_contributors-4-orange.svg?style=flat-square)](#-contributors)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
@@ -15,6 +15,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="16.66%"><a href="https://github.com/FPA-DavidTai"><img src="https://avatars.githubusercontent.com/u/60372864?v=4?s=100" width="100px;" alt="David Tai"/><br /><sub><b>David Tai</b></sub></a><br /><a href="https://github.com/gethnet/litellm-connector-copilot/commits?author=FPA-DavidTai" title="Code">💻</a></td>
       <td align="center" valign="top" width="16.66%"><a href="https://github.com/kud-csi"><img src="https://avatars.githubusercontent.com/u/317819818?v=4?s=100" width="100px;" alt="N7 Architect"/><br /><sub><b>N7 Architect</b></sub></a><br /><a href="https://github.com/gethnet/litellm-connector-copilot/commits?author=kud-csi" title="Code">💻</a> <a href="https://github.com/gethnet/litellm-connector-copilot/issues?q=author%3Akud-csi" title="Bug reports">🐛</a></td>
       <td align="center" valign="top" width="16.66%"><a href="https://github.com/amwdrizz"><img src="https://avatars.githubusercontent.com/u/1386055?v=4?s=100" width="100px;" alt="amwdrizz"/><br /><sub><b>amwdrizz</b></sub></a><br /><a href="https://github.com/gethnet/litellm-connector-copilot/commits?author=amwdrizz" title="Code">💻</a> <a href="#ideas-amwdrizz" title="Ideas, Planning, & Feedback">🤔</a> <a href="https://github.com/gethnet/litellm-connector-copilot/commits?author=amwdrizz" title="Documentation">📖</a> <a href="#infra-amwdrizz" title="Infrastructure (Hosting, Build-Tools, etc)">🚇</a> <a href="#maintenance-amwdrizz" title="Maintenance">🚧</a></td>
+      <td align="center" valign="top" width="16.66%"><a href="https://github.com/bn45hkurr0y4"><img src="https://avatars.githubusercontent.com/u/182658541?v=4?s=100" width="100px;" alt="bn45hkurr0y4"/><br /><sub><b>bn45hkurr0y4</b></sub></a><br /><a href="https://github.com/gethnet/litellm-connector-copilot/commits?author=bn45hkurr0y4" title="Code">💻</a> <a href="https://github.com/gethnet/litellm-connector-copilot/issues?q=author%3Abn45hkurr0y4" title="Bug reports">🐛</a></td>
     </tr>
   </tbody>
 </table>

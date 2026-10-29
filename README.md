@@ -10,14 +10,13 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.5.17
+## 🆕 What's New in 2.5.18
 
-> Version 2.5.17 makes token budgets fit real backend tokenizers: local estimates now self-calibrate from the server's own usage counts, and commit generation verifies the exact diff size with LiteLLM before sending.
+> Version 2.5.18 restores reliable multi-turn `/responses` chats for native ChatGPT/OpenAI reasoning models by preserving their required upstream reasoning identifiers.
 
-- 🎯 **Calibrated token counting** — The heuristic estimator undercounts dense code and diffs on some backends (~1.37× on vLLM), silently overflowing context windows the picker said were fine. Every request's `usage.prompt_tokens` now teaches a per-model correction factor (clamped ×1.0–×2.0 — estimates only inflate, never shrink), applied everywhere tokens are counted: chat trimming, commit diff budgeting, `provideTokenCount`, and telemetry. It converges within a few requests and adds no bundled tokenizer, so the web build stays lean.
-- 🛠️ **Commit overflow retry** — Generating a commit message from a huge staged diff no longer hard-fails with a context-window 400: the command retries up to 2 times on overflow, shrinking the diff ×0.75 per attempt. On top of that, the compacted diff is now verified against LiteLLM's exact token counter before sending and recompacted once if the server says it's still too big.
+- 🧠 **Native OpenAI reasoning replay** — Follow-up turns for native ChatGPT/OpenAI reasoning models on `/responses` now reuse the original `rs_…` reasoning ID instead of an invalid synthesized ID. The connector asks for encrypted reasoning only from confirmed native reasoning models, replays it before the associated assistant turn, and uses the existing one-shot continuity retry to recover old or mismatched history without losing visible text or tool calls.
 
-> ℹ️ **Both defenses stack** — calibration is the first line (budgets fit on the first request); the remote recount and the retry loop are the backstop. Bug report and original fix by [@kud-csi](https://github.com/kud-csi) — thank you! 🙏
+> ℹ️ **Credit** — Bug report, root-cause analysis, and original fix by [@bn45hkurr0y4](https://github.com/bn45hkurr0y4) in [#170](https://github.com/gethnet/litellm-connector-copilot/issues/170) and [#169](https://github.com/gethnet/litellm-connector-copilot/pull/169). Thank you! 🙏
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
@@ -379,7 +378,7 @@ The extension automatically detects quota errors and can redact tools to recover
 ## ✨ Contributors
 
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-3-orange.svg?style=flat-square)](#-contributors)
+[![All Contributors](https://img.shields.io/badge/all_contributors-4-orange.svg?style=flat-square)](#-contributors)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Thanks to everyone who contributes to LiteLLM Connector for Copilot. See [CONTRIBUTORS.md](CONTRIBUTORS.md) for contribution details and recognition guidance.
@@ -393,6 +392,7 @@ Thanks to everyone who contributes to LiteLLM Connector for Copilot. See [CONTRI
       <td align="center" valign="top" width="16.66%"><a href="https://github.com/FPA-DavidTai"><img src="https://avatars.githubusercontent.com/u/60372864?v=4?s=100" width="100px;" alt="David Tai"/><br /><sub><b>David Tai</b></sub></a><br /><a href="https://github.com/gethnet/litellm-connector-copilot/commits?author=FPA-DavidTai" title="Code">💻</a></td>
       <td align="center" valign="top" width="16.66%"><a href="https://github.com/kud-csi"><img src="https://avatars.githubusercontent.com/u/317819818?v=4?s=100" width="100px;" alt="N7 Architect"/><br /><sub><b>N7 Architect</b></sub></a><br /><a href="https://github.com/gethnet/litellm-connector-copilot/commits?author=kud-csi" title="Code">💻</a> <a href="https://github.com/gethnet/litellm-connector-copilot/issues?q=author%3Akud-csi" title="Bug reports">🐛</a></td>
       <td align="center" valign="top" width="16.66%"><a href="https://github.com/amwdrizz"><img src="https://avatars.githubusercontent.com/u/1386055?v=4?s=100" width="100px;" alt="amwdrizz"/><br /><sub><b>amwdrizz</b></sub></a><br /><a href="https://github.com/gethnet/litellm-connector-copilot/commits?author=amwdrizz" title="Code">💻</a> <a href="#ideas-amwdrizz" title="Ideas, Planning, & Feedback">🤔</a> <a href="https://github.com/gethnet/litellm-connector-copilot/commits?author=amwdrizz" title="Documentation">📖</a> <a href="#infra-amwdrizz" title="Infrastructure (Hosting, Build-Tools, etc)">🚇</a> <a href="#maintenance-amwdrizz" title="Maintenance">🚧</a></td>
+      <td align="center" valign="top" width="16.66%"><a href="https://github.com/bn45hkurr0y4"><img src="https://avatars.githubusercontent.com/u/182658541?v=4?s=100" width="100px;" alt="bn45hkurr0y4"/><br /><sub><b>bn45hkurr0y4</b></sub></a><br /><a href="https://github.com/gethnet/litellm-connector-copilot/commits?author=bn45hkurr0y4" title="Code">💻</a> <a href="https://github.com/gethnet/litellm-connector-copilot/issues?q=author%3Abn45hkurr0y4" title="Bug reports">🐛</a></td>
     </tr>
   </tbody>
 </table>
