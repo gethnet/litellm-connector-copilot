@@ -66,6 +66,7 @@ export class StreamTokenCapture {
     // Pre-computed input token estimates (set by caller before request)
     private _estimatedPromptTokens = 0;
     private _estimatedSystemPromptTokens = 0;
+    private _calibrationEnabled = true;
 
     // Enrichment context (injected by caller for the usage DataPart pass-through)
     private _reservedOutputTokens?: number;
@@ -92,6 +93,11 @@ export class StreamTokenCapture {
 
     setEstimatedPromptTokens(count: number): void {
         this._estimatedPromptTokens = count;
+    }
+
+    /** Disable learning for this entire turn, including retries; usage reporting is unchanged. */
+    disableCalibration(): void {
+        this._calibrationEnabled = false;
     }
 
     setEstimatedSystemPromptTokens(count: number): void {
@@ -121,7 +127,9 @@ export class StreamTokenCapture {
         // prompt count against the calibrated local estimate that was used for
         // this request. The calibration module's multiplicative update is
         // self-correcting, so feeding it the calibrated estimate is correct.
-        if (hasUpstream && typeof this._upstream?.prompt_tokens === "number") {
+        // A multimodal total cannot isolate text usage. Subtracting a heuristic
+        // media cost could corrupt the shared text factor in either direction.
+        if (this._calibrationEnabled && hasUpstream && typeof this._upstream?.prompt_tokens === "number") {
             recordCalibrationObservation(this._modelId, this._upstream.prompt_tokens, this._estimatedPromptTokens);
         }
 

@@ -6,6 +6,7 @@ import { selectTokenizer } from "./tokenizers/selectTokenizer";
 import { getCalibrationFactor } from "./tokenizers/tokenCalibration";
 import type { TelemetryService } from "../telemetry/telemetryService";
 import { getRequestInputTokenBudget } from "./requestTokenBudget";
+import { isBinaryContentMimeType } from "./dataUriContentItem";
 
 // Token estimation constants for binary media types
 // These are conservative estimates to avoid context window overflow
@@ -51,6 +52,18 @@ export function estimateMediaTokenCost(mimeType: string, dataLength: number): nu
 
 /** Count only media so finalized wire text/tool metadata can be added without duplication. */
 export function countMessageMediaTokens(messages: readonly vscode.LanguageModelChatRequestMessage[]): number {
+    return sumMessageMedia(messages, estimateMediaTokenCost);
+}
+
+/** Detect media even when its payload is empty and therefore has no estimated token cost. */
+export function hasMessageMedia(messages: readonly vscode.LanguageModelChatRequestMessage[]): boolean {
+    return sumMessageMedia(messages, (mimeType) => (isBinaryContentMimeType(mimeType) ? 1 : 0)) > 0;
+}
+
+function sumMessageMedia(
+    messages: readonly vscode.LanguageModelChatRequestMessage[],
+    valueOf: (mimeType: string, byteLength: number) => number
+): number {
     const countPart = (part: unknown): number => {
         if (typeof part !== "object" || part === null) {
             return 0;
@@ -61,7 +74,7 @@ export function countMessageMediaTokens(messages: readonly vscode.LanguageModelC
             "data" in part &&
             part.data instanceof Uint8Array
         ) {
-            return estimateMediaTokenCost(part.mimeType, part.data.length);
+            return valueOf(part.mimeType, part.data.length);
         }
         if ("content" in part && Array.isArray(part.content)) {
             return part.content.reduce<number>((sum, nested: unknown) => sum + countPart(nested), 0);
@@ -147,19 +160,26 @@ export function countTokens(
     // toward observed backend tokenizer behavior. 1.0 when uncalibrated,
     // never below 1.0 (budgets only shrink — the safe direction).
     const factor = getCalibrationFactor(modelId || "default");
-    const applyFactor = (tokens: number): number => Math.ceil(tokens * factor);
+    // Media uses its own conservative heuristic. Keep it uncalibrated, matching
+    // the final wire-budget guard, including media nested inside tool results.
+    const applyFactor = (tokens: number, mediaTokens = 0): number =>
+        Math.ceil((tokens - mediaTokens) * factor) + mediaTokens;
 
     if (typeof input === "string") {
         return applyFactor(tokenizer.countTokens(input).tokens);
     }
     if (Array.isArray(input)) {
         let total = 0;
+        let mediaTokens = 0;
         for (const m of input) {
-            total += tokenizer.countMessageTokens(m).tokens;
+            const result = tokenizer.countMessageTokens(m);
+            total += result.tokens;
+            mediaTokens += result.mediaTokens ?? 0;
         }
-        return applyFactor(total);
+        return applyFactor(total, mediaTokens);
     }
-    return applyFactor(tokenizer.countMessageTokens(input as vscode.LanguageModelChatRequestMessage).tokens);
+    const result = tokenizer.countMessageTokens(input as vscode.LanguageModelChatRequestMessage);
+    return applyFactor(result.tokens, result.mediaTokens);
 }
 
 /**
@@ -300,13 +320,16 @@ export function estimateToolTokens(
  * Trim messages to fit within the model's input token budget, preserving the system prompt
  * and as much recent context as possible. Anthropic models get a safety margin to avoid
  * overfilling the context window.
+ * Use the raw tokenizerModelId shared by usage calibration and the final wire count;
+ * keep model.id intact for trim telemetry and log correlation.
  */
 export function trimMessagesToFitBudget(
     messages: readonly vscode.LanguageModelChatRequestMessage[],
     tools: { type: string; function: { name: string; description?: string; parameters?: object } }[] | undefined,
     model: vscode.LanguageModelChatInformation,
     modelInfo?: LiteLLMModelInfo,
-    hardBudgetOverride?: number
+    hardBudgetOverride?: number,
+    tokenizerModelId = model.id
 ): readonly vscode.LanguageModelChatRequestMessage[] {
     const toolTokenCount = estimateToolTokens(tools);
     const tokenLimit =
@@ -327,7 +350,7 @@ export function trimMessagesToFitBudget(
 
                   // Keep an additional small margin for Anthropic-style models which tend to be
                   // stricter about context limits.
-                  return isAnthropicModel(model.id, modelInfo)
+                  return isAnthropicModel(tokenizerModelId, modelInfo)
                       ? Math.max(0, Math.floor(bufferedLimit * 0.98))
                       : bufferedLimit;
               })();
@@ -337,7 +360,7 @@ export function trimMessagesToFitBudget(
         throw new Error("Message exceeds token limit.");
     }
 
-    const originalTokens = countTokens(messages, model.id, modelInfo);
+    const originalTokens = countTokens(messages, tokenizerModelId, modelInfo);
 
     let systemMessage: vscode.LanguageModelChatRequestMessage | undefined;
     const remaining: vscode.LanguageModelChatRequestMessage[] = [];
@@ -374,7 +397,7 @@ export function trimMessagesToFitBudget(
         lastMessage.content[0].value.trim().toLowerCase() === "continue";
 
     if (systemMessage) {
-        const sysTokens = estimateSingleMessageTokens(systemMessage, model.id, modelInfo);
+        const sysTokens = estimateSingleMessageTokens(systemMessage, tokenizerModelId, modelInfo);
         if (sysTokens > budget) {
             throw new Error("Message exceeds token limit.");
         }
@@ -384,7 +407,7 @@ export function trimMessagesToFitBudget(
 
     for (let i = remaining.length - 1; i >= 0; i--) {
         const msg = remaining[i];
-        const msgTokens = estimateSingleMessageTokens(msg, model.id, modelInfo);
+        const msgTokens = estimateSingleMessageTokens(msg, tokenizerModelId, modelInfo);
 
         // If it's a continuation, we MUST include the immediately preceding assistant message
         // to provide context for where to resume.

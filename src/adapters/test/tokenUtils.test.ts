@@ -474,4 +474,69 @@ suite("countTokens calibration application", () => {
         const text = "hello world";
         assert.strictEqual(countTokens(text, "untouched-model"), countTokens(text, "other-model"));
     });
+
+    test("calibration leaves image and PDF estimates unchanged for single messages and arrays", () => {
+        const id = "anthropic/claude-fable-5-1";
+        const image = vscode.LanguageModelChatMessage.User([
+            new vscode.LanguageModelDataPart(new Uint8Array(1), "image/png"),
+        ]);
+        const pdf = vscode.LanguageModelChatMessage.User([
+            new vscode.LanguageModelDataPart(new Uint8Array(400), "application/pdf"),
+        ]);
+        assert.strictEqual(countTokens(image, id), 86);
+        assert.strictEqual(countTokens(pdf, id), 100);
+        recordCalibrationObservation(id, 4000, 1000);
+        recordCalibrationObservation(id, 4000, 1000);
+        assert.strictEqual(countTokens(image, id), 86);
+        assert.strictEqual(countTokens(pdf, id), 100);
+        assert.strictEqual(countTokens([image, pdf], id), 186);
+    });
+
+    test("calibrates decoded text data but not image/PDF parts in the same message", () => {
+        const id = "gemini/gemini-2.5-pro";
+        const mixed = vscode.LanguageModelChatMessage.User([
+            new vscode.LanguageModelTextPart("hello"),
+            new vscode.LanguageModelDataPart(new TextEncoder().encode("world"), "text/plain"),
+            new vscode.LanguageModelDataPart(new TextEncoder().encode("{}"), "application/json"),
+            new vscode.LanguageModelDataPart(new Uint8Array(1), "image/png"),
+            new vscode.LanguageModelDataPart(new Uint8Array(400), "application/pdf"),
+        ]);
+        assert.strictEqual(countTokens(mixed, id), 192);
+        recordCalibrationObservation(id, 4000, 1000);
+        recordCalibrationObservation(id, 4000, 1000);
+        assert.strictEqual(countTokens(mixed, id), 198, "six text tokens are doubled; media stays at 186");
+    });
+
+    test("nested tool-result media is uncalibrated and message arrays round their text total once", () => {
+        const id = "bedrock/us.anthropic.claude-fable-5-1-v1:0";
+        const bytes = new Uint8Array(1);
+        const parts = Object.freeze([
+            new vscode.LanguageModelTextPart("a"),
+            new vscode.LanguageModelDataPart(bytes, "image/png"),
+            new vscode.LanguageModelDataPart(new Uint8Array(400), "application/pdf"),
+        ]);
+        const nested: vscode.LanguageModelChatRequestMessage = Object.freeze({
+            role: vscode.LanguageModelChatMessageRole.User,
+            name: undefined,
+            content: Object.freeze([new vscode.LanguageModelToolResultPart("call-a", [{ content: parts }])]),
+        });
+        recordCalibrationObservation(id, 1300, 1000);
+        assert.strictEqual(countTokens(nested, id), 189, "ceil(2 * 1.09) + 186");
+        assert.strictEqual(countTokens([nested, nested], id), 377, "ceil(4 * 1.09) + 372, not 2 * 189");
+        assert.deepStrictEqual(bytes, new Uint8Array(1));
+    });
+
+    test("calibration preserves legacy string-content messages and string inputs", () => {
+        const id = "calibrated-legacy-model";
+        const legacy = {
+            role: vscode.LanguageModelChatMessageRole.User,
+            content: "hello world",
+            name: undefined,
+        } as unknown as vscode.LanguageModelChatRequestMessage;
+        recordCalibrationObservation(id, 4000, 1000);
+        recordCalibrationObservation(id, 4000, 1000);
+        assert.strictEqual(countTokens("hello world", id), 8);
+        assert.strictEqual(countTokens(legacy, id), 8);
+        assert.strictEqual(countTokens([legacy], id), 8);
+    });
 });

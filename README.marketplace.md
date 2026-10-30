@@ -10,13 +10,13 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.5.18
+## 🆕 What's New in 2.5.19
 
-> Version 2.5.18 restores reliable multi-turn `/responses` chats for native ChatGPT/OpenAI reasoning models by preserving their required upstream reasoning identifiers.
+> Version 2.5.19 fixes false `Message exceeds token limit` errors in long chats after token calibration has adjusted a model's estimates.
 
-- 🧠 **Native OpenAI reasoning replay** — Follow-up turns for native ChatGPT/OpenAI reasoning models on `/responses` now reuse the original `rs_…` reasoning ID instead of an invalid synthesized ID. The connector asks for encrypted reasoning only from confirmed native reasoning models, replays it before the associated assistant turn, and uses the existing one-shot continuity retry to recover old or mismatched history without losing visible text or tool calls.
+- 📏 **Long chats trim instead of failing** — Once usage calibration had adjusted a model's token estimates, the connector could reject a request locally with `Message exceeds token limit` before it ever reached LiteLLM. History trimming and the final size check now count tokens with the same calibration, so older messages are dropped to make room. Model limits and protection against genuinely oversized input are unchanged.
 
-> ℹ️ **Credit** — Bug report, root-cause analysis, and original fix by [@bn45hkurr0y4](https://github.com/bn45hkurr0y4) in [#170](https://github.com/gethnet/litellm-connector-copilot/issues/170) and [#169](https://github.com/gethnet/litellm-connector-copilot/pull/169). Thank you! 🙏
+> ℹ️ **Credit** — Bug report and fix by [@bn45hkurr0y4](https://github.com/bn45hkurr0y4) in [#173](https://github.com/gethnet/litellm-connector-copilot/issues/173) and [#174](https://github.com/gethnet/litellm-connector-copilot/pull/174).
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 

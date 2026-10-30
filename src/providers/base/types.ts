@@ -56,6 +56,9 @@ export interface TransportDeps {
     liteLLMClientFactory?: (backend: { url: string; key?: string; disableCaching?: boolean }) => LiteLLMClient;
 }
 
+/** Observes the finalized provider attempt immediately before transport, after configuration resolution. */
+export type RequestAttemptObserver = (request: Readonly<OpenAIChatCompletionRequest>) => void;
+
 export interface SendRequestArgs {
     request: OpenAIChatCompletionRequest;
     messages: readonly vscode.LanguageModelChatRequestMessage[];

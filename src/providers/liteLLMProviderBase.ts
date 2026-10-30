@@ -7,9 +7,8 @@ import type {
 } from "vscode";
 
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../types";
-import { convertMessages, convertTools } from "../utils";
-import { getRequestInputTokenBudget, resolveRequestOutputCap } from "../adapters/requestTokenBudget";
-import { trimMessagesToFitBudget, isContextOverflowError, countTokens } from "../adapters/tokenUtils";
+import { convertMessages } from "../utils";
+import { isContextOverflowError, countTokens } from "../adapters/tokenUtils";
 import { ConfigManager } from "../config/configManager";
 import { Logger } from "../utils/logger";
 import type { TelemetryService } from "../telemetry/telemetryService";
@@ -25,7 +24,7 @@ import {
 import type { BackendSession } from "./backendSession";
 import { RequestBuilder } from "./base/requestBuilder";
 import { Transport } from "./base/transport";
-import type { RequestBuilderDeps, TransportDeps } from "./base/types";
+import type { RequestAttemptObserver, RequestBuilderDeps, TransportDeps } from "./base/types";
 import {
     isThinkingBlockRetryableError,
     requestHasThinkingBlocks,
@@ -571,11 +570,7 @@ export abstract class LiteLLMProviderBase {
         return this._transport.sendRequestToLiteLLM(request, _progress, token, caller, modelInfo, configuration);
     }
 
-    /**
-     * Sends a LiteLLM request with a single retry on context overflow. The first attempt uses the
-     * standard buffered budget. On overflow, we re-trim messages with a hard cap equal to the raw
-     * model max input (minus tool tokens) and retry once.
-     */
+    /** Retry overflow, usage, continuity and reasoning failures; observe each finalized provider attempt. */
     protected async sendRequestWithRetry(
         request: OpenAIChatCompletionRequest,
         messages: readonly LanguageModelChatRequestMessage[],
@@ -584,7 +579,8 @@ export abstract class LiteLLMProviderBase {
         progress: vscode.Progress<vscode.LanguageModelResponsePart>,
         token: vscode.CancellationToken,
         caller?: string,
-        modelInfo?: LiteLLMModelInfo
+        modelInfo?: LiteLLMModelInfo,
+        onRequestAttempt?: RequestAttemptObserver
     ): Promise<ReadableStream<Uint8Array>> {
         // `currentRequest` is the live request shape mutated across retries. It
         // starts as the caller's request but is replaced (never the same
@@ -627,7 +623,8 @@ export abstract class LiteLLMProviderBase {
                     token,
                     caller,
                     modelInfo,
-                    thinkingBlocksRetryAttempted
+                    thinkingBlocksRetryAttempted,
+                    onRequestAttempt
                 );
             } catch (err) {
                 this.logRequestPayloadOnFailure(currentRequest, err, {
@@ -781,17 +778,18 @@ export abstract class LiteLLMProviderBase {
         // When true, overflow rebuilding re-strips thinking_blocks so a prior
         // continuity redaction survives the rebuild and is not restored from
         // the original VS Code history.
-        stripThinkingBlocksForRetry = false
+        stripThinkingBlocksForRetry = false,
+        onRequestAttempt?: RequestAttemptObserver
     ): Promise<ReadableStream<Uint8Array>> {
+        const sendAttempt = async (candidate: OpenAIChatCompletionRequest) => {
+            const configuration = await this.getCallTimeConfiguration(options, model);
+            // Calibration can change while configuration resolves. Capture this
+            // attempt's numeric estimate now, not before the await or after usage.
+            onRequestAttempt?.(candidate);
+            return this.sendRequestToLiteLLM(candidate, progress, token, caller, modelInfo, configuration);
+        };
         try {
-            return await this.sendRequestToLiteLLM(
-                request,
-                progress,
-                token,
-                caller,
-                modelInfo,
-                await this.getCallTimeConfiguration(options, model)
-            );
+            return await sendAttempt(request);
         } catch (err) {
             if (!isContextOverflowError(err)) {
                 throw err;
@@ -799,17 +797,11 @@ export abstract class LiteLLMProviderBase {
 
             Logger.warn("[sendRequestWithRetry] Context overflow detected, retrying with aggressive trim", err);
 
-            const toolConfig = convertTools(options);
-            const outputCap = resolveRequestOutputCap(model, request.max_tokens, modelInfo);
-            // Preserve existing hard-budget retry policy (no new 85% ratio).
-            // The trimmer owns tool cost once; only raw explicit context reserves output.
-            const hardBudget = getRequestInputTokenBudget(model, modelInfo, outputCap);
-            const trimmedMessages = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo, hardBudget);
-            const retryOptions = { ...options, modelOptions: { ...options.modelOptions, max_tokens: outputCap } };
+            const retry = this._requestBuilder.prepareOverflowRetry(request, messages, model, options, modelInfo);
             const rebuiltRequest = await this.buildOpenAIChatRequest(
-                trimmedMessages,
+                retry.messages,
                 model,
-                retryOptions,
+                retry.options,
                 modelInfo,
                 caller
             );
@@ -824,14 +816,7 @@ export abstract class LiteLLMProviderBase {
             replaceReasoningRetryState(retrimmedRequest, readReasoningRetryState(request));
 
             try {
-                return await this.sendRequestToLiteLLM(
-                    retrimmedRequest,
-                    progress,
-                    token,
-                    caller,
-                    modelInfo,
-                    await this.getCallTimeConfiguration(options, model)
-                );
+                return await sendAttempt(retrimmedRequest);
             } catch (retryErr) {
                 if (isContextOverflowError(retryErr)) {
                     const contextError = new vscode.LanguageModelError(
