@@ -6,6 +6,7 @@ import { selectTokenizer } from "./tokenizers/selectTokenizer";
 import { getCalibrationFactor } from "./tokenizers/tokenCalibration";
 import type { TelemetryService } from "../telemetry/telemetryService";
 import { getRequestInputTokenBudget } from "./requestTokenBudget";
+import { isBinaryContentMimeType } from "./dataUriContentItem";
 
 // Token estimation constants for binary media types
 // These are conservative estimates to avoid context window overflow
@@ -72,6 +73,20 @@ export function countMessageMediaTokens(messages: readonly vscode.LanguageModelC
         (sum, message) => sum + message.content.reduce<number>((cost, part) => cost + countPart(part), 0),
         0
     );
+}
+
+/** A multimodal usage total cannot reliably distinguish text tokens from media tokens. */
+export function hasMessageMedia(messages: readonly vscode.LanguageModelChatRequestMessage[]): boolean {
+    const containsMedia = (part: unknown): boolean => {
+        if (typeof part !== "object" || part === null) {
+            return false;
+        }
+        if ("mimeType" in part && typeof part.mimeType === "string" && isBinaryContentMimeType(part.mimeType)) {
+            return true;
+        }
+        return "content" in part && Array.isArray(part.content) && part.content.some(containsMedia);
+    };
+    return messages.some((message) => Array.isArray(message.content) && message.content.some(containsMedia));
 }
 
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16000;
@@ -147,19 +162,24 @@ export function countTokens(
     // toward observed backend tokenizer behavior. 1.0 when uncalibrated,
     // never below 1.0 (budgets only shrink — the safe direction).
     const factor = getCalibrationFactor(modelId || "default");
-    const applyFactor = (tokens: number): number => Math.ceil(tokens * factor);
+    // The wire guard counts media independently; only calibrate text and tool content.
+    const applyFactor = (tokens: number, media = 0): number => Math.ceil((tokens - media) * factor) + media;
 
     if (typeof input === "string") {
         return applyFactor(tokenizer.countTokens(input).tokens);
     }
     if (Array.isArray(input)) {
         let total = 0;
+        let media = 0;
         for (const m of input) {
-            total += tokenizer.countMessageTokens(m).tokens;
+            const result = tokenizer.countMessageTokens(m);
+            total += result.tokens;
+            media += result.mediaTokens ?? 0;
         }
-        return applyFactor(total);
+        return applyFactor(total, media);
     }
-    return applyFactor(tokenizer.countMessageTokens(input as vscode.LanguageModelChatRequestMessage).tokens);
+    const result = tokenizer.countMessageTokens(input as vscode.LanguageModelChatRequestMessage);
+    return applyFactor(result.tokens, result.mediaTokens);
 }
 
 /**
@@ -306,7 +326,8 @@ export function trimMessagesToFitBudget(
     tools: { type: string; function: { name: string; description?: string; parameters?: object } }[] | undefined,
     model: vscode.LanguageModelChatInformation,
     modelInfo?: LiteLLMModelInfo,
-    hardBudgetOverride?: number
+    hardBudgetOverride?: number,
+    tokenizerModelId = model.id
 ): readonly vscode.LanguageModelChatRequestMessage[] {
     const toolTokenCount = estimateToolTokens(tools);
     const tokenLimit =
@@ -327,7 +348,7 @@ export function trimMessagesToFitBudget(
 
                   // Keep an additional small margin for Anthropic-style models which tend to be
                   // stricter about context limits.
-                  return isAnthropicModel(model.id, modelInfo)
+                  return isAnthropicModel(tokenizerModelId, modelInfo)
                       ? Math.max(0, Math.floor(bufferedLimit * 0.98))
                       : bufferedLimit;
               })();
@@ -337,7 +358,7 @@ export function trimMessagesToFitBudget(
         throw new Error("Message exceeds token limit.");
     }
 
-    const originalTokens = countTokens(messages, model.id, modelInfo);
+    const originalTokens = countTokens(messages, tokenizerModelId, modelInfo);
 
     let systemMessage: vscode.LanguageModelChatRequestMessage | undefined;
     const remaining: vscode.LanguageModelChatRequestMessage[] = [];
@@ -374,7 +395,7 @@ export function trimMessagesToFitBudget(
         lastMessage.content[0].value.trim().toLowerCase() === "continue";
 
     if (systemMessage) {
-        const sysTokens = estimateSingleMessageTokens(systemMessage, model.id, modelInfo);
+        const sysTokens = estimateSingleMessageTokens(systemMessage, tokenizerModelId, modelInfo);
         if (sysTokens > budget) {
             throw new Error("Message exceeds token limit.");
         }
@@ -382,19 +403,41 @@ export function trimMessagesToFitBudget(
         used += sysTokens;
     }
 
-    for (let i = remaining.length - 1; i >= 0; i--) {
-        const msg = remaining[i];
-        const msgTokens = estimateSingleMessageTokens(msg, model.id, modelInfo);
+    // A tool call and its consecutive result messages are an indivisible exchange.
+    // Cutting between them creates orphaned tool results that upstream rejects.
+    const groups: vscode.LanguageModelChatRequestMessage[][] = [];
+    for (const message of remaining) {
+        const previous = groups[groups.length - 1];
+        const isResult =
+            message.role === vscode.LanguageModelChatMessageRole.User &&
+            message.content.some(
+                (part) => typeof part === "object" && part !== null && "callId" in part && "content" in part
+            );
+        const startsWithCall =
+            previous?.[0].role === vscode.LanguageModelChatMessageRole.Assistant &&
+            previous[0].content.some((part) => part instanceof vscode.LanguageModelToolCallPart);
+        if (isResult && startsWithCall) {
+            previous.push(message);
+        } else {
+            groups.push([message]);
+        }
+    }
+    for (let i = groups.length - 1; i >= 0; i--) {
+        const group = groups[i];
+        const msgTokens = group.reduce(
+            (sum, msg) => sum + estimateSingleMessageTokens(msg, tokenizerModelId, modelInfo),
+            0
+        );
 
         // If it's a continuation, we MUST include the immediately preceding assistant message
         // to provide context for where to resume.
         const isProtectedAssistantMessage =
             isContinuation &&
-            i === remaining.length - 2 &&
-            msg.role === (vscode.LanguageModelChatMessageRole.Assistant as unknown as number);
+            i === groups.length - 2 &&
+            group[0].role === (vscode.LanguageModelChatMessageRole.Assistant as unknown as number);
 
         if (used + msgTokens <= budget || selected.length === (systemMessage ? 1 : 0) || isProtectedAssistantMessage) {
-            selected.splice(systemMessage ? 1 : 0, 0, msg);
+            selected.splice(systemMessage ? 1 : 0, 0, ...group);
             used += msgTokens;
         } else {
             break;
