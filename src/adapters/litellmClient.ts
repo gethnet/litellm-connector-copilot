@@ -9,6 +9,7 @@ import type {
     LiteLLMTokenCounterResponse,
 } from "../types";
 import { transformToResponsesFormat } from "./responsesAdapter";
+import { normalizeRequestUnicode } from "./requestUnicode";
 import { Logger } from "../utils/logger";
 import { StructuredLogger } from "../observability/structuredLogger";
 import { isAnthropicModel } from "../utils/modelUtils";
@@ -162,7 +163,7 @@ export class LiteLLMClient {
             const resp = await fetch(`${this.config.url}/utils/token_counter`, {
                 method: "POST",
                 headers: this.getHeaders(),
-                body: JSON.stringify(request),
+                body: JSON.stringify(normalizeRequestUnicode(request)),
                 signal: controller.signal,
             });
 
@@ -192,10 +193,11 @@ export class LiteLLMClient {
         modelInfo?: LiteLLMModelInfo
     ): Promise<ReadableStream<Uint8Array>> {
         const endpoint = this.getEndpoint(mode);
-        let body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest = request;
+        const normalizedRequest = normalizeRequestUnicode(request);
+        let body: OpenAIChatCompletionRequest | LiteLLMResponsesRequest = normalizedRequest;
 
         if (endpoint === "/responses") {
-            body = transformToResponsesFormat(request, modelInfo);
+            body = transformToResponsesFormat(normalizedRequest, modelInfo);
         }
 
         Logger.trace(`Sending chat request to ${endpoint}`, { model: request.model });

@@ -7,6 +7,7 @@ import {
     estimateToolTokens,
 } from "../../adapters/tokenUtils";
 import { getRequestInputTokenBudget, resolveRequestOutputCap } from "../../adapters/requestTokenBudget";
+import { normalizeRequestUnicode } from "../../adapters/requestUnicode";
 import { StructuredLogger } from "../../observability/structuredLogger";
 import { isAnthropicModel, isFable51Family } from "../../utils/modelUtils";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, OpenAIFunctionToolDef } from "../../types";
@@ -281,14 +282,15 @@ export class RequestBuilder {
         // The trimmer intentionally protects final/continuation content.
         // Reject known oversized wire input instead of amputating it. Transport
         // text/metadata and source media have disjoint costs: add, do not max.
+        const normalizedRequest = normalizeRequestUnicode(requestBody);
         const transportInputTokens =
-            countOpenAIChatMessagesTokens(requestBody.messages, rawModelId, modelInfo) +
+            countOpenAIChatMessagesTokens(normalizedRequest.messages, rawModelId, modelInfo) +
             countMessageMediaTokens(messagesToUse) +
-            estimateToolTokens(requestBody.tools);
+            estimateToolTokens(normalizedRequest.tools);
         if (transportInputTokens > inputBudget) {
             throw new Error("Message exceeds token limit.");
         }
-        return requestBody;
+        return normalizedRequest;
     }
 }
 
