@@ -2,6 +2,12 @@ comment:
   layout: "reach,diff,flags,files,components"
   behavior: default
 
+# Preserve the existing Insiders aggregate while retaining floor-host coverage
+# for inspection under its own flag. Both reports belong to the same commit.
+flags:
+  vscode-minimum:
+    joined: false
+
 coverage:
   status:
     project:

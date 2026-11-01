@@ -1,7 +1,7 @@
 {
 	"name": "litellm-connector-copilot",
 	"displayName": "LiteLLM Connector for Copilot",
-	"version": "2.5.19",
+	"version": "2.5.19-dev4",
 	"description": "An extension that integrates LiteLLM proxy into Copilot",
 	"categories": [
 		"AI",
@@ -66,6 +66,7 @@
 		"test": "xvfb-run vscode-test --args=\"--no-sandbox\"",
 		"pretest:coverage": "npm run compile",
 		"test:coverage": "node scripts/test-coverage.mjs",
+		"test:coverage:base": "node scripts/test-coverage.mjs --minimum-host",
 		"test:report": "npm run pretest && export VSCODE_TEST_RESULTS_DIR=$PWD/test-results && mkdir -p $VSCODE_TEST_RESULTS_DIR && npm run test",
 		"vscode:pack": "npm run clean:build && tsc --noEmit && node esbuild.js --production && npx vsce package",
 		"vscode:pack:dev": "npm run clean:build && tsc --noEmit && node esbuild.js && npx vsce package",
@@ -93,6 +94,14 @@
 				"command": "litellm-connector.generateCommitMessage",
 				"title": "Generate Commit Message",
 				"icon": "$(sparkle)"
+			},
+			{
+				"command": "litellm-connector.stopCommitMessageGeneration",
+				"title": "Stop Generating Commit Message",
+				"icon": {
+					"light": "assets/stop-spinner-light.svg",
+					"dark": "assets/stop-spinner-dark.svg"
+				}
 			},
 			{
 				"command": "litellm-connector.setLogLevel",
@@ -403,10 +412,19 @@
 				{
 					"command": "litellm-connector.generateCommitMessage",
 					"group": "navigation",
-					"when": "config.litellm-connector.commitModelIdOverride != ''"
+					"when": "config.litellm-connector.commitModelIdOverride != '' && !litellm-connector.commitGenerationActive"
+				},
+				{
+					"command": "litellm-connector.stopCommitMessageGeneration",
+					"group": "navigation",
+					"when": "litellm-connector.commitGenerationActive"
 				}
 			],
 			"commandPalette": [
+				{
+					"command": "litellm-connector.stopCommitMessageGeneration",
+					"when": "litellm-connector.commitGenerationActive"
+				},
 				{
 					"command": "litellm-connector.dev.resetReviewPrompt",
 					"when": "litellm-connector.isDevBuild"

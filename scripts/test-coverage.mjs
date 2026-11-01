@@ -2,8 +2,21 @@ import { existsSync, mkdirSync, rmSync, readdirSync, readFileSync } from "node:f
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { setTimeout, clearTimeout } from "node:timers";
+import { URL } from "node:url";
 import process from "node:process";
 import console from "node:console";
+import { resolveTestVersion } from "./test-coverage-options.mjs";
+
+if (process.argv.slice(2).includes("--minimum-host")) {
+  try {
+    const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    process.env.VSCODE_TEST_VERSION = resolveTestVersion(process.argv.slice(2), process.env.VSCODE_TEST_VERSION, manifest.engines?.vscode);
+    console.log(`Testing against minimum VS Code host ${process.env.VSCODE_TEST_VERSION}`);
+  } catch (error) {
+    console.error(`Cannot determine minimum VS Code host: ${error.message}`);
+    process.exit(1);
+  }
+}
 
 // Exit code for test timeout (unique identifier for timeout-related failures)
 const TIMEOUT_EXIT_CODE = 124; // Traditional timeout command uses 124

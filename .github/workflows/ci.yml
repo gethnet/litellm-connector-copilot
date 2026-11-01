@@ -36,10 +36,35 @@ jobs:
       - name: Install Dependencies
         run: npm install --include dev
 
-      - name: Run full suite on VS Code 1.125.0
-        run: npm run test:coverage
-        env:
-          VSCODE_TEST_VERSION: 1.125.0
+      - name: Test coverage runner options
+        run: node --test scripts/test/*.test.mjs
+
+      - name: Run full suite on minimum VS Code host
+        run: npm run test:coverage -- --minimum-host
+
+      # Explicit files and disabled discovery prevent the two host reports
+      # from being accidentally uploaded under the wrong flag.
+      - name: Upload minimum-host coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          files: ${{ github.workspace }}/.vscode-test/minimum/coverage/lcov.info
+          disable_search: true
+          flags: vscode-minimum
+          name: vscode-minimum-coverage
+          fail_ci_if_error: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && github.event.pull_request.user.login != 'app/dependabot' }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload minimum-host test results to Codecov
+        if: always()
+        uses: codecov/codecov-action@v7
+        with:
+          files: ${{ github.workspace }}/.vscode-test/minimum/test-results/test-results.xml
+          disable_search: true
+          flags: vscode-minimum
+          name: vscode-minimum-tests
+          report_type: test_results
+          fail_ci_if_error: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && github.event.pull_request.user.login != 'app/dependabot' }}
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload minimum host results
         if: always()
@@ -82,6 +107,9 @@ jobs:
         uses: codecov/codecov-action@v7
         with:
           files: ${{ github.workspace }}/coverage/lcov.info
+          disable_search: true
+          flags: vscode-insiders
+          name: vscode-insiders-coverage
           fail_ci_if_error: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && github.event.pull_request.user.login != 'app/dependabot' }}
           token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -90,6 +118,9 @@ jobs:
         uses: codecov/codecov-action@v7
         with:
           files: ${{ github.workspace }}/test-results/test-results.xml
+          disable_search: true
+          flags: vscode-insiders
+          name: vscode-insiders-tests
           report_type: test_results
           fail_ci_if_error: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && github.event.pull_request.user.login != 'app/dependabot' }}
           token: ${{ secrets.CODECOV_TOKEN }}

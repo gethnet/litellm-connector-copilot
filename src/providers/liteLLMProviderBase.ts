@@ -384,26 +384,42 @@ export abstract class LiteLLMProviderBase {
      * @param modelId namespaced `<routing>/<raw>` model id
      * @param text the exact text to count
      * @param timeoutMs give up after this long (default 3000ms)
+     * @param parentToken optional cancellation for the caller's operation
      */
-    public async remoteCountTokens(modelId: string, text: string, timeoutMs = 3000): Promise<number | undefined> {
+    public async remoteCountTokens(
+        modelId: string,
+        text: string,
+        timeoutMs = 3000,
+        parentToken?: vscode.CancellationToken
+    ): Promise<number | undefined> {
         try {
+            if (parentToken?.isCancellationRequested) {
+                return undefined;
+            }
             const entry = this._registry.lookup(modelId);
             if (!entry) {
                 return undefined;
             }
             const rawModelId = this.getRawModelName(modelId);
             const cfg = await this._configManager.getConfig();
+            if (parentToken?.isCancellationRequested) {
+                return undefined;
+            }
             const client = new LiteLLMClient(
                 { url: entry.baseUrl, key: entry.apiKey, disableCaching: cfg.disableCaching },
                 this.userAgent
             );
             const cts = new vscode.CancellationTokenSource();
+            const parentListener = parentToken?.onCancellationRequested(() => cts.cancel());
             const timer = setTimeout(() => cts.cancel(), timeoutMs);
             try {
                 const result = await client.countTokens({ model: rawModelId, prompt: text }, cts.token);
-                return typeof result?.token_count === "number" ? result.token_count : undefined;
+                return !cts.token.isCancellationRequested && typeof result?.token_count === "number"
+                    ? result.token_count
+                    : undefined;
             } finally {
                 clearTimeout(timer);
+                parentListener?.dispose();
                 cts.dispose();
             }
         } catch {

@@ -11,7 +11,7 @@ const junitSpecReporterPath = fileURLToPath(new URL('./out/src/test/junitSpecRep
 
 // Both hosts run the full suite. The versioned run additionally exercises
 // minimum-host activation and verifies the requested version and engine floor.
-// Run with VSCODE_TEST_VERSION=1.125.0 npm run test:coverage. Its reports and
+// Run with npm run test:coverage -- --minimum-host. Its reports and
 // profile are under .vscode-test/minimum; npm's precompile still cleans normal
 // reports, so CI runs it separately. Discovery and streaming call the provider
 // directly; host picker routing needs a VS Code-managed secret and group.

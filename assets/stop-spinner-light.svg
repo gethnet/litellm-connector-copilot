@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+    <g>
+        <path d="M 8 2 A 6 6 0 1 1 2 8" fill="none" stroke="#424242" stroke-width="1.5" stroke-linecap="round" />
+        <animateTransform attributeName="transform" type="rotate" from="0 8 8" to="360 8 8" dur="1s" repeatCount="indefinite" />
+    </g>
+    <rect x="6" y="6" width="4" height="4" fill="#424242" />
+</svg>

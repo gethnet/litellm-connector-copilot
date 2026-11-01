@@ -391,7 +391,7 @@ The extension surfaces a small set of developer-only commands when the installed
 - Before/after non-trivial edits: run `npm run compile` and `npm run test:coverage`.
 - Before finishing the task: verify the changed files contain the intended code or that new files exist with the expected contents.
 - Before finishing the tasks run: run `npm run lint` → `npm run format` → `npm run test:coverage` independently (verify each succeeds)
-- For VS Code compatibility changes and engine-floor updates, run `VSCODE_TEST_VERSION=1.125.0 npm run test:coverage` in addition to the normal Insiders suite. The isolated minimum-host run includes the full suite plus smoke tests for the declared floor, activation, and direct provider discovery/streaming against a local mock; it does not exercise the VS Code-managed model picker or real provider groups. Update the CI host version when the declared floor changes.
+- For VS Code compatibility changes and engine-floor updates, run `npm run test:coverage -- --minimum-host` in addition to the normal Insiders suite. The isolated minimum-host run derives its version from `engines.vscode` and includes the full suite plus smoke tests for the declared floor, activation, and direct provider discovery/streaming against a local mock; it does not exercise the VS Code-managed model picker or real provider groups.
 - Before opening/updating a PR: run `npm run lint` → `npm run format` → `npm run test:coverage` independently (verify each succeeds)
 
 ### Validation requirements
