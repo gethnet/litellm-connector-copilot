@@ -10,13 +10,15 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.5.18
+## 🆕 What's New in 2.5.19
 
-> Version 2.5.18 restores reliable multi-turn `/responses` chats for native ChatGPT/OpenAI reasoning models by preserving their required upstream reasoning identifiers.
+> Version 2.5.19 improves chat reliability and adds LiteLLM Connector branding to the model picker.
 
-- 🧠 **Native OpenAI reasoning replay** — Follow-up turns for native ChatGPT/OpenAI reasoning models on `/responses` now reuse the original `rs_…` reasoning ID instead of an invalid synthesized ID. The connector asks for encrypted reasoning only from confirmed native reasoning models, replays it before the associated assistant turn, and uses the existing one-shot continuity retry to recover old or mismatched history without losing visible text or tool calls.
+- 📏 **Fewer false token-limit errors** — History trimming uses the raw model's calibrated estimates, keeps tool calls and results together, and avoids learning text calibration from multimodal turns.
+- 🔤 **Safer Unicode requests** — Invalid Unicode in supported text is repaired before sending; malformed protocol or opaque data is rejected instead of silently changed.
+- 🏷️ **LiteLLM Connector model-picker branding** — The provider tab shows the connector's logo on VS Code 1.144 and newer.
 
-> ℹ️ **Credit** — Bug report, root-cause analysis, and original fix by [@bn45hkurr0y4](https://github.com/bn45hkurr0y4) in [#170](https://github.com/gethnet/litellm-connector-copilot/issues/170) and [#169](https://github.com/gethnet/litellm-connector-copilot/pull/169). Thank you! 🙏
+> ℹ️ **Credit** — Thank you to [@bn45hkurr0y4](https://github.com/bn45hkurr0y4) for the token-limit bug report and original fix in [#173](https://github.com/gethnet/litellm-connector-copilot/issues/173) and [#174](https://github.com/gethnet/litellm-connector-copilot/pull/174); the follow-up implementation landed in [#176](https://github.com/gethnet/litellm-connector-copilot/pull/176). 🙏
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 

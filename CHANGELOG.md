@@ -6,11 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### ✨ Features
 
-* **🏷️ Brand the model picker**: Show the packaged LiteLLM logo in the provider tab on supported VS Code versions.
+* **🏷️ Brand the model picker**: Show the LiteLLM Connector logo in the provider tab on VS Code 1.144 and newer.
 
 ### 🐛 Fixes
 
-* **📏 Prevent false token-limit errors after calibration (#173, #174)**: Align history trimming with the raw model's calibrated estimates, preserve tool exchanges, and avoid learning text calibration from multimodal usage. Bug report and original fix by [@bn45hkurr0y4](https://github.com/bn45hkurr0y4).
+* **📏 Prevent false token-limit errors after calibration (#176)**: Align history trimming with the raw model's calibrated estimates, preserve tool exchanges, and avoid learning text calibration from multimodal usage. Bug report and original fix by [@bn45hkurr0y4](https://github.com/bn45hkurr0y4) in [#173](https://github.com/gethnet/litellm-connector-copilot/issues/173) and [#174](https://github.com/gethnet/litellm-connector-copilot/pull/174); the follow-up implementation landed in [#176](https://github.com/gethnet/litellm-connector-copilot/pull/176).
+* **🔤 Prevent Unicode encoding failures in requests (#175, #177)**: Repair unpaired UTF-16 surrogates in supported text fields before chat, Responses, and token-count requests; reject malformed protocol metadata, opaque reasoning state, and tool arguments rather than silently changing them.
+
+### 🧪 Validation
+
+* **VS Code 1.125 compatibility**: Run the full test suite and minimum-host activation, discovery, and streaming smoke tests on the declared minimum host in CI. The smoke tests do not exercise VS Code-managed model groups or picker routing.
 
 ## [2.5.18] - 2026-10-28
 
