@@ -9,14 +9,23 @@ import { fileURLToPath } from 'node:url';
 // reporters via require.resolve(name), so we pass the absolute compiled path.
 const junitSpecReporterPath = fileURLToPath(new URL('./out/src/test/junitSpecReporter.js', import.meta.url));
 
-// Use VS Code Insiders so the test host matches the extension's `engines.vscode: ^1.120.0`
-// requirement. Stable VS Code lags behind 1.120 at this point so the regular test runner
-// would skip our extension entirely. Switch back to "stable" once 1.120.0 ships.
+// Both hosts run the full suite. The versioned run additionally exercises
+// minimum-host activation and verifies the requested version and engine floor.
+// Run with npm run test:coverage -- --minimum-host. Its reports and
+// profile are under .vscode-test/minimum; npm's precompile still cleans normal
+// reports, so CI runs it separately. Discovery and streaming call the provider
+// directly; host picker routing needs a VS Code-managed secret and group.
+const version = process.env.VSCODE_TEST_VERSION;
 export default defineConfig({
-  version: 'insiders',
+  version: version || 'insiders',
+  // Never reuse the full suite's profile: model groups and secrets are host state.
+  launchArgs: version ? [
+    `--user-data-dir=${fileURLToPath(new URL('./.vscode-test/minimum/user-data', import.meta.url))}`,
+    `--extensions-dir=${fileURLToPath(new URL('./.vscode-test/minimum/extensions', import.meta.url))}`
+  ] : [],
   // The memory profile is a self-executing benchmark with its own npm script.
   // Running it concurrently with Mocha mutates global fetch and makes retry tests flaky.
-  files: 'out/**/!(memoryProfile).test.js',
+  files: version ? ['out/src/test/integration/minimumHost.smoke.js', 'out/**/!(memoryProfile).test.js'] : 'out/**/!(memoryProfile).test.js',
   mocha: {
     ui: 'tdd',
     timeout: 20000,

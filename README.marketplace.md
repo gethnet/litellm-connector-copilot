@@ -10,13 +10,16 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.5.18
+## 🆕 What's New in 2.5.19
 
-> Version 2.5.18 restores reliable multi-turn `/responses` chats for native ChatGPT/OpenAI reasoning models by preserving their required upstream reasoning identifiers.
+> Version 2.5.19 improves chat reliability, adds model-picker branding, and makes commit-message generation cancellable.
 
-- 🧠 **Native OpenAI reasoning replay** — Follow-up turns for native ChatGPT/OpenAI reasoning models on `/responses` now reuse the original `rs_…` reasoning ID instead of an invalid synthesized ID. The connector asks for encrypted reasoning only from confirmed native reasoning models, replays it before the associated assistant turn, and uses the existing one-shot continuity retry to recover old or mismatched history without losing visible text or tool calls.
+- 📏 **Fewer false token-limit errors** — History trimming uses the raw model's calibrated estimates, keeps tool calls and results together, and avoids learning text calibration from multimodal turns.
+- 🔤 **Safer Unicode requests** — Invalid Unicode in supported text is repaired before sending; malformed protocol or opaque data is rejected instead of silently changed.
+- 🏷️ **LiteLLM Connector model-picker branding** — The provider tab shows the connector's logo on VS Code 1.144 and newer.
+- ⏹️ **Cancellable commit generation** — The Source Control generate button becomes an animated stop button; stopping restores your existing draft.
 
-> ℹ️ **Credit** — Bug report, root-cause analysis, and original fix by [@bn45hkurr0y4](https://github.com/bn45hkurr0y4) in [#170](https://github.com/gethnet/litellm-connector-copilot/issues/170) and [#169](https://github.com/gethnet/litellm-connector-copilot/pull/169). Thank you! 🙏
+> ℹ️ **Credit** — Thank you to [@bn45hkurr0y4](https://github.com/bn45hkurr0y4) for the token-limit bug report and original fix in [#173](https://github.com/gethnet/litellm-connector-copilot/issues/173) and [#174](https://github.com/gethnet/litellm-connector-copilot/pull/174); the follow-up implementation landed in [#176](https://github.com/gethnet/litellm-connector-copilot/pull/176). 🙏
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
@@ -67,7 +70,7 @@ See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 | 🛠️ **Tool Calling** | Models can use tools to interact with your workspace |
 | 👁️ **Vision** | Image analysis support |
 | 📊 **Token Tracking** | Real-time input/output token usage |
-| ✍️ **Commit Generation** | Generate conventional commit messages from staged changes |
+| ✍️ **Commit Generation** | Generate conventional commit messages from staged changes; stop an active generation and restore your draft |
 | 🔐 **Secure** | API keys stored in VS Code's encrypted storage |
 
 ---
@@ -225,6 +228,7 @@ These aren't in Settings UI — add to `settings.json` if needed:
 - **LiteLLM: Reload Models** — Refresh model list
 - **LiteLLM: Show Available Models** — View discovered models and copy a fully qualified ID to the clipboard
 - **Generate Commit Message** — Generate a commit message from staged changes (SCM sparkle appears once `commitModelIdOverride` is set)
+- **Stop Generating Commit Message** — Cancel an active generation from the animated Source Control stop button or the Command Palette; the original draft is restored. Failed or empty responses also restore the draft.
 - **LiteLLM: Set Log Level** — Change logging verbosity
 - **LiteLLM: Reset All Configuration** — Remove all provider groups, API keys, and connector settings (asks for confirmation)
 

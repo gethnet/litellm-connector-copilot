@@ -22,6 +22,7 @@ const DIFF_PREAMBLE = "Here is the diff:\n\n";
 // Servers report a capped token count on overflow, so shrink the diff by a fixed factor instead of calibrating.
 const MAX_OVERFLOW_RETRIES = 2;
 const OVERFLOW_SHRINK_FACTOR = 0.75;
+const ACTIVE_CONTEXT = "litellm-connector.commitGenerationActive";
 
 function isOverflowFailure(err: unknown): boolean {
     // `context\s*window\s*exceeded` also matches LiteLLM's backend-agnostic `ContextWindowExceededError`.
@@ -81,267 +82,329 @@ async function tryGenerateViaVSCodeModelRequest(
     return stripMarkdownCodeBlocks(accumulated);
 }
 
-/**
- * Registers the command to generate a git commit message.
- */
 export function registerGenerateCommitMessageCommand(
     _provider: LiteLLMCommitMessageProvider,
     telemetryService?: TelemetryService
 ): vscode.Disposable {
-    return vscode.commands.registerCommand("litellm-connector.generateCommitMessage", async (scm: unknown) => {
-        const startTime = Date.now();
-        if (telemetryService) {
-            telemetryService.captureCommandExecuted("generateCommitMessage");
-            telemetryService.captureFeatureUsed("commit-message", "commit-message");
-        }
-        try {
-            // Check if model is configured, if not, show picker
-            const config = await _provider.getConfigManager().getConfig();
-            const modelId = config.commitModelIdOverride;
-            const systemPrompt = resolvePrompt(config.commitSystemPromptOverride, COMMIT_SYSTEM_PROMPT);
-            const messagePrompt = resolvePrompt(config.commitMessagePromptOverride, COMMIT_MESSAGE_PROMPT);
-
-            if (!modelId) {
-                const result = await vscode.window.showInformationMessage(
-                    "No model configured for commit message generation. Would you like to select one?",
-                    "Select Model"
-                );
-                if (result === "Select Model") {
-                    await showModelPicker(_provider, {
-                        title: "Select Commit Message Model",
-                        settingKey: "commitModelIdOverride",
-                        telemetryService: telemetryService,
-                        caller: "commit-message",
-                    });
-                }
+    // One operation owns the global SCM action until its asynchronous cleanup finishes.
+    let active: vscode.CancellationTokenSource | undefined;
+    const generate = vscode.commands.registerCommand(
+        "litellm-connector.generateCommitMessage",
+        async (scm: unknown) => {
+            if (active) {
                 return;
             }
-
-            // Get staged diff — extract rootUri from SCM context to select the correct repository
-            const scmContext = scm as { rootUri?: vscode.Uri } | undefined;
-            const targetRootUri = scmContext?.rootUri;
-            const diff = await GitUtils.getStagedDiff(targetRootUri);
-            if (diff === undefined) {
-                vscode.window.showErrorMessage(
-                    "No staged changes found. Please stage your changes before generating a commit message."
-                );
-                return;
-            }
-            if (diff === "") {
-                vscode.window.showInformationMessage("No staged changes found.");
-                return;
-            }
-
-            let selectedModel: vscode.LanguageModelChat | undefined;
+            const source = new vscode.CancellationTokenSource();
+            active = source;
             try {
-                selectedModel = await selectCommitModel(modelId);
-            } catch (selectErr) {
-                Logger.error("VS Code model selection failed", selectErr);
-                vscode.window.showErrorMessage(
-                    "Failed to generate commit message: " +
-                        (selectErr instanceof Error ? selectErr.message : String(selectErr))
+                await vscode.commands.executeCommand("setContext", ACTIVE_CONTEXT, true);
+                await vscode.window.withProgress(
+                    { location: vscode.ProgressLocation.SourceControl, title: "Generating commit message..." },
+                    async (_progress, progressToken) => {
+                        const listener = progressToken.onCancellationRequested(() => source.cancel());
+                        try {
+                            await generateCommitMessage(_provider, telemetryService, scm, source.token);
+                        } finally {
+                            listener.dispose();
+                        }
+                    }
                 );
+            } finally {
+                try {
+                    await vscode.commands.executeCommand("setContext", ACTIVE_CONTEXT, false);
+                } finally {
+                    source.dispose();
+                    active = undefined;
+                }
+            }
+        }
+    );
+    const stop = vscode.commands.registerCommand("litellm-connector.stopCommitMessageGeneration", () => {
+        active?.cancel();
+    });
+    return vscode.Disposable.from(generate, stop, new vscode.Disposable(() => active?.cancel()));
+}
+
+async function generateCommitMessage(
+    _provider: LiteLLMCommitMessageProvider,
+    telemetryService: TelemetryService | undefined,
+    scm: unknown,
+    token: vscode.CancellationToken
+): Promise<void> {
+    if (token.isCancellationRequested) {
+        return;
+    }
+    const startTime = Date.now();
+    if (telemetryService) {
+        telemetryService.captureCommandExecuted("generateCommitMessage");
+        telemetryService.captureFeatureUsed("commit-message", "commit-message");
+    }
+    try {
+        // Check if model is configured, if not, show picker
+        const config = await _provider.getConfigManager().getConfig();
+        if (token.isCancellationRequested) {
+            return;
+        }
+        const modelId = config.commitModelIdOverride;
+        const systemPrompt = resolvePrompt(config.commitSystemPromptOverride, COMMIT_SYSTEM_PROMPT);
+        const messagePrompt = resolvePrompt(config.commitMessagePromptOverride, COMMIT_MESSAGE_PROMPT);
+
+        if (!modelId) {
+            const result = await vscode.window.showInformationMessage(
+                "No model configured for commit message generation. Would you like to select one?",
+                "Select Model"
+            );
+            if (!token.isCancellationRequested && result === "Select Model") {
+                await showModelPicker(_provider, {
+                    title: "Select Commit Message Model",
+                    settingKey: "commitModelIdOverride",
+                    telemetryService: telemetryService,
+                    caller: "commit-message",
+                });
+            }
+            return;
+        }
+
+        // Get staged diff — extract rootUri from SCM context to select the correct repository
+        const scmContext = scm as { rootUri?: vscode.Uri } | undefined;
+        const targetRootUri = scmContext?.rootUri;
+        const diff = await GitUtils.getStagedDiff(targetRootUri);
+        if (token.isCancellationRequested) {
+            return;
+        }
+        if (diff === undefined) {
+            vscode.window.showErrorMessage(
+                "No staged changes found. Please stage your changes before generating a commit message."
+            );
+            return;
+        }
+        if (diff === "") {
+            vscode.window.showInformationMessage("No staged changes found.");
+            return;
+        }
+
+        let selectedModel: vscode.LanguageModelChat | undefined;
+        try {
+            selectedModel = await selectCommitModel(modelId);
+        } catch (selectErr) {
+            if (token.isCancellationRequested) {
                 return;
             }
-
-            const modelInfo = _provider.getModelInfo(modelId);
-            const maxInputTokens = resolveCommitContextWindow(selectedModel?.maxInputTokens, modelId, modelInfo);
-            const breadth = countDiffBreadth(diff);
-            // Early diff shaping is request preparation. LanguageModelChat
-            // exposes input but not output/combined limits; the registered
-            // chat provider performs final authoritative validation on send.
-            const outputReserve = resolveRequestOutputCap(
-                deriveCapabilitiesFromModelInfo(modelId, modelInfo),
-                computeOutputReserve(breadth, config.commitOutputTokenReserve),
-                modelInfo
+            Logger.error("VS Code model selection failed", selectErr);
+            vscode.window.showErrorMessage(
+                "Failed to generate commit message: " +
+                    (selectErr instanceof Error ? selectErr.message : String(selectErr))
             );
-            let budget = computeDiffBudget({
+            return;
+        }
+        if (token.isCancellationRequested) {
+            return;
+        }
+
+        const modelInfo = _provider.getModelInfo(modelId);
+        const maxInputTokens = resolveCommitContextWindow(selectedModel?.maxInputTokens, modelId, modelInfo);
+        const breadth = countDiffBreadth(diff);
+        // Early diff shaping is request preparation. LanguageModelChat
+        // exposes input but not output/combined limits; the registered
+        // chat provider performs final authoritative validation on send.
+        const outputReserve = resolveRequestOutputCap(
+            deriveCapabilitiesFromModelInfo(modelId, modelInfo),
+            computeOutputReserve(breadth, config.commitOutputTokenReserve),
+            modelInfo
+        );
+        let budget = computeDiffBudget({
+            maxInputTokens,
+            outputReserve,
+            staticPrompts: [systemPrompt, messagePrompt, DIFF_PREAMBLE],
+            modelId,
+            modelInfo,
+        });
+        const estimatedDiffTokens = countTokens(diff, modelId, modelInfo);
+        let processedDiff = diff;
+        if (estimatedDiffTokens > budget) {
+            processedDiff = GitUtils.compactDiff(diff, budget, modelId, modelInfo);
+        }
+        let processedTokens = countTokens(processedDiff, modelId, modelInfo);
+
+        // Remote exact-count verification (#166): the heuristic undercounts
+        // dense diffs on some backend tokenizers (~1.37× observed, #164).
+        // Ask the proxy for the authoritative count of what we are about to
+        // send; on undercount, shrink by the measured ratio and recompact
+        // once. Best-effort — undefined (blocked route/timeout) keeps the
+        // heuristic path, and the #165 overflow retry remains the backstop.
+        const remoteTokens = await _provider.remoteCountTokens(modelId, processedDiff, undefined, token);
+        if (token.isCancellationRequested) {
+            return;
+        }
+        if (remoteTokens !== undefined && remoteTokens > budget && processedTokens > 0) {
+            const ratio = remoteTokens / processedTokens;
+            budget = Math.floor(budget / ratio);
+            processedDiff = GitUtils.compactDiff(diff, budget, modelId, modelInfo);
+            processedTokens = countTokens(processedDiff, modelId, modelInfo);
+            StructuredLogger.warn(
+                "commit.diff_remote_recount",
+                { remoteTokens, ratio: Number(ratio.toFixed(3)), budget },
+                { model: modelId, caller: COMMIT_CALLER }
+            );
+        }
+        const isTruncated = processedDiff !== diff;
+
+        StructuredLogger.info(
+            "commit.diff_budget",
+            {
                 maxInputTokens,
                 outputReserve,
-                staticPrompts: [systemPrompt, messagePrompt, DIFF_PREAMBLE],
-                modelId,
-                modelInfo,
-            });
-            const estimatedDiffTokens = countTokens(diff, modelId, modelInfo);
-            let processedDiff = diff;
-            if (estimatedDiffTokens > budget) {
-                processedDiff = GitUtils.compactDiff(diff, budget, modelId, modelInfo);
-            }
-            let processedTokens = countTokens(processedDiff, modelId, modelInfo);
+                budget,
+                diffTokens: estimatedDiffTokens,
+                files: breadth.files,
+                hunks: breadth.hunks,
+                compacted: isTruncated,
+            },
+            { model: modelId, caller: COMMIT_CALLER }
+        );
 
-            // Remote exact-count verification (#166): the heuristic undercounts
-            // dense diffs on some backend tokenizers (~1.37× observed, #164).
-            // Ask the proxy for the authoritative count of what we are about to
-            // send; on undercount, shrink by the measured ratio and recompact
-            // once. Best-effort — undefined (blocked route/timeout) keeps the
-            // heuristic path, and the #165 overflow retry remains the backstop.
-            const remoteTokens = await _provider.remoteCountTokens(modelId, processedDiff);
-            if (remoteTokens !== undefined && remoteTokens > budget && processedTokens > 0) {
-                const ratio = remoteTokens / processedTokens;
-                budget = Math.floor(budget / ratio);
-                processedDiff = GitUtils.compactDiff(diff, budget, modelId, modelInfo);
-                processedTokens = countTokens(processedDiff, modelId, modelInfo);
-                StructuredLogger.warn(
-                    "commit.diff_remote_recount",
-                    { remoteTokens, ratio: Number(ratio.toFixed(3)), budget },
-                    { model: modelId, caller: COMMIT_CALLER }
-                );
-            }
-            const isTruncated = processedDiff !== diff;
-
-            StructuredLogger.info(
-                "commit.diff_budget",
+        if (isTruncated) {
+            StructuredLogger.warn(
+                "commit.diff_compacted",
                 {
-                    maxInputTokens,
-                    outputReserve,
+                    originalTokens: estimatedDiffTokens,
+                    resultTokens: processedTokens,
                     budget,
-                    diffTokens: estimatedDiffTokens,
-                    files: breadth.files,
-                    hunks: breadth.hunks,
-                    compacted: isTruncated,
                 },
                 { model: modelId, caller: COMMIT_CALLER }
             );
+            telemetryService?.captureTrimExecuted(modelId, COMMIT_CALLER, estimatedDiffTokens, processedTokens, budget);
+            vscode.window.showWarningMessage("The diff was truncated to fit within the model's context window.");
+        }
 
-            if (isTruncated) {
-                StructuredLogger.warn(
-                    "commit.diff_compacted",
-                    {
-                        originalTokens: estimatedDiffTokens,
-                        resultTokens: processedTokens,
-                        budget,
-                    },
-                    { model: modelId, caller: COMMIT_CALLER }
-                );
-                telemetryService?.captureTrimExecuted(
-                    modelId,
-                    COMMIT_CALLER,
-                    estimatedDiffTokens,
-                    processedTokens,
-                    budget
-                );
-                vscode.window.showWarningMessage("The diff was truncated to fit within the model's context window.");
-            }
+        // Find the SCM input box — prefer the repository matching the SCM context
+        const api = await GitUtils.getGitAPI();
+        if (token.isCancellationRequested) {
+            return;
+        }
+        if (!api || api.repositories.length === 0) {
+            return;
+        }
 
-            // Find the SCM input box — prefer the repository matching the SCM context
-            const api = await GitUtils.getGitAPI();
-            if (!api || api.repositories.length === 0) {
-                return;
-            }
+        // Never write into a different repository when the requested one disappeared.
+        const matchedRepo = targetRootUri ? GitUtils.findRepositoryByRootUri(api, targetRootUri) : undefined;
+        const repo = targetRootUri ? matchedRepo : api.repositories[0];
+        if (!repo) {
+            return;
+        }
 
-            // Match the correct repository from SCM context, or fall back to first
-            const matchedRepo = targetRootUri ? GitUtils.findRepositoryByRootUri(api, targetRootUri) : undefined;
-            const repo = matchedRepo ?? api.repositories[0];
+        const scmAny = scm as { inputBox?: { value: string; placeholder: string; enabled: boolean } };
+        const repoAny = repo as { inputBox?: { value: string; placeholder: string; enabled: boolean } };
+        const inputBox = repoAny.inputBox || (scmAny && scmAny.inputBox);
 
-            const scmAny = scm as { inputBox?: { value: string; placeholder: string; enabled: boolean } };
-            const repoAny = repo as { inputBox?: { value: string; placeholder: string; enabled: boolean } };
-            const inputBox = repoAny.inputBox || (scmAny && scmAny.inputBox);
+        if (!inputBox) {
+            Logger.error("Could not find SCM input box");
+            return;
+        }
 
-            if (!inputBox) {
-                Logger.error("Could not find SCM input box");
-                return;
-            }
+        // Keep the original draft unless generation completes with a usable message.
+        const originalValue = inputBox.value;
+        inputBox.value = "";
+        const originalPlaceholder = inputBox.placeholder;
+        const originalEnabled = inputBox.enabled;
+        inputBox.placeholder = "Generating commit message...";
+        inputBox.enabled = false;
+        let completed = false;
 
-            // Clear existing message
-            inputBox.value = "";
-            const originalPlaceholder = inputBox.placeholder;
-            inputBox.placeholder = "Generating commit message...";
-            inputBox.enabled = false;
+        try {
+            let accumulatedText = "";
+            let generatedMessage: string | undefined;
 
-            await vscode.window.withProgress(
-                {
-                    location: vscode.ProgressLocation.SourceControl,
-                    title: "Generating commit message...",
-                    cancellable: true,
-                },
-                async (progress, token) => {
-                    try {
-                        let accumulatedText = "";
-                        let generatedMessage: string | undefined;
-
-                        for (let retries = 0; ; retries++) {
-                            try {
-                                generatedMessage = await tryGenerateViaVSCodeModelRequest(
-                                    selectedModel,
-                                    processedDiff,
-                                    systemPrompt,
-                                    messagePrompt,
-                                    outputReserve,
-                                    token,
-                                    (chunk) => {
-                                        accumulatedText += chunk;
-                                        const filtered = accumulatedText
-                                            .replace(/^```(?:\w+)?\s*/, "")
-                                            .replace(/```$/, "");
-                                        inputBox.value = filtered;
-                                    }
-                                );
-                                break;
-                            } catch (vscodeRouteErr) {
-                                if (
-                                    isOverflowFailure(vscodeRouteErr) &&
-                                    retries < MAX_OVERFLOW_RETRIES &&
-                                    !token.isCancellationRequested
-                                ) {
-                                    budget = Math.floor(budget * OVERFLOW_SHRINK_FACTOR);
-                                    processedDiff = GitUtils.compactDiff(diff, budget, modelId, modelInfo);
-                                    accumulatedText = "";
-                                    inputBox.value = "";
-                                    StructuredLogger.warn(
-                                        "commit.diff_overflow_retry",
-                                        { attempt: retries + 1, budget },
-                                        { model: modelId, caller: COMMIT_CALLER }
-                                    );
-                                    continue;
-                                }
-                                Logger.error("VS Code model request route failed", vscodeRouteErr);
-                                vscode.window.showErrorMessage(
-                                    "Failed to generate commit message: " +
-                                        (vscodeRouteErr instanceof Error
-                                            ? vscodeRouteErr.message
-                                            : String(vscodeRouteErr))
-                                );
+            for (let retries = 0; ; retries++) {
+                try {
+                    generatedMessage = await tryGenerateViaVSCodeModelRequest(
+                        selectedModel,
+                        processedDiff,
+                        systemPrompt,
+                        messagePrompt,
+                        outputReserve,
+                        token,
+                        (chunk) => {
+                            if (token.isCancellationRequested) {
                                 return;
                             }
+                            accumulatedText += chunk;
+                            const filtered = accumulatedText.replace(/^```(?:\w+)?\s*/, "").replace(/```$/, "");
+                            inputBox.value = filtered;
                         }
+                    );
+                    break;
+                } catch (vscodeRouteErr) {
+                    if (token.isCancellationRequested) {
+                        return;
+                    }
+                    if (isOverflowFailure(vscodeRouteErr) && retries < MAX_OVERFLOW_RETRIES) {
+                        budget = Math.floor(budget * OVERFLOW_SHRINK_FACTOR);
+                        processedDiff = GitUtils.compactDiff(diff, budget, modelId, modelInfo);
+                        accumulatedText = "";
+                        inputBox.value = "";
+                        StructuredLogger.warn(
+                            "commit.diff_overflow_retry",
+                            { attempt: retries + 1, budget },
+                            { model: modelId, caller: COMMIT_CALLER }
+                        );
+                        continue;
+                    }
+                    Logger.error("VS Code model request route failed", vscodeRouteErr);
+                    vscode.window.showErrorMessage(
+                        "Failed to generate commit message: " +
+                            (vscodeRouteErr instanceof Error ? vscodeRouteErr.message : String(vscodeRouteErr))
+                    );
+                    return;
+                }
+            }
 
-                        if (generatedMessage === undefined) {
-                            vscode.window.showErrorMessage(
-                                "Failed to generate commit message: no response from the selected model."
-                            );
-                            return;
-                        }
+            if (token.isCancellationRequested) {
+                return;
+            }
+            if (!generatedMessage?.trim()) {
+                vscode.window.showErrorMessage(
+                    "Failed to generate commit message: no response from the selected model."
+                );
+                return;
+            }
 
-                        inputBox.value = generatedMessage;
+            inputBox.value = generatedMessage;
+            completed = true;
 
-                        /* if (telemetryService) {
+            /* if (telemetryService) {
                             telemetryService.captureCommitMessageGenerated({
                                 model: modelId,
                                 durationMs: Date.now() - startTime,
                                 status: "success",
                             });
                         } */
-                    } catch (err) {
-                        Logger.error("Failed to generate commit message", err);
-                        vscode.window.showErrorMessage(
-                            "Failed to generate commit message: " + (err instanceof Error ? err.message : String(err))
-                        );
-
-                        if (telemetryService) {
-                            telemetryService.captureCommitMessageGenerated({
-                                model: modelId,
-                                durationMs: Date.now() - startTime,
-                                status: "failure",
-                            });
-                        }
-                    } finally {
-                        inputBox.placeholder = originalPlaceholder;
-                        inputBox.enabled = true;
-                    }
-                }
-            );
         } catch (err) {
+            if (token.isCancellationRequested) {
+                return;
+            }
+            Logger.error("Failed to generate commit message", err);
+            vscode.window.showErrorMessage(
+                "Failed to generate commit message: " + (err instanceof Error ? err.message : String(err))
+            );
+
+            if (telemetryService) {
+                telemetryService.captureCommitMessageGenerated({
+                    model: modelId,
+                    durationMs: Date.now() - startTime,
+                    status: "failure",
+                });
+            }
+        } finally {
+            if (!completed || token.isCancellationRequested) {
+                inputBox.value = originalValue;
+            }
+            inputBox.placeholder = originalPlaceholder;
+            inputBox.enabled = originalEnabled;
+        }
+    } catch (err) {
+        if (!token.isCancellationRequested) {
             Logger.error("Error in generateCommitMessage command", err);
         }
-    });
+    }
 }

@@ -25,19 +25,22 @@ export class HeuristicTokenizer implements Tokenizer {
 
     countMessageTokens(message: LanguageModelChatRequestMessage): TokenizationResult {
         let total = 0;
+        let mediaTokens = 0;
+        const trackMedia = (tokens: number): void => {
+            mediaTokens += tokens;
+        };
         if (typeof message.content === "string") {
             total += this.countTokens(message.content).tokens;
         } else {
             for (const part of message.content) {
-                total += this.countPartTokens(part);
-                // Images are typically handled with a fixed cost or safety margin in the caller
+                total += this.countPartTokens(part, trackMedia);
             }
         }
         // Add overhead for roles/formatting (OpenAI-ish)
-        return { tokens: total };
+        return { tokens: total, mediaTokens };
     }
 
-    private countPartTokens(part: unknown): number {
+    private countPartTokens(part: unknown, trackMedia?: (tokens: number) => void): number {
         if (typeof part !== "object" || part === null) {
             StructuredLogger.trace("Part rejected - non-object type", {
                 type: typeof part,
@@ -99,6 +102,7 @@ export class HeuristicTokenizer implements Tokenizer {
                 // Count media types (images, PDFs) with conservative token estimates
                 if (mimeType.startsWith("image/") || mimeType === "application/pdf") {
                     const tokens = estimateMediaTokenCost(mimeType, data.length);
+                    trackMedia?.(tokens);
                     StructuredLogger.trace("Counting image/PDF data part tokens", {
                         mimeType,
                         dataLength: data.length,
@@ -124,7 +128,10 @@ export class HeuristicTokenizer implements Tokenizer {
         if ("content" in part && Array.isArray((part as { content?: unknown[] }).content)) {
             keysPresent.add("content");
             const arrayContent = (part as { content: unknown[] }).content;
-            const totalTokens = arrayContent.reduce<number>((sum, item) => sum + this.countPartTokens(item), 0);
+            const totalTokens = arrayContent.reduce<number>(
+                (sum, item) => sum + this.countPartTokens(item, trackMedia),
+                0
+            );
             StructuredLogger.trace("Counting nested content array tokens", {
                 innerArrayLength: arrayContent.length,
                 totalTokens,

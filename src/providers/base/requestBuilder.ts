@@ -7,6 +7,7 @@ import {
     estimateToolTokens,
 } from "../../adapters/tokenUtils";
 import { getRequestInputTokenBudget, resolveRequestOutputCap } from "../../adapters/requestTokenBudget";
+import { normalizeRequestUnicode } from "../../adapters/requestUnicode";
 import { StructuredLogger } from "../../observability/structuredLogger";
 import { isAnthropicModel, isFable51Family } from "../../utils/modelUtils";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest, OpenAIFunctionToolDef } from "../../types";
@@ -126,6 +127,32 @@ export class RequestBuilder {
         return promptCachePolicy;
     }
 
+    /** Retain the established hard-budget overflow policy before normal request rebuilding. */
+    public prepareOverflowRetry(
+        request: OpenAIChatCompletionRequest,
+        messages: readonly vscode.LanguageModelChatRequestMessage[],
+        model: vscode.LanguageModelChatInformation,
+        options: vscode.ProvideLanguageModelChatResponseOptions,
+        modelInfo?: LiteLLMModelInfo
+    ): {
+        messages: readonly vscode.LanguageModelChatRequestMessage[];
+        options: vscode.ProvideLanguageModelChatResponseOptions;
+    } {
+        const outputCap = resolveRequestOutputCap(model, request.max_tokens, modelInfo);
+        const budget = getRequestInputTokenBudget(model, modelInfo, outputCap);
+        return {
+            messages: trimMessagesToFitBudget(
+                messages,
+                convertTools(options).tools,
+                model,
+                modelInfo,
+                budget,
+                this.extractRawModelName(model.id)
+            ),
+            options: { ...options, modelOptions: { ...options.modelOptions, max_tokens: outputCap } },
+        };
+    }
+
     public async buildOpenAIChatRequest(
         messages: readonly vscode.LanguageModelChatRequestMessage[],
         model: vscode.LanguageModelChatInformation,
@@ -158,7 +185,14 @@ export class RequestBuilder {
         const outputCap = resolveRequestOutputCap(model, mo.max_tokens, modelInfo);
         const safetyRatio = isAnthropicModel(rawModelId, modelInfo) ? 0.95 * 0.98 : 0.95;
         const inputBudget = getRequestInputTokenBudget(model, modelInfo, outputCap, safetyRatio);
-        const messagesToUse = trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo, inputBudget);
+        const messagesToUse = trimMessagesToFitBudget(
+            messages,
+            toolConfig.tools,
+            model,
+            modelInfo,
+            inputBudget,
+            rawModelId
+        );
         const openaiMessages = convertMessages(messagesToUse, {
             attachPromptCacheControl: modelSupportsPromptCacheControl(rawModelId, modelInfo),
         });
@@ -248,14 +282,15 @@ export class RequestBuilder {
         // The trimmer intentionally protects final/continuation content.
         // Reject known oversized wire input instead of amputating it. Transport
         // text/metadata and source media have disjoint costs: add, do not max.
+        const normalizedRequest = normalizeRequestUnicode(requestBody);
         const transportInputTokens =
-            countOpenAIChatMessagesTokens(requestBody.messages, rawModelId, modelInfo) +
+            countOpenAIChatMessagesTokens(normalizedRequest.messages, rawModelId, modelInfo) +
             countMessageMediaTokens(messagesToUse) +
-            estimateToolTokens(requestBody.tools);
+            estimateToolTokens(normalizedRequest.tools);
         if (transportInputTokens > inputBudget) {
             throw new Error("Message exceeds token limit.");
         }
-        return requestBody;
+        return normalizedRequest;
     }
 }
 

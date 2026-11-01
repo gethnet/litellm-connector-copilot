@@ -23,7 +23,7 @@ Every change under `src/` is reviewed against these gates by the PR Reviewer age
 - Exactly **one** chat provider (`LiteLLMChatProvider`); never introduce version-suffixed siblings.
 - Shared orchestration stays in `LiteLLMProviderBase`; protocol specifics stay in the derived provider.
 - Read per-group config from `options.configuration` on **every** call — no global config caching.
-- Model info sets `isUserSelectable: true` and `category: { label, order }`; reasoning models include `group: "navigation"` on `reasoningEffort`.
+- Model info sets `isUserSelectable: true`; picker `category` is a tier string or omitted, never a grouping object. Reasoning models include `group: "navigation"` on `reasoningEffort`.
 - BackendRegistry writes are internal-only; consumers use `discoverModels` / `lookup` / read APIs.
 - Secrets only via `ConfigManager` / `SecretStorage` — never `globalState`.
 

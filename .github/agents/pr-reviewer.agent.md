@@ -43,7 +43,7 @@ Deliver an evidence-based, repo-standards-aligned review of a pull request, bran
 - Exactly **one** chat provider (`LiteLLMChatProvider`) — reject any version-suffixed sibling (V2/V3).
 - Shared orchestration stays in `LiteLLMProviderBase`; protocol specifics stay in the derived provider. Flag pipeline forks.
 - Per-group config: providers must read `options.configuration` on **every** call — flag global config caching.
-- `LanguageModelChatInformation` entries set `isUserSelectable: true` and `category: { label, order }`; reasoning models include `group: "navigation"` on `reasoningEffort`.
+- `LanguageModelChatInformation` entries set `isUserSelectable: true`; picker `category` is a tier string or omitted, never a grouping object. Reasoning models include `group: "navigation"` on `reasoningEffort`.
 - BackendRegistry contract: writes (`setModelsForBackend`, …) are internal-only; consumers use `discoverModels`/`lookup`/etc. Flag external write calls or test seams that bypass the typed cast pattern.
 - Secrets only via `ConfigManager` / `SecretStorage` — flag any `globalState` secret storage.
 

@@ -19,6 +19,7 @@ import {
     countTokens,
     estimateToolTokens,
     getTotalTokenLimit,
+    hasMessageMedia,
 } from "../adapters/tokenUtils";
 import { getPreparedOutputCap } from "../adapters/requestTokenBudget";
 import { decodeSSE } from "../adapters/sse/sseDecoder";
@@ -311,6 +312,10 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
         // chats, so storing this on `this` let one in-flight request's usage capture overwrite
         // another's (issue: shared-state race across concurrent provideLanguageModelChatResponse calls).
         const tokenCapture = new StreamTokenCapture(this.getRawModelName(model.id), progress, modelInfo);
+        // Retry can restore media from original history, so disable learning for the whole turn.
+        if (hasMessageMedia(messages)) {
+            tokenCapture.disableCalibration();
+        }
         const trackingProgress = tokenCapture.progress;
 
         try {
@@ -380,33 +385,25 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                     0
                 ),
             };
-            // The model id in `modelToUse` is the namespaced `<routing>/<raw>`
-            // form VS Code hands us. The tokenizer heuristics (and the
-            // `isParameterSupported` / `usageOptOutModels` lookups inside the
-            // request builder) key off the raw model family, not the routing
-            // prefix. The request builder extracts the raw name internally
-            // before populating `request.model`.
-            const rawModelIdForTokenizers = this.getRawModelName(modelToUse.id);
-            const estimatedTransportInputTokens =
-                countOpenAIChatMessagesTokens(requestBody.messages, rawModelIdForTokenizers, modelInfo) +
-                estimateToolTokens(requestBody.tools);
-            const reservedOutputTokens = getPreparedOutputCap(requestBody);
             const totalTokenMax = getTotalTokenLimit(modelToUse, modelInfo);
-            // <Line of Code>; // TODO: Remove by v2.3 if still commented
-            // reservedOutputTokensForRequest = reservedOutputTokens;
-            // totalTokenMaxForRequest = totalTokenMax;
-            tokenCapture.setEstimatedPromptTokens(estimatedTransportInputTokens);
-            const systemPromptContent = requestBody.messages.find((m) => m.role === "system")?.content;
-            if (typeof systemPromptContent === "string") {
-                tokenCapture.setEstimatedSystemPromptTokens(
-                    countTokens(systemPromptContent, rawModelIdForTokenizers, modelInfo)
-                );
-            }
-            tokenCapture.setReservedOutputTokens(reservedOutputTokens);
+            let reservedOutputTokens = getPreparedOutputCap(requestBody);
             tokenCapture.setTotalTokenMax(totalTokenMax);
 
-            // Count the actual transport request after trimming/conversion.
-            tokensIn = estimatedTransportInputTokens;
+            // Retry can rebuild the prompt; usage must be compared with the attempt actually sent.
+            const observeAttempt = (attempt: OpenAIChatCompletionRequest): void => {
+                tokensIn =
+                    countOpenAIChatMessagesTokens(attempt.messages, attempt.model, modelInfo) +
+                    estimateToolTokens(attempt.tools);
+                tokenCapture.setModelInfo(attempt.model, modelInfo);
+                tokenCapture.setEstimatedPromptTokens(tokensIn);
+                const system = attempt.messages.find((message) => message.role === "system")?.content;
+                tokenCapture.setEstimatedSystemPromptTokens(
+                    typeof system === "string" ? countTokens(system, attempt.model, modelInfo) : 0
+                );
+                reservedOutputTokens = getPreparedOutputCap(attempt);
+                tokenCapture.setReservedOutputTokens(reservedOutputTokens);
+            };
+            observeAttempt(requestBody);
 
             let stream: ReadableStream<Uint8Array>;
             try {
@@ -420,7 +417,8 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                     trackingProgress,
                     token,
                     caller,
-                    modelInfo
+                    modelInfo,
+                    observeAttempt
                 );
             } catch (err: unknown) {
                 this.logRequestPayloadOnFailure(requestBody, err, {
@@ -468,7 +466,8 @@ export class LiteLLMChatProvider extends LiteLLMProviderBase implements Language
                                 trackingProgress,
                                 token,
                                 caller,
-                                modelInfo
+                                modelInfo,
+                                observeAttempt
                             );
                             await this.processStreamingResponse(stream, trackingProgress, token, streamRequestContext);
 

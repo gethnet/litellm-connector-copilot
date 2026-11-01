@@ -2,7 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2.5.19] - 2026-11-1
+
+### ✨ Features
+
+* **🏷️ Brand the model picker**: Show the LiteLLM Connector logo in the provider tab on VS Code 1.144 and newer.
+* **⏹️ Stop commit-message generation**: The Source Control generate button becomes an animated stop button while generating. Cancel a request without losing the existing commit-message draft; failed or empty responses also restore it.
+
+### 🐛 Fixes
+
+* **📏 Prevent false token-limit errors after calibration (#176)**: Align history trimming with the raw model's calibrated estimates, preserve tool exchanges, and avoid learning text calibration from multimodal usage. Bug report and original fix by [@bn45hkurr0y4](https://github.com/bn45hkurr0y4) in [#173](https://github.com/gethnet/litellm-connector-copilot/issues/173) and [#174](https://github.com/gethnet/litellm-connector-copilot/pull/174); the follow-up implementation landed in [#176](https://github.com/gethnet/litellm-connector-copilot/pull/176).
+* **🔤 Prevent Unicode encoding failures in requests (#175, #177)**: Repair unpaired UTF-16 surrogates in supported text fields before chat, Responses, and token-count requests; reject malformed protocol metadata, opaque reasoning state, and tool arguments rather than silently changing them.
+
+### 🧪 Validation
+
+* **VS Code minimum-host compatibility**: Run `npm run test:coverage -- --minimum-host` to test against the version declared in `engines.vscode`. CI runs the full suite and minimum-host activation, discovery, and streaming smoke tests, and reports minimum-host and Insiders results separately to Codecov. The smoke tests do not exercise VS Code-managed model groups or picker routing.
+
+## [2.5.18] - 2026-10-28
 
 ### 🐛 Fixes
 

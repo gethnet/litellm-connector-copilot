@@ -2137,6 +2137,130 @@ suite("LiteLLMProviderBase", () => {
                 provider["_registry"].dispose();
             }
         });
+
+        test("remoteCountTokens propagates parent cancellation to the in-flight client", async () => {
+            sandbox.stub(ConfigManager.prototype, "getConfig").resolves({});
+            let requestToken: vscode.CancellationToken | undefined;
+            let signalStarted!: () => void;
+            const started = new Promise<void>((resolve) => (signalStarted = resolve));
+            const counter = sandbox.stub(LiteLLMClient.prototype, "countTokens").callsFake((_request, token) => {
+                requestToken = token;
+                assert.ok(token);
+                signalStarted();
+                return new Promise((_resolve, reject) =>
+                    token.onCancellationRequested(() => reject(new Error("cancelled")))
+                );
+            });
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const parent = new vscode.CancellationTokenSource();
+            seedRegistry(provider);
+            try {
+                const pending = provider.remoteCountTokens("group/model", "text", undefined, parent.token);
+                await started;
+                parent.cancel();
+                assert.strictEqual(requestToken?.isCancellationRequested, true);
+                assert.strictEqual(await pending, undefined);
+                assert.strictEqual(counter.callCount, 1);
+            } finally {
+                parent.dispose();
+                provider["_registry"].dispose();
+            }
+        });
+
+        test("remoteCountTokens skips the client when its parent is already cancelled", async () => {
+            sandbox.stub(ConfigManager.prototype, "getConfig").resolves({});
+            const counter = sandbox.stub(LiteLLMClient.prototype, "countTokens").resolves({ token_count: 42 });
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const parent = new vscode.CancellationTokenSource();
+            seedRegistry(provider);
+            parent.cancel();
+            try {
+                assert.strictEqual(
+                    await provider.remoteCountTokens("group/model", "text", undefined, parent.token),
+                    undefined
+                );
+                assert.ok(counter.notCalled);
+            } finally {
+                parent.dispose();
+                provider["_registry"].dispose();
+            }
+        });
+
+        test("remoteCountTokens skips the client when cancellation occurs during configuration", async () => {
+            let finishConfig!: (value: Record<string, never>) => void;
+            sandbox
+                .stub(ConfigManager.prototype, "getConfig")
+                .returns(new Promise((resolve) => (finishConfig = resolve)));
+            const counter = sandbox.stub(LiteLLMClient.prototype, "countTokens");
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const parent = new vscode.CancellationTokenSource();
+            seedRegistry(provider);
+            try {
+                const pending = provider.remoteCountTokens("group/model", "text", undefined, parent.token);
+                parent.cancel();
+                finishConfig({});
+                assert.strictEqual(await pending, undefined);
+                assert.ok(counter.notCalled);
+            } finally {
+                parent.dispose();
+                provider["_registry"].dispose();
+            }
+        });
+
+        test("remoteCountTokens preserves its default timeout without a parent", async () => {
+            sandbox.stub(ConfigManager.prototype, "getConfig").resolves({});
+            const clock = sandbox.useFakeTimers();
+            let signalStarted!: () => void;
+            const started = new Promise<void>((resolve) => (signalStarted = resolve));
+            let requestToken: vscode.CancellationToken | undefined;
+            sandbox.stub(LiteLLMClient.prototype, "countTokens").callsFake((_request, token) => {
+                assert.ok(token);
+                requestToken = token;
+                signalStarted();
+                return new Promise((_resolve, reject) =>
+                    token.onCancellationRequested(() => reject(new Error("timeout")))
+                );
+            });
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            seedRegistry(provider);
+            try {
+                const pending = provider.remoteCountTokens("group/model", "text");
+                await started;
+                clock.tick(2999);
+                assert.strictEqual(requestToken?.isCancellationRequested, false);
+                clock.tick(1);
+                assert.strictEqual(requestToken?.isCancellationRequested, true);
+                assert.strictEqual(await pending, undefined);
+            } finally {
+                provider["_registry"].dispose();
+            }
+        });
+
+        test("remoteCountTokens ignores a late client result after a custom timeout", async () => {
+            sandbox.stub(ConfigManager.prototype, "getConfig").resolves({});
+            const clock = sandbox.useFakeTimers();
+            let signalStarted!: () => void;
+            let finishCount!: (value: { token_count: number }) => void;
+            const started = new Promise<void>((resolve) => (signalStarted = resolve));
+            let requestToken: vscode.CancellationToken | undefined;
+            sandbox.stub(LiteLLMClient.prototype, "countTokens").callsFake((_request, token) => {
+                requestToken = token;
+                signalStarted();
+                return new Promise((resolve) => (finishCount = resolve));
+            });
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            seedRegistry(provider);
+            try {
+                const pending = provider.remoteCountTokens("group/model", "text", 100);
+                await started;
+                clock.tick(100);
+                assert.strictEqual(requestToken?.isCancellationRequested, true);
+                finishCount({ token_count: 42 });
+                assert.strictEqual(await pending, undefined);
+            } finally {
+                provider["_registry"].dispose();
+            }
+        });
     });
 
     suite("sanitizeErrorTextForLogs / collectMessageText", () => {
