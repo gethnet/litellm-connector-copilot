@@ -2,11 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.5.19] - TBA
+## [2.5.19] - 2026-11-1
 
 ### ✨ Features
 
 * **🏷️ Brand the model picker**: Show the LiteLLM Connector logo in the provider tab on VS Code 1.144 and newer.
+* **⏹️ Stop commit-message generation**: The Source Control generate button becomes an animated stop button while generating. Cancel a request without losing the existing commit-message draft; failed or empty responses also restore it.
 
 ### 🐛 Fixes
 
@@ -15,7 +16,7 @@ All notable changes to this project will be documented in this file.
 
 ### 🧪 Validation
 
-* **VS Code 1.125 compatibility**: Run the full test suite and minimum-host activation, discovery, and streaming smoke tests on the declared minimum host in CI. The smoke tests do not exercise VS Code-managed model groups or picker routing.
+* **VS Code minimum-host compatibility**: Run `npm run test:coverage -- --minimum-host` to test against the version declared in `engines.vscode`. CI runs the full suite and minimum-host activation, discovery, and streaming smoke tests, and reports minimum-host and Insiders results separately to Codecov. The smoke tests do not exercise VS Code-managed model groups or picker routing.
 
 ## [2.5.18] - 2026-10-28
 
