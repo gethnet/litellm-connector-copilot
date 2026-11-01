@@ -25,6 +25,34 @@ on:
         value: ${{ jobs.build-and-test.outputs.version }}
 
 jobs:
+  minimum-vscode-host:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}-build-container:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Dependencies
+        run: npm install --include dev
+
+      - name: Run full suite on VS Code 1.125.0
+        run: npm run test:coverage
+        env:
+          VSCODE_TEST_VERSION: 1.125.0
+
+      - name: Upload minimum host results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: minimum-vscode-host-results
+          path: |
+            .vscode-test/minimum/test-results/
+            .vscode-test/minimum/coverage/
+            .vscode-test/minimum/user-data/logs/
+          include-hidden-files: true
+          retention-days: 7
+
   build-and-test:
     runs-on: ubuntu-latest
     container:

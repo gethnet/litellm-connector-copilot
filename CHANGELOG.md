@@ -2,11 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2.5.19] - TBA
+
+### ✨ Features
+
+* **🏷️ Brand the model picker**: Show the packaged LiteLLM logo in the provider tab on supported VS Code versions.
 
 ### 🐛 Fixes
 
 * **📏 Prevent false token-limit errors after calibration (#173, #174)**: Align history trimming with the raw model's calibrated estimates, preserve tool exchanges, and avoid learning text calibration from multimodal usage. Bug report and original fix by [@bn45hkurr0y4](https://github.com/bn45hkurr0y4).
+
+## [2.5.18] - 2026-10-28
 
 ### 🐛 Fixes
 

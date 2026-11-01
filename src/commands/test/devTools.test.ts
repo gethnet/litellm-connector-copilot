@@ -18,6 +18,7 @@ interface Stubs {
     showWarningMessage: sinon.SinonStub;
     getExtensionStub: sinon.SinonStub;
     executeCommandSpy: sinon.SinonSpy;
+    registerCommandStub: sinon.SinonStub;
 }
 
 function installStubs(): Stubs {
@@ -28,10 +29,11 @@ function installStubs(): Stubs {
         showInformationMessage: sandbox.stub(vscode.window, "showInformationMessage").resolves(undefined),
         showWarningMessage: sandbox.stub(vscode.window, "showWarningMessage").resolves(undefined),
         getExtensionStub: sandbox.stub(vscode.extensions, "getExtension"),
-        // Use a spy (not a stub) so setContext is really forwarded to VS Code and
-        // executeCommand("litellm-connector.dev.resetReviewPrompt") dispatches to
-        // the registered handler instead of silently resolving undefined.
+        // Keep forwarding setContext, but never register a duplicate command in the host.
         executeCommandSpy: sandbox.spy(vscode.commands, "executeCommand"),
+        registerCommandStub: sandbox
+            .stub(vscode.commands, "registerCommand")
+            .callsFake(() => new vscode.Disposable(() => undefined)),
     };
 }
 
@@ -160,22 +162,23 @@ suite("registerDevResetReviewPromptCommand", () => {
         stubs.sandbox.restore();
     });
 
+    function registerHandler(service: ReviewPromptService): () => Promise<void> {
+        disposables.push(registerDevResetReviewPromptCommand(service));
+        assert.strictEqual(stubs.registerCommandStub.calledOnce, true);
+        const args = stubs.registerCommandStub.firstCall.args as unknown[];
+        assert.strictEqual(args[0], "litellm-connector.dev.resetReviewPrompt");
+        assert.strictEqual(typeof args[1], "function");
+        return args[1] as () => Promise<void>;
+    }
+
     test("always registers the command regardless of build", async () => {
         // Production context: command must still be registered (palette hides it).
         const prodContext = buildContext(stubs, "2.2.3");
         await setDevBuildContextKey(prodContext);
         const service = buildService();
 
-        const disposable = registerDevResetReviewPromptCommand(service);
-        assert.ok(disposable, "command must always be registered; palette visibility is via setContext");
-        disposables.push(disposable);
-
-        const commands = await vscode.commands.getCommands(true);
-        assert.strictEqual(
-            commands.includes("litellm-connector.dev.resetReviewPrompt"),
-            true,
-            "command must be in the command registry even on production builds"
-        );
+        registerHandler(service);
+        assert.ok(disposables[0], "command must always be registered; palette visibility is via setContext");
     });
 
     test("resets state on dev builds when activated via setDevBuildContextKey", async () => {
@@ -183,11 +186,8 @@ suite("registerDevResetReviewPromptCommand", () => {
         await setDevBuildContextKey(devContext);
         const service = buildService();
 
-        const disposable = registerDevResetReviewPromptCommand(service);
-        assert.ok(disposable);
-        disposables.push(disposable);
-
-        await vscode.commands.executeCommand("litellm-connector.dev.resetReviewPrompt");
+        const handler = registerHandler(service);
+        await handler();
 
         const state = (service as unknown as { globalState: vscode.Memento }).globalState;
         assert.strictEqual(
@@ -216,8 +216,7 @@ suite("registerDevResetReviewPromptCommand", () => {
         await setDevBuildContextKey(devContext);
         const service = buildService();
 
-        const disposable = registerDevResetReviewPromptCommand(service);
-        disposables.push(disposable);
+        const handler = registerHandler(service);
 
         // Re-stub getExtension so the live lookup returns a production build.
         stubs.getExtensionStub.withArgs("test.litellm-connector").returns({
@@ -225,7 +224,7 @@ suite("registerDevResetReviewPromptCommand", () => {
             packageJSON: { version: "2.2.3" },
         } as vscode.Extension<unknown>);
 
-        await vscode.commands.executeCommand("litellm-connector.dev.resetReviewPrompt");
+        await handler();
 
         const state = (service as unknown as { globalState: vscode.Memento }).globalState;
         assert.strictEqual(

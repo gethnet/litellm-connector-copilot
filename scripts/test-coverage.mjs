@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { setTimeout, clearTimeout } from "node:timers";
@@ -9,7 +9,7 @@ import console from "node:console";
 const TIMEOUT_EXIT_CODE = 124; // Traditional timeout command uses 124
 
 // Maximum time to allow the test process to run (in milliseconds)
-const TEST_TIMEOUT_MS = 60000; // 60 seconds
+const TEST_TIMEOUT_MS = process.env.VSCODE_TEST_VERSION ? 180000 : 60000;
 
 /**
  * Remove directory contents without removing the directory itself.
@@ -32,13 +32,16 @@ function clearDirectory(dirPath) {
   }
 }
 
-const coveragePath = join(process.cwd(), "coverage");
+// Keep floor-host reports separate from the full-suite coverage and JUnit data.
+const minimumHost = Boolean(process.env.VSCODE_TEST_VERSION);
+const coverageDir = minimumHost ? ".vscode-test/minimum/coverage" : "coverage";
+const coveragePath = join(process.cwd(), coverageDir);
 clearDirectory(coveragePath);
 if (!existsSync(coveragePath)) {
   mkdirSync(coveragePath, { recursive: true });
 }
 
-const testResultsDir = join(process.cwd(), "test-results");
+const testResultsDir = join(process.cwd(), minimumHost ? ".vscode-test/minimum/test-results" : "test-results");
 process.env.VSCODE_TEST_RESULTS_DIR = testResultsDir;
 // Disable PostHog telemetry during tests to prevent fetch mock interference
 // and avoid real HTTP requests during test execution
@@ -48,11 +51,21 @@ if (!existsSync(testResultsDir)) {
   mkdirSync(testResultsDir, { recursive: true });
 }
 
+if (minimumHost) {
+  // Compile alone does not produce package.json's dist/extension.js entrypoint.
+  // Build the production bundle so activation exercises the shipped entrypoint.
+  const build = spawnSync(process.execPath, ["esbuild.js", "--production"], { stdio: "inherit", env: process.env });
+  if (build.error || build.status !== 0) {
+    console.error("Failed to build the extension for the minimum host", build.error ?? `exit ${build.status}`);
+    process.exit(build.status || 1);
+  }
+}
+
 const testArgs = [
   "--args=--no-sandbox",
   "--coverage",
   "--coverage-output",
-  "coverage",
+  coverageDir,
   "--coverage-reporter",
   "lcovonly",
   "--coverage-reporter",
@@ -108,6 +121,18 @@ child.on("exit", (code, signal) => {
     process.exit(TIMEOUT_EXIT_CODE);
   }
   if (typeof code === "number") {
+    if (minimumHost && code === 0) {
+      // Reject empty or smoke-only runs even if the runner exits successfully.
+      const reportPath = join(testResultsDir, "test-results.xml");
+      const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
+      if (!report.includes("runs on the requested host and activates the installed extension") ||
+          !report.includes("discovers a model and streams a response using minimum-host API objects") ||
+          !report.includes('name="Provider icon manifest"') ||
+          !report.includes('skipped="0"')) {
+        console.error("Minimum-host full suite did not produce complete JUnit results.");
+        process.exit(1);
+      }
+    }
     process.exit(code);
   } else if (signal) {
     console.error(`Process terminated by signal: ${signal}`);
