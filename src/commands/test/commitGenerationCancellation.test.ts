@@ -27,6 +27,7 @@ suite("Commit generation cancellation", () => {
     setup(() => {
         sandbox = sinon.createSandbox();
         provider = sandbox.createStubInstance(LiteLLMCommitMessageProvider);
+        provider.getRawModelName.callsFake((id: string) => id);
         commands = new Map();
         sandbox.stub(vscode.commands, "registerCommand").callsFake((name, handler) => {
             commands.set(name, handler as (scm?: unknown) => Promise<void>);

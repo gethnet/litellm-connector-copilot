@@ -185,10 +185,10 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
   - Returns `LanguageModelChatInformation` entries with `isUserSelectable: true` so models appear in the picker
   - Reuses the base request pipeline for normalization, filtering, trimming, and routing
 
-- **Commit provider**: `src/providers/liteLLMCommitProvider.ts`
-  - Implements commit-message generation only (not a `LanguageModelTextCompletionProvider`)
-  - Reuses the shared base lifecycle for LiteLLM-backed request orchestration
-  - Avoids re-implementing shared request preparation, endpoint selection, or quota/error logic
+- **Legacy commit provider**: `src/providers/liteLLMCommitProvider.ts`
+  - Retained command-backed compatibility implementation; not a registered text-completion provider
+  - Reuses the shared base lifecycle when invoked directly
+  - The live SCM command uses `LanguageModelChat.sendRequest`, not this object's discovery registry
 
 - **Entry Point**: `src/extension.ts`
   - Activates extension and instantiates exactly one `LiteLLMChatProvider` and one `LiteLLMCommitMessageProvider`
@@ -197,6 +197,7 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
   - Both providers share same `context.secrets` for `SecretStorage` (if needed for non-provider secrets)
   - Both receive per-group configuration from VS Code via `options.configuration` in `provideLanguageModelChatInformation` and request methods
   - Configuration schema defined in `package.json` `languageModelChatProviders` contribution point (VS Code 1.120 per-group format)
+  - The SCM command registration passes the registered chat provider instance, not the legacy commit provider. Preflight (raw metadata, raw model names, remote token counts) reads from that provider's discovery-populated registry; no registry copy, no global provider-group config cache.
 
 - **Adapters**:
   - `src/adapters/litellmClient.ts` — HTTP client and endpoint routing integration
@@ -327,10 +328,13 @@ Keep this pipeline shared unless the change is intentionally protocol-specific a
 - **Model selection**: resolve model using `modelIdOverride` config or first available model with `inline-completions` tag
 - **Cost tracking**: completions reuse the same pricing/token snapshot pipeline so estimated request costs are reported consistently with chat.
 
-#### Commit-Message Diff Budgeting (`src/utils/commitDiffBudget.ts`)
-- The commit command resolves the chat model once and uses `LanguageModelChat.maxInputTokens` as the independent input maximum, with raw derived limits only as a fallback.
-- `countDiffBreadth`, `computeOutputReserve`, and `computeDiffBudget` own early request-specific diff shaping. The adaptive output target is sent as `modelOptions.max_tokens`; it constrains explicit combined context but is not subtracted again from an independent input maximum. The registered chat provider performs final authoritative budgeting before transport, including when the commit provider's separate registry has no metadata.
-- `GitUtils.compactDiff` and `truncateToTokenLimit` accept optional model details and guarantee that the returned diff fits the requested token budget.
+#### Commit-Message Diff Budgeting (`src/commands/commitRequestPreparation.ts`)
+- Activation injects the registered chat provider into the SCM command. Its populated registry is the sole preflight source for raw model metadata, canonical calibration IDs, and remote counter routing; no registry or provider-group config is copied or globally cached.
+- The command selects the VS Code model once and uses its independent input maximum. `src/utils/commitDiffBudget.ts` owns breadth/output calculations; only explicit raw combined context allows subtraction of the actual prepared output cap.
+- `buildCommitMessages` defines both complete instruction-bearing messages. Preflight counts those full messages via `/utils/token_counter`, verifies up to two remote-directed reductions, and never sends a known-over-budget final recount. Counter timeout/failure falls back to locally validated calibrated estimates.
+- SCM's connector-local preserve option (`litellm_connector_preserve_messages`) retains both messages through trimming, never bypassing the shared finalized input guard. At most two command overflow recoveries shrink the actual prepared diff with strictly decreasing token count and length, recounting before each generation send; the full operation is bounded to nine counter calls / 27 seconds of counter waiting (three 3-second calls per preparation, three preparations). Failure/cancellation restores the original draft.
+- Shared chat/legacy recovery uses a stricter request-local prepared-input budget, preserves latest messages and complete tool exchanges, and skips resend when the finalized body cannot be made strictly smaller. Connector-local budget/preserve keys are never wire parameters or model metadata.
+- `src/providers/base/remoteTokenCount.ts` owns bounded, operation-local counting with cancellation and stateless access to existing provider routing. It adds no registry, credential cache, or global configuration.
 
 #### Configuration Flow (v1.120+, per-group)
 Configuration from user settings reaches providers via VS Code's language model API on a per-group basis:

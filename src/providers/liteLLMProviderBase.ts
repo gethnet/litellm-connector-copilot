@@ -8,7 +8,7 @@ import type {
 
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../types";
 import { convertMessages } from "../utils";
-import { isContextOverflowError, countTokens } from "../adapters/tokenUtils";
+import { countTokens } from "../adapters/tokenUtils";
 import { ConfigManager } from "../config/configManager";
 import { Logger } from "../utils/logger";
 import type { TelemetryService } from "../telemetry/telemetryService";
@@ -23,6 +23,8 @@ import {
 } from "../utils/reasoningEffortFallback";
 import type { BackendSession } from "./backendSession";
 import { RequestBuilder } from "./base/requestBuilder";
+import { countRemoteTokens } from "./base/remoteTokenCount";
+import { sendOnceWithOverflow } from "./base/overflowRecovery";
 import { Transport } from "./base/transport";
 import type { RequestBuilderDeps, TransportDeps } from "./base/types";
 import {
@@ -30,11 +32,7 @@ import {
     requestHasThinkingBlocks,
     stripThinkingBlocksFromRequest,
 } from "./base/thinkingBlockRetry";
-import {
-    applyReasoningRetryState,
-    readReasoningRetryState,
-    replaceReasoningRetryState,
-} from "./base/reasoningRetryState";
+import { applyReasoningRetryState, readReasoningRetryState } from "./base/reasoningRetryState";
 import { LiteLLMProviderRegistry } from "./liteLLMProviderRegistry";
 import {
     detectQuotaToolRedaction as detectQuotaToolRedactionImpl,
@@ -388,45 +386,22 @@ export abstract class LiteLLMProviderBase {
      */
     public async remoteCountTokens(
         modelId: string,
-        text: string,
+        input: string | readonly vscode.LanguageModelChatRequestMessage[],
         timeoutMs = 3000,
         parentToken?: vscode.CancellationToken
     ): Promise<number | undefined> {
-        try {
-            if (parentToken?.isCancellationRequested) {
-                return undefined;
-            }
-            const entry = this._registry.lookup(modelId);
-            if (!entry) {
-                return undefined;
-            }
-            const rawModelId = this.getRawModelName(modelId);
-            const cfg = await this._configManager.getConfig();
-            if (parentToken?.isCancellationRequested) {
-                return undefined;
-            }
-            const client = new LiteLLMClient(
-                { url: entry.baseUrl, key: entry.apiKey, disableCaching: cfg.disableCaching },
-                this.userAgent
-            );
-            const cts = new vscode.CancellationTokenSource();
-            const parentListener = parentToken?.onCancellationRequested(() => cts.cancel());
-            const timer = setTimeout(() => cts.cancel(), timeoutMs);
-            try {
-                const result = await client.countTokens({ model: rawModelId, prompt: text }, cts.token);
-                return !cts.token.isCancellationRequested && typeof result?.token_count === "number"
-                    ? result.token_count
-                    : undefined;
-            } finally {
-                clearTimeout(timer);
-                parentListener?.dispose();
-                cts.dispose();
-            }
-        } catch {
-            // Best-effort by contract: blocked route (/utils/token_counter not
-            // in allowed_routes), network failure, or timeout → heuristic fallback.
-            return undefined;
-        }
+        return countRemoteTokens({
+            deps: {
+                configManager: this._configManager,
+                registry: this._registry,
+                userAgent: this.userAgent,
+                getRawModelName: (id) => this.getRawModelName(id),
+            },
+            modelId,
+            input,
+            timeoutMs,
+            parentToken,
+        });
     }
 
     /**
@@ -587,9 +562,8 @@ export abstract class LiteLLMProviderBase {
     }
 
     /**
-     * Sends a LiteLLM request with a single retry on context overflow. The first attempt uses the
-     * standard buffered budget. On overflow, we re-trim messages with a hard cap equal to the raw
-     * model max input (minus tool tokens) and retry once.
+     * Shared compatibility orchestration with one smaller-body overflow recovery per send.
+     * Protected latest content is never amputated; SCM owns its separate bounded diff recovery.
      */
     protected async sendRequestWithRetry(
         request: OpenAIChatCompletionRequest,
@@ -801,65 +775,37 @@ export abstract class LiteLLMProviderBase {
         stripThinkingBlocksForRetry = false,
         onAttempt?: (request: OpenAIChatCompletionRequest) => void
     ): Promise<ReadableStream<Uint8Array>> {
-        const sendAttempt = async (candidate: OpenAIChatCompletionRequest): Promise<ReadableStream<Uint8Array>> => {
-            const configuration = await this.getCallTimeConfiguration(options, model);
-            onAttempt?.(candidate);
-            return this.sendRequestToLiteLLM(candidate, progress, token, caller, modelInfo, configuration);
-        };
-        try {
-            return await sendAttempt(request);
-        } catch (err) {
-            if (!isContextOverflowError(err)) {
-                throw err;
-            }
-
-            Logger.warn("[sendRequestWithRetry] Context overflow detected, retrying with aggressive trim", err);
-
-            const retry = this._requestBuilder.prepareOverflowRetry(request, messages, model, options, modelInfo);
-            const rebuiltRequest = await this.buildOpenAIChatRequest(
-                retry.messages,
-                model,
-                retry.options,
-                modelInfo,
-                caller
-            );
-            // If continuity was already redacted on the outer retry, the rebuilt
-            // request (which re-reads the original history) would reintroduce
-            // thinking_blocks. Re-strip so the rejected continuity stays gone.
-            const retrimmedRequest = stripThinkingBlocksForRetry
-                ? stripThinkingBlocksFromRequest(rebuiltRequest)
-                : rebuiltRequest;
-            // Overflow rebuilds from the original picker options, so re-stamp
-            // the live retry representation instead of restoring picker effort.
-            replaceReasoningRetryState(retrimmedRequest, readReasoningRetryState(request));
-
-            try {
-                return await sendAttempt(retrimmedRequest);
-            } catch (retryErr) {
-                if (isContextOverflowError(retryErr)) {
-                    const contextError = new vscode.LanguageModelError(
-                        "Context window exceeded. The conversation is too long for this model."
-                    );
-                    (contextError as { code?: string }).code = "ContextExceeded";
-                    throw contextError;
-                }
-                throw retryErr;
-            }
-        }
+        // The recovery state machine lives in its own module so the base stays
+        // under the repository's file-size budget; behavior is unchanged.
+        return sendOnceWithOverflow(
+            {
+                requestBuilder: this._requestBuilder,
+                getCallTimeConfiguration: (opts, target) => this.getCallTimeConfiguration(opts, target),
+                buildOpenAIChatRequest: (msgs, target, reqOptions, info, reqCaller) =>
+                    this.buildOpenAIChatRequest(msgs, target, reqOptions, info, reqCaller),
+                sendRequestToLiteLLM: (candidate, reqProgress, reqToken, reqCaller, info, configuration) =>
+                    this.sendRequestToLiteLLM(candidate, reqProgress, reqToken, reqCaller, info, configuration),
+                stripThinkingBlocksForRetry,
+            },
+            request,
+            messages,
+            model,
+            options,
+            progress,
+            token,
+            caller,
+            modelInfo,
+            onAttempt
+        );
     }
 
     /**
      * Resolves the per-group configuration for a response-time call.
-     *
-     * Delegates to the pure {@link ../base/callConfig callConfig} module, which
-     * owns the `options.configuration` trust heuristic and the registry
-     * fallback. Kept as a private method (rather than called inline) so tests
+     * Delegates to {@link ../base/callConfig.resolveCallTimeConfiguration}.
+     * See `resolveCallTimeConfiguration` for the full invariant documentation
+     * (empty `options.configuration` is untrusted, ergonomic toggles are
+     * merged on both resolution paths). Kept as a private method so tests
      * can exercise the resolution via the test-access seam.
-     *
-     * See `resolveCallTimeConfiguration` for the full invariant documentation,
-     * including why an empty `options.configuration` object must NOT be
-     * trusted and how the workspace ergonomic toggles are merged onto both
-     * resolution paths.
      */
     private async getCallTimeConfiguration(
         options: vscode.ProvideLanguageModelChatResponseOptions,
@@ -881,7 +827,7 @@ export abstract class LiteLLMProviderBase {
      * — LiteLLM does NOT understand the namespaced id format that VS Code
      * sees in the picker.
      */
-    protected getRawModelName(modelId: string): string {
+    public getRawModelName(modelId: string): string {
         const entry = this._registry.lookup(modelId);
         if (entry) {
             return entry.rawModelName;

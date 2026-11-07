@@ -300,7 +300,8 @@ export function activate(context: vscode.ExtensionContext): void {
         context.subscriptions.push(registerResetConfigurationCommand(context, configManager, telemetryService));
         context.subscriptions.push(registerShowModelsCommand(activeProvider, telemetryService));
         context.subscriptions.push(registerReloadModelsCommand(activeProvider, telemetryService));
-        context.subscriptions.push(registerGenerateCommitMessageCommand(commitProvider, telemetryService));
+        // SCM preflight must use the same registry populated by registered chat discovery.
+        context.subscriptions.push(registerGenerateCommitMessageCommand(activeProvider, telemetryService));
         context.subscriptions.push(registerSetLogLevelCommand());
 
         // Dev-only reset-review-prompt command. The command is always registered

@@ -154,11 +154,11 @@ export class LiteLLMClient {
         token?: vscode.CancellationToken
     ): Promise<LiteLLMTokenCounterResponse> {
         const controller = new AbortController();
-        if (token) {
-            token.onCancellationRequested(() => controller.abort());
+        const listener = token?.onCancellationRequested(() => controller.abort());
+        if (token?.isCancellationRequested) {
+            controller.abort();
         }
-
-        Logger.trace(`Counting tokens for model ${request.model} at ${this.config.url}/utils/token_counter`);
+        Logger.trace(`Counting tokens for model ${request.model}`);
         try {
             const resp = await fetch(`${this.config.url}/utils/token_counter`, {
                 method: "POST",
@@ -166,20 +166,19 @@ export class LiteLLMClient {
                 body: JSON.stringify(normalizeRequestUnicode(request)),
                 signal: controller.signal,
             });
-
             if (!resp.ok) {
-                const errorText = await resp.text();
-                Logger.error(`Failed to count tokens: ${resp.status} ${resp.statusText} - ${errorText}`);
-                throw new Error(`Failed to count tokens: ${resp.status} ${resp.statusText}`);
+                Logger.warn(`Token counter unavailable (HTTP ${resp.status}); using local estimate`);
+                throw new Error(`Token counter unavailable (HTTP ${resp.status})`);
             }
-
-            return resp.json() as Promise<LiteLLMTokenCounterResponse>;
+            return (await resp.json()) as LiteLLMTokenCounterResponse;
         } catch (err) {
             if (this._telemetryService) {
                 const errorType = err instanceof Error ? err.name : "FetchError";
                 this._telemetryService.captureConnectionError("countTokens", errorType);
             }
             throw err;
+        } finally {
+            listener?.dispose();
         }
     }
 

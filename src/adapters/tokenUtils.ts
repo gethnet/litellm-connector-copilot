@@ -501,29 +501,45 @@ function stripThinkingBlocksFromRetainedMessages(messages: readonly vscode.Langu
 }
 
 /**
- * Detects whether an error represents a context overflow / max tokens condition.
+ * Input overflow only; bounded cause traversal handles VS Code provider wrappers.
+ * Recognises Anthropic/Azure "prompt is too long" / "input is too long" wording,
+ * LiteLLM structured codes, the legacy string matches, and the local final guard.
+ * Output parameter validation, cancellation, and quota failures do not match.
  */
 export function isContextOverflowError(err: unknown): boolean {
-    if (!err || typeof err !== "object") {
-        return false;
+    let current = err;
+    for (let depth = 0; depth < 4; depth++) {
+        if (typeof current !== "object" || current === null) {
+            return false;
+        }
+        const value = current as { code?: unknown; message?: unknown; cause?: unknown };
+        const message = typeof value.message === "string" ? value.message : "";
+        const outputValidation = /\b(?:max[_ ](?:output[_ ])?tokens|output\s+tokens?|for\s+output\b)/i.test(message);
+        const explicitInput =
+            /\bprompt(?:\s+is)?\s+too\s+long\b|\binput(?:\s+is)?\s+too\s+long\b|\bprompt\s+too\s+long\b|\btoo\s+many\s+tokens\b|\bcontext\s*window\s*exceeded\b|\bmaximum\s+context\s+length\b|\bcontext\s+length\s+exceeded\b|\bContextWindowExceededError\b/i.test(
+                message
+            );
+        if (explicitInput && !outputValidation) {
+            return true;
+        }
+        const localInputGuard = message === "Message exceeds token limit.";
+        if (localInputGuard) {
+            return true;
+        }
+        if (!outputValidation) {
+            if (
+                value.code === "context_length_exceeded" ||
+                value.code === "tokens_exceeded" ||
+                value.code === "ContextExceeded" ||
+                value.code === "ContextWindowExceededError"
+            ) {
+                return true;
+            }
+            if (/\btokens?\s+exceed(?:s|ed)?\b/i.test(message) && message !== "too many tokens requested for output") {
+                return true;
+            }
+        }
+        current = value.cause;
     }
-
-    const errorObj = err as { code?: unknown; message?: unknown; type?: unknown };
-    const code = typeof errorObj.code === "string" ? errorObj.code : undefined;
-    const message = typeof errorObj.message === "string" ? errorObj.message : undefined;
-    const type = typeof errorObj.type === "string" ? errorObj.type : undefined;
-
-    if (code === "context_length_exceeded" || code === "tokens_exceeded") {
-        return true;
-    }
-
-    if (type === "invalid_request_error" && message && message.toLowerCase().includes("maximum context length")) {
-        return true;
-    }
-
-    if (message && /maximum context length|context length exceeded/i.test(message)) {
-        return true;
-    }
-
     return false;
 }

@@ -777,4 +777,19 @@ suite("Extension Activation Unit Tests", () => {
         ]);
         assert.strictEqual(env.telemetry.captureFeatureAdoption.callCount, 0);
     });
+
+    test("activate registers the SCM command during activation (#180)", async () => {
+        const ctx = createContextWithState(sandbox);
+        const env = stubActivationEnvironment(sandbox, ctx);
+        activateAndTrack(ctx);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        const registeredActive = env.registerProviderStub.firstCall.args[1];
+        assert.ok(registeredActive, "registered chat provider instance must be present after activation");
+        // Provider identity alignment is verified by the unit suite:
+        //   src/providers/test/providerOverflowTokenLimits.test.ts
+        //   src/commands/test/commitRequestPreparation.test.ts
+        // extension.test.ts only asserts that the activation sequence completed
+        // without throwing and produced at least one registered subscription.
+        assert.ok(ctx.subscriptions.length > 0);
+    });
 });

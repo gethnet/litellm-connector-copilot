@@ -127,7 +127,11 @@ export class RequestBuilder {
         return promptCachePolicy;
     }
 
-    /** Retain the established hard-budget overflow policy before normal request rebuilding. */
+    /**
+     * Rebuilding uses a stricter actual-input ceiling; tools are included once in this total.
+     * The literal `litellm_connector_input_budget` option is consumed by the builder
+     * and never copied into the wire request body.
+     */
     public prepareOverflowRetry(
         request: OpenAIChatCompletionRequest,
         messages: readonly vscode.LanguageModelChatRequestMessage[],
@@ -138,19 +142,48 @@ export class RequestBuilder {
         messages: readonly vscode.LanguageModelChatRequestMessage[];
         options: vscode.ProvideLanguageModelChatResponseOptions;
     } {
+        void messages;
         const outputCap = resolveRequestOutputCap(model, request.max_tokens, modelInfo);
-        const budget = getRequestInputTokenBudget(model, modelInfo, outputCap);
+        const rawModelId = this.extractRawModelName(model.id);
+        const preparedInput =
+            countOpenAIChatMessagesTokens(request.messages, rawModelId, modelInfo) + estimateToolTokens(request.tools);
+        const budget = Math.floor(preparedInput * 0.75);
+        const tools = convertTools(options).tools;
+        const trimmed = trimMessagesToFitBudget(messages, tools, model, modelInfo, budget, rawModelId);
         return {
-            messages: trimMessagesToFitBudget(
-                messages,
-                convertTools(options).tools,
-                model,
-                modelInfo,
-                budget,
-                this.extractRawModelName(model.id)
-            ),
-            options: { ...options, modelOptions: { ...options.modelOptions, max_tokens: outputCap } },
+            messages: trimmed,
+            options: {
+                ...options,
+                modelOptions: {
+                    ...options.modelOptions,
+                    max_tokens: outputCap,
+                    litellm_connector_input_budget: budget,
+                },
+            },
         };
+    }
+
+    /**
+     * Comparator for the shared retry: a longer hop must reduce actual finalized
+     * text + tools input. Media lives outside the trimmer/pass budget, so this is
+     * an upper-bound check for text+tools; we are conservative on media and
+     * conservative for protected overlays.
+     */
+    public hasOverflowProgress(
+        previous: OpenAIChatCompletionRequest,
+        next: OpenAIChatCompletionRequest,
+        modelInfo?: LiteLLMModelInfo,
+        continuityStripped = false
+    ): boolean {
+        const cost = (body: OpenAIChatCompletionRequest): number =>
+            countOpenAIChatMessagesTokens(body.messages, body.model, modelInfo) + estimateToolTokens(body.tools);
+        if (cost(next) < cost(previous)) {
+            return true;
+        }
+        if (JSON.stringify(previous.messages) !== JSON.stringify(next.messages)) {
+            return true;
+        }
+        return continuityStripped;
     }
 
     public async buildOpenAIChatRequest(
@@ -184,15 +217,27 @@ export class RequestBuilder {
         const mo = (options.modelOptions as Record<string, unknown>) ?? {};
         const outputCap = resolveRequestOutputCap(model, mo.max_tokens, modelInfo);
         const safetyRatio = isAnthropicModel(rawModelId, modelInfo) ? 0.95 * 0.98 : 0.95;
-        const inputBudget = getRequestInputTokenBudget(model, modelInfo, outputCap, safetyRatio);
-        const messagesToUse = trimMessagesToFitBudget(
-            messages,
-            toolConfig.tools,
-            model,
-            modelInfo,
-            inputBudget,
-            rawModelId
-        );
+        const normalInputBudget = getRequestInputTokenBudget(model, modelInfo, outputCap, safetyRatio);
+        const requestedInputBudget = mo.litellm_connector_input_budget;
+        if (
+            requestedInputBudget !== undefined &&
+            (typeof requestedInputBudget !== "number" ||
+                !Number.isFinite(requestedInputBudget) ||
+                requestedInputBudget < 1)
+        ) {
+            throw new Error("Message exceeds token limit.");
+        }
+        const inputBudget =
+            typeof requestedInputBudget === "number"
+                ? Math.min(normalInputBudget, Math.floor(requestedInputBudget))
+                : normalInputBudget;
+        // SCM owns diff shrinking. Preserve BOTH instruction-bearing user messages
+        // when the SCM command sets this flag, but still apply validateRequest and
+        // the finalized transport guard below.
+        const messagesToUse =
+            mo.litellm_connector_preserve_messages === true
+                ? messages
+                : trimMessagesToFitBudget(messages, toolConfig.tools, model, modelInfo, inputBudget, rawModelId);
         const openaiMessages = convertMessages(messagesToUse, {
             attachPromptCacheControl: modelSupportsPromptCacheControl(rawModelId, modelInfo),
         });
