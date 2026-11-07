@@ -120,6 +120,61 @@ suite("Final request token limits (#159)", () => {
         }
     });
 
+    test("overflow progress rejects a larger but different rebuilt body", () => {
+        const previous = {
+            model: model.id,
+            messages: [{ role: "user" as const, content: "a".repeat(140) }],
+        };
+        const larger = {
+            model: model.id,
+            messages: [{ role: "user" as const, content: "b".repeat(280) }],
+        };
+        const equalCost = {
+            model: model.id,
+            messages: [{ role: "user" as const, content: "b".repeat(140) }],
+        };
+        const smaller = {
+            model: model.id,
+            messages: [{ role: "user" as const, content: "x" }],
+        };
+
+        assert.strictEqual(builder.hasOverflowProgress(previous, larger), false);
+        assert.strictEqual(builder.hasOverflowProgress(previous, equalCost), false);
+        assert.strictEqual(builder.hasOverflowProgress(previous, smaller), true);
+    });
+
+    test("overflow retry budget includes media retained from source messages", () => {
+        const image = new vscode.LanguageModelDataPart(new Uint8Array(1500), "image/png");
+        const source = [
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                name: undefined,
+                content: [new vscode.LanguageModelTextPart("describe"), image],
+            },
+        ] as const;
+        const prepared = builder.prepareOverflowRetry(
+            {
+                model: model.id,
+                messages: [{ role: "user", content: "describe" }],
+                max_tokens: 400,
+            },
+            source,
+            model,
+            options(400),
+            undefined
+        );
+        const budget = (prepared.options.modelOptions as Record<string, unknown>).litellm_connector_input_budget;
+
+        assert.strictEqual(
+            budget,
+            Math.floor(
+                (countOpenAIChatMessagesTokens([{ role: "user", content: "describe" }], model.id) +
+                    estimateMediaTokenCost("image/png", 1500)) *
+                    0.75
+            )
+        );
+    });
+
     test("actual output cap controls only the explicit combined constraint", async () => {
         const history = [message("a".repeat(2100)), message("b".repeat(350))];
         const info = Object.freeze({ max_input_tokens: 1000, max_output_tokens: 400, context_window_tokens: 1000 });

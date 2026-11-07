@@ -4,6 +4,11 @@ import * as sinon from "sinon";
 
 import * as extension from "../../extension";
 import * as providers from "../../providers";
+import { LiteLLMClient } from "../../adapters/litellmClient";
+import { countOpenAIChatMessagesTokens, countTokens } from "../../adapters/tokenUtils";
+import { ConfigManager } from "../../config/configManager";
+import type { LiteLLMModelInfo, LiteLLMTokenCounterRequest, OpenAIChatCompletionRequest } from "../../types";
+import { GitUtils } from "../../utils/gitUtils";
 import { Logger } from "../../utils/logger";
 import { TelemetryService } from "../../telemetry/telemetryService";
 import { LegacyConfigMigration } from "../../config/legacyConfigMigration";
@@ -778,18 +783,132 @@ suite("Extension Activation Unit Tests", () => {
         assert.strictEqual(env.telemetry.captureFeatureAdoption.callCount, 0);
     });
 
-    test("activate registers the SCM command during activation (#180)", async () => {
-        const ctx = createContextWithState(sandbox);
+    test("SCM uses activation's discovered chat provider for recount and builder retries (#180)", async () => {
+        const ctx = createContextWithState(sandbox, {
+            globalState: { "litellm-connector.migrationNotice.v1": true },
+        });
         const env = stubActivationEnvironment(sandbox, ctx);
+        const handlers = new Map<string, (scm?: unknown) => Promise<void>>();
+        (vscode.commands.registerCommand as sinon.SinonStub).callsFake((name: string, handler: unknown) => {
+            handlers.set(name, handler as (scm?: unknown) => Promise<void>);
+            return new vscode.Disposable(() => undefined);
+        });
+        const settings = sandbox.stub(ConfigManager.prototype, "getConfig").resolves({});
+        sandbox.stub(LegacyConfigMigration.prototype, "runMigrationIfNeeded").resolves({
+            migrated: false,
+            groupsCreated: 0,
+            groupNames: [],
+            cleanupComplete: false,
+            errors: [],
+        });
+        const info = Object.freeze({ max_input_tokens: 8000, max_output_tokens: 500 });
+        sandbox.stub(LiteLLMClient.prototype, "getModelInfo").resolves({
+            data: [{ model_name: "azure_ai/raw-test", model_info: info }],
+        });
+        const counter = sandbox.stub(LiteLLMClient.prototype, "countTokens").callsFake(async (request) => ({
+            token_count: Math.ceil(countOpenAIChatMessagesTokens(request.messages ?? [], request.model) * 1.5),
+        }));
+        sandbox.stub(GitUtils, "getStagedDiff").resolves("+" + "x".repeat(22000));
+        const inputBox = { value: "original", placeholder: "original", enabled: true };
+        sandbox.stub(GitUtils, "getGitAPI").resolves({ repositories: [{ inputBox }] } as never);
+        sandbox.stub(vscode.window, "showWarningMessage");
+        const progressSource = new vscode.CancellationTokenSource();
+        const source = new vscode.CancellationTokenSource();
+        sandbox
+            .stub(vscode.window, "withProgress")
+            .callsFake(async (_options, task) => task({ report: () => undefined }, progressSource.token));
         activateAndTrack(ctx);
-        await new Promise<void>((resolve) => setImmediate(resolve));
-        const registeredActive = env.registerProviderStub.firstCall.args[1];
-        assert.ok(registeredActive, "registered chat provider instance must be present after activation");
-        // Provider identity alignment is verified by the unit suite:
-        //   src/providers/test/providerOverflowTokenLimits.test.ts
-        //   src/commands/test/commitRequestPreparation.test.ts
-        // extension.test.ts only asserts that the activation sequence completed
-        // without throwing and produced at least one registered subscription.
-        assert.ok(ctx.subscriptions.length > 0);
+        const active = env.registerProviderStub.firstCall.args[1] as providers.LiteLLMChatProvider;
+        const activeCount = sandbox.spy(active, "remoteCountTokens");
+        try {
+            const discovered = await active.discoverModels(
+                { silent: true, configuration: { baseUrl: "https://proxy.example", apiKey: "test-key" } },
+                source.token
+            );
+            assert.strictEqual(discovered.length, 1);
+            const model = discovered[0];
+            assert.strictEqual(active.getRawModelName(model.id), "azure_ai/raw-test");
+            assert.strictEqual(active.getModelInfo(model.id)?.max_output_tokens, 500);
+            settings.resolves({
+                commitModelIdOverride: model.id,
+                commitSystemPromptOverride: "system-preserved",
+                commitMessagePromptOverride: "instruction-preserved",
+                commitOutputTokenReserve: 8000,
+            });
+            const access = active as unknown as {
+                buildOpenAIChatRequest(
+                    messages: readonly vscode.LanguageModelChatRequestMessage[],
+                    model: vscode.LanguageModelChatInformation,
+                    options: vscode.ProvideLanguageModelChatResponseOptions,
+                    info?: LiteLLMModelInfo
+                ): Promise<OpenAIChatCompletionRequest>;
+            };
+            const bodies: OpenAIChatCompletionRequest[] = [];
+            const sendRequest = sandbox
+                .stub()
+                .callsFake(
+                    async (
+                        messages: vscode.LanguageModelChatMessage[],
+                        options: vscode.LanguageModelChatRequestOptions
+                    ) => {
+                        const body = await access.buildOpenAIChatRequest(
+                            messages,
+                            model,
+                            { modelOptions: options.modelOptions } as vscode.ProvideLanguageModelChatResponseOptions,
+                            active.getModelInfo(model.id)
+                        );
+                        bodies.push(body);
+                        if (bodies.length === 1) {
+                            throw new Error("prompt is too long: 1115674 tokens > 1000000 maximum");
+                        }
+                        return {
+                            stream: (async function* () {
+                                yield new vscode.LanguageModelTextPart("fix: recovered");
+                            })(),
+                        };
+                    }
+                );
+            sandbox
+                .stub(vscode.lm, "selectChatModels")
+                .resolves([{ maxInputTokens: 8000, sendRequest } as unknown as vscode.LanguageModelChat]);
+            const handler = handlers.get("litellm-connector.generateCommitMessage");
+            assert.ok(handler);
+            await handler();
+
+            // Assertions live outside the best-effort counter: it intentionally swallows client failures.
+            assert.strictEqual(counter.callCount, 3, "initial count, correction verification, and retry recount");
+            assert.strictEqual(activeCount.callCount, 3, "every recount must use the registered chat instance");
+            for (const call of counter.getCalls()) {
+                const request = call.args[0] as LiteLLMTokenCounterRequest;
+                assert.strictEqual(request.model, "azure_ai/raw-test");
+                assert.strictEqual(request.prompt, undefined);
+                assert.strictEqual(request.messages?.length, 2);
+                assert.strictEqual(request.messages?.[0].content, "system-preserved");
+                assert.ok(
+                    String(request.messages?.[1].content).startsWith("instruction-preserved\n\nHere is the diff:\n\n")
+                );
+            }
+            assert.strictEqual(bodies.length, 2);
+            for (const body of bodies) {
+                assert.strictEqual(body.max_tokens, 500);
+                assert.strictEqual(body.messages.length, 2);
+                assert.strictEqual(body.messages[0].content, "system-preserved");
+                assert.ok(
+                    String(body.messages[1].content).startsWith("instruction-preserved\n\nHere is the diff:\n\n")
+                );
+                assert.ok(countOpenAIChatMessagesTokens(body.messages, "azure_ai/raw-test") <= 7200);
+                assert.strictEqual(JSON.stringify(body).includes("litellm_connector_"), false);
+            }
+            assert.ok(String(bodies[1].messages[1].content).length < String(bodies[0].messages[1].content).length);
+            assert.ok(
+                countTokens(bodies[1].messages[1].content as string, "azure_ai/raw-test") <
+                    countTokens(bodies[0].messages[1].content as string, "azure_ai/raw-test")
+            );
+            assert.strictEqual(inputBox.value, "fix: recovered");
+        } finally {
+            (active as unknown as { _registry: { dispose(): void } })._registry.dispose();
+            progressSource.dispose();
+            source.dispose();
+        }
     });
 });

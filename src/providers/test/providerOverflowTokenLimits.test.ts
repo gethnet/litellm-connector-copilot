@@ -25,7 +25,8 @@ interface RetryAccess {
         progress: vscode.Progress<vscode.LanguageModelResponsePart>,
         token: vscode.CancellationToken,
         caller?: string,
-        info?: LiteLLMModelInfo
+        info?: LiteLLMModelInfo,
+        stripThinkingBlocksForRetry?: boolean
     ): Promise<ReadableStream<Uint8Array>>;
 }
 
@@ -36,6 +37,50 @@ const message = (text: string): vscode.LanguageModelChatRequestMessage => ({
 });
 
 suite("Shared provider overflow budgets (#180)", () => {
+    test("prior continuity redaction does not retry an unchanged input after overflow", async () => {
+        const sandbox = sinon.createSandbox();
+        const source = new vscode.CancellationTokenSource();
+        const provider = new LiteLLMChatProvider(createMockSecrets(), "test");
+        const access = provider as unknown as RetryAccess;
+        try {
+            sandbox.stub(provider.getConfigManager(), "getConfig").resolves({});
+            sandbox.stub(access, "getCallTimeConfiguration").resolves({});
+            const failure = new Error("prompt is too long");
+            const send = sandbox.stub(access, "sendRequestToLiteLLM").rejects(failure);
+            const history = [message("latest protected message".repeat(30))];
+            const model = {
+                id: "m",
+                maxInputTokens: 1000,
+                maxOutputTokens: 400,
+            } as vscode.LanguageModelChatInformation;
+            const options = {
+                modelOptions: { max_tokens: 400 },
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions;
+            const request = await access.buildOpenAIChatRequest(history, model, options, { max_input_tokens: 1000 });
+
+            await assert.rejects(
+                () =>
+                    access.sendOnceWithOverflow(
+                        request,
+                        history,
+                        model,
+                        options,
+                        { report: () => undefined },
+                        source.token,
+                        "test",
+                        { max_input_tokens: 1000 },
+                        true
+                    ),
+                (error: unknown) => error === failure
+            );
+            assert.strictEqual(send.callCount, 1);
+        } finally {
+            access._registry.dispose();
+            source.dispose();
+            sandbox.restore();
+        }
+    });
+
     test("internal budget and preserve options never leak into the wire body", async () => {
         const sandbox = sinon.createSandbox();
         const provider = new LiteLLMChatProvider(createMockSecrets(), "test");
@@ -209,12 +254,11 @@ suite("Shared provider overflow budgets (#180)", () => {
                         assert.strictEqual(second.max_tokens, 400);
                         assert.deepStrictEqual(second.tools, first.tools);
                         if (scenario === "tool-exchange") {
-                            assert.ok(
-                                second.messages.some(
-                                    (m) => Array.isArray(m.tool_calls) || typeof m.tool_call_id === "string"
-                                ),
-                                "tool result retained"
-                            );
+                            const calls = second.messages.flatMap((m) => m.tool_calls ?? []);
+                            const results = second.messages.filter((m) => m.role === "tool");
+                            assert.strictEqual(calls.length, 1, "tool call retained");
+                            assert.strictEqual(results.length, 1, "tool result retained");
+                            assert.strictEqual(results[0].tool_call_id, calls[0].id);
                         } else {
                             assert.strictEqual(second.messages[second.messages.length - 1].content, "b".repeat(700));
                         }

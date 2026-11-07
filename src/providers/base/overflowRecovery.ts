@@ -55,7 +55,7 @@ export interface OverflowRecoveryDeps {
  * - A rebuild that cannot fit protected latest messages/tool exchanges
  *   surfaces the original backend overflow instead of amputating content.
  * - A rebuilt request is sent only when the finalized text+tools input is
- *   strictly smaller (or continuity stripping alone made progress).
+ *   strictly smaller; prior continuity redaction is not another reduction.
  * - A second consecutive overflow is normalized to `LanguageModelError`
  *   with code `ContextExceeded` for VS Code's error surface.
  */
@@ -113,12 +113,7 @@ export async function sendOnceWithOverflow(
         replaceReasoningRetryState(retrimmedRequest, readReasoningRetryState(request));
         if (
             token.isCancellationRequested ||
-            !deps.requestBuilder.hasOverflowProgress(
-                request,
-                retrimmedRequest,
-                modelInfo,
-                deps.stripThinkingBlocksForRetry
-            )
+            !deps.requestBuilder.hasOverflowProgress(request, retrimmedRequest, modelInfo)
         ) {
             throw err;
         }

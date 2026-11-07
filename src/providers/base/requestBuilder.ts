@@ -142,11 +142,14 @@ export class RequestBuilder {
         messages: readonly vscode.LanguageModelChatRequestMessage[];
         options: vscode.ProvideLanguageModelChatResponseOptions;
     } {
-        void messages;
         const outputCap = resolveRequestOutputCap(model, request.max_tokens, modelInfo);
         const rawModelId = this.extractRawModelName(model.id);
+        // Source media may include trimmed history, so this is a conservative
+        // ceiling; the final builder still checks retained media independently.
         const preparedInput =
-            countOpenAIChatMessagesTokens(request.messages, rawModelId, modelInfo) + estimateToolTokens(request.tools);
+            countOpenAIChatMessagesTokens(request.messages, rawModelId, modelInfo) +
+            countMessageMediaTokens(messages) +
+            estimateToolTokens(request.tools);
         const budget = Math.floor(preparedInput * 0.75);
         const tools = convertTools(options).tools;
         const trimmed = trimMessagesToFitBudget(messages, tools, model, modelInfo, budget, rawModelId);
@@ -163,27 +166,16 @@ export class RequestBuilder {
         };
     }
 
-    /**
-     * Comparator for the shared retry: a longer hop must reduce actual finalized
-     * text + tools input. Media lives outside the trimmer/pass budget, so this is
-     * an upper-bound check for text+tools; we are conservative on media and
-     * conservative for protected overlays.
-     */
+    /** Compare the actual first wire body with the rebuilt body, not the original history. */
     public hasOverflowProgress(
         previous: OpenAIChatCompletionRequest,
         next: OpenAIChatCompletionRequest,
-        modelInfo?: LiteLLMModelInfo,
-        continuityStripped = false
+        modelInfo?: LiteLLMModelInfo
     ): boolean {
         const cost = (body: OpenAIChatCompletionRequest): number =>
             countOpenAIChatMessagesTokens(body.messages, body.model, modelInfo) + estimateToolTokens(body.tools);
-        if (cost(next) < cost(previous)) {
-            return true;
-        }
-        if (JSON.stringify(previous.messages) !== JSON.stringify(next.messages)) {
-            return true;
-        }
-        return continuityStripped;
+        // Equal or higher estimates cannot prove progress, even if JSON differs.
+        return cost(next) < cost(previous);
     }
 
     public async buildOpenAIChatRequest(

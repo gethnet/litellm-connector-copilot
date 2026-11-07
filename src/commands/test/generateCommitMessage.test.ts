@@ -478,7 +478,8 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
                 modelId: string,
                 text: string | readonly vscode.LanguageModelChatRequestMessage[]
             ) => Promise<number | undefined>,
-            sendRequest: sinon.SinonStub = sandbox.stub().resolves(streamOf("fix: recount diff"))
+            sendRequest: sinon.SinonStub = sandbox.stub().resolves(streamOf("fix: recount diff")),
+            originalDraft = ""
         ): Promise<{
             inputBox: { value: string };
             sendRequest: sinon.SinonStub;
@@ -495,7 +496,7 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
             mockProvider.getModelInfo.returns(undefined);
             mockProvider.remoteCountTokens.callsFake(remoteBehavior);
             sandbox.stub(GitUtils, "getStagedDiff").resolves(buildLargeDiff(3, 350));
-            const inputBox = { value: "", placeholder: "", enabled: true };
+            const inputBox = { value: originalDraft, placeholder: "", enabled: true };
             sandbox.stub(GitUtils, "getGitAPI").resolves({ repositories: [{ inputBox }] } as unknown as never);
             (vscode.lm.selectChatModels as unknown as sinon.SinonStub).resolves([
                 { maxInputTokens: 8000, sendRequest },
@@ -544,6 +545,70 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
                 assert.strictEqual(matched.length, 1);
             } finally {
                 logWarn.restore();
+            }
+        });
+
+        test("bounds an operation to nine full-message counts and three generation sends", async () => {
+            const events: string[] = [];
+            const sendRequest = sandbox.stub().callsFake(async () => {
+                events.push("send");
+                throw new Error("prompt is too long");
+            });
+            const errorStub = sandbox.stub(vscode.window, "showErrorMessage");
+            const originalDraft = "existing commit draft";
+            let countCalls = 0;
+            const { inputBox, sendRequest: sent } = await runWithRemoteCount(
+                async (_modelId, messages) => {
+                    countCalls++;
+                    events.push("count");
+                    // The 7,200-token input budget forces two corrections; the third count verifies the real input.
+                    return countCalls % 3 === 0 ? countTokens(messages, "test-model") : 7201;
+                },
+                sendRequest,
+                originalDraft
+            );
+
+            assert.strictEqual(countCalls, 9);
+            assert.strictEqual(mockProvider.remoteCountTokens.callCount, 9);
+            assert.strictEqual(sent.callCount, 3);
+            assert.deepStrictEqual(events, Array.from({ length: 3 }, () => ["count", "count", "count", "send"]).flat());
+            assert.strictEqual(inputBox.value, originalDraft);
+            assert.ok(errorStub.calledOnce);
+            const counted = mockProvider.remoteCountTokens.getCalls();
+            const sends = sent.getCalls();
+            let previousDiff: string | undefined;
+            for (let preparation = 0; preparation < 3; preparation++) {
+                const sentMessages = sends[preparation].args[0] as vscode.LanguageModelChatMessage[];
+                assert.strictEqual(sentMessages.length, 2);
+                assert.strictEqual(
+                    (sentMessages[0].content[0] as vscode.LanguageModelTextPart).value,
+                    COMMIT_SYSTEM_PROMPT
+                );
+                const body = (sentMessages[1].content[0] as vscode.LanguageModelTextPart).value;
+                const prefix = `${COMMIT_MESSAGE_PROMPT}\n\n${DIFF_PREAMBLE}`;
+                assert.ok(body.startsWith(prefix));
+                const diff = body.substring(prefix.length);
+                assert.ok(diff.length > 0);
+                if (previousDiff !== undefined) {
+                    assert.ok(diff.length < previousDiff.length);
+                    assert.ok(countTokens(diff, "test-model") < countTokens(previousDiff, "test-model"));
+                }
+                previousDiff = diff;
+                for (let attempt = 0; attempt < 3; attempt++) {
+                    const call = counted[preparation * 3 + attempt];
+                    const messages = call.args[1] as readonly vscode.LanguageModelChatRequestMessage[];
+                    assert.strictEqual(call.args[0], "test-model");
+                    assert.strictEqual(call.args[2], 3000);
+                    assert.strictEqual(messages.length, 2);
+                    assert.strictEqual(
+                        (messages[0].content[0] as vscode.LanguageModelTextPart).value,
+                        COMMIT_SYSTEM_PROMPT
+                    );
+                    assert.ok((messages[1].content[0] as vscode.LanguageModelTextPart).value.startsWith(prefix));
+                    if (attempt === 2) {
+                        assert.deepStrictEqual(messages, sentMessages);
+                    }
+                }
             }
         });
     });
