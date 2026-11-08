@@ -1,6 +1,7 @@
 import type { V2EmittedPart as EmittedPart } from "../../providers/v2Types";
 import { Logger } from "../../utils/logger";
 import { StructuredLogger } from "../../observability/structuredLogger";
+import { diagnosticHash } from "./diagnosticHash";
 
 /**
  * Real LiteLLM /responses reasoning event names.
@@ -35,6 +36,17 @@ export function createResponsesReasoningState(): ResponsesReasoningState {
     };
 }
 
+/**
+ * Optional correlation forwarded from the owning request. Kept structural
+ * (not imported from the provider) so this adapter stays dependency-free;
+ * the interpreter re-exports it for its own StreamingState.
+ */
+export interface StreamLogContext {
+    requestId?: string;
+    model?: string;
+    endpoint?: string;
+}
+
 interface ReasoningAddedOrDoneItem {
     type?: unknown;
     id?: unknown;
@@ -60,7 +72,11 @@ function isReasoningItem(item: unknown): item is ReasoningAddedOrDoneItem {
  * `output_item.added`/`output_item.done` with non-reasoning items, which the
  * interpreter's tool-call branches must still see).
  */
-export function interpretResponsesReasoningEvent(json: unknown, state: ResponsesReasoningState): EmittedPart[] {
+export function interpretResponsesReasoningEvent(
+    json: unknown,
+    state: ResponsesReasoningState,
+    logContext?: StreamLogContext
+): EmittedPart[] {
     const data = asRecord(json);
     if (!data || typeof data.type !== "string") {
         return [];
@@ -76,11 +92,23 @@ export function interpretResponsesReasoningEvent(json: unknown, state: Responses
     ) {
         const metadata = state.currentThinkingDisplay ? { display: state.currentThinkingDisplay } : undefined;
         Logger.trace(`[responsesReasoning] Emitting thinking delta: ${data.delta.length} chars`);
-        StructuredLogger.trace("stream.responses_reasoning_delta", {
-            length: data.delta.length,
-            preview: data.delta.slice(0, 100),
-            display: state.currentThinkingDisplay,
-        });
+        // Upstream identity (item_id/indices/sequence) is the only way to tie a
+        // delta back to its owning reasoning item when triaging fragmented
+        // thinking blocks — see the disjointed-Claude-reasoning investigation.
+        StructuredLogger.trace(
+            "stream.responses_reasoning_delta",
+            {
+                eventType: data.type,
+                itemId: diagnosticHash(typeof data.item_id === "string" ? data.item_id : undefined),
+                outputIndex: typeof data.output_index === "number" ? data.output_index : undefined,
+                summaryIndex: typeof data.summary_index === "number" ? data.summary_index : undefined,
+                sequenceNumber: typeof data.sequence_number === "number" ? data.sequence_number : undefined,
+                openReasoningItemId: diagnosticHash(state.currentReasoningItemId),
+                length: data.delta.length,
+                display: state.currentThinkingDisplay,
+            },
+            logContext
+        );
         return [{ type: "thinking", value: data.delta, metadata }];
     }
 
@@ -94,10 +122,14 @@ export function interpretResponsesReasoningEvent(json: unknown, state: Responses
     // collapsible thinking block from the first delta.
     if (data.type === "response.output_item.added" && isReasoningItem(data.item)) {
         state.currentReasoningItemId = typeof data.item.id === "string" ? data.item.id : undefined;
-        Logger.debug(`[responsesReasoning] Reasoning block opened (${state.currentReasoningItemId ?? "unknown id"})`);
-        StructuredLogger.debug("stream.responses_reasoning_block_opened", {
-            itemId: state.currentReasoningItemId,
+        Logger.debug("[responsesReasoning] Reasoning block opened", {
+            itemId: diagnosticHash(state.currentReasoningItemId),
         });
+        StructuredLogger.debug(
+            "stream.responses_reasoning_block_opened",
+            { itemId: diagnosticHash(state.currentReasoningItemId) },
+            logContext
+        );
         return [];
     }
 
@@ -109,12 +141,12 @@ export function interpretResponsesReasoningEvent(json: unknown, state: Responses
         state.currentReasoningItemId = undefined;
         const encrypted = typeof data.item.encrypted_content === "string" ? data.item.encrypted_content : undefined;
         const signature = typeof data.item.signature === "string" ? data.item.signature : undefined;
-        Logger.debug(`[responsesReasoning] Reasoning block closed (${itemId ?? "unknown id"})`);
-        StructuredLogger.debug("stream.responses_reasoning_block_closed", {
-            itemId,
-            hasEncryptedContent: !!encrypted,
-            hasSignature: !!signature,
-        });
+        Logger.debug("[responsesReasoning] Reasoning block closed", { itemId: diagnosticHash(itemId) });
+        StructuredLogger.debug(
+            "stream.responses_reasoning_block_closed",
+            { itemId: diagnosticHash(itemId), hasEncryptedContent: !!encrypted, hasSignature: !!signature },
+            logContext
+        );
         if (!encrypted && !signature) {
             // Visible text already streamed; no opaque state to preserve.
             return [];

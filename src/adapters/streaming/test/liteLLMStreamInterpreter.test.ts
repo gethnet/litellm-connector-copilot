@@ -1,10 +1,292 @@
 import * as assert from "assert";
+import * as sinon from "sinon";
+import { sha256 } from "js-sha256";
+import { StructuredLogger } from "../../../observability/structuredLogger";
+import { Logger } from "../../../utils/logger";
+import { diagnosticHash } from "../diagnosticHash";
+import { createTerminalStats, recordEmittedParts, buildTerminalFingerprint } from "../streamTerminalFingerprint";
 import { interpretStreamEvent, createInitialStreamingState, flushPendingBuffers } from "../liteLLMStreamInterpreter";
 
 declare const suite: (name: string, fn: () => void) => void;
 declare const test: (name: string, fn: () => void) => void;
 
 suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
+    test("numeric upstream tool name does not break diagnostics and retains the sanitized fallback", () => {
+        const state = createInitialStreamingState();
+        const buffered = interpretStreamEvent(
+            {
+                choices: [
+                    {
+                        delta: {
+                            tool_calls: [{ index: 0, id: "call_numeric", function: { name: 42, arguments: "{}" } }],
+                        },
+                    },
+                ],
+            },
+            state
+        );
+
+        assert.deepStrictEqual(buffered, []);
+        const parts = interpretStreamEvent({ choices: [{ delta: {}, finish_reason: "tool_calls" }] }, state);
+        const call = parts.find((part) => part.type === "tool_call");
+        assert.ok(call && call.type === "tool_call");
+        assert.strictEqual(call.name, "tool");
+        assert.strictEqual(call.args, "{}");
+    });
+
+    test("malformed Gemini tool identifiers do not make diagnostics change emitted parts", () => {
+        const parts = interpretStreamEvent(
+            { candidates: [{ content: { parts: [{ functionCall: { name: "tool", id: 42, args: {} } }] } }] },
+            createInitialStreamingState()
+        );
+
+        const call = parts.find((part) => part.type === "tool_call");
+        assert.ok(call && call.type === "tool_call");
+        assert.strictEqual(call.id as unknown, 42);
+        assert.strictEqual(call.name, "tool");
+        assert.strictEqual(call.args, "{}");
+    });
+
+    test("hashing failure does not alter streamed text or sanitized tool calls", () => {
+        const hashStub = sinon.stub(sha256, "hmac").throws(new Error("hash unavailable"));
+        try {
+            const state = createInitialStreamingState();
+            const first = interpretStreamEvent(
+                {
+                    choices: [
+                        {
+                            delta: {
+                                content: "hello",
+                                tool_calls: [{ id: "call", function: { name: "do work", arguments: "{}" } }],
+                            },
+                        },
+                    ],
+                },
+                state
+            );
+            assert.deepStrictEqual(first, [{ type: "text", value: "hello" }]);
+            const last = interpretStreamEvent({ choices: [{ delta: {}, finish_reason: "tool_calls" }] }, state);
+            const call = last.find((part) => part.type === "tool_call");
+            assert.ok(call && call.type === "tool_call");
+            assert.strictEqual(call.name, "do_work");
+            assert.strictEqual(call.args, "{}");
+        } finally {
+            hashStub.restore();
+        }
+    });
+
+    test("hostile terminal diagnostic fields do not suppress the original finish reason", () => {
+        const error = new Proxy(
+            {},
+            {
+                ownKeys: () => {
+                    throw new Error("unreadable diagnostics");
+                },
+            }
+        );
+        const parts = interpretStreamEvent(
+            {
+                type: "response.incomplete",
+                response: { status: "incomplete", incomplete_details: { reason: "length" }, error },
+            },
+            createInitialStreamingState()
+        );
+
+        assert.ok(parts.some((part) => part.type === "finish" && part.reason === "length"));
+    });
+
+    test("both loggers protect arbitrary event types, carrier MIME types, and tool names across stream paths", () => {
+        const sandbox = sinon.createSandbox();
+        const structured = sandbox.stub(StructuredLogger, "log");
+        const trace = sandbox.stub(Logger, "trace");
+        const debug = sandbox.stub(Logger, "debug");
+        const warn = sandbox.stub(Logger, "warn");
+        try {
+            const name = "private_tool_secret";
+            const event = "private-event@example.com";
+            const mime = "application/cache-control-private@example.com";
+            const state = createInitialStreamingState();
+            interpretStreamEvent({ type: event }, state);
+            interpretStreamEvent({ $mid: 1, mimeType: mime }, state);
+            interpretStreamEvent(
+                { choices: [{ delta: { tool_calls: [{ index: 0, id: "id", function: { name, arguments: "{}" } }] } }] },
+                state
+            );
+            const chatParts = interpretStreamEvent({ choices: [{ delta: {}, finish_reason: "tool_calls" }] }, state);
+            const responseParts = interpretStreamEvent(
+                {
+                    type: "response.output_item.done",
+                    item: { type: "function_call", call_id: "id2", name, arguments: "{}" },
+                },
+                state
+            );
+            interpretStreamEvent(
+                { candidates: [{ content: { parts: [{ functionCall: { name, args: {} } }] } }] },
+                state
+            );
+            const longName = `private_long_${"x".repeat(70)}`;
+            interpretStreamEvent(
+                {
+                    choices: [
+                        {
+                            delta: {
+                                tool_calls: [{ index: 0, id: "long", function: { name: longName, arguments: "{}" } }],
+                            },
+                        },
+                    ],
+                },
+                createInitialStreamingState()
+            );
+            const logs = JSON.stringify([structured.args, trace.args, debug.args, warn.args]);
+            assert.ok(!logs.includes(name));
+            assert.ok(!logs.includes(longName.slice(0, 64)));
+            assert.ok(!logs.includes(event));
+            assert.ok(!logs.includes(mime));
+            assert.ok(logs.includes(String(diagnosticHash(name))));
+            assert.ok(logs.includes(String(diagnosticHash(event))));
+            assert.ok(logs.includes(String(diagnosticHash(mime))));
+            assert.ok(chatParts.some((part) => part.type === "tool_call" && part.name === name));
+            assert.ok(responseParts.some((part) => part.type === "tool_call" && part.name === name));
+        } finally {
+            sandbox.restore();
+        }
+    });
+    test("response tool and recovery diagnostics protect names and malformed arguments without changing recovered parts", () => {
+        const sandbox = sinon.createSandbox();
+        const structured = sandbox.stub(StructuredLogger, "log");
+        const trace = sandbox.stub(Logger, "trace");
+        const debug = sandbox.stub(Logger, "debug");
+        const warn = sandbox.stub(Logger, "warn");
+        try {
+            const name = "private_tool_recovery";
+            const state = createInitialStreamingState();
+            interpretStreamEvent(
+                {
+                    type: "response.output_item.delta",
+                    item: { type: "function_call", call_id: "key", name, arguments: "{}" },
+                },
+                state
+            );
+            interpretStreamEvent(
+                { type: "response.output_tool_call.delta", delta: { id: "legacy", name, arguments: "{}" } },
+                state
+            );
+            state.anonymousResponseToolName = name;
+            state.anonymousResponseToolArgs = "private_argument_secret{";
+            const recovered = flushPendingBuffers(state);
+            assert.strictEqual(recovered.filter((part) => part.type === "tool_call" && part.name === name).length, 2);
+            const logs = JSON.stringify([structured.args, trace.args, debug.args, warn.args]);
+            assert.ok(!logs.includes(name));
+            assert.ok(!logs.includes("private_argument_secret"));
+            assert.ok(logs.includes(String(diagnosticHash(name))));
+        } finally {
+            sandbox.restore();
+        }
+    });
+    test("tool call ID diagnostics are correlated without exposing IDs or changing emitted calls", () => {
+        const sandbox = sinon.createSandbox();
+        const structured = sandbox.stub(StructuredLogger, "log");
+        const legacy = sandbox.stub(Logger, "trace");
+        try {
+            const id = "private-call@example.com";
+            const state = createInitialStreamingState();
+            interpretStreamEvent(
+                {
+                    type: "response.output_item.delta",
+                    delta: { type: "function_call", call_id: id, name: "tool", arguments: "{}" },
+                },
+                state
+            );
+            const parts = interpretStreamEvent(
+                {
+                    type: "response.output_item.done",
+                    item: { type: "function_call", call_id: id, name: "tool", arguments: "{}" },
+                },
+                state
+            );
+            const emitted = parts.find((part) => part.type === "tool_call");
+            assert.ok(emitted && emitted.type === "tool_call");
+            assert.strictEqual(emitted.id, id);
+            const done = structured.getCalls().find((call) => call.args[1] === "stream.responses_tool_call_done");
+            assert.ok(done);
+            assert.strictEqual((done.args[2] as { callId: string }).callId, diagnosticHash(id));
+            assert.ok(!JSON.stringify([structured.args, legacy.args]).includes(id));
+        } finally {
+            sandbox.restore();
+        }
+    });
+    test("tool emission logs only allowlisted finish reasons without changing emitted parts", () => {
+        const sandbox = sinon.createSandbox();
+        const trace = sandbox.stub(StructuredLogger, "trace");
+        try {
+            for (const reason of ["tool_calls", "stop", "private-finish@example.com"]) {
+                const state = createInitialStreamingState();
+                state.toolCallBuffers.set(0, { id: "call", name: "tool", args: "{}" });
+                const parts = interpretStreamEvent({ choices: [{ delta: {}, finish_reason: reason }] }, state);
+                assert.ok(parts.some((part) => part.type === "tool_call"));
+                assert.ok(parts.some((part) => part.type === "finish" && part.reason === reason));
+            }
+            const emissions = trace.getCalls().filter((call) => call.args[0] === "stream.tool_call_emitted");
+            assert.deepStrictEqual(
+                emissions.map((call) => (call.args[1] as { finishReason: string }).finishReason),
+                ["tool_calls", "stop", "unknown"]
+            );
+            assert.ok(!JSON.stringify(trace.args).includes("private-finish@example.com"));
+        } finally {
+            sandbox.restore();
+        }
+    });
+    test("terminal diagnostics retain structure without exposing untrusted response fields or finish reasons", () => {
+        const sandbox = sinon.createSandbox();
+        const warn = sandbox.stub(StructuredLogger, "warn");
+        try {
+            const state = createInitialStreamingState();
+            const parts = interpretStreamEvent(
+                {
+                    type: "response.incomplete",
+                    response: {
+                        status: "incomplete",
+                        incomplete_details: { reason: "secret-reason" },
+                        error: { code: "secret-code", message: "secret-message", nested: { token: "secret-token" } },
+                        "secret-key": { value: "secret-value" },
+                        output: [{ type: "message", status: "incomplete", content: "secret-content" }],
+                        usage: { input_tokens: 10, output_tokens: 2, opaque: "secret-usage" },
+                    },
+                },
+                state
+            );
+            const stats = createTerminalStats();
+            recordEmittedParts(stats, parts);
+            const fingerprint = buildTerminalFingerprint(stats, {
+                requestId: "req",
+                model: "model",
+                endpoint: "responses",
+                requestHadThinkingBlocks: false,
+                requestToolCallCount: 0,
+                durationMs: 1,
+            });
+            assert.strictEqual(warn.callCount, 2);
+            assert.strictEqual(warn.firstCall.args[0], "stream.responses_terminal_not_completed");
+            assert.strictEqual(warn.secondCall.args[0], "stream.responses_terminal_frame");
+            assert.ok(!JSON.stringify([warn.args, fingerprint.data]).includes("secret"));
+            assert.strictEqual(fingerprint.data.finishReasons, "unknown");
+        } finally {
+            sandbox.restore();
+        }
+    });
+    test("terminal usage traces do not expose malformed numeric fields", () => {
+        const sandbox = sinon.createSandbox();
+        const trace = sandbox.stub(StructuredLogger, "trace");
+        try {
+            interpretStreamEvent(
+                { type: "response.completed", response: { usage: { input_tokens: "secret-input", output_tokens: 2 } } },
+                createInitialStreamingState()
+            );
+            assert.ok(!JSON.stringify(trace.args).includes("secret-input"));
+        } finally {
+            sandbox.restore();
+        }
+    });
     test("should clear buffered tool calls when stream aborts before finish", () => {
         const state = createInitialStreamingState();
 
@@ -472,6 +754,114 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
         );
 
         assert.deepStrictEqual(parts, []);
+    });
+
+    test("preserves HEAD usage values and JavaScript addition for malformed chat and responses counts", () => {
+        const cases = [
+            { prompt: "private-token-count", completion: 3, total: "private-token-count3" },
+            { prompt: 2, completion: "4", total: "24" },
+            { prompt: false, completion: 3, total: 3 },
+            { prompt: { value: "private-object" }, completion: 3, total: "[object Object]3" },
+            { prompt: null, completion: 3, total: 3 },
+            { prompt: undefined, completion: 3, total: 3 },
+            { prompt: -2, completion: 1.5, total: -0.5 },
+            { prompt: NaN, completion: 3, total: NaN },
+            { prompt: Infinity, completion: 3, total: Infinity },
+        ];
+        for (const { prompt, completion, total } of cases) {
+            const chat = interpretStreamEvent(
+                { choices: [{ delta: {} }], usage: { prompt_tokens: prompt, completion_tokens: completion } },
+                createInitialStreamingState()
+            );
+            const standalone = interpretStreamEvent(
+                { usage: { prompt_tokens: prompt, completion_tokens: completion } },
+                createInitialStreamingState()
+            );
+            const responses = interpretStreamEvent(
+                {
+                    type: "response.completed",
+                    response: { usage: { input_tokens: prompt, output_tokens: completion } },
+                },
+                createInitialStreamingState()
+            );
+            for (const parts of [chat, standalone, responses]) {
+                const usage = parts.find((part) => part.type === "data");
+                assert.ok(usage && usage.type === "data");
+                const value = usage.value as Record<string, unknown>;
+                assert.strictEqual(value.prompt_tokens, prompt ?? 0);
+                assert.strictEqual(value.completion_tokens, completion ?? 0);
+                assert.strictEqual(value.total_tokens, total);
+            }
+        }
+    });
+
+    test("retains the responses terminal guard when neither token count is numeric", () => {
+        const parts = interpretStreamEvent(
+            { type: "response.completed", response: { usage: { input_tokens: "2", output_tokens: "3" } } },
+            createInitialStreamingState()
+        );
+        assert.ok(!parts.some((part) => part.type === "data"));
+    });
+
+    test("response usage diagnostics omit non-numeric token values without altering emitted usage", () => {
+        const sandbox = sinon.createSandbox();
+        const trace = sandbox.stub(StructuredLogger, "trace");
+        const debug = sandbox.stub(Logger, "debug");
+        try {
+            const parts = interpretStreamEvent(
+                {
+                    type: "response.completed",
+                    response: { usage: { input_tokens: "private-token-count", output_tokens: 3 } },
+                },
+                createInitialStreamingState()
+            );
+            const usage = parts.find((part) => part.type === "data");
+            assert.ok(usage && usage.type === "data");
+            assert.strictEqual((usage.value as Record<string, unknown>).prompt_tokens, "private-token-count");
+            assert.ok(!JSON.stringify([trace.args, debug.args]).includes("private-token-count"));
+        } finally {
+            sandbox.restore();
+        }
+    });
+
+    test("response usage diagnostics reject nonfinite and negative values without changing the host payload", () => {
+        const sandbox = sinon.createSandbox();
+        const trace = sandbox.stub(StructuredLogger, "trace");
+        try {
+            const parts = interpretStreamEvent(
+                {
+                    type: "response.completed",
+                    response: {
+                        usage: {
+                            input_tokens: Infinity,
+                            output_tokens: -4,
+                            system_tokens: NaN,
+                            input_tokens_details: { cached_tokens: -1, cache_creation_input_tokens: Infinity },
+                            output_tokens_details: { reasoning_tokens: -2 },
+                        },
+                    },
+                },
+                createInitialStreamingState()
+            );
+            const usage = parts.find((part) => part.type === "data");
+            assert.ok(usage && usage.type === "data");
+            assert.strictEqual((usage.value as { prompt_tokens: number }).prompt_tokens, Infinity);
+            const call = trace.getCalls().find((entry) => entry.args[0] === "stream.responses_usage");
+            assert.ok(call);
+            const values = call.args[1] as Record<string, unknown>;
+            for (const key of [
+                "inputTokens",
+                "outputTokens",
+                "systemPromptTokens",
+                "cachedTokens",
+                "cacheCreationInputTokens",
+                "reasoningTokens",
+            ]) {
+                assert.strictEqual(values[key], undefined, key);
+            }
+        } finally {
+            sandbox.restore();
+        }
     });
 
     // Anthropic reports prompt-cache accounting at the usage root, not inside
@@ -1012,6 +1402,27 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
         if (toolCallPart && toolCallPart.type === "tool_call") {
             assert.strictEqual(toolCallPart.name, "filesystem");
             assert.strictEqual(toolCallPart.args, '{"path":"/tmp"}');
+        }
+    });
+
+    test("state.logContext is forwarded as StructuredLogger options for event traces", () => {
+        const sandbox = sinon.createSandbox();
+        try {
+            const traceStub = sandbox.stub(StructuredLogger, "trace");
+            const state = createInitialStreamingState();
+            state.logContext = { requestId: "req-int-1", model: "m", endpoint: "responses" };
+
+            interpretStreamEvent({ type: "response.output_text.delta", delta: "hi" }, state);
+
+            const received = traceStub.getCalls().find((c) => c.args[0] === "stream.event_received");
+            assert.ok(received, "expected stream.event_received trace");
+            assert.strictEqual((received.args[2] as Record<string, unknown> | undefined)?.requestId, "req-int-1");
+
+            const complete = traceStub.getCalls().find((c) => c.args[0] === "stream.event_interpretation_complete");
+            assert.ok(complete, "expected stream.event_interpretation_complete trace");
+            assert.strictEqual((complete.args[2] as Record<string, unknown> | undefined)?.requestId, "req-int-1");
+        } finally {
+            sandbox.restore();
         }
     });
 });

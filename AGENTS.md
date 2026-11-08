@@ -184,6 +184,7 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
   - Reads per-group configuration from `options.configuration` on each call (no global config caching)
   - Returns `LanguageModelChatInformation` entries with `isUserSelectable: true` so models appear in the picker
   - Reuses the base request pipeline for normalization, filtering, trimming, and routing
+  - Delegates final usage diagnostic formatting for normal and retry paths to `src/providers/chat/finalUsageLogger.ts`
 
 - **Legacy commit provider**: `src/providers/liteLLMCommitProvider.ts`
   - Retained command-backed compatibility implementation; not a registered text-completion provider

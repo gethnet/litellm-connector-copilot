@@ -55,6 +55,47 @@ suite("Telemetry Unit Tests", () => {
         assert.ok(infoMessage.includes("total_token_max=n/a"));
     });
 
+    test("numeric metric fields reject untrusted values in both logs and telemetry", () => {
+        const capture = sandbox.stub();
+        LiteLLMTelemetry.setTelemetryService({
+            captureRequestCompletedWithCache: capture,
+        } as unknown as TelemetryService);
+        const invalid = "private-metric" as unknown as number;
+        LiteLLMTelemetry.reportMetric({
+            requestId: "req",
+            model: "model",
+            status: "success",
+            durationMs: Infinity,
+            tokensIn: invalid,
+            tokensOut: NaN,
+            cacheReadRatio: -1,
+            promptCacheTokens: invalid,
+            cacheCreationInputTokens: invalid,
+            reasoningTokens: invalid,
+            toolTokens: invalid,
+            acceptedPredictionTokens: invalid,
+            rejectedPredictionTokens: invalid,
+            reservedOutputTokens: invalid,
+            totalTokenMax: invalid,
+            estimatedInputCost: invalid,
+            estimatedOutputCost: -1,
+            estimatedTotalCost: Infinity,
+        });
+        assert.ok(
+            !JSON.stringify([loggerDebugStub.args, loggerInfoStub.args, capture.args]).includes("private-metric")
+        );
+        const props = firstArg<{
+            tokensIn: number;
+            tokensOut: number;
+            cacheReadRatio?: number;
+            cost: Record<string, unknown>;
+        }>(capture);
+        assert.strictEqual(props.tokensIn, 0);
+        assert.strictEqual(props.tokensOut, 0);
+        assert.strictEqual(props.cacheReadRatio, undefined);
+        assert.deepStrictEqual(Object.values(props.cost), [undefined, undefined, undefined]);
+    });
+
     test("IMetrics interface includes cacheReadRatio field", () => {
         const metric: IMetrics = {
             requestId: "999",
@@ -284,6 +325,59 @@ suite("Telemetry Unit Tests", () => {
         assert.strictEqual(props.request_id, "req-metric-fail-123");
         assert.strictEqual(props.caller, "chat");
         assert.strictEqual(props.errorType, "network_error");
+    });
+
+    test("preserves known failure categories and rejects arbitrary upstream strings at every metric sink", () => {
+        const captureRequestFailed = sandbox.stub();
+        const captureRequestCachingBypassed = sandbox.stub();
+        LiteLLMTelemetry.setTelemetryService({
+            captureRequestFailed,
+            captureRequestCachingBypassed,
+        } as unknown as TelemetryService);
+        for (const category of [
+            "network_error",
+            "timeout",
+            "request_failed",
+            "abnormal_termination:truncated",
+            "abnormal_termination:failed",
+            "abnormal_termination:empty_response",
+            "abnormal_termination:no_terminal_event",
+            "quota_exceeded:insert_edit_into_file",
+            "quota_exceeded:replace_string_in_file",
+        ]) {
+            LiteLLMTelemetry.reportMetric({ requestId: "req", model: "model", status: "failure", error: category });
+            assert.strictEqual(firstArg<{ errorType: string }>(captureRequestFailed).errorType, category);
+            captureRequestFailed.resetHistory();
+        }
+        for (const status of ["failure", "caching_bypassed"] as const) {
+            LiteLLMTelemetry.reportMetric({
+                requestId: "req",
+                model: "model",
+                status,
+                error: "secret-key@example.com",
+            });
+        }
+        assert.strictEqual(firstArg<{ errorType: string }>(captureRequestFailed).errorType, "request_failed");
+        assert.strictEqual(
+            firstArg<{ reason: string }>(captureRequestCachingBypassed).reason,
+            "provider_caching_not_supported"
+        );
+        assert.ok(
+            !JSON.stringify([
+                ...loggerDebugStub.args,
+                ...loggerInfoStub.args,
+                ...captureRequestFailed.args,
+                ...captureRequestCachingBypassed.args,
+            ]).includes("secret-key@example.com")
+        );
+        captureRequestFailed.resetHistory();
+        LiteLLMTelemetry.reportMetric({
+            requestId: "req",
+            model: "model",
+            status: "failure",
+            error: "quota_exceeded:secret-key",
+        });
+        assert.strictEqual(firstArg<{ errorType: string }>(captureRequestFailed).errorType, "request_failed");
     });
 
     for (const status of ["success", "failure"] as const) {

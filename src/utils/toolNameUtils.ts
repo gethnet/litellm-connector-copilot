@@ -49,6 +49,7 @@ export interface SanitizedToolName {
  *
  * @param name - Tool function name to sanitize. Must be a string; non-string values
  *        are normalized to `"tool"` and treated as not truncated.
+ * @param log - Disable legacy name logging for untrusted model-stream inputs.
  * @returns A `SanitizedToolName` with the length-bounded name and an indicator
  *        of whether truncation actually occurred.
  *
@@ -57,7 +58,7 @@ export interface SanitizedToolName {
  *       and `truncated`. The log keys differ between legacy `Logger.warn` (for
  *       v1 converter) and `StructuredLogger.warn` (for v2 and streaming sites).
  */
-export function sanitizeToolName(name: unknown): SanitizedToolName {
+export function sanitizeToolName(name: unknown, log = true): SanitizedToolName {
     if (typeof name !== "string" || !name) {
         return { name: "tool", wasTruncated: false };
     }
@@ -76,21 +77,23 @@ export function sanitizeToolName(name: unknown): SanitizedToolName {
         const truncated = sanitized.slice(0, TOOL_NAME_MAX_LENGTH);
 
         // Emit a warning with structured payload for v1 converter (Logger.warn variant).
-        logToolNameTruncationLegacy({
-            originalName: name,
-            data: {
-                originalLength,
-                sanitizedLength: truncated.length,
-                truncated,
-                source:
-                    // For v1 converter, we assume a caller-declared tool (source: "caller").
-                    // For v2 converter, the `source` is set explicitly to "model_stream".
-                    // When the source unknown, we default to "caller" as the safer assumption.
-                    // The user requested logging to diagnose the origin, so we include all
-                    // context in the payload.
-                    "unknown",
-            },
-        });
+        if (log) {
+            logToolNameTruncationLegacy({
+                originalName: name,
+                data: {
+                    originalLength,
+                    sanitizedLength: truncated.length,
+                    truncated,
+                    source:
+                        // For v1 converter, we assume a caller-declared tool (source: "caller").
+                        // For v2 converter, the `source` is set explicitly to "model_stream".
+                        // When the source unknown, we default to "caller" as the safer assumption.
+                        // The user requested logging to diagnose the origin, so we include all
+                        // context in the payload.
+                        "unknown",
+                },
+            });
+        }
 
         // Return a truncated result; the log above provides diagnostic context.
         return { name: truncated, wasTruncated: true };
@@ -98,7 +101,9 @@ export function sanitizeToolName(name: unknown): SanitizedToolName {
 
     // Name is within limit: no truncation needed.
     // Emit a trace-level log to confirm we passed through this boundary without issues.
-    Logger.trace("[sanitizeToolName]", { name, length: originalLength });
+    if (log) {
+        Logger.trace("[sanitizeToolName]", { name, length: originalLength });
+    }
 
     return { name: sanitized, wasTruncated: false };
 }

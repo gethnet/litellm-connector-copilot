@@ -97,6 +97,80 @@ suite("StreamTokenCapture", () => {
         assert.strictEqual(usage.mimeType, "usage");
     });
 
+    test("snapshot rejects malformed upstream token fields while preserving forwarded usage", () => {
+        const { parts, progress } = createInnerProgress();
+        const capture = new StreamTokenCapture("model-x", progress);
+        capture.setEstimatedPromptTokens(11);
+        capture.setEstimatedSystemPromptTokens(3);
+        capture.progress.report(
+            asUsagePart({
+                prompt_tokens: "private-token",
+                completion_tokens: -1,
+                system_prompt_tokens: {},
+                prompt_tokens_details: { cached_tokens: "private-cache", cache_creation_input_tokens: -2 },
+                completion_tokens_details: {
+                    reasoning_tokens: "private-reasoning",
+                    tool_tokens: -3,
+                    accepted_prediction_tokens: [],
+                    rejected_prediction_tokens: -4,
+                },
+            })
+        );
+        const snapshot = capture.getSnapshot();
+        assert.strictEqual(snapshot.promptTokens, 11);
+        assert.strictEqual(snapshot.systemPromptTokens, 3);
+        for (const value of [
+            snapshot.completionTokens,
+            snapshot.cachedTokens,
+            snapshot.cacheCreationInputTokens,
+            snapshot.reasoningTokens,
+            snapshot.toolTokens,
+            snapshot.acceptedPredictionTokens,
+            snapshot.rejectedPredictionTokens,
+        ]) {
+            assert.strictEqual(value, 0);
+        }
+        const payload = JSON.parse(
+            Buffer.from((parts[0] as vscode.LanguageModelDataPart).data).toString("utf8")
+        ) as Record<string, unknown>;
+        assert.strictEqual(payload.prompt_tokens, "private-token");
+        assert.strictEqual(payload.completion_tokens, -1);
+    });
+
+    test("snapshot drops nonfinite calculated costs without changing the enriched host payload", () => {
+        const { parts, progress } = createInnerProgress();
+        const capture = new StreamTokenCapture("model-x", progress, {
+            pricing: { inputCostPerToken: Infinity, outputCostPerToken: 1 },
+        });
+        capture.progress.report(asUsagePart({ prompt_tokens: 2, completion_tokens: 3 }));
+        const snapshot = capture.getSnapshot();
+        assert.strictEqual(snapshot.estimatedInputCost, undefined);
+        assert.strictEqual(snapshot.estimatedTotalCost, undefined);
+        assert.strictEqual(snapshot.estimatedOutputCost, 3);
+        const payload = JSON.parse(
+            Buffer.from((parts[0] as vscode.LanguageModelDataPart).data).toString("utf8")
+        ) as Record<string, unknown>;
+        assert.strictEqual(payload.estimated_input_cost, null);
+        assert.strictEqual(payload.estimated_total_cost, null);
+    });
+
+    test("nonfinite JSON token values never reach snapshots after multiple usage frames", () => {
+        const { parts, progress } = createInnerProgress();
+        const capture = new StreamTokenCapture("model-x", progress);
+        capture.setEstimatedPromptTokens(4);
+        const bytes = new TextEncoder().encode('{"prompt_tokens":1e999,"completion_tokens":2}');
+        capture.progress.report(new vscode.LanguageModelDataPart(bytes, "usage"));
+        capture.progress.report(asUsagePart({ prompt_tokens: 5, completion_tokens: 3 }));
+        const snapshot = capture.getSnapshot();
+        assert.strictEqual(snapshot.promptTokens, 4);
+        assert.strictEqual(snapshot.completionTokens, 3);
+        assert.strictEqual(parts.length, 2);
+        const final = JSON.parse(Buffer.from((parts[1] as vscode.LanguageModelDataPart).data).toString("utf8")) as {
+            prompt_tokens: unknown;
+        };
+        assert.strictEqual(final.prompt_tokens, null);
+    });
+
     test("getSnapshot records a calibration observation from upstream usage", () => {
         resetCalibration();
         const { progress } = createInnerProgress();

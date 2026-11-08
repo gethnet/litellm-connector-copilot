@@ -1,9 +1,12 @@
 import * as assert from "assert";
+import * as sinon from "sinon";
 import {
     createResponsesReasoningState,
     interpretResponsesReasoningEvent,
     type ResponsesReasoningState,
 } from "../responsesReasoningEvents";
+import { StructuredLogger } from "../../../observability/structuredLogger";
+import { Logger } from "../../../utils/logger";
 
 declare const suite: (name: string, fn: () => void) => void;
 declare const test: (name: string, fn: () => void) => void;
@@ -182,5 +185,99 @@ suite("ResponsesReasoningEvents - real LiteLLM /responses sequence", () => {
             state as ResponsesReasoningState
         );
         assert.strictEqual(wrongType.length, 0, "non-string delta should not emit a part");
+    });
+
+    test("delta trace carries upstream identity (itemId, indices, sequence) and correlation options", () => {
+        const sandbox = sinon.createSandbox();
+        try {
+            const traceStub = sandbox.stub(StructuredLogger, "trace");
+            const state = createResponsesReasoningState();
+            state.currentReasoningItemId = "rs_abc";
+            const parts = interpretResponsesReasoningEvent(
+                {
+                    type: "response.reasoning_summary_text.delta",
+                    item_id: "rs_abc",
+                    output_index: 0,
+                    summary_index: 2,
+                    sequence_number: 17,
+                    delta: "thought fragment",
+                },
+                state,
+                { requestId: "req-9", model: "claude-sonnet", endpoint: "responses" }
+            );
+            assert.strictEqual(parts.length, 1, "behavior unchanged: one thinking part per delta");
+
+            const call = traceStub.getCalls().find((c) => c.args[0] === "stream.responses_reasoning_delta");
+            assert.ok(call, "expected a stream.responses_reasoning_delta trace line");
+            const data = call.args[1] as Record<string, unknown>;
+            assert.strictEqual(data.eventType, "response.reasoning_summary_text.delta");
+            assert.match(String(data.itemId), /^[a-f0-9]{64}$/);
+            assert.strictEqual(data.outputIndex, 0);
+            assert.strictEqual(data.summaryIndex, 2);
+            assert.strictEqual(data.sequenceNumber, 17);
+            assert.strictEqual(data.openReasoningItemId, data.itemId);
+            assert.strictEqual(data.length, "thought fragment".length);
+            assert.ok(!JSON.stringify(data).includes("thought fragment"));
+
+            const options = call.args[2] as Record<string, unknown> | undefined;
+            assert.strictEqual(options?.requestId, "req-9");
+            assert.strictEqual(options?.endpoint, "responses");
+        } finally {
+            sandbox.restore();
+        }
+    });
+
+    test("reasoning identity is correlated without logging untrusted IDs and replay remains unchanged", () => {
+        const sandbox = sinon.createSandbox();
+        try {
+            const structured = sandbox.stub(StructuredLogger, "log");
+            const legacy = sandbox.stub(Logger, "debug");
+            const state = createResponsesReasoningState();
+            const id = "private@example.com-reasoning-id";
+            interpretResponsesReasoningEvent(
+                { type: "response.output_item.added", item: { type: "reasoning", id } },
+                state
+            );
+            interpretResponsesReasoningEvent(
+                { type: "response.reasoning_text.delta", item_id: id, delta: "thought" },
+                state
+            );
+            const parts = interpretResponsesReasoningEvent(
+                { type: "response.output_item.done", item: { type: "reasoning", id, signature: "sig" } },
+                state
+            );
+            assert.deepStrictEqual(parts, [{ type: "thinking", value: "", id, metadata: { signature: "sig" } }]);
+            const calls = structured.getCalls();
+            const opened = calls.find((call) => call.args[1] === "stream.responses_reasoning_block_opened");
+            const delta = calls.find((call) => call.args[1] === "stream.responses_reasoning_delta");
+            const closed = calls.find((call) => call.args[1] === "stream.responses_reasoning_block_closed");
+            assert.ok(opened && delta && closed);
+            const openId = (opened.args[2] as { itemId: string }).itemId;
+            assert.match(openId, /^[a-f0-9]{64}$/);
+            assert.strictEqual((delta.args[2] as { itemId: string; openReasoningItemId: string }).itemId, openId);
+            assert.strictEqual((delta.args[2] as { openReasoningItemId: string }).openReasoningItemId, openId);
+            assert.strictEqual((closed.args[2] as { itemId: string }).itemId, openId);
+            assert.ok(!JSON.stringify([structured.args, legacy.args]).includes(id));
+        } finally {
+            sandbox.restore();
+        }
+    });
+
+    test("logContext is optional: omitting it keeps the legacy no-request behavior", () => {
+        const sandbox = sinon.createSandbox();
+        try {
+            const traceStub = sandbox.stub(StructuredLogger, "trace");
+            const state = createResponsesReasoningState();
+            const parts = interpretResponsesReasoningEvent(
+                { type: "response.reasoning_summary_text.delta", item_id: "rs_1", delta: "x" },
+                state
+            );
+            assert.strictEqual(parts.length, 1);
+            const call = traceStub.getCalls().find((c) => c.args[0] === "stream.responses_reasoning_delta");
+            assert.ok(call);
+            assert.strictEqual(call.args[2], undefined, "no fabricated correlation when context is unavailable");
+        } finally {
+            sandbox.restore();
+        }
     });
 });

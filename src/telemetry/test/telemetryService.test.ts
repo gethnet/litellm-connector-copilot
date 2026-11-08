@@ -142,6 +142,58 @@ suite("TelemetryService", () => {
         assert.strictEqual(event.properties.estimated_total_cost, 0.03);
     });
 
+    test("request telemetry rejects malformed token counts and costs at the adapter boundary", () => {
+        telemetryService.initialize({
+            extension: { packageJSON: { version: "test" } },
+        } as unknown as vscode.ExtensionContext);
+        telemetryService.captureRequestCompletedWithCache({
+            request_id: "req",
+            caller: "chat",
+            model: "model",
+            endpoint: "chat",
+            durationMs: 5,
+            tokensIn: "private-token" as unknown as number,
+            tokensOut: Infinity,
+            cacheReadRatio: NaN,
+            cost: {
+                estimated_input_cost: "private-cost" as unknown as number,
+                estimated_output_cost: -1,
+                estimated_total_cost: Infinity,
+            },
+        });
+        const props = adapterMock.capture.firstCall.args[0].properties;
+        for (const key of [
+            "tokens_in",
+            "tokens_out",
+            "cache_read_ratio",
+            "estimated_input_cost",
+            "estimated_output_cost",
+            "estimated_total_cost",
+        ]) {
+            assert.strictEqual(props[key], undefined, key);
+        }
+    });
+
+    test("failure telemetry rejects malformed costs while retaining valid zero values", () => {
+        telemetryService.initialize({
+            extension: { packageJSON: { version: "test" } },
+        } as unknown as vscode.ExtensionContext);
+        telemetryService.captureRequestFailed({
+            request_id: "req",
+            caller: "chat",
+            model: "model",
+            endpoint: "chat",
+            durationMs: 0,
+            errorType: "request_failed",
+            cost: { estimated_input_cost: NaN, estimated_output_cost: 0, estimated_total_cost: -1 },
+        });
+        const props = adapterMock.capture.firstCall.args[0].properties;
+        assert.strictEqual(props.duration_ms, 0);
+        assert.strictEqual(props.estimated_input_cost, undefined);
+        assert.strictEqual(props.estimated_output_cost, 0);
+        assert.strictEqual(props.estimated_total_cost, undefined);
+    });
+
     test("captureRequestFailed includes request_id when provided", () => {
         const mockContext = {
             extension: {

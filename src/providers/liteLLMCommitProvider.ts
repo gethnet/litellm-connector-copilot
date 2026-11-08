@@ -162,8 +162,9 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
 
             return sanitizedMessage;
         } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : String(err);
-            Logger.error(`Commit message generation failed: ${errorMsg}`, err);
+            // Upstream errors may echo the diff, credentials, or nested causes.
+            // Retain a stable failure signal without forwarding the original to sinks.
+            Logger.error("Commit message generation failed");
 
             const snapshot = tokenCapture.getSnapshot();
 
@@ -176,12 +177,12 @@ export class LiteLLMCommitMessageProvider extends LiteLLMProviderBase {
                 estimatedOutputCost: snapshot?.estimatedOutputCost,
                 estimatedTotalCost: snapshot?.estimatedTotalCost,
                 status: "failure",
-                error: errorMsg,
+                error: "request_failed",
                 caller: "scm-generator",
             });
 
             if (err instanceof Error) {
-                this._telemetryService?.captureException(err, {
+                this._telemetryService?.captureException(new Error("Commit message generation failed"), {
                     caller: "scm-generator",
                     properties: {
                         requestId,

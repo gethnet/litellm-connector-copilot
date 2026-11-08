@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { PostHogAdapter } from "./posthogAdapter";
 import { BoundedTelemetryAggregate, type AggregateSample } from "./telemetryAggregate";
+import { safeUsageNumber } from "../utils/safeUsageNumber";
 import type {
     LegacyConfigMigrationEvent,
     CostSummary,
@@ -180,23 +181,24 @@ export class TelemetryService implements vscode.Disposable {
             return;
         }
 
+        const cacheReadRatio = safeUsageNumber(props.cacheReadRatio);
         const properties: TelemetryEventProperties = {
             request_id: props.request_id,
             caller: props.caller,
             model: props.model,
             endpoint: props.endpoint ?? "unknown",
-            duration_ms: props.durationMs ?? 0,
+            duration_ms: safeUsageNumber(props.durationMs) ?? 0,
             status: props.status,
-            tokens_in: props.tokensIn,
-            tokens_out: props.tokensOut,
-            cache_read_ratio: props.cacheReadRatio,
+            tokens_in: safeUsageNumber(props.tokensIn),
+            tokens_out: safeUsageNumber(props.tokensOut),
+            cache_read_ratio: cacheReadRatio !== undefined && cacheReadRatio <= 1 ? cacheReadRatio : undefined,
             error_type: props.errorType,
             error: props.error,
             stack: props.stack,
             reason: props.reason,
-            estimated_input_cost: props.cost?.estimated_input_cost,
-            estimated_output_cost: props.cost?.estimated_output_cost,
-            estimated_total_cost: props.cost?.estimated_total_cost,
+            estimated_input_cost: safeUsageNumber(props.cost?.estimated_input_cost),
+            estimated_output_cost: safeUsageNumber(props.cost?.estimated_output_cost),
+            estimated_total_cost: safeUsageNumber(props.cost?.estimated_total_cost),
         };
 
         this.capture(eventName, properties);

@@ -1,9 +1,50 @@
 import * as assert from "assert";
+import * as sinon from "sinon";
 import * as vscode from "vscode";
 import { decodeSSE } from "../sseDecoder";
+import { StructuredLogger } from "../../../observability/structuredLogger";
+import { Logger } from "../../../utils/logger";
 
 /*eslint no-useless-escape: "off"*/
 suite("SSE Decoder Unit Tests", () => {
+    test("normal and final-flush payload logs never expose opaque values", async () => {
+        const sandbox = sinon.createSandbox();
+        try {
+            const structured = sandbox.stub(StructuredLogger, "log");
+            const legacy = sandbox.stub(Logger, "trace");
+            const values = ['{"signature":"private-signature"}', '{"encrypted_content":"private-ciphertext"}'];
+            const stream = new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(new TextEncoder().encode(`data: ${values[0]}\n\ndata: ${values[1]}`));
+                    controller.close();
+                },
+            });
+            const received: string[] = [];
+            try {
+                for await (const payload of decodeSSE(stream)) {
+                    received.push(payload);
+                }
+            } catch (error) {
+                assert.match(String(error), /incomplete data/);
+            }
+            assert.deepStrictEqual(received, values);
+            const payloadLogs = structured.getCalls().filter((call) => call.args[1] === "stream.payload_yielded");
+            assert.strictEqual(payloadLogs.length, 2);
+            assert.deepStrictEqual(
+                payloadLogs.map((call) => (call.args[2] as { payloadLength: number }).payloadLength),
+                values.map((value) => value.length)
+            );
+            const logged = JSON.stringify([
+                ...structured.getCalls().map((call) => call.args),
+                ...legacy.getCalls().map((call) => call.args),
+            ]);
+            assert.ok(!logged.includes("private-signature"));
+            assert.ok(!logged.includes("private-ciphertext"));
+        } finally {
+            sandbox.restore();
+        }
+    });
+
     test("decodes simple data frames", async () => {
         const stream = new ReadableStream<Uint8Array>({
             start(controller) {

@@ -16,6 +16,11 @@ import { isAnthropicModel } from "../utils/modelUtils";
 import { stripCacheBreakpoints } from "../utils/promptCacheControl";
 import type { TelemetryService } from "../telemetry/telemetryService";
 
+/** Client route selection, shared with request-local transport diagnostics. */
+export function resolveChatEndpoint(mode?: string): "/responses" | "/chat/completions" {
+    return mode === "responses" ? "/responses" : "/chat/completions";
+}
+
 /**
  * Error thrown when a /model/info discovery request times out.
  */
@@ -420,14 +425,7 @@ export class LiteLLMClient {
     }
 
     private getEndpoint(mode?: string): string {
-        if (mode === "chat" || mode === "completions") {
-            return "/chat/completions";
-        }
-        if (mode === "responses") {
-            return "/responses";
-        }
-        // Default to chat/completions for backward compatibility
-        return "/chat/completions";
+        return resolveChatEndpoint(mode);
     }
 
     private async fetchWithRetry(

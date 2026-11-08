@@ -8,6 +8,7 @@ import type {
     OpenAIUsagePromptTokenDetails,
 } from "../../types";
 import { calculateRequestCost, extractPricing, type RequestCost } from "../../utils/pricingCalculator";
+import { safeUsageNumber } from "../../utils/safeUsageNumber";
 
 /**
  * Snapshot of all tracked token counts for a single request.
@@ -121,14 +122,23 @@ export class StreamTokenCapture {
     // ── Snapshot (call after stream completes) ──
 
     getSnapshot(): TokenSnapshot {
+        return this._getSnapshot(true);
+    }
+
+    private _getSnapshot(forDiagnostics: boolean): TokenSnapshot {
         const hasUpstream = this._sawUpstreamUsage && this._upstream !== undefined;
+        // Host usage generation retains its existing semantics; diagnostic snapshots
+        // independently reject values that runtime types cannot guarantee.
+        const numeric = (value: number | undefined): number | undefined =>
+            forDiagnostics ? safeUsageNumber(value) : value;
 
         // Usage-feedback calibration (#166): compare the backend's authoritative
         // prompt count against the calibrated local estimate that was used for
         // this request. The calibration module's multiplicative update is
         // self-correcting, so feeding it the calibrated estimate is correct.
-        if (this._calibrationEnabled && hasUpstream && typeof this._upstream?.prompt_tokens === "number") {
-            recordCalibrationObservation(this._modelId, this._upstream.prompt_tokens, this._estimatedPromptTokens);
+        const upstreamPromptTokens = safeUsageNumber(this._upstream?.prompt_tokens);
+        if (this._calibrationEnabled && hasUpstream && upstreamPromptTokens !== undefined) {
+            recordCalibrationObservation(this._modelId, upstreamPromptTokens, this._estimatedPromptTokens);
         }
 
         const promptDetails: OpenAIUsagePromptTokenDetails | undefined = this._upstream?.prompt_tokens_details;
@@ -137,20 +147,24 @@ export class StreamTokenCapture {
 
         const snapshot: TokenSnapshot = {
             // Input — prefer upstream, fall back to pre-computed estimate
-            promptTokens: this._upstream?.prompt_tokens ?? this._estimatedPromptTokens,
-            cachedTokens: promptDetails?.cached_tokens ?? 0,
-            cacheCreationInputTokens: promptDetails?.cache_creation_input_tokens ?? 0,
-            systemPromptTokens: this._upstream?.system_prompt_tokens ?? this._estimatedSystemPromptTokens,
+            promptTokens: numeric(this._upstream?.prompt_tokens) ?? numeric(this._estimatedPromptTokens) ?? 0,
+            cachedTokens: numeric(promptDetails?.cached_tokens) ?? 0,
+            cacheCreationInputTokens: numeric(promptDetails?.cache_creation_input_tokens) ?? 0,
+            systemPromptTokens:
+                numeric(this._upstream?.system_prompt_tokens) ?? numeric(this._estimatedSystemPromptTokens) ?? 0,
 
             // Output — prefer upstream, fall back to internal accumulation
             completionTokens:
-                this._upstream?.completion_tokens ?? countTokens(this._textBuffer, this._modelId, this._modelInfo),
+                numeric(this._upstream?.completion_tokens) ??
+                countTokens(this._textBuffer, this._modelId, this._modelInfo),
             reasoningTokens:
-                completionDetails?.reasoning_tokens ??
+                numeric(completionDetails?.reasoning_tokens) ??
                 countTokens(this._reasoningBuffer, this._modelId, this._modelInfo),
-            toolTokens: completionDetails?.tool_tokens ?? (this._toolCallTokens > 0 ? this._toolCallTokens : 0),
-            acceptedPredictionTokens: completionDetails?.accepted_prediction_tokens ?? 0,
-            rejectedPredictionTokens: completionDetails?.rejected_prediction_tokens ?? 0,
+            toolTokens:
+                numeric(completionDetails?.tool_tokens) ??
+                (this._toolCallTokens > 0 ? (numeric(this._toolCallTokens) ?? 0) : 0),
+            acceptedPredictionTokens: numeric(completionDetails?.accepted_prediction_tokens) ?? 0,
+            rejectedPredictionTokens: numeric(completionDetails?.rejected_prediction_tokens) ?? 0,
 
             sawUpstreamUsage: hasUpstream,
         };
@@ -163,9 +177,9 @@ export class StreamTokenCapture {
             pricing: this._pricing,
         });
         if (this._pricing) {
-            snapshot.estimatedInputCost = cost.inputCost;
-            snapshot.estimatedOutputCost = cost.outputCost;
-            snapshot.estimatedTotalCost = cost.totalCost;
+            snapshot.estimatedInputCost = numeric(cost.inputCost);
+            snapshot.estimatedOutputCost = numeric(cost.outputCost);
+            snapshot.estimatedTotalCost = numeric(cost.totalCost);
         }
 
         return snapshot;
@@ -187,7 +201,7 @@ export class StreamTokenCapture {
         }
 
         // Build usage payload from accumulated counts
-        const snapshot = this.getSnapshot();
+        const snapshot = this._getSnapshot(false);
 
         // Don't emit usage if there's no meaningful token usage (empty stream)
         // Check if any actual tokens were generated (not just estimated prompt tokens)

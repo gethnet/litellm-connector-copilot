@@ -556,9 +556,18 @@ export abstract class LiteLLMProviderBase {
         token: vscode.CancellationToken,
         caller?: string,
         modelInfo?: LiteLLMModelInfo,
-        configuration?: Record<string, unknown>
+        configuration?: Record<string, unknown>,
+        onRoute?: (endpoint: string) => void
     ): Promise<ReadableStream<Uint8Array>> {
-        return this._transport.sendRequestToLiteLLM(request, _progress, token, caller, modelInfo, configuration);
+        return this._transport.sendRequestToLiteLLM(
+            request,
+            _progress,
+            token,
+            caller,
+            modelInfo,
+            configuration,
+            onRoute
+        );
     }
 
     /**
@@ -574,7 +583,8 @@ export abstract class LiteLLMProviderBase {
         token: vscode.CancellationToken,
         caller?: string,
         modelInfo?: LiteLLMModelInfo,
-        onAttempt?: (request: OpenAIChatCompletionRequest) => void
+        onAttempt?: (request: OpenAIChatCompletionRequest) => void,
+        onRoute?: (endpoint: string) => void
     ): Promise<ReadableStream<Uint8Array>> {
         // `currentRequest` is the live request shape mutated across retries. It
         // starts as the caller's request but is replaced (never the same
@@ -618,7 +628,8 @@ export abstract class LiteLLMProviderBase {
                     caller,
                     modelInfo,
                     thinkingBlocksRetryAttempted,
-                    onAttempt
+                    onAttempt,
+                    onRoute
                 );
             } catch (err) {
                 this.logRequestPayloadOnFailure(currentRequest, err, {
@@ -773,7 +784,8 @@ export abstract class LiteLLMProviderBase {
         // continuity redaction survives the rebuild and is not restored from
         // the original VS Code history.
         stripThinkingBlocksForRetry = false,
-        onAttempt?: (request: OpenAIChatCompletionRequest) => void
+        onAttempt?: (request: OpenAIChatCompletionRequest) => void,
+        onRoute?: (endpoint: string) => void
     ): Promise<ReadableStream<Uint8Array>> {
         // The recovery state machine lives in its own module so the base stays
         // under the repository's file-size budget; behavior is unchanged.
@@ -784,7 +796,15 @@ export abstract class LiteLLMProviderBase {
                 buildOpenAIChatRequest: (msgs, target, reqOptions, info, reqCaller) =>
                     this.buildOpenAIChatRequest(msgs, target, reqOptions, info, reqCaller),
                 sendRequestToLiteLLM: (candidate, reqProgress, reqToken, reqCaller, info, configuration) =>
-                    this.sendRequestToLiteLLM(candidate, reqProgress, reqToken, reqCaller, info, configuration),
+                    this.sendRequestToLiteLLM(
+                        candidate,
+                        reqProgress,
+                        reqToken,
+                        reqCaller,
+                        info,
+                        configuration,
+                        onRoute
+                    ),
                 stripThinkingBlocksForRetry,
             },
             request,

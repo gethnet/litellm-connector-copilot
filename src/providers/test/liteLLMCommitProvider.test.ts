@@ -7,6 +7,8 @@ import { Logger } from "../../utils/logger";
 import { LiteLLMTelemetry } from "../../utils/telemetry";
 import { createMockSecrets } from "../../test/utils/testMocks";
 import { createTelemetryMocks } from "../../test/utils/telemetryMock";
+import { TelemetryService } from "../../telemetry/telemetryService";
+import { PostHogAdapter } from "../../telemetry/posthogAdapter";
 
 /**
  * Typed access to private/protected members for testing.
@@ -142,6 +144,56 @@ suite("LiteLLMCommitMessageProvider", () => {
     });
 
     suite("provideCommitMessage", () => {
+        test("upstream errors reach PostHog only as sanitized exceptions and never leak to local logs or metrics", async () => {
+            const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
+            const internals = accessInternals(provider);
+            const service = new TelemetryService();
+            const adapter = new PostHogAdapter();
+            const posthogCapture = sandbox.stub();
+            sandbox.stub(adapter, "initialize").callsFake(() => {
+                const adapterState = adapter as unknown as {
+                    client: { captureException: typeof posthogCapture };
+                    enabled: boolean;
+                };
+                adapterState.client = { captureException: posthogCapture };
+                adapterState.enabled = true;
+            });
+            (service as unknown as { adapter: PostHogAdapter }).adapter = adapter;
+            sandbox.stub(vscode.env, "isTelemetryEnabled").get(() => true);
+            service.initialize({
+                extension: { packageJSON: { version: "1.0.0" } },
+            } as unknown as vscode.ExtensionContext);
+            provider.setTelemetryService(service);
+            sandbox.stub(internals._configManager, "getConfig").resolves({ commitModelIdOverride: "model" });
+            sandbox
+                .stub(internals, "registryEntries")
+                .returns([["model", { baseUrl: "https://example.test", apiKey: "key", rawModelName: "model" }]]);
+            sandbox.stub(internals, "buildOpenAIChatRequest").resolves({});
+            const upstream = new Error("secret-message", { cause: new Error("secret-cause") });
+            upstream.stack = "secret-stack";
+            sandbox.stub(internals, "sendRequestWithRetry").rejects(upstream);
+            const tokenSource = new vscode.CancellationTokenSource();
+            try {
+                await assert.rejects(
+                    provider.provideCommitMessage("secret-diff", {}, tokenSource.token),
+                    (error: unknown) => error === upstream
+                );
+                assert.strictEqual(posthogCapture.callCount, 1);
+                const captured = posthogCapture.firstCall.args[0] as Error;
+                const sinks = [
+                    captured.message,
+                    captured.stack,
+                    String(captured.cause),
+                    JSON.stringify(posthogCapture.firstCall.args[2]),
+                    JSON.stringify((Logger.error as sinon.SinonStub).args),
+                    JSON.stringify(telemetryMocks.captureRequestFailedStub.args),
+                ];
+                assert.ok(!sinks.join(" ").includes("secret"));
+            } finally {
+                tokenSource.dispose();
+                service.dispose();
+            }
+        });
         test("should throw when no model is available", async () => {
             const provider = new LiteLLMCommitMessageProvider(mockSecrets, userAgent);
             const internals = accessInternals(provider);

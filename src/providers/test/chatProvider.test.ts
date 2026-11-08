@@ -5,6 +5,7 @@ import * as vscode from "vscode";
 import { LiteLLMChatProvider } from "../";
 import { LiteLLMClient } from "../../adapters/litellmClient";
 import { Logger } from "../../utils/logger";
+import { StructuredLogger } from "../../observability/structuredLogger";
 import { LiteLLMTelemetry } from "../../utils/telemetry";
 import { createMockSecrets } from "../../test/utils/testMocks";
 import { createTelemetryMocks } from "../../test/utils/telemetryMock";
@@ -1550,6 +1551,85 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         );
     });
 
+    test("preserves upstream finish reasons for the host while sanitizing abnormal termination logs", async () => {
+        const secretReason = "private-upstream-cause@example.com";
+        const cases = [
+            { suppressed: false, responses: false },
+            { suppressed: true, responses: false },
+            { suppressed: false, responses: true },
+            { suppressed: true, responses: true },
+        ];
+        for (const { suppressed, responses } of cases) {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const providerWithConfig = provider as unknown as { _configManager: { getConfig: () => Promise<unknown> } };
+            const configStub = sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
+                url: "http://localhost:4000",
+                inactivityTimeout: 60,
+                disableAbnormalTerminationErrors: suppressed,
+            });
+            const warnStub = sandbox.stub(StructuredLogger, "warn");
+            const { ReadableStream } = await import("node:stream/web");
+            const encoder = new TextEncoder();
+            const stream = new ReadableStream<Uint8Array>({
+                start(controller) {
+                    if (responses) {
+                        const terminal = {
+                            type: "response.completed",
+                            response: { status: "incomplete", incomplete_details: { reason: secretReason } },
+                        };
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify(terminal)}\n\n`));
+                    } else {
+                        controller.enqueue(encoder.encode('data: {"choices":[{"finish_reason":"length"}]}\n\n'));
+                        controller.enqueue(
+                            encoder.encode(
+                                `data: ${JSON.stringify({ choices: [{ finish_reason: secretReason }] })}\n\n`
+                            )
+                        );
+                    }
+                    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                    controller.close();
+                },
+            });
+            const providerTest = provider as unknown as {
+                processStreamingResponse: (
+                    stream: unknown,
+                    progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+                    token: vscode.CancellationToken
+                ) => Promise<void>;
+            };
+            const run = providerTest.processStreamingResponse(
+                stream,
+                { report: () => undefined },
+                new vscode.CancellationTokenSource().token
+            );
+            if (suppressed) {
+                await run;
+            } else {
+                await assert.rejects(run, (error: unknown) => {
+                    assert.ok(error instanceof Error);
+                    const expected = responses ? secretReason : `length,${secretReason}`;
+                    assert.strictEqual((error as Error & { finishReasons: string }).finishReasons, expected);
+                    assert.ok(error.message.includes(`(reason: ${expected})`));
+                    return true;
+                });
+            }
+            const abnormalEvent = suppressed
+                ? "stream.abnormal_termination_suppressed"
+                : "stream.abnormal_termination_surfaced";
+            for (const event of [abnormalEvent, "stream.terminal_fingerprint"]) {
+                const call = warnStub.getCalls().find((entry) => entry.args[0] === event);
+                assert.ok(call, `missing ${event}`);
+                assert.strictEqual(
+                    (call.args[1] as { finishReasons: string }).finishReasons,
+                    responses ? "unknown" : "length,unknown"
+                );
+            }
+            assert.ok(!JSON.stringify(warnStub.getCalls().map((call) => call.args)).includes(secretReason));
+            warnStub.restore();
+            configStub.restore();
+        }
+    });
+
     test("does not throw for a healthy /responses completed terminal with text output", async () => {
         const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
         const providerWithConfig = provider as unknown as {
@@ -1871,5 +1951,152 @@ suite("LiteLLM Chat Provider Unit Tests", () => {
         } finally {
             tokenSource.dispose();
         }
+    });
+
+    test("stream traces carry the turn's requestId when a request context is provided", async () => {
+        const traceStub = sandbox.stub(StructuredLogger, "trace");
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        const providerWithConfig = provider as unknown as {
+            _configManager: { getConfig: () => Promise<unknown> };
+        };
+        sandbox.stub(providerWithConfig._configManager, "getConfig").resolves({
+            url: "http://localhost:4000",
+            inactivityTimeout: 60,
+        });
+
+        const { ReadableStream } = await import("node:stream/web");
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":"Hello"}\n\n'));
+                controller.enqueue(
+                    encoder.encode('data: {"type":"response.completed","response":{"status":"completed"}}\n\n')
+                );
+                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                controller.close();
+            },
+        });
+
+        const providerTest = provider as unknown as {
+            processStreamingResponse: (
+                stream: unknown,
+                progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+                token: vscode.CancellationToken,
+                requestContext?: {
+                    requestId: string;
+                    model: string;
+                    endpoint: string;
+                    requestHadThinkingBlocks: boolean;
+                    requestToolCallCount: number;
+                }
+            ) => Promise<void>;
+        };
+
+        await providerTest.processStreamingResponse(
+            stream,
+            { report: () => {} },
+            new vscode.CancellationTokenSource().token,
+            {
+                requestId: "req-corr-1",
+                model: "model-1",
+                endpoint: "responses",
+                requestHadThinkingBlocks: false,
+                requestToolCallCount: 0,
+            }
+        );
+
+        const processed = traceStub.getCalls().filter((c) => c.args[0] === "stream.event_processed");
+        assert.ok(processed.length > 0, "expected stream.event_processed traces");
+        for (const call of processed) {
+            assert.strictEqual(
+                (call.args[2] as Record<string, unknown> | undefined)?.requestId,
+                "req-corr-1",
+                "every per-event trace must be correlated to the turn"
+            );
+        }
+
+        const received = traceStub.getCalls().filter((c) => c.args[0] === "stream.event_received");
+        assert.ok(received.length > 0, "interpreter traces must flow through the same state context");
+        for (const call of received) {
+            assert.strictEqual((call.args[2] as Record<string, unknown> | undefined)?.requestId, "req-corr-1");
+        }
+    });
+
+    test("every host-facing part produces one correlated vscode.part_reported trace, including generated usage", async () => {
+        const traceStub = sandbox.stub(StructuredLogger, "trace");
+        const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+        seedDiscoveredBackend(sandbox, provider, "model-part-trace");
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(
+                    encoder.encode('data: {"type":"response.output_text.delta","delta":"Hello world"}\n\n')
+                );
+                controller.enqueue(
+                    encoder.encode(
+                        'data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":10,"output_tokens":3}}}\n\n'
+                    )
+                );
+                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                controller.close();
+            },
+        });
+        sandbox.stub(LiteLLMClient.prototype, "chat").resolves(stream);
+
+        const reported: vscode.LanguageModelResponsePart[] = [];
+        await provider.provideLanguageModelChatResponse(
+            {
+                id: "model-part-trace",
+                name: "model-part-trace",
+                tooltip: "",
+                family: "litellm",
+                version: "1.0.0",
+                maxInputTokens: 1000,
+                maxOutputTokens: 1000,
+                capabilities: { toolCalling: true, imageInput: false },
+            },
+            [
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [new vscode.LanguageModelTextPart("Hi")],
+                },
+            ],
+            {
+                modelOptions: {},
+                tools: [],
+                toolMode: vscode.LanguageModelChatToolMode.Auto,
+                requestInitiator: "test",
+                configuration: {
+                    baseUrl: "http://localhost:4000",
+                    apiKey: "test-api-key",
+                } as unknown as Record<string, unknown>,
+            } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
+            { report: (part: vscode.LanguageModelResponsePart) => reported.push(part) },
+            new vscode.CancellationTokenSource().token
+        );
+
+        const partReports = traceStub.getCalls().filter((c) => c.args[0] === "vscode.part_reported");
+        assert.strictEqual(
+            partReports.length,
+            reported.length,
+            "exactly one vscode.part_reported trace per part the host received"
+        );
+
+        const seqs = partReports.map((call) => (call.args[1] as Record<string, unknown>).reportSeq as number);
+        assert.deepStrictEqual(
+            seqs,
+            seqs.map((_, i) => i + 1),
+            "reportSeq is 1-based and strictly increasing across the whole turn"
+        );
+
+        const requestIds = new Set(
+            partReports.map((call) => (call.args[2] as Record<string, unknown>).requestId as string)
+        );
+        assert.strictEqual(requestIds.size, 1, "all part reports share the turn's requestId");
+        assert.ok(!requestIds.has("no-request"), "the real requestId must be attached, not the default");
+
+        const usageReport = partReports.find((call) => (call.args[1] as Record<string, unknown>).isUsage === true);
+        assert.ok(usageReport, "the usage DataPart (generated/enriched by StreamTokenCapture) is traced too");
     });
 });
