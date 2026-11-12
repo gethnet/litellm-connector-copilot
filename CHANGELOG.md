@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.5.20] - UNRELEASED
+## [2.5.20] - 2026-11-12
 
 ### ✨ Features
 
@@ -10,13 +10,13 @@ All notable changes to this project will be documented in this file.
 
 ### 🐛 Fixes
 
-* **🧠 Fix fragmented thinking blocks**: Keep consecutive thinking chunks in one block instead of many short blocks. Reported with W&B DeepSeek-V4.1-Flash-1017 and GLM-5.3.
+* **🧠 Fix fragmented thinking blocks**: Keep consecutive thinking chunks in one block instead of many short blocks. Reported with W&B DeepSeek-V4.1-Flash-1017 and GLM-5.3. Reported and fixed by [@bn45hkurr0y4](https://github.com/bn45hkurr0y4) in [#182](https://github.com/gethnet/litellm-connector-copilot/issues/182) and [#183](https://github.com/gethnet/litellm-connector-copilot/pull/183).
 * **🧠 Keep `/responses` thinking in one block**: Reasoning chunks from `/responses` models now carry their reasoning item's id, matching the chat-completions fix.
 * **📏 Fit commit-message prompts to the model before sending (#180)**: Commit generation now runs through the registered chat provider, so it budgets against the selected model's real limits. The full prompt is counted with LiteLLM's `/utils/token_counter` and the diff is reduced before sending; counter timeouts or failures fall back to local estimates. On a context-overflow error the command retries up to twice with a smaller diff, and restores the existing draft if generation still fails.
 * **🔁 Recover from context-overflow errors more reliably**: Recognize more overflow errors, including provider-wrapped, Azure, and Anthropic messages and structured error codes, without mistaking output-limit, quota, or cancellation failures for overflow. The retry trims the request while keeping the latest messages and complete tool call/result pairs, counts retained images, and is skipped when the request cannot be made smaller.
 * **🧼 Tighten what logs and telemetry record**: Trace logs no longer include previews of streamed content, and debug logs and telemetry record a fixed failure category instead of upstream error text.
 
-## [2.5.19] - 2026-11-1
+## [2.5.19] - 2026-11-01
 
 ### ✨ Features
 
@@ -1064,6 +1064,8 @@ There have been a tremendous amount of backend work done with this update to mak
 ---
 
 [2.5.20]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.19...rel/v2.5.20
+[2.5.19]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.18...rel/v2.5.19
+[2.5.18]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.17...rel/v2.5.18
 [2.5.17]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.16...rel/v2.5.17
 [2.5.16]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.15...rel/v2.5.16
 [2.5.15]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.14...rel/v2.5.15
