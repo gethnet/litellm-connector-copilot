@@ -12,7 +12,15 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ## 🆕 What's New in 2.5.20
 
-- 🧠 **Fix fragmented thinking blocks** — Keep consecutive thinking chunks in one block instead of many short blocks. Reported with W&B DeepSeek-V4.1-Flash-1017 and GLM-5.3.
+> Version 2.5.20 keeps streamed thinking in one block, fits commit-message prompts to the model, and recovers from context-overflow errors more reliably.
+
+- 🧠 **Thinking stays in one block** — Streamed reasoning is no longer split into many short "Thought" blocks, on both chat-completions and `/responses` models.
+- 📏 **Commit messages fit the model before sending** — Commit generation budgets against the selected model's real limits and reduces the diff first. On a context-overflow error it retries up to twice with a smaller diff and restores your existing draft if generation still fails.
+- 🔁 **More reliable context-overflow recovery** — More overflow errors are recognized, including provider-wrapped, Azure, and Anthropic messages. Retries keep the latest messages and complete tool call/result pairs.
+- 🔎 **Follow one request through the logs** — Stream log lines carry the request id from SSE decoding through to the parts reported to VS Code.
+- 🧼 **Less in logs and telemetry** — Trace logs no longer include previews of streamed content, and telemetry records a fixed failure category instead of upstream error text.
+
+> ℹ️ **Credit** — Thank you to [@bn45hkurr0y4](https://github.com/bn45hkurr0y4) for reporting and fixing fragmented thinking blocks in [#182](https://github.com/gethnet/litellm-connector-copilot/issues/182) and [#183](https://github.com/gethnet/litellm-connector-copilot/pull/183). 🙏
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
