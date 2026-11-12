@@ -10,16 +10,9 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.5.19
+## 🆕 What's New in 2.5.20
 
-> Version 2.5.19 improves chat reliability, adds model-picker branding, and makes commit-message generation cancellable.
-
-- 📏 **Fewer false token-limit errors** — History trimming uses the raw model's calibrated estimates, keeps tool calls and results together, and avoids learning text calibration from multimodal turns.
-- 🔤 **Safer Unicode requests** — Invalid Unicode in supported text is repaired before sending; malformed protocol or opaque data is rejected instead of silently changed.
-- 🏷️ **LiteLLM Connector model-picker branding** — The provider tab shows the connector's logo on VS Code 1.144 and newer.
-- ⏹️ **Cancellable commit generation** — The Source Control generate button becomes an animated stop button; stopping restores your existing draft.
-
-> ℹ️ **Credit** — Thank you to [@bn45hkurr0y4](https://github.com/bn45hkurr0y4) for the token-limit bug report and original fix in [#173](https://github.com/gethnet/litellm-connector-copilot/issues/173) and [#174](https://github.com/gethnet/litellm-connector-copilot/pull/174); the follow-up implementation landed in [#176](https://github.com/gethnet/litellm-connector-copilot/pull/176). 🙏
+- 🧠 **Fix fragmented thinking blocks** — Keep consecutive thinking chunks in one block instead of many short blocks. Reported with W&B DeepSeek-V4.1-Flash-1017 and GLM-5.3.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 

@@ -46,6 +46,12 @@ export interface StreamingState {
      * Optional: the commit provider and legacy tests run without it.
      */
     logContext?: StreamLogContext;
+    /**
+     * Id shared by consecutive chat `reasoning_content` chunks. Copilot gives an
+     * id-less thinking part its own block, so without it every chunk renders as
+     * a separate "Thought" entry. Cleared by text and tool calls.
+     */
+    chatReasoningId: string | undefined;
 }
 
 export function createInitialStreamingState(): StreamingState {
@@ -60,6 +66,7 @@ export function createInitialStreamingState(): StreamingState {
         anonymousResponseToolName: undefined,
         anonymousResponseToolArgs: "",
         responsesReasoning: createResponsesReasoningState(),
+        chatReasoningId: undefined,
     };
 }
 
@@ -427,7 +434,8 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
         const mergeReasoningIntoContent = state.mergeReasoningContentInChoices && !!reasoningContent;
 
         if (reasoningContent && !mergeReasoningIntoContent) {
-            thinkingParts.push({ type: "thinking", value: reasoningContent });
+            state.chatReasoningId ??= `thinking-${globalThis.crypto.randomUUID()}`;
+            thinkingParts.push({ type: "thinking", value: reasoningContent, id: state.chatReasoningId });
             Logger.trace(`[interpretStreamEvent] Emitted thinking part, length=${reasoningContent.length}`);
             StructuredLogger.trace(
                 "stream.reasoning_emitted",
@@ -487,6 +495,9 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
         }
 
         const deltaContent = typeof delta?.content === "string" && delta.content ? delta.content : undefined;
+        if (deltaContent || (Array.isArray(delta?.tool_calls) && delta.tool_calls.length > 0)) {
+            state.chatReasoningId = undefined;
+        }
         const contentForParsing = mergeReasoningIntoContent
             ? `${reasoningContent ?? ""}${deltaContent ?? ""}`
             : deltaContent;
