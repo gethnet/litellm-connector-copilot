@@ -42,6 +42,7 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
     setup(() => {
         sandbox = sinon.createSandbox();
         mockProvider = sandbox.createStubInstance(LiteLLMCommitMessageProvider);
+        mockProvider.getRawModelName.callsFake((id: string) => id);
         sandbox.stub(vscode.lm, "selectChatModels").resolves([]);
     });
 
@@ -332,7 +333,8 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
 
         /** Runs the command against a large diff with the given sendRequest stub. */
         async function runWithSendRequest(
-            sendRequest: sinon.SinonStub
+            sendRequest: sinon.SinonStub,
+            belowBudget = false
         ): Promise<{ inputBox: { value: string }; errorStub: sinon.SinonStub }> {
             const registerStub = sandbox.stub(vscode.commands, "registerCommand");
             registerGenerateCommitMessageCommand(mockProvider as unknown as LiteLLMCommitMessageProvider);
@@ -341,7 +343,9 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
                 getConfig: async () => ({ commitModelIdOverride: "test-model" }),
             } as unknown as ConfigManager);
             mockProvider.getModelInfo.returns(undefined);
-            sandbox.stub(GitUtils, "getStagedDiff").resolves(buildLargeDiff(3, 350));
+            sandbox
+                .stub(GitUtils, "getStagedDiff")
+                .resolves(belowBudget ? buildLargeDiff(1, 30) : buildLargeDiff(3, 350));
             const inputBox = { value: "", placeholder: "", enabled: true };
             sandbox.stub(GitUtils, "getGitAPI").resolves({ repositories: [{ inputBox }] } as unknown as never);
             (vscode.lm.selectChatModels as unknown as sinon.SinonStub).resolves([
@@ -407,6 +411,39 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
             assert.strictEqual(inputBox.value, "fix: shrink diff");
         });
 
+        test("retries below-budget diffs with all prompts preserved across overflow signatures", async () => {
+            const sendRequest = sandbox.stub();
+            sendRequest.onFirstCall().rejects(new Error("prompt is too long: 1115674 tokens > 1000000 maximum"));
+            sendRequest.onSecondCall().resolves(streamOf("fix: recovered"));
+            const { inputBox, errorStub } = await runWithSendRequest(sendRequest, true);
+            assert.strictEqual(sendRequest.callCount, 2);
+            assert.ok(sentDiffAt(sendRequest, 1).length < sentDiffAt(sendRequest, 0).length);
+            for (const call of sendRequest.getCalls()) {
+                const messages = call.args[0] as vscode.LanguageModelChatMessage[];
+                assert.strictEqual(
+                    (messages[0].content[0] as vscode.LanguageModelTextPart).value,
+                    COMMIT_SYSTEM_PROMPT
+                );
+                assert.ok(
+                    (messages[1].content[0] as vscode.LanguageModelTextPart).value.startsWith(COMMIT_MESSAGE_PROMPT)
+                );
+            }
+            assert.strictEqual(inputBox.value, "fix: recovered");
+            assert.ok(errorStub.notCalled);
+        });
+
+        for (const failure of [
+            "max_tokens invalid: too many tokens for output",
+            "too many tokens requested for output",
+        ]) {
+            test(`does not retry output parameter validation: ${failure}`, async () => {
+                const sendRequest = sandbox.stub().rejects(new Error(failure));
+                const { errorStub } = await runWithSendRequest(sendRequest);
+                assert.strictEqual(sendRequest.callCount, 1);
+                assert.ok(errorStub.calledOnce);
+            });
+        }
+
         test("does not retry errors that are not context overflows", async () => {
             const sendRequest = sandbox.stub().rejects(new Error("provider fail"));
 
@@ -437,13 +474,17 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
 
         /** Runs the command against a large diff with the given remoteCountTokens behavior. */
         async function runWithRemoteCount(
-            remoteBehavior: (modelId: string, text: string) => Promise<number | undefined>
+            remoteBehavior: (
+                modelId: string,
+                text: string | readonly vscode.LanguageModelChatRequestMessage[]
+            ) => Promise<number | undefined>,
+            sendRequest: sinon.SinonStub = sandbox.stub().resolves(streamOf("fix: recount diff")),
+            originalDraft = ""
         ): Promise<{
             inputBox: { value: string };
             sendRequest: sinon.SinonStub;
             compactDiff: sinon.SinonStub;
         }> {
-            const sendRequest = sandbox.stub().resolves(streamOf("fix: recount diff"));
             // callThrough keeps the real compaction behavior while tracking invocations.
             const compactDiff = sandbox.stub(GitUtils, "compactDiff").callThrough();
             const registerStub = sandbox.stub(vscode.commands, "registerCommand");
@@ -455,7 +496,7 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
             mockProvider.getModelInfo.returns(undefined);
             mockProvider.remoteCountTokens.callsFake(remoteBehavior);
             sandbox.stub(GitUtils, "getStagedDiff").resolves(buildLargeDiff(3, 350));
-            const inputBox = { value: "", placeholder: "", enabled: true };
+            const inputBox = { value: originalDraft, placeholder: "", enabled: true };
             sandbox.stub(GitUtils, "getGitAPI").resolves({ repositories: [{ inputBox }] } as unknown as never);
             (vscode.lm.selectChatModels as unknown as sinon.SinonStub).resolves([
                 { maxInputTokens: 8000, sendRequest },
@@ -489,7 +530,8 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
                 // Server says the compacted diff is 1.5× the local estimate —
                 // far over the budget the local count thought it fit.
                 const { inputBox, sendRequest, compactDiff } = await runWithRemoteCount(
-                    async (_modelId: string, text: string) => Math.ceil(countTokens(text, "test-model") * 1.5)
+                    async (_modelId: string, text: string | readonly vscode.LanguageModelChatRequestMessage[]) =>
+                        Math.ceil(countTokens(text, "test-model") * 1.5)
                 );
 
                 // compactDiff runs twice: initial compaction + one remote-triggered recompact.
@@ -503,6 +545,70 @@ suite("GenerateCommitMessage Command Unit Tests", () => {
                 assert.strictEqual(matched.length, 1);
             } finally {
                 logWarn.restore();
+            }
+        });
+
+        test("bounds an operation to nine full-message counts and three generation sends", async () => {
+            const events: string[] = [];
+            const sendRequest = sandbox.stub().callsFake(async () => {
+                events.push("send");
+                throw new Error("prompt is too long");
+            });
+            const errorStub = sandbox.stub(vscode.window, "showErrorMessage");
+            const originalDraft = "existing commit draft";
+            let countCalls = 0;
+            const { inputBox, sendRequest: sent } = await runWithRemoteCount(
+                async (_modelId, messages) => {
+                    countCalls++;
+                    events.push("count");
+                    // The 7,200-token input budget forces two corrections; the third count verifies the real input.
+                    return countCalls % 3 === 0 ? countTokens(messages, "test-model") : 7201;
+                },
+                sendRequest,
+                originalDraft
+            );
+
+            assert.strictEqual(countCalls, 9);
+            assert.strictEqual(mockProvider.remoteCountTokens.callCount, 9);
+            assert.strictEqual(sent.callCount, 3);
+            assert.deepStrictEqual(events, Array.from({ length: 3 }, () => ["count", "count", "count", "send"]).flat());
+            assert.strictEqual(inputBox.value, originalDraft);
+            assert.ok(errorStub.calledOnce);
+            const counted = mockProvider.remoteCountTokens.getCalls();
+            const sends = sent.getCalls();
+            let previousDiff: string | undefined;
+            for (let preparation = 0; preparation < 3; preparation++) {
+                const sentMessages = sends[preparation].args[0] as vscode.LanguageModelChatMessage[];
+                assert.strictEqual(sentMessages.length, 2);
+                assert.strictEqual(
+                    (sentMessages[0].content[0] as vscode.LanguageModelTextPart).value,
+                    COMMIT_SYSTEM_PROMPT
+                );
+                const body = (sentMessages[1].content[0] as vscode.LanguageModelTextPart).value;
+                const prefix = `${COMMIT_MESSAGE_PROMPT}\n\n${DIFF_PREAMBLE}`;
+                assert.ok(body.startsWith(prefix));
+                const diff = body.substring(prefix.length);
+                assert.ok(diff.length > 0);
+                if (previousDiff !== undefined) {
+                    assert.ok(diff.length < previousDiff.length);
+                    assert.ok(countTokens(diff, "test-model") < countTokens(previousDiff, "test-model"));
+                }
+                previousDiff = diff;
+                for (let attempt = 0; attempt < 3; attempt++) {
+                    const call = counted[preparation * 3 + attempt];
+                    const messages = call.args[1] as readonly vscode.LanguageModelChatRequestMessage[];
+                    assert.strictEqual(call.args[0], "test-model");
+                    assert.strictEqual(call.args[2], 3000);
+                    assert.strictEqual(messages.length, 2);
+                    assert.strictEqual(
+                        (messages[0].content[0] as vscode.LanguageModelTextPart).value,
+                        COMMIT_SYSTEM_PROMPT
+                    );
+                    assert.ok((messages[1].content[0] as vscode.LanguageModelTextPart).value.startsWith(prefix));
+                    if (attempt === 2) {
+                        assert.deepStrictEqual(messages, sentMessages);
+                    }
+                }
             }
         });
     });

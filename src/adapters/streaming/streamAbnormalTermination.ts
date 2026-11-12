@@ -67,10 +67,13 @@ const CLASSIFICATION_SUMMARIES: Record<Exclude<TerminalClassification, "ok" | "r
 /**
  * Decides whether a finished stream must be surfaced as a thrown error.
  * Returns the error to throw, or `undefined` for healthy/acceptable turns.
- * Pure function of the fingerprint — no logging, no side effects.
+ * The optional raw reasons are for the host-facing error only; fingerprint
+ * data is sanitized for logs and must not replace the actual upstream cause.
+ * Pure function — no logging, no side effects.
  */
 export function evaluateAbnormalTermination(
-    fingerprint: TerminalFingerprint
+    fingerprint: TerminalFingerprint,
+    finishReasons = fingerprint.data.finishReasons
 ): StreamAbnormalTerminationError | undefined {
     const { classification, data } = fingerprint;
 
@@ -91,7 +94,7 @@ export function evaluateAbnormalTermination(
     }
 
     const summary = CLASSIFICATION_SUMMARIES[classification];
-    const reasonSuffix = data.finishReasons ? ` (reason: ${data.finishReasons})` : "";
+    const reasonSuffix = finishReasons ? ` (reason: ${finishReasons})` : "";
     const tokenDetail =
         typeof data.completionTokens === "number"
             ? ` ${data.completionTokens} output tokens (${data.reasoningTokens ?? 0} reasoning), ${data.textChars} visible characters.`
@@ -103,5 +106,5 @@ export function evaluateAbnormalTermination(
         " Do not blindly retry the identical request: if the LiteLLM proxy has fallback models configured they were already exhausted, and identical retries can be served a cached copy of this same failure. " +
         "Consider retrying manually, reducing the conversation size, or checking the proxy's fallback/caching configuration.";
 
-    return new StreamAbnormalTerminationError(classification, data.finishReasons, message);
+    return new StreamAbnormalTerminationError(classification, finishReasons, message);
 }

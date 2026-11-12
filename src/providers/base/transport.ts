@@ -1,5 +1,5 @@
 import type * as vscode from "vscode";
-import { LiteLLMClient } from "../../adapters/litellmClient";
+import { LiteLLMClient, resolveChatEndpoint } from "../../adapters/litellmClient";
 import { isContextOverflowError } from "../../adapters/tokenUtils";
 import { StructuredLogger } from "../../observability/structuredLogger";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../../types";
@@ -59,7 +59,8 @@ export class Transport {
         token: vscode.CancellationToken,
         caller?: string,
         modelInfo?: LiteLLMModelInfo,
-        configuration?: Record<string, unknown>
+        configuration?: Record<string, unknown>,
+        onRoute?: (endpoint: string) => void
     ): Promise<ReadableStream<Uint8Array>> {
         this.logger.debug(
             `[transport.sendRequestToLiteLLM] Preparing LiteLLM request for model: ${request.model} (caller: ${caller})`
@@ -140,6 +141,8 @@ export class Transport {
             configuration.allowChatCompletionsFallback === true;
 
         try {
+            // Report the route actually selected by the client, not model metadata.
+            onRoute?.(resolveChatEndpoint(modelInfo?.mode) === "/responses" ? "responses" : "chat");
             const stream = await client.chat(request, modelInfo?.mode, token, modelInfo);
             this.logger.debug(`[transport.sendRequestToLiteLLM] HTTP stream established for model: ${request.model}`);
             StructuredLogger.debug("transport.http_response_stream_open", {
@@ -171,6 +174,7 @@ export class Transport {
                 const chatModelInfo: LiteLLMModelInfo | undefined = modelInfo
                     ? { ...modelInfo, mode: "chat" }
                     : modelInfo;
+                onRoute?.("chat");
                 return client.chat(request, "chat", token, chatModelInfo);
             }
 

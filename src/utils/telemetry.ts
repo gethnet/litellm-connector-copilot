@@ -1,6 +1,23 @@
 import { Logger } from "./logger";
 import type { TelemetryService } from "../telemetry/telemetryService";
 import type { CostSummary } from "../telemetry/types";
+import { safeUsageNumber } from "./safeUsageNumber";
+
+// Only connector-owned constants may cross the telemetry boundary. Never infer
+// safety from a prefix: upstream messages can mimic category names.
+const SAFE_FAILURE_CATEGORIES = new Set([
+    "request_failed",
+    "network_error",
+    "timeout",
+    "abnormal_termination:refusal",
+    "abnormal_termination:truncated",
+    "abnormal_termination:failed",
+    "abnormal_termination:no_terminal_event",
+    "abnormal_termination:empty_response",
+    "abnormal_termination:ok",
+    "quota_exceeded:insert_edit_into_file",
+    "quota_exceeded:replace_string_in_file",
+]);
 
 export interface IMetrics {
     requestId: string;
@@ -33,8 +50,33 @@ export class LiteLLMTelemetry {
     }
 
     public static reportMetric(metric: IMetrics): void {
+        // Runtime values can originate in untrusted upstream usage despite static types.
+        // Normalize a copy so neither legacy diagnostics nor telemetry sees them.
+        metric = {
+            ...metric,
+            durationMs: safeUsageNumber(metric.durationMs),
+            tokensIn: safeUsageNumber(metric.tokensIn),
+            tokensOut: safeUsageNumber(metric.tokensOut),
+            cacheReadRatio: safeUsageNumber(metric.cacheReadRatio),
+            promptCacheTokens: safeUsageNumber(metric.promptCacheTokens),
+            cacheCreationInputTokens: safeUsageNumber(metric.cacheCreationInputTokens),
+            reasoningTokens: safeUsageNumber(metric.reasoningTokens),
+            toolTokens: safeUsageNumber(metric.toolTokens),
+            acceptedPredictionTokens: safeUsageNumber(metric.acceptedPredictionTokens),
+            rejectedPredictionTokens: safeUsageNumber(metric.rejectedPredictionTokens),
+            reservedOutputTokens: safeUsageNumber(metric.reservedOutputTokens),
+            totalTokenMax: safeUsageNumber(metric.totalTokenMax),
+            estimatedInputCost: safeUsageNumber(metric.estimatedInputCost),
+            estimatedOutputCost: safeUsageNumber(metric.estimatedOutputCost),
+            estimatedTotalCost: safeUsageNumber(metric.estimatedTotalCost),
+        };
+        if (metric.cacheReadRatio !== undefined && metric.cacheReadRatio > 1) {
+            metric.cacheReadRatio = undefined;
+        }
         // Keep structured debug logs for local diagnostics.
-        Logger.debug(`[Telemetry] ${JSON.stringify(metric)}`);
+        // Error strings can contain arbitrary upstream echoes, including secrets.
+        const { error: _error, ...safeMetric } = metric;
+        Logger.debug(`[Telemetry] ${JSON.stringify(safeMetric)}`);
 
         // Mirror token usage into the regular output stream to make token accounting
         // visible without requiring debug log level.
@@ -113,7 +155,8 @@ export class LiteLLMTelemetry {
                     model: metric.model,
                     endpoint: "unknown",
                     durationMs: metric.durationMs ?? 0,
-                    errorType: metric.error ?? "unknown",
+                    errorType:
+                        metric.error && SAFE_FAILURE_CATEGORIES.has(metric.error) ? metric.error : "request_failed",
                     cost: {
                         estimated_input_cost: metric.estimatedInputCost,
                         estimated_output_cost: metric.estimatedOutputCost,
@@ -126,7 +169,7 @@ export class LiteLLMTelemetry {
                     caller,
                     model: metric.model,
                     endpoint: "unknown",
-                    reason: metric.error ?? "provider_caching_not_supported",
+                    reason: "provider_caching_not_supported",
                 });
             }
         }

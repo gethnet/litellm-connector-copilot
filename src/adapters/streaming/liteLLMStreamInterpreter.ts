@@ -1,6 +1,7 @@
 export type { V2EmittedPart as EmittedPart } from "../../providers/v2Types";
 import type { V2EmittedPart as EmittedPart } from "../../providers/v2Types";
 import type { OpenAIUsageCompletionTokenDetails, OpenAIUsagePayload, OpenAIUsagePromptTokenDetails } from "../../types";
+import { safeUsageNumber } from "../../utils/safeUsageNumber";
 import { isCacheControlMimeType, normalizeToolCallId } from "../../utils";
 import { sanitizeToolName } from "../../utils/toolNameUtils";
 import { Logger } from "../../utils/logger";
@@ -9,8 +10,13 @@ import {
     createResponsesReasoningState,
     interpretResponsesReasoningEvent,
     type ResponsesReasoningState,
+    type StreamLogContext,
 } from "./responsesReasoningEvents";
 import { sanitizeTerminalFrame } from "./terminalFrameDump";
+import { safeFinishReason } from "./streamTerminalFingerprint";
+import { diagnosticHash } from "./diagnosticHash";
+
+export type { StreamLogContext } from "./responsesReasoningEvents";
 
 export interface StreamingState {
     toolCallBuffers: Map<number, { id?: string; name?: string; args: string }>;
@@ -33,6 +39,13 @@ export interface StreamingState {
      * responsesReasoningEvents.ts; see issue #149.
      */
     responsesReasoning: ResponsesReasoningState;
+    /**
+     * Optional request correlation injected by the owning provider turn.
+     * Interpreter and reasoning traces attach this as StructuredLogger
+     * options so concurrent requests remain distinguishable in logs.
+     * Optional: the commit provider and legacy tests run without it.
+     */
+    logContext?: StreamLogContext;
     /**
      * Id shared by consecutive chat `reasoning_content` chunks. Copilot gives an
      * id-less thinking part its own block, so without it every chunk renders as
@@ -164,6 +177,8 @@ function normalizeUsagePayload(usage: RawUsagePayload): OpenAIUsagePayload {
         completionTokenDetails.rejected_prediction_tokens = rejectedPredictionTokens;
     }
 
+    // Preserve upstream values and JavaScript addition for host-facing parts;
+    // diagnostic sinks must independently filter untrusted runtime values.
     const normalized: OpenAIUsagePayload = {
         prompt_tokens: usage.prompt_tokens ?? 0,
         completion_tokens: usage.completion_tokens ?? 0,
@@ -342,31 +357,39 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
 
     // Log the incoming event at trace level
     Logger.trace("[interpretStreamEvent] Processing event", {
-        eventType: typeof data.type === "string" ? data.type : "unknown",
+        eventType: diagnosticHash(typeof data.type === "string" ? data.type : undefined),
         hasChoices: !!data.choices,
         hasUsage: !!data.usage,
     });
-    StructuredLogger.trace("stream.event_received", {
-        eventType: typeof data.type === "string" ? data.type : undefined,
-        hasChoices: !!data.choices,
-        hasUsage: !!data.usage,
-        mergeReasoning: state.mergeReasoningContentInChoices,
-    });
+    StructuredLogger.trace(
+        "stream.event_received",
+        {
+            eventType: diagnosticHash(typeof data.type === "string" ? data.type : undefined),
+            hasChoices: !!data.choices,
+            hasUsage: !!data.usage,
+            mergeReasoning: state.mergeReasoningContentInChoices,
+        },
+        state.logContext
+    );
 
     if (typeof data.merge_reasoning_content_in_choices === "boolean") {
         state.mergeReasoningContentInChoices = data.merge_reasoning_content_in_choices;
         Logger.trace(
             `[interpretStreamEvent] Set mergeReasoningContentInChoices=${data.merge_reasoning_content_in_choices}`
         );
-        StructuredLogger.trace("stream.merge_reasoning_setting", {
-            mergeReasoningContentInChoices: data.merge_reasoning_content_in_choices,
-        });
+        StructuredLogger.trace(
+            "stream.merge_reasoning_setting",
+            {
+                mergeReasoningContentInChoices: data.merge_reasoning_content_in_choices,
+            },
+            state.logContext
+        );
     }
 
     // /responses reasoning events (real LiteLLM sequence — issue #149).
     // Runs before every other /responses branch so reasoning frames are never
     // swallowed by the text/tool-call handling below.
-    const reasoningParts = interpretResponsesReasoningEvent(data, state.responsesReasoning);
+    const reasoningParts = interpretResponsesReasoningEvent(data, state.responsesReasoning, state.logContext);
     if (reasoningParts.length > 0) {
         thinkingParts.push(...reasoningParts);
     }
@@ -378,7 +401,11 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
     // the normal text branches below.
     if (typeof data.$mid === "number" && typeof data.mimeType === "string") {
         if (isCacheControlMimeType(data.mimeType)) {
-            StructuredLogger.trace("stream.cache_control_carrier_dropped", { mimeType: data.mimeType });
+            StructuredLogger.trace(
+                "stream.cache_control_carrier_dropped",
+                { mimeType: diagnosticHash(data.mimeType) },
+                state.logContext
+            );
             return [];
         }
 
@@ -410,15 +437,22 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
             state.chatReasoningId ??= `thinking-${globalThis.crypto.randomUUID()}`;
             thinkingParts.push({ type: "thinking", value: reasoningContent, id: state.chatReasoningId });
             Logger.trace(`[interpretStreamEvent] Emitted thinking part, length=${reasoningContent.length}`);
-            StructuredLogger.trace("stream.reasoning_emitted", {
-                length: reasoningContent.length,
-                preview: reasoningContent.slice(0, 50),
-            });
+            StructuredLogger.trace(
+                "stream.reasoning_emitted",
+                {
+                    length: reasoningContent.length,
+                },
+                state.logContext
+            );
         } else if (reasoningContent && mergeReasoningIntoContent) {
             Logger.trace(`[interpretStreamEvent] Merging reasoning into content, length=${reasoningContent.length}`);
-            StructuredLogger.trace("stream.reasoning_merged", {
-                length: reasoningContent.length,
-            });
+            StructuredLogger.trace(
+                "stream.reasoning_merged",
+                {
+                    length: reasoningContent.length,
+                },
+                state.logContext
+            );
         }
 
         // LiteLLM's chat endpoint sends visible Anthropic thinking through
@@ -436,18 +470,26 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                         value: "",
                         metadata: { redactedData: block.data, display: "omitted" },
                     });
-                    StructuredLogger.trace("stream.chat_redacted_thinking_block", {
-                        dataLength: block.data.length,
-                    });
+                    StructuredLogger.trace(
+                        "stream.chat_redacted_thinking_block",
+                        {
+                            dataLength: block.data.length,
+                        },
+                        state.logContext
+                    );
                 } else if (typeof block.signature === "string" && block.signature.length > 0) {
                     thinkingParts.push({
                         type: "thinking",
                         value: "",
                         metadata: { signature: block.signature },
                     });
-                    StructuredLogger.trace("stream.chat_thinking_block_signature", {
-                        signatureLength: block.signature.length,
-                    });
+                    StructuredLogger.trace(
+                        "stream.chat_thinking_block_signature",
+                        {
+                            signatureLength: block.signature.length,
+                        },
+                        state.logContext
+                    );
                 }
             }
         }
@@ -473,10 +515,13 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
             if (textWithoutParsedCalls) {
                 textParts.push({ type: "text", value: textWithoutParsedCalls });
                 Logger.trace(`[interpretStreamEvent] Emitted text part, length=${textWithoutParsedCalls.length}`);
-                StructuredLogger.trace("stream.text_emitted", {
-                    length: textWithoutParsedCalls.length,
-                    preview: textWithoutParsedCalls.slice(0, 50),
-                });
+                StructuredLogger.trace(
+                    "stream.text_emitted",
+                    {
+                        length: textWithoutParsedCalls.length,
+                    },
+                    state.logContext
+                );
             }
 
             for (const parsedToolCall of toolCalls) {
@@ -522,30 +567,47 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                     const newId = rawId ? normalizeToolCallId(rawId) : "";
                     // Skip if this tool call ID was already emitted in a previous turn
                     if (newId && state.emittedTextToolCallIds.has(newId)) {
-                        Logger.trace(`[interpretStreamEvent] Skipping duplicate tool call ID: ${newId}`);
-                        StructuredLogger.trace("stream.tool_call_skipped_duplicate", { id: newId });
+                        Logger.trace("[interpretStreamEvent] Skipping duplicate tool call", {
+                            id: diagnosticHash(newId),
+                        });
+                        StructuredLogger.trace(
+                            "stream.tool_call_skipped_duplicate",
+                            { id: diagnosticHash(newId) },
+                            state.logContext
+                        );
                         continue;
                     }
                     // Apply tool name sanitization for AWS Bedrock Converse API compliance (64-char limit)
-                    const { name: sanitizedName } = sanitizeToolName(fn?.name || "");
+                    const { name: sanitizedName } = sanitizeToolName(fn?.name || "", false);
                     buffer = { id: newId, name: sanitizedName, args: fn?.arguments || "" };
                     state.toolCallBuffers.set(index, buffer);
-                    Logger.trace(`[interpretStreamEvent] Buffered new tool call: ${sanitizedName} (id: ${newId})`);
-                    StructuredLogger.trace("stream.tool_call_buffered", {
-                        toolName: fn?.name,
-                        rawId,
-                        normalizedId: newId,
-                        index,
-                    });
+                    Logger.trace(
+                        `[interpretStreamEvent] Buffered new tool call name hash: ${diagnosticHash(sanitizedName)}`,
+                        { id: diagnosticHash(newId) }
+                    );
+                    StructuredLogger.trace(
+                        "stream.tool_call_buffered",
+                        {
+                            toolName: diagnosticHash(fn?.name),
+                            rawId: diagnosticHash(rawId),
+                            normalizedId: diagnosticHash(newId),
+                            index,
+                        },
+                        state.logContext
+                    );
                 } else {
                     if (tc.id) {
                         // Normalize the tool call ID when updating
                         const normalizedId = normalizeToolCallId(tc.id as string);
-                        StructuredLogger.trace("stream.tool_call_id_updated", {
-                            rawId: tc.id,
-                            normalizedId,
-                            index,
-                        });
+                        StructuredLogger.trace(
+                            "stream.tool_call_id_updated",
+                            {
+                                rawId: diagnosticHash(typeof tc.id === "string" ? tc.id : undefined),
+                                normalizedId: diagnosticHash(normalizedId),
+                                index,
+                            },
+                            state.logContext
+                        );
                         buffer.id = normalizedId;
                     }
                     const tcFn = tc.function as Record<string, string> | undefined;
@@ -595,11 +657,15 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                         JSON.parse(buffer.args);
                     } catch {
                         isJsonValid = false;
-                        StructuredLogger.warn("stream.tool_call_args_invalid_json", {
-                            toolName: buffer.name,
-                            normalizedId: buffer.id,
-                            index,
-                        });
+                        StructuredLogger.warn(
+                            "stream.tool_call_args_invalid_json",
+                            {
+                                toolName: diagnosticHash(buffer.name),
+                                normalizedId: diagnosticHash(buffer.id),
+                                index,
+                            },
+                            state.logContext
+                        );
                     }
 
                     // Only emit invalid JSON tool calls when finish_reason is tool_calls
@@ -614,12 +680,16 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                             args: buffer.args,
                         });
                         state.emittedTextToolCallIds.add(buffer.id);
-                        StructuredLogger.trace("stream.tool_call_emitted", {
-                            toolName: buffer.name,
-                            normalizedId: buffer.id,
-                            index,
-                            finishReason,
-                        });
+                        StructuredLogger.trace(
+                            "stream.tool_call_emitted",
+                            {
+                                toolName: diagnosticHash(buffer.name),
+                                normalizedId: diagnosticHash(buffer.id),
+                                index,
+                                finishReason: safeFinishReason(finishReason),
+                            },
+                            state.logContext
+                        );
                     }
                     state.completedToolCallIndices.add(index);
                 }
@@ -630,9 +700,13 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
             // Log at warn so operators see refusals at default verbosity without
             // the stream interpreter treating it as a normal completion.
             if (choice.finish_reason === "refusal") {
-                StructuredLogger.warn("stream.refusal_detected", {
-                    shape: "chat-completions",
-                });
+                StructuredLogger.warn(
+                    "stream.refusal_detected",
+                    {
+                        shape: "chat-completions",
+                    },
+                    state.logContext
+                );
             }
             finishParts.push({ type: "finish", reason: choice.finish_reason });
         }
@@ -659,10 +733,13 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
     if (data.type === "response.output_text.delta" && typeof data.delta === "string") {
         Logger.trace(`[interpretStreamEvent] Emitting /responses text delta: ${data.delta.length} chars`);
         textParts.push({ type: "text", value: data.delta });
-        StructuredLogger.trace("stream.responses_text_delta", {
-            length: data.delta.length,
-            preview: data.delta.substring(0, 100),
-        });
+        StructuredLogger.trace(
+            "stream.responses_text_delta",
+            {
+                length: data.delta.length,
+            },
+            state.logContext
+        );
     }
     // NOTE (/responses reasoning): thinking deltas, block open/close, and
     // encrypted continuity for the real LiteLLM sequence
@@ -686,9 +763,11 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                 const existing = state.responseToolCallBuffers.get(callId) ?? { id: callId, name: undefined, args: "" };
                 if (name) {
                     // Apply tool name sanitization for AWS Bedrock Converse API compliance (64-char limit)
-                    const { name: sanitizedName } = sanitizeToolName(name);
+                    const { name: sanitizedName } = sanitizeToolName(name, false);
                     existing.name = sanitizedName;
-                    Logger.trace(`[interpretStreamEvent] /responses output_item.delta tool name: ${sanitizedName}`);
+                    Logger.trace(
+                        `[interpretStreamEvent] /responses output_item.delta tool name hash: ${diagnosticHash(sanitizedName)}`
+                    );
                 }
                 if (argsDelta) {
                     existing.args += argsDelta;
@@ -699,20 +778,24 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                 state.responseToolCallBuffers.set(callId, existing);
                 if (!state.responseToolCallOrder.includes(callId)) {
                     state.responseToolCallOrder.push(callId);
-                    StructuredLogger.trace("stream.responses_tool_call_delta", {
-                        callId,
-                        name,
-                        argsLength: argsDelta?.length ?? 0,
-                    });
+                    StructuredLogger.trace(
+                        "stream.responses_tool_call_delta",
+                        {
+                            callId: diagnosticHash(callId),
+                            name: diagnosticHash(name),
+                            argsLength: argsDelta?.length ?? 0,
+                        },
+                        state.logContext
+                    );
                 }
             } else {
                 // No call_id yet — buffer anonymously (providers that stream args before id)
                 if (name) {
                     // Apply tool name sanitization for AWS Bedrock Converse API compliance (64-char limit)
-                    const { name: sanitizedName } = sanitizeToolName(name);
+                    const { name: sanitizedName } = sanitizeToolName(name, false);
                     state.anonymousResponseToolName = sanitizedName;
                     Logger.trace(
-                        `[interpretStreamEvent] /responses output_item.delta anonymous tool name: ${sanitizedName}`
+                        `[interpretStreamEvent] /responses output_item.delta anonymous tool name hash: ${diagnosticHash(sanitizedName)}`
                     );
                 }
                 if (argsDelta) {
@@ -720,9 +803,13 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                     Logger.trace(
                         `[interpretStreamEvent] /responses output_item.delta anonymous args delta: ${argsDelta.length} chars accumulated`
                     );
-                    StructuredLogger.trace("stream.responses_anonymous_tool_delta", {
-                        argsLength: argsDelta.length,
-                    });
+                    StructuredLogger.trace(
+                        "stream.responses_anonymous_tool_delta",
+                        {
+                            argsLength: argsDelta.length,
+                        },
+                        state.logContext
+                    );
                 }
             }
         }
@@ -733,13 +820,17 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
         const delta = data.delta as Record<string, unknown> | undefined;
         const id = typeof delta?.id === "string" ? delta.id : undefined;
         if (id) {
-            Logger.trace(`[interpretStreamEvent] /responses legacy output_tool_call.* delta for id: ${id}`);
+            Logger.trace("[interpretStreamEvent] /responses legacy output_tool_call.* delta", {
+                id: diagnosticHash(id),
+            });
             const existing = state.responseToolCallBuffers.get(id) ?? { id, name: undefined, args: "" };
             if (typeof delta?.name === "string") {
                 // Apply tool name sanitization for AWS Bedrock Converse API compliance (64-char limit)
-                const { name: sanitizedName } = sanitizeToolName(delta.name);
+                const { name: sanitizedName } = sanitizeToolName(delta.name, false);
                 existing.name = sanitizedName;
-                Logger.trace(`[interpretStreamEvent] /responses legacy tool name: ${sanitizedName}`);
+                Logger.trace(
+                    `[interpretStreamEvent] /responses legacy tool name hash: ${diagnosticHash(sanitizedName)}`
+                );
             }
             if (typeof delta?.arguments === "string") {
                 existing.args += delta.arguments;
@@ -750,11 +841,15 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
             state.responseToolCallBuffers.set(id, existing);
             if (!state.responseToolCallOrder.includes(id)) {
                 state.responseToolCallOrder.push(id);
-                StructuredLogger.trace("stream.responses_legacy_tool_call_delta", {
-                    id,
-                    name: delta?.name as string | undefined,
-                    argsLength: typeof delta?.arguments === "string" ? delta.arguments.length : 0,
-                });
+                StructuredLogger.trace(
+                    "stream.responses_legacy_tool_call_delta",
+                    {
+                        id: diagnosticHash(id),
+                        name: diagnosticHash(typeof delta?.name === "string" ? delta.name : undefined),
+                        argsLength: typeof delta?.arguments === "string" ? delta.arguments.length : 0,
+                    },
+                    state.logContext
+                );
             }
         }
     }
@@ -788,7 +883,7 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                 try {
                     JSON.parse(buffer.args);
                     Logger.trace(
-                        `[interpretStreamEvent] Flushing /responses tool call: ${buffer.name} (id: ${buffer.id})`
+                        `[interpretStreamEvent] Flushing /responses tool call name hash: ${diagnosticHash(buffer.name)} (id hash: ${diagnosticHash(buffer.id)})`
                     );
                     toolCallParts.push({
                         type: "tool_call",
@@ -800,7 +895,9 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                     flushedToolCallCount++;
                 } catch {
                     // drop malformed tool call
-                    Logger.warn(`[interpretStreamEvent] Dropped malformed tool call args for ${buffer.name}`);
+                    Logger.warn(
+                        `[interpretStreamEvent] Dropped malformed tool call args for name hash ${diagnosticHash(buffer.name)}`
+                    );
                 }
             }
         }
@@ -830,23 +927,31 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                 usageValue.completion_tokens_details = { reasoning_tokens: 0 };
             }
 
-            Logger.debug(
-                `[interpretStreamEvent] Recording usage: input=${usageValue.prompt_tokens} output=${usageValue.completion_tokens}`
-            );
+            // The emitted payload preserves malformed upstream values for compatibility,
+            // but untrusted strings or objects must not reach diagnostic sinks.
+            const diagnosticInput = safeUsageNumber(usageValue.prompt_tokens);
+            const diagnosticOutput = safeUsageNumber(usageValue.completion_tokens);
+            Logger.debug(`[interpretStreamEvent] Recording usage: input=${diagnosticInput} output=${diagnosticOutput}`);
             dataParts.push({
                 type: "data",
                 mimeType: "usage",
                 value: usageValue,
             });
-            StructuredLogger.trace("stream.responses_usage", {
-                inputTokens: usageValue.prompt_tokens,
-                outputTokens: usageValue.completion_tokens,
-                systemPromptTokens: usageValue.system_prompt_tokens,
-                cachedTokens: usageValue.prompt_tokens_details?.cached_tokens,
-                cacheCreationInputTokens: usageValue.prompt_tokens_details?.cache_creation_input_tokens,
-                reasoningTokens: usageValue.completion_tokens_details?.reasoning_tokens,
-                toolCallsEmitted: flushedToolCallCount,
-            });
+            StructuredLogger.trace(
+                "stream.responses_usage",
+                {
+                    inputTokens: diagnosticInput,
+                    outputTokens: diagnosticOutput,
+                    systemPromptTokens: safeUsageNumber(usageValue.system_prompt_tokens),
+                    cachedTokens: safeUsageNumber(usageValue.prompt_tokens_details?.cached_tokens),
+                    cacheCreationInputTokens: safeUsageNumber(
+                        usageValue.prompt_tokens_details?.cache_creation_input_tokens
+                    ),
+                    reasoningTokens: safeUsageNumber(usageValue.completion_tokens_details?.reasoning_tokens),
+                    toolCallsEmitted: flushedToolCallCount,
+                },
+                state.logContext
+            );
         }
 
         // Fable 5.1 /responses refusal: the response status can be "refusal"
@@ -856,9 +961,13 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
         const responseRecord = data.response as Record<string, unknown> | undefined;
         const responseStatus = typeof responseRecord?.status === "string" ? responseRecord.status : undefined;
         if (responseStatus === "refusal") {
-            StructuredLogger.warn("stream.refusal_detected", {
-                shape: "responses",
-            });
+            StructuredLogger.warn(
+                "stream.refusal_detected",
+                {
+                    shape: "responses",
+                },
+                state.logContext
+            );
             finishParts.push({ type: "finish", reason: "refusal" });
         }
 
@@ -873,24 +982,33 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
             const incompleteDetails = responseRecord?.incomplete_details as { reason?: unknown } | undefined;
             const incompleteReason =
                 typeof incompleteDetails?.reason === "string" ? incompleteDetails.reason : undefined;
-            const errorRecord = responseRecord?.error as { code?: unknown; message?: unknown } | undefined;
             const reason = isFailed ? "failed" : (incompleteReason ?? "incomplete");
-            // Untruncated by design: this is the primary triage signal for
-            // "response stopped mid-answer" reports across all models.
-            StructuredLogger.warn("stream.responses_terminal_not_completed", {
-                terminalType: String(data.type),
-                status: responseStatus,
-                incompleteReason,
-                errorCode: typeof errorRecord?.code === "string" ? errorRecord.code : undefined,
-                errorMessage: typeof errorRecord?.message === "string" ? errorRecord.message : undefined,
-            });
-            // Full sanitized frame: bridges stash the real stop cause under
-            // nonstandard keys (observed: incomplete with NO reason from a
-            // LiteLLM bridge) that the selective extraction above misses.
-            // Content/system-prompt fields are stripped; see terminalFrameDump.
-            StructuredLogger.warn("stream.responses_terminal_frame", {
-                frame: sanitizeTerminalFrame(responseRecord),
-            });
+            const safeFrame = sanitizeTerminalFrame(responseRecord);
+            // Reasons and error fields are untrusted upstream data; log only
+            // allowlisted classifications and structural presence indicators.
+            StructuredLogger.warn(
+                "stream.responses_terminal_not_completed",
+                {
+                    terminalType: String(data.type),
+                    status: safeFrame.status,
+                    incompleteReason:
+                        incompleteReason === "max_output_tokens" || incompleteReason === "content_filter"
+                            ? incompleteReason
+                            : incompleteReason === undefined
+                              ? undefined
+                              : "unknown",
+                    hasError: safeFrame.hasError === true,
+                },
+                state.logContext
+            );
+            // Preserve the permanent triage event using a strict structural summary.
+            StructuredLogger.warn(
+                "stream.responses_terminal_frame",
+                {
+                    frame: safeFrame,
+                },
+                state.logContext
+            );
             finishParts.push({ type: "finish", reason });
         }
     }
@@ -909,7 +1027,7 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                 const name = nameFromDone ?? buffer?.name;
                 const args = argsFromDone ?? buffer?.args;
                 Logger.trace(
-                    `[interpretStreamEvent] Flushing keyed tool call on output_item.done: ${name} (id: ${callId})`
+                    `[interpretStreamEvent] Flushing keyed tool call on output_item.done: name hash ${diagnosticHash(name)} (id hash: ${diagnosticHash(callId)})`
                 );
                 if (name && args) {
                     try {
@@ -921,14 +1039,20 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                             name,
                             args,
                         });
-                        StructuredLogger.trace("stream.responses_tool_call_done", {
-                            callId,
-                            name,
-                            argsLength: args.length,
-                        });
+                        StructuredLogger.trace(
+                            "stream.responses_tool_call_done",
+                            {
+                                callId: diagnosticHash(callId),
+                                name: diagnosticHash(name),
+                                argsLength: args.length,
+                            },
+                            state.logContext
+                        );
                     } catch {
                         // drop malformed tool call
-                        Logger.warn(`[interpretStreamEvent] Dropped malformed tool call ${name} on output_item.done`);
+                        Logger.warn(
+                            `[interpretStreamEvent] Dropped malformed tool call name hash ${diagnosticHash(name)} on output_item.done`
+                        );
                     }
                 }
                 state.responseToolCallBuffers.delete(callId);
@@ -938,7 +1062,9 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                 // Preserved from ResponsesClient for providers that never emit a call_id.
                 const name = nameFromDone ?? state.anonymousResponseToolName;
                 const args = argsFromDone ?? state.anonymousResponseToolArgs;
-                Logger.trace(`[interpretStreamEvent] Flushing anonymous tool call on output_item.done: ${name}`);
+                Logger.trace(
+                    `[interpretStreamEvent] Flushing anonymous tool call on output_item.done: name hash ${diagnosticHash(name)}`
+                );
                 if (name && args) {
                     try {
                         JSON.parse(args);
@@ -949,13 +1075,19 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                             name,
                             args,
                         });
-                        StructuredLogger.trace("stream.responses_anonymous_tool_done", {
-                            name,
-                            argsLength: args.length,
-                        });
+                        StructuredLogger.trace(
+                            "stream.responses_anonymous_tool_done",
+                            {
+                                name: diagnosticHash(name),
+                                argsLength: args.length,
+                            },
+                            state.logContext
+                        );
                     } catch {
                         // drop malformed tool call
-                        Logger.warn(`[interpretStreamEvent] Dropped malformed anonymous tool call ${name}`);
+                        Logger.warn(
+                            `[interpretStreamEvent] Dropped malformed anonymous tool call name hash ${diagnosticHash(name)}`
+                        );
                     }
                 }
             }
@@ -983,7 +1115,7 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                     try {
                         JSON.parse(buffer.args);
                         Logger.trace(
-                            `[interpretStreamEvent] Legacy flushed tool call: ${buffer.name} (id: ${buffer.id})`
+                            `[interpretStreamEvent] Legacy flushed tool call name hash: ${diagnosticHash(buffer.name)} (id hash: ${diagnosticHash(buffer.id)})`
                         );
                         toolCallParts.push({
                             type: "tool_call",
@@ -996,7 +1128,7 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                     } catch {
                         // drop malformed tool call
                         Logger.warn(
-                            `[interpretStreamEvent] Dropped malformed tool call ${buffer.name} on legacy flush`
+                            `[interpretStreamEvent] Dropped malformed tool call name hash ${diagnosticHash(buffer.name)} on legacy flush`
                         );
                     }
                 }
@@ -1004,9 +1136,13 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
             state.responseToolCallBuffers.clear();
             state.responseToolCallOrder = [];
             Logger.debug(`[interpretStreamEvent] Legacy flushed ${legacyFlushedCount} tool calls on output_item.done`);
-            StructuredLogger.trace("stream.responses_legacy_flush", {
-                toolCallsEmitted: legacyFlushedCount,
-            });
+            StructuredLogger.trace(
+                "stream.responses_legacy_flush",
+                {
+                    toolCallsEmitted: legacyFlushedCount,
+                },
+                state.logContext
+            );
         }
 
         finishParts.push({ type: "finish" });
@@ -1022,15 +1158,20 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
             if (typeof part.text === "string" && part.text) {
                 Logger.trace(`[interpretStreamEvent] Gemini text part: ${part.text.length} chars`);
                 textParts.push({ type: "text", value: part.text });
-                StructuredLogger.trace("stream.gemini_text", {
-                    length: part.text.length,
-                    preview: part.text.substring(0, 100),
-                });
+                StructuredLogger.trace(
+                    "stream.gemini_text",
+                    {
+                        length: part.text.length,
+                    },
+                    state.logContext
+                );
             }
             const functionCall = part.functionCall as { name?: string; args?: unknown; id?: string } | undefined;
             if (functionCall?.name) {
                 const argsJson = JSON.stringify(functionCall.args ?? {});
-                Logger.trace(`[interpretStreamEvent] Gemini function call: ${functionCall.name}`);
+                Logger.trace(
+                    `[interpretStreamEvent] Gemini function call name hash: ${diagnosticHash(functionCall.name)}`
+                );
                 toolCallParts.push({
                     type: "tool_call",
                     index: 0,
@@ -1038,11 +1179,15 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
                     name: functionCall.name,
                     args: argsJson,
                 });
-                StructuredLogger.trace("stream.gemini_function_call", {
-                    name: functionCall.name,
-                    id: functionCall.id,
-                    argsLength: argsJson.length,
-                });
+                StructuredLogger.trace(
+                    "stream.gemini_function_call",
+                    {
+                        name: diagnosticHash(functionCall.name),
+                        id: diagnosticHash(functionCall.id),
+                        argsLength: argsJson.length,
+                    },
+                    state.logContext
+                );
             }
         }
     }
@@ -1052,15 +1197,19 @@ export function interpretStreamEvent(json: unknown, state: StreamingState): Emit
     Logger.trace(
         `[interpretStreamEvent] Returning ${allParts.length} parts: thinking=${thinkingParts.length} text=${textParts.length} toolCall=${toolCallParts.length} response=${responseParts.length} data=${dataParts.length} finish=${finishParts.length}`
     );
-    StructuredLogger.trace("stream.event_interpretation_complete", {
-        totalParts: allParts.length,
-        thinkingParts: thinkingParts.length,
-        textParts: textParts.length,
-        toolCallParts: toolCallParts.length,
-        responseParts: responseParts.length,
-        dataParts: dataParts.length,
-        finishParts: finishParts.length,
-    });
+    StructuredLogger.trace(
+        "stream.event_interpretation_complete",
+        {
+            totalParts: allParts.length,
+            thinkingParts: thinkingParts.length,
+            textParts: textParts.length,
+            toolCallParts: toolCallParts.length,
+            responseParts: responseParts.length,
+            dataParts: dataParts.length,
+            finishParts: finishParts.length,
+        },
+        state.logContext
+    );
     return allParts;
 }
 
@@ -1093,9 +1242,13 @@ export function flushPendingBuffers(state: StreamingState): EmittedPart[] {
                     name: buffer.name || "unknown_tool",
                     args: buffer.args,
                 });
-                Logger.debug(`[flushPendingBuffers] Flushed /responses tool call: ${buffer.name} (id: ${id})`);
+                Logger.debug(
+                    `[flushPendingBuffers] Flushed /responses tool call name hash: ${diagnosticHash(buffer.name)} (id hash: ${diagnosticHash(id)})`
+                );
             } catch {
-                Logger.warn(`[flushPendingBuffers] Skipping malformed /responses tool call args (id: ${id})`);
+                Logger.warn(
+                    `[flushPendingBuffers] Skipping malformed /responses tool call args (id hash: ${diagnosticHash(id)})`
+                );
             }
         }
     }
@@ -1113,11 +1266,13 @@ export function flushPendingBuffers(state: StreamingState): EmittedPart[] {
                 name: state.anonymousResponseToolName,
                 args: state.anonymousResponseToolArgs,
             });
-            Logger.debug(`[flushPendingBuffers] Flushed anonymous tool call: ${state.anonymousResponseToolName}`);
-        } catch {
-            Logger.warn(
-                `[flushPendingBuffers] Skipping malformed anonymous tool call args: ${state.anonymousResponseToolArgs}`
+            Logger.debug(
+                `[flushPendingBuffers] Flushed anonymous tool call name hash: ${diagnosticHash(state.anonymousResponseToolName)}`
             );
+        } catch {
+            Logger.warn("[flushPendingBuffers] Skipping malformed anonymous tool call args", {
+                argsLength: state.anonymousResponseToolArgs.length,
+            });
         }
     }
     state.anonymousResponseToolName = undefined;
@@ -1136,7 +1291,9 @@ export function flushPendingBuffers(state: StreamingState): EmittedPart[] {
                     name: buffer.name || "unknown_tool",
                     args: buffer.args,
                 });
-                Logger.debug(`[flushPendingBuffers] Flushed OpenAI tool call: ${buffer.name} (id: ${buffer.id})`);
+                Logger.debug(
+                    `[flushPendingBuffers] Flushed OpenAI tool call name hash: ${diagnosticHash(buffer.name)} (id hash: ${diagnosticHash(buffer.id)})`
+                );
             } catch {
                 Logger.warn(`[flushPendingBuffers] Skipping malformed OpenAI tool call args at index ${index}`);
             }
@@ -1147,9 +1304,13 @@ export function flushPendingBuffers(state: StreamingState): EmittedPart[] {
 
     // 4. Emit finish with "incomplete_stream_end" reason to signal partial response
     Logger.debug(`[flushPendingBuffers] Emitting ${parts.length} flushed parts with incomplete_stream_end signal`);
-    StructuredLogger.debug("stream.pending_buffers_flushed", {
-        toolCallsEmitted: parts.filter((p) => p.type === "tool_call").length,
-    });
+    StructuredLogger.debug(
+        "stream.pending_buffers_flushed",
+        {
+            toolCallsEmitted: parts.filter((p) => p.type === "tool_call").length,
+        },
+        state.logContext
+    );
     parts.push({
         type: "finish",
         reason: "incomplete_stream_end",

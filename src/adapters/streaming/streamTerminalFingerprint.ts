@@ -1,4 +1,5 @@
 import type { EmittedPart } from "./liteLLMStreamInterpreter";
+import { safeUsageNumber } from "../../utils/safeUsageNumber";
 
 /**
  * Terminal-turn fingerprinting — pure accumulation + classification.
@@ -87,18 +88,20 @@ export function recordEmittedParts(stats: TerminalStats, parts: readonly Emitted
                     break;
                 }
                 const usage = part.value as UsageShape;
-                if (typeof usage.prompt_tokens === "number") {
-                    stats.promptTokens = usage.prompt_tokens;
+                const prompt = safeUsageNumber(usage.prompt_tokens);
+                if (prompt !== undefined) {
+                    stats.promptTokens = prompt;
                 }
-                if (typeof usage.completion_tokens === "number") {
-                    stats.completionTokens = usage.completion_tokens;
+                const completion = safeUsageNumber(usage.completion_tokens);
+                if (completion !== undefined) {
+                    stats.completionTokens = completion;
                 }
-                const reasoning = usage.completion_tokens_details?.reasoning_tokens;
-                if (typeof reasoning === "number") {
+                const reasoning = safeUsageNumber(usage.completion_tokens_details?.reasoning_tokens);
+                if (reasoning !== undefined) {
                     stats.reasoningTokens = reasoning;
                 }
-                const cached = usage.prompt_tokens_details?.cached_tokens;
-                if (typeof cached === "number") {
+                const cached = safeUsageNumber(usage.prompt_tokens_details?.cached_tokens);
+                if (cached !== undefined) {
                     stats.cachedTokens = cached;
                 }
                 break;
@@ -116,6 +119,20 @@ export type TerminalClassification = "refusal" | "truncated" | "failed" | "no_te
 
 /** Finish reasons that mean "output was cut short", not "model chose to stop". */
 const TRUNCATION_REASONS = new Set(["max_output_tokens", "content_filter", "incomplete", "length"]);
+const SAFE_FINISH_REASONS = new Set([
+    ...TRUNCATION_REASONS,
+    "stop",
+    "tool_calls",
+    "function_call",
+    "refusal",
+    "failed",
+    "incomplete_stream_end",
+]);
+
+/** Finish strings come from upstream and are safe to log only as known enums. */
+export function safeFinishReason(reason: string | undefined): string | undefined {
+    return reason === undefined ? undefined : SAFE_FINISH_REASONS.has(reason) ? reason : "unknown";
+}
 
 export interface FingerprintContext {
     requestId: string;
@@ -188,7 +205,8 @@ export function buildTerminalFingerprint(stats: TerminalStats, context: Fingerpr
         level: classification === "ok" ? "debug" : "warn",
         data: {
             classification,
-            finishReasons: stats.finishReasons.join(","),
+            // Finish reasons originate upstream and may contain echoed content.
+            finishReasons: stats.finishReasons.map(safeFinishReason).join(","),
             textChars: stats.textChars,
             thinkingParts: stats.thinkingParts,
             toolCallCount: stats.toolCallCount,

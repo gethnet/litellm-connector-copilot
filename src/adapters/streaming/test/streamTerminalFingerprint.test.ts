@@ -61,6 +61,15 @@ suite("streamTerminalFingerprint", () => {
         assert.strictEqual(stats.sawTerminalEvent, true);
     });
 
+    test("ignores nonfinite and negative upstream usage in terminal diagnostics", () => {
+        const stats = createTerminalStats();
+        recordEmittedParts(stats, [usage(Infinity, -1, NaN, -2)]);
+        assert.deepStrictEqual(
+            [stats.promptTokens, stats.completionTokens, stats.reasoningTokens, stats.cachedTokens],
+            [undefined, undefined, undefined, undefined]
+        );
+    });
+
     test("empty productive output is classified empty_response and logged at warn", () => {
         // Classifier-reject / laundered-400 signature: terminal arrived, zero
         // text, zero tool calls, zero completion tokens.

@@ -668,7 +668,7 @@ suite("LiteLLM Client Unit Tests", () => {
             text: async () => "detailed error",
         } as Response);
 
-        await assert.rejects(() => client.countTokens({ model: "m", prompt: "p" }), /Failed to count tokens/);
+        await assert.rejects(() => client.countTokens({ model: "m", prompt: "p" }), /HTTP 400/);
     });
 
     test("chat handles missing response body", async () => {

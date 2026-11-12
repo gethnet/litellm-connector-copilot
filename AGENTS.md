@@ -184,11 +184,12 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
   - Reads per-group configuration from `options.configuration` on each call (no global config caching)
   - Returns `LanguageModelChatInformation` entries with `isUserSelectable: true` so models appear in the picker
   - Reuses the base request pipeline for normalization, filtering, trimming, and routing
+  - Delegates final usage diagnostic formatting for normal and retry paths to `src/providers/chat/finalUsageLogger.ts`
 
-- **Commit provider**: `src/providers/liteLLMCommitProvider.ts`
-  - Implements commit-message generation only (not a `LanguageModelTextCompletionProvider`)
-  - Reuses the shared base lifecycle for LiteLLM-backed request orchestration
-  - Avoids re-implementing shared request preparation, endpoint selection, or quota/error logic
+- **Legacy commit provider**: `src/providers/liteLLMCommitProvider.ts`
+  - Retained command-backed compatibility implementation; not a registered text-completion provider
+  - Reuses the shared base lifecycle when invoked directly
+  - The live SCM command uses `LanguageModelChat.sendRequest`, not this object's discovery registry
 
 - **Entry Point**: `src/extension.ts`
   - Activates extension and instantiates exactly one `LiteLLMChatProvider` and one `LiteLLMCommitMessageProvider`
@@ -197,12 +198,13 @@ The extension uses a **shared orchestration + specialized protocol handlers** pa
   - Both providers share same `context.secrets` for `SecretStorage` (if needed for non-provider secrets)
   - Both receive per-group configuration from VS Code via `options.configuration` in `provideLanguageModelChatInformation` and request methods
   - Configuration schema defined in `package.json` `languageModelChatProviders` contribution point (VS Code 1.120 per-group format)
+  - The SCM command registration passes the registered chat provider instance, not the legacy commit provider. Preflight (raw metadata, raw model names, remote token counts) reads from that provider's discovery-populated registry; no registry copy, no global provider-group config cache.
 
 - **Adapters**:
   - `src/adapters/litellmClient.ts` — HTTP client and endpoint routing integration
   - `src/adapters/multiBackendClient.ts` — Multi-backend orchestrator and model namespacing
   - `src/adapters/responsesAdapter.ts` — LiteLLM `/responses` endpoint payload translation. Owns the Chat→Responses **content-part translation** (`text`/`image_url`/`file` → `input_text`/`input_image`/`input_file`, one `message` item per turn) and the parameter mapping (`max_tokens` → `max_output_tokens`; chat-only params are never emitted). Native OpenAI reasoning replay preserves the original `rs_` item id through the existing ThinkingPart → `thinking_blocks` path and places the reasoning item before its assistant message; only id-less bridge blocks use legacy synthetic ids. Native OpenAI histories without a valid `rs_` id are omitted rather than assigned a fabricated id. `include: ["reasoning.encrypted_content"]` is sent only for known native OpenAI/ChatGPT reasoning models with explicit `supports_reasoning: true`; stale/foreign ciphertext and old malformed histories use the existing one-shot continuity retry. See issue #154.
-  - `/responses` stream event handling (`output_item.delta`, `output_item.done`, anonymous tool buffering) lives in `src/adapters/streaming/liteLLMStreamInterpreter.ts`; the real LiteLLM reasoning sequence (`output_item.added`/`output_item.done` with `item.type "reasoning"`, `reasoning_summary_text.delta`, `reasoning_text.delta`) lives in `src/adapters/streaming/responsesReasoningEvents.ts` (issue #149)
+  - `/responses` stream event handling (`output_item.delta`, `output_item.done`, anonymous tool buffering) lives in `src/adapters/streaming/liteLLMStreamInterpreter.ts`; the real LiteLLM reasoning sequence (`output_item.added`/`output_item.done` with `item.type "reasoning"`, `reasoning_summary_text.delta`, `reasoning_text.delta`) lives in `src/adapters/streaming/responsesReasoningEvents.ts` (issue #149). Every visible `/responses` reasoning delta carries its reasoning item's id (frame `item_id`, else the open item id, else one generated id) so the host renders one thinking block per item; chat-completions `reasoning_content` chunks share `StreamingState.chatReasoningId` for the same reason (issue #182)
   - Stream-failure triage instrumentation (permanent, do not remove): `src/adapters/streaming/streamTerminalFingerprint.ts` condenses each turn into one `stream.terminal_fingerprint` event (classification ok|refusal|truncated|failed|empty_response|no_terminal_event, plus token/cache counts); `src/adapters/streaming/terminalFrameDump.ts` logs the sanitized full terminal frame (`stream.responses_terminal_frame`) whenever a `/responses` terminal has status ≠ completed. Together these attribute "nothing came back" turns to classifier rejects, upstream truncation, bridge-laundered errors, or proxy cache replays
   - `src/adapters/tokenUtils.ts` — token budgeting, trimming, and related helpers
 
@@ -327,10 +329,13 @@ Keep this pipeline shared unless the change is intentionally protocol-specific a
 - **Model selection**: resolve model using `modelIdOverride` config or first available model with `inline-completions` tag
 - **Cost tracking**: completions reuse the same pricing/token snapshot pipeline so estimated request costs are reported consistently with chat.
 
-#### Commit-Message Diff Budgeting (`src/utils/commitDiffBudget.ts`)
-- The commit command resolves the chat model once and uses `LanguageModelChat.maxInputTokens` as the independent input maximum, with raw derived limits only as a fallback.
-- `countDiffBreadth`, `computeOutputReserve`, and `computeDiffBudget` own early request-specific diff shaping. The adaptive output target is sent as `modelOptions.max_tokens`; it constrains explicit combined context but is not subtracted again from an independent input maximum. The registered chat provider performs final authoritative budgeting before transport, including when the commit provider's separate registry has no metadata.
-- `GitUtils.compactDiff` and `truncateToTokenLimit` accept optional model details and guarantee that the returned diff fits the requested token budget.
+#### Commit-Message Diff Budgeting (`src/commands/commitRequestPreparation.ts`)
+- Activation injects the registered chat provider into the SCM command. Its populated registry is the sole preflight source for raw model metadata, canonical calibration IDs, and remote counter routing; no registry or provider-group config is copied or globally cached.
+- The command selects the VS Code model once and uses its independent input maximum. `src/utils/commitDiffBudget.ts` owns breadth/output calculations; only explicit raw combined context allows subtraction of the actual prepared output cap.
+- `buildCommitMessages` defines both complete instruction-bearing messages. Preflight counts those full messages via `/utils/token_counter`, verifies up to two remote-directed reductions, and never sends a known-over-budget final recount. Counter timeout/failure falls back to locally validated calibrated estimates.
+- SCM's connector-local preserve option (`litellm_connector_preserve_messages`) retains both messages through trimming, never bypassing the shared finalized input guard. At most two command overflow recoveries shrink the actual prepared diff with strictly decreasing token count and length, recounting before each generation send; the full operation is bounded to nine counter calls / 27 seconds of counter waiting (three 3-second calls per preparation, three preparations). Failure/cancellation restores the original draft.
+- Shared chat/legacy recovery uses a stricter request-local prepared-input budget, preserves latest messages and complete tool exchanges, and skips resend when the finalized body cannot be made strictly smaller. Connector-local budget/preserve keys are never wire parameters or model metadata.
+- `src/providers/base/remoteTokenCount.ts` owns bounded, operation-local counting with cancellation and stateless access to existing provider routing. It adds no registry, credential cache, or global configuration.
 
 #### Configuration Flow (v1.120+, per-group)
 Configuration from user settings reaches providers via VS Code's language model API on a per-group basis:

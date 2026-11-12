@@ -1,10 +1,12 @@
 import type { CancellationToken } from "vscode";
 import { Logger } from "../../utils/logger";
 import { StructuredLogger } from "../../observability/structuredLogger";
+import type { StreamLogContext } from "../streaming/responsesReasoningEvents";
 
 /**
  * Decodes a ReadableStream of SSE data into raw payload strings.
- * Handles chunk boundaries, partial lines, and [DONE] marker.
+ * Handles chunk boundaries, partial lines, and [DONE] marker. Structured
+ * lifecycle and payload traces inherit the optional owning request context.
  */
 export async function* decodeSSE(
     stream: ReadableStream<Uint8Array>,
@@ -17,7 +19,8 @@ export async function* decodeSSE(
      * this to anchor inactivity watchdogs to raw connection liveness instead of
      * payload yield — see issue #151.
      */
-    onActivity?: (byteLength: number) => void
+    onActivity?: (byteLength: number) => void,
+    logContext?: StreamLogContext
 ): AsyncGenerator<string> {
     const reader = stream.getReader();
     const decoder = new TextDecoder();
@@ -32,11 +35,15 @@ export async function* decodeSSE(
     const onAbort = () => {
         aborted = true;
         Logger.warn("[decodeSSE] Stream aborted by signal");
-        StructuredLogger.warn("stream.aborted", {
-            chunkCount,
-            payloadCount,
-            reason: "abort_signal",
-        });
+        StructuredLogger.warn(
+            "stream.aborted",
+            {
+                chunkCount,
+                payloadCount,
+                reason: "abort_signal",
+            },
+            logContext
+        );
         reader.cancel().catch(() => {
             return undefined;
         });
@@ -82,32 +89,44 @@ export async function* decodeSSE(
 
     try {
         Logger.trace("[decodeSSE] Starting SSE stream decode");
-        StructuredLogger.info("stream.started", {
-            hasToken: !!token,
-            hasSignal: !!signal,
-        });
+        StructuredLogger.info(
+            "stream.started",
+            {
+                hasToken: !!token,
+                hasSignal: !!signal,
+            },
+            logContext
+        );
 
         while (true) {
             if (aborted || token?.isCancellationRequested) {
                 Logger.debug("[decodeSSE] Loop break: aborted=", aborted, "cancelled=", token?.isCancellationRequested);
-                StructuredLogger.debug("stream.loop_break", {
-                    aborted,
-                    cancellationRequested: token?.isCancellationRequested,
-                    chunkCount,
-                    payloadCount,
-                });
+                StructuredLogger.debug(
+                    "stream.loop_break",
+                    {
+                        aborted,
+                        cancellationRequested: token?.isCancellationRequested,
+                        chunkCount,
+                        payloadCount,
+                    },
+                    logContext
+                );
                 break;
             }
 
             const { done, value } = await reader.read();
             if (done) {
                 Logger.trace("[decodeSSE] Stream done, chunkCount=", chunkCount, "payloadCount=", payloadCount);
-                StructuredLogger.debug("stream.chunk_received", {
-                    event: "done",
-                    chunkCount,
-                    payloadCount,
-                    bufferLength: buffer.length,
-                });
+                StructuredLogger.debug(
+                    "stream.chunk_received",
+                    {
+                        event: "done",
+                        chunkCount,
+                        payloadCount,
+                        bufferLength: buffer.length,
+                    },
+                    logContext
+                );
                 break;
             }
             chunkCount++;
@@ -119,11 +138,15 @@ export async function* decodeSSE(
                 onActivity(value.length);
             }
             Logger.trace("[decodeSSE] Chunk #" + chunkCount + " received, length=", value?.length);
-            StructuredLogger.trace("stream.chunk_received", {
-                chunkNumber: chunkCount,
-                byteLength: value?.length,
-                bufferLengthBefore: buffer.length,
-            });
+            StructuredLogger.trace(
+                "stream.chunk_received",
+                {
+                    chunkNumber: chunkCount,
+                    byteLength: value?.length,
+                    bufferLengthBefore: buffer.length,
+                },
+                logContext
+            );
 
             buffer += decoder.decode(value, { stream: true });
 
@@ -137,20 +160,27 @@ export async function* decodeSSE(
                 const { payload, sawDone } = extractEvent(event);
                 if (sawDone) {
                     Logger.debug("[decodeSSE] Saw [DONE] marker");
-                    StructuredLogger.info("stream.done_marker_received", {
-                        chunkCount,
-                        payloadCount,
-                    });
+                    StructuredLogger.info(
+                        "stream.done_marker_received",
+                        {
+                            chunkCount,
+                            payloadCount,
+                        },
+                        logContext
+                    );
                     return;
                 }
                 if (payload) {
                     payloadCount++;
-                    Logger.trace("[decodeSSE] Yield payload #" + payloadCount, payload.slice(0, 100));
-                    StructuredLogger.trace("stream.payload_yielded", {
-                        payloadNumber: payloadCount,
-                        payloadLength: payload.length,
-                        payloadPreview: payload.slice(0, 100),
-                    });
+                    Logger.trace("[decodeSSE] Yield payload #" + payloadCount, { payloadLength: payload.length });
+                    StructuredLogger.trace(
+                        "stream.payload_yielded",
+                        {
+                            payloadNumber: payloadCount,
+                            payloadLength: payload.length,
+                        },
+                        logContext
+                    );
                     yield payload;
                 }
 
@@ -161,22 +191,29 @@ export async function* decodeSSE(
         // Flush any trailing complete event if the stream ended without an extra separator.
         if (buffer.trim()) {
             Logger.debug("[decodeSSE] Flushing trailing buffer, length=", buffer.length);
-            StructuredLogger.debug("stream.flushing_buffer", {
-                bufferLength: buffer.length,
-                chunkCount,
-                payloadCount,
-                sawDoneMarker: sawDone,
-            });
+            StructuredLogger.debug(
+                "stream.flushing_buffer",
+                {
+                    bufferLength: buffer.length,
+                    chunkCount,
+                    payloadCount,
+                    sawDoneMarker: sawDone,
+                },
+                logContext
+            );
             const { payload } = extractEvent(buffer);
             if (payload) {
                 payloadCount++;
                 Logger.trace("[decodeSSE] Yield final payload #" + payloadCount);
-                StructuredLogger.trace("stream.payload_yielded", {
-                    payloadNumber: payloadCount,
-                    payloadLength: payload.length,
-                    payloadPreview: payload.slice(0, 100),
-                    isFinalFlush: true,
-                });
+                StructuredLogger.trace(
+                    "stream.payload_yielded",
+                    {
+                        payloadNumber: payloadCount,
+                        payloadLength: payload.length,
+                        isFinalFlush: true,
+                    },
+                    logContext
+                );
                 yield payload;
             }
         }
@@ -192,12 +229,16 @@ export async function* decodeSSE(
 
             if (bufferHasIncompletData) {
                 Logger.error("[decodeSSE] Stream ended with incomplete data in buffer");
-                StructuredLogger.error("stream.ended_without_done_incomplete_buffer", {
-                    chunkCount,
-                    payloadCount,
-                    bufferLength: buffer.length,
-                    note: "Stream ended with unprocessed data - response likely truncated",
-                });
+                StructuredLogger.error(
+                    "stream.ended_without_done_incomplete_buffer",
+                    {
+                        chunkCount,
+                        payloadCount,
+                        bufferLength: buffer.length,
+                        note: "Stream ended with unprocessed data - response likely truncated",
+                    },
+                    logContext
+                );
 
                 if (!aborted && !token?.isCancellationRequested) {
                     endError = new Error(
@@ -206,11 +247,15 @@ export async function* decodeSSE(
                 }
             } else if (isEmptyStream) {
                 Logger.error("[decodeSSE] Stream ended without any payloads or [DONE] marker");
-                StructuredLogger.error("stream.ended_without_done_empty_stream", {
-                    chunkCount,
-                    payloadCount: 0,
-                    note: "Stream ended without receiving any data",
-                });
+                StructuredLogger.error(
+                    "stream.ended_without_done_empty_stream",
+                    {
+                        chunkCount,
+                        payloadCount: 0,
+                        note: "Stream ended without receiving any data",
+                    },
+                    logContext
+                );
 
                 if (!aborted && !token?.isCancellationRequested) {
                     endError = new Error("Stream ended before [DONE] marker without receiving any payloads");
@@ -221,22 +266,30 @@ export async function* decodeSSE(
                 Logger.debug(
                     "[decodeSSE] Stream closed without [DONE] marker but all payloads complete (clean closure)"
                 );
-                StructuredLogger.info("stream.ended_without_done_clean_closure", {
-                    chunkCount,
-                    payloadCount,
-                    note: "Stream ended cleanly without [DONE] marker - treating as implicit complete",
-                });
+                StructuredLogger.info(
+                    "stream.ended_without_done_clean_closure",
+                    {
+                        chunkCount,
+                        payloadCount,
+                        note: "Stream ended cleanly without [DONE] marker - treating as implicit complete",
+                    },
+                    logContext
+                );
             }
         }
     } finally {
         Logger.trace("[decodeSSE] Stream decode completed, total chunks=", chunkCount, "total payloads=", payloadCount);
-        StructuredLogger.info("stream.completed", {
-            chunkCount,
-            payloadCount,
-            sawDoneMarker: sawDone,
-            aborted,
-            bufferRemaining: buffer.length,
-        });
+        StructuredLogger.info(
+            "stream.completed",
+            {
+                chunkCount,
+                payloadCount,
+                sawDoneMarker: sawDone,
+                aborted,
+                bufferRemaining: buffer.length,
+            },
+            logContext
+        );
         if (signal) {
             signal.removeEventListener("abort", onAbort);
         }

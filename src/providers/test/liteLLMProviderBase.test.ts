@@ -4,6 +4,7 @@ import * as sinon from "sinon";
 import { LiteLLMChatProvider } from "../";
 import { ConfigManager } from "../../config/configManager";
 import { LiteLLMClient } from "../../adapters/litellmClient";
+import { countOpenAIChatMessagesTokens } from "../../adapters/tokenUtils";
 import type { LiteLLMModelInfo, OpenAIChatCompletionRequest } from "../../types";
 import { createMockSecrets } from "../../test/utils/testMocks";
 import { EffortFallbackCache } from "../../utils/reasoningEffortFallback";
@@ -922,28 +923,29 @@ suite("LiteLLMProviderBase", () => {
                 apiKey: "k",
                 client: {} as never,
             });
+            const originalAnswer = "answer ".repeat(50);
             const history = [
                 {
                     role: vscode.LanguageModelChatMessageRole.Assistant,
-                    content: [new vscode.LanguageModelTextPart("answer")],
+                    content: [new vscode.LanguageModelTextPart(originalAnswer)],
                     name: undefined,
                 },
             ];
-            const requestWithContinuity = (): OpenAIChatCompletionRequest => ({
+            const requestWithContinuity = (content: string): OpenAIChatCompletionRequest => ({
                 model: "claude-opus-5",
                 stream: true,
                 max_tokens: 100,
                 messages: [
                     {
                         role: "assistant",
-                        content: "answer",
+                        content,
                         thinking_blocks: [
                             { type: "thinking", thinking: "prior reasoning", signature: "old-signature" },
                         ],
                     },
                 ],
             });
-            sandbox.stub(access(provider), "buildOpenAIChatRequest").resolves(requestWithContinuity());
+            sandbox.stub(access(provider), "buildOpenAIChatRequest").resolves(requestWithContinuity("answer"));
             const sent: OpenAIChatCompletionRequest[] = [];
             sandbox.stub(access(provider)._transport, "sendRequestToLiteLLM").callsFake(async (candidate) => {
                 sent.push(candidate);
@@ -957,7 +959,7 @@ suite("LiteLLMProviderBase", () => {
             });
 
             await access(provider).sendRequestWithRetry(
-                requestWithContinuity(),
+                requestWithContinuity(originalAnswer),
                 history as unknown as vscode.LanguageModelChatRequestMessage[],
                 model,
                 { configuration: baseConfig } as unknown as vscode.ProvideLanguageModelChatResponseOptions,
@@ -971,6 +973,10 @@ suite("LiteLLMProviderBase", () => {
             assert.ok(sent[0].messages[0].thinking_blocks);
             assert.strictEqual("thinking_blocks" in sent[1].messages[0], false);
             assert.strictEqual("thinking_blocks" in sent[2].messages[0], false);
+            assert.ok(
+                countOpenAIChatMessagesTokens(sent[2].messages, sent[2].model) <
+                    countOpenAIChatMessagesTokens(sent[1].messages, sent[1].model)
+            );
         });
 
         test("does not restore original adaptive effort after overflow rebuild", async () => {
@@ -982,6 +988,7 @@ suite("LiteLLMProviderBase", () => {
                 apiKey: "k",
                 client: {} as never,
             });
+            const originalPrompt = "original prompt ".repeat(50);
             sandbox.stub(access(provider), "buildOpenAIChatRequest").resolves({
                 model: "claude-opus-5",
                 stream: true,
@@ -1010,13 +1017,13 @@ suite("LiteLLMProviderBase", () => {
                     max_tokens: 100,
                     thinking: { type: "adaptive", display: "summarized" },
                     output_config: { effort: "medium" },
-                    messages: [{ role: "user", content: "hi" }],
+                    messages: [{ role: "user", content: originalPrompt }],
                 } as OpenAIChatCompletionRequest,
                 [
                     {
                         role: vscode.LanguageModelChatMessageRole.User,
                         name: undefined,
-                        content: [new vscode.LanguageModelTextPart("hi")],
+                        content: [new vscode.LanguageModelTextPart(originalPrompt)],
                     },
                 ],
                 model,
@@ -1031,6 +1038,10 @@ suite("LiteLLMProviderBase", () => {
             assert.strictEqual(sent[1].reasoning_effort, undefined);
             assert.deepStrictEqual(sent[1].thinking, { type: "adaptive", display: "summarized" });
             assert.deepStrictEqual(sent[1].output_config, { effort: "medium" });
+            assert.ok(
+                countOpenAIChatMessagesTokens(sent[1].messages, sent[1].model) <
+                    countOpenAIChatMessagesTokens(sent[0].messages, sent[0].model)
+            );
         });
 
         test("round-trips streamed continuity and recovers after switching models", async () => {
