@@ -11,6 +11,12 @@ import { Logger } from "../../../utils/logger";
 declare const suite: (name: string, fn: () => void) => void;
 declare const test: (name: string, fn: () => void) => void;
 
+/** Id of the first thinking part in a batch, or undefined when there is none. */
+function thinkingId(parts: ReturnType<typeof interpretResponsesReasoningEvent>): string | undefined {
+    const part = parts.find((p) => p.type === "thinking");
+    return part?.type === "thinking" ? part.id : undefined;
+}
+
 /**
  * Regression tests for issue #149: the interpreter previously listened for
  * `response.output_reasoning.delta` and raw Anthropic `content_block_*`
@@ -276,6 +282,121 @@ suite("ResponsesReasoningEvents - real LiteLLM /responses sequence", () => {
             const call = traceStub.getCalls().find((c) => c.args[0] === "stream.responses_reasoning_delta");
             assert.ok(call);
             assert.strictEqual(call.args[2], undefined, "no fabricated correlation when context is unavailable");
+        } finally {
+            sandbox.restore();
+        }
+    });
+
+    // Issue #182: id-less deltas let the host split one reasoning run into many blocks.
+    test("deltas of one reasoning item share its upstream id and match the closing metadata part", () => {
+        const state = createResponsesReasoningState();
+        interpretResponsesReasoningEvent(
+            { type: "response.output_item.added", item: { type: "reasoning", id: "rs_a" } },
+            state
+        );
+        const first = thinkingId(
+            interpretResponsesReasoningEvent(
+                { type: "response.reasoning_summary_text.delta", item_id: "rs_a", delta: "First " },
+                state
+            )
+        );
+        const second = thinkingId(
+            interpretResponsesReasoningEvent(
+                { type: "response.reasoning_summary_text.delta", item_id: "rs_a", delta: "thought" },
+                state
+            )
+        );
+        const closing = thinkingId(
+            interpretResponsesReasoningEvent(
+                {
+                    type: "response.output_item.done",
+                    item: { type: "reasoning", id: "rs_a", encrypted_content: "enc" },
+                },
+                state
+            )
+        );
+        assert.strictEqual(first, "rs_a");
+        assert.strictEqual(second, "rs_a");
+        assert.strictEqual(closing, "rs_a");
+
+        const nextItem = thinkingId(
+            interpretResponsesReasoningEvent(
+                { type: "response.reasoning_summary_text.delta", item_id: "rs_b", delta: "Next" },
+                state
+            )
+        );
+        assert.strictEqual(nextItem, "rs_b", "a different reasoning item must get a different id");
+    });
+
+    test("a delta without item_id uses the open reasoning item id", () => {
+        const state = createResponsesReasoningState();
+        interpretResponsesReasoningEvent(
+            { type: "response.output_item.added", item: { type: "reasoning", id: "rs_open" } },
+            state
+        );
+        const id = thinkingId(
+            interpretResponsesReasoningEvent({ type: "response.reasoning_text.delta", delta: "thought" }, state)
+        );
+        assert.strictEqual(id, "rs_open");
+    });
+
+    test("deltas with no upstream identity share one generated id that is not reused across streams", () => {
+        const state = createResponsesReasoningState();
+        const delta = { type: "response.reasoning_text.delta", delta: "thought" };
+        const first = thinkingId(interpretResponsesReasoningEvent(delta, state));
+        assert.ok(first && first.startsWith("thinking-"), "expected a generated thinking- id");
+        assert.strictEqual(thinkingId(interpretResponsesReasoningEvent(delta, state)), first);
+
+        const otherStream = thinkingId(interpretResponsesReasoningEvent(delta, createResponsesReasoningState()));
+        assert.ok(otherStream);
+        assert.notStrictEqual(otherStream, first, "streams must not share generated ids");
+    });
+
+    test("a generated id is dropped once a reasoning item opens and closes", () => {
+        const state = createResponsesReasoningState();
+        const delta = { type: "response.reasoning_text.delta", delta: "thought" };
+        const before = thinkingId(interpretResponsesReasoningEvent(delta, state));
+        interpretResponsesReasoningEvent(
+            { type: "response.output_item.added", item: { type: "reasoning", id: "rs_c" } },
+            state
+        );
+        interpretResponsesReasoningEvent(
+            { type: "response.output_item.done", item: { type: "reasoning", id: "rs_c" } },
+            state
+        );
+        const after = thinkingId(interpretResponsesReasoningEvent(delta, state));
+        assert.ok(before && after);
+        assert.notStrictEqual(after, before, "a later id-less run must not reuse the earlier generated id");
+    });
+
+    test("delta trace records which source supplied the id without logging the id", () => {
+        const sandbox = sinon.createSandbox();
+        try {
+            const traceStub = sandbox.stub(StructuredLogger, "trace");
+            const sourceOfLastDelta = (): unknown => {
+                const calls = traceStub.getCalls().filter((c) => c.args[0] === "stream.responses_reasoning_delta");
+                return (calls[calls.length - 1].args[1] as Record<string, unknown>).idSource;
+            };
+            const state = createResponsesReasoningState();
+
+            interpretResponsesReasoningEvent({ type: "response.reasoning_text.delta", delta: "a" }, state);
+            assert.strictEqual(sourceOfLastDelta(), "generated");
+
+            interpretResponsesReasoningEvent(
+                { type: "response.output_item.added", item: { type: "reasoning", id: "rs_private_open" } },
+                state
+            );
+            interpretResponsesReasoningEvent({ type: "response.reasoning_text.delta", delta: "b" }, state);
+            assert.strictEqual(sourceOfLastDelta(), "open_item");
+
+            interpretResponsesReasoningEvent(
+                { type: "response.reasoning_text.delta", item_id: "rs_private_frame", delta: "c" },
+                state
+            );
+            assert.strictEqual(sourceOfLastDelta(), "item_id");
+
+            const logged = JSON.stringify(traceStub.args);
+            assert.ok(!logged.includes("rs_private_open") && !logged.includes("rs_private_frame"));
         } finally {
             sandbox.restore();
         }
