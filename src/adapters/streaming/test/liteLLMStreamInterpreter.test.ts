@@ -189,6 +189,41 @@ suite("LiteLLMStreamInterpreter - Tool Call Regressions", () => {
         }
     });
 
+    test("gives consecutive reasoning_content chunks one id and starts a new id after text or tool calls", () => {
+        const state = createInitialStreamingState();
+        const thinkingId = (frame: unknown): string | undefined => {
+            const part = interpretStreamEvent(frame, state).find((p) => p.type === "thinking");
+            return part?.type === "thinking" ? part.id : undefined;
+        };
+        const reasoning = (text: string) => ({ choices: [{ delta: { reasoning_content: text } }] });
+
+        const first = thinkingId(reasoning("First "));
+        assert.ok(first, "id-less reasoning_content must receive an id");
+        assert.strictEqual(thinkingId(reasoning("second")), first);
+
+        interpretStreamEvent({ choices: [{ delta: { content: "Answer" } }] }, state);
+        const afterText = thinkingId(reasoning("After text"));
+        assert.ok(afterText);
+        assert.notStrictEqual(afterText, first);
+
+        interpretStreamEvent(
+            {
+                choices: [
+                    { delta: { tool_calls: [{ index: 0, id: "call_1", function: { name: "t", arguments: "{}" } }] } },
+                ],
+            },
+            state
+        );
+        const afterTool = thinkingId(reasoning("After tool"));
+        assert.ok(afterTool);
+        assert.notStrictEqual(afterTool, afterText);
+
+        const otherStream = createInitialStreamingState();
+        const otherPart = interpretStreamEvent(reasoning("Other"), otherStream).find((p) => p.type === "thinking");
+        assert.ok(otherPart?.type === "thinking" && otherPart.id);
+        assert.ok(![first, afterText, afterTool].includes(otherPart.id), "streams must not share ids");
+    });
+
     test("emits signature metadata from chat delta thinking_blocks without duplicating text", () => {
         const state = createInitialStreamingState();
 

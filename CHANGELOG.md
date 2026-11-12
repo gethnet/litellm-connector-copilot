@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.20] - 2026-11-12
+
+### 🐛 Fixes
+
+* **🧠 Fix fragmented thinking blocks**: Keep consecutive thinking chunks in one block instead of many short blocks. Reported with W&B DeepSeek-V4.1-Flash-1017 and GLM-5.3.
+
 ## [2.5.19] - 2026-11-1
 
 ### ✨ Features
@@ -1049,7 +1055,7 @@ There have been a tremendous amount of backend work done with this update to mak
 
 ---
 
-[Unreleased]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.17...HEAD
+[2.5.20]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.19...rel/v2.5.20
 [2.5.17]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.16...rel/v2.5.17
 [2.5.16]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.15...rel/v2.5.16
 [2.5.15]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.14...rel/v2.5.15
