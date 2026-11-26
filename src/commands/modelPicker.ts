@@ -1,8 +1,16 @@
 import * as vscode from "vscode";
-import { formatModelDisplayLabel, type ExtendedModelInformation } from "../utils/modelCapabilities";
+import type { ExtendedModelInformation } from "../utils/modelCapabilities";
 import type { LiteLLMProviderBase } from "../providers/liteLLMProviderBase";
 import { Logger } from "../utils/logger";
 import type { TelemetryService } from "../telemetry/telemetryService";
+
+/**
+ * The vendor prefix VS Code qualifies extension provider model ids with.
+ * The clipboard payload uses it so a pasted id is unambiguous in settings,
+ * chat prompts, and issue reports; `ConfigManager.normalizeModelId` strips
+ * it again when the commit-model setting is read, so round-tripping is safe.
+ */
+const MODEL_SELECTOR = "litellm-connector/";
 
 /**
  * Options for the model picker.
@@ -35,8 +43,10 @@ export interface ModelPickerOptions {
 }
 
 /**
- * Shows a QuickPick to select a model from the available models in LiteLLM.
- * @param provider The provider to use for model discovery.
+ * Shows a QuickPick to select a model from the connector's last-known model
+ * list. Selecting a model stores its namespaced id into the given setting and
+ * copies the fully qualified id (`litellm-connector/<id>`) to the clipboard.
+ * @param provider The provider whose display models populate the picker.
  * @param options Picker options.
  */
 export async function showModelPicker(provider: LiteLLMProviderBase, options: ModelPickerOptions): Promise<void> {
@@ -45,20 +55,33 @@ export async function showModelPicker(provider: LiteLLMProviderBase, options: Mo
         options.telemetryService.captureFeatureUsed("model-picker", options.caller || "unknown");
     }
     try {
-        // Ensure models are discovered
-        const models = await provider.discoverModels({ silent: true }, new vscode.CancellationTokenSource().token);
+        // Source candidates from the registry's display models — the same
+        // last-known view the "LiteLLM: Show Available Models" command reads.
+        // A vendor-level discoverModels({silent:true}) call is a no-op on
+        // modern per-group configs (it returns [] without options.configuration
+        // and would falsely blame the user's connection), and the extension
+        // cannot enumerate provider groups itself. The display list is
+        // populated by VS Code's host-driven per-group discovery; if it is
+        // empty, the honest guidance is to run Reload Models first.
+        const models = provider.getLastKnownModels();
         if (models.length === 0) {
-            vscode.window.showWarningMessage("No models available in LiteLLM. Please check your connection.");
+            vscode.window.showInformationMessage(
+                "No LiteLLM models are available yet. Run 'LiteLLM: Reload Models' (or open the model picker once) so provider groups resolve, then try again."
+            );
             return;
         }
 
-        const items: (vscode.QuickPickItem & { id?: string })[] = models.map((m) => {
+        const items: (vscode.QuickPickItem & { id?: string; modelId?: string })[] = models.map((m) => {
             const mExtended = m as ExtendedModelInformation;
+            const fullyQualifiedId = `${MODEL_SELECTOR}${m.id}`;
             return {
-                label: formatModelDisplayLabel(mExtended),
-                description: mExtended.backendName || mExtended.detail || "",
+                label: `${mExtended.backendName || "LiteLLM"} :: ${m.name}`,
+                description: fullyQualifiedId,
                 detail: mExtended.tooltip || "",
+                // `id` keeps the namespaced registry id for callers that match
+                // on it; `modelId` carries the fully qualified clipboard form.
                 id: mExtended.id,
+                modelId: fullyQualifiedId,
             };
         });
 
@@ -77,6 +100,8 @@ export async function showModelPicker(provider: LiteLLMProviderBase, options: Mo
         const selected = await vscode.window.showQuickPick(items, {
             title: options.title,
             placeHolder: "Select a model to use...",
+            matchOnDescription: true,
+            matchOnDetail: true,
         });
 
         if (!selected) {
@@ -97,11 +122,21 @@ export async function showModelPicker(provider: LiteLLMProviderBase, options: Mo
             return;
         }
 
-        const selectedId = (selected as { id?: string }).id ?? models.find((m) => m.name === selected.label)?.id;
-        if (!selectedId) {
+        // Selection always carries the fully qualified id (QuickPickItem.modelId,
+        // set above). The label fallback exists only for stale callers.
+        const selectedId = selected.id ?? models.find((m) => m.name === selected.label)?.id;
+        const fullyQualifiedId = selected.modelId ?? (selectedId ? `${MODEL_SELECTOR}${selectedId}` : undefined);
+        if (!selectedId || !fullyQualifiedId) {
             vscode.window.showErrorMessage("Selected model could not be resolved.");
             return;
         }
+
+        // Copy the fully qualified id to the clipboard so it can be pasted
+        // into settings, prompts, and issue reports — same contract as
+        // "LiteLLM: Show Available Models". The setting still stores the
+        // namespaced registry id; normalizeModelId strips the vendor prefix
+        // on read, so both forms round-trip.
+        await vscode.env.clipboard.writeText(fullyQualifiedId);
 
         await vscode.workspace
             .getConfiguration("litellm-connector")
@@ -112,7 +147,9 @@ export async function showModelPicker(provider: LiteLLMProviderBase, options: Mo
         if (options.onSelect) {
             options.onSelect(selectedId);
         }
-        vscode.window.showInformationMessage(`Selected model: ${selectedId}`);
+        vscode.window.showInformationMessage(
+            `Selected model: ${selectedId}. Copied fully qualified model id: ${fullyQualifiedId}`
+        );
     } catch (err) {
         Logger.error("Failed to show model picker", err);
         vscode.window.showErrorMessage("Failed to load models for selection.");
