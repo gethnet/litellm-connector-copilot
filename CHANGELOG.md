@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### 🐛 Fixes
+
+* **🔢 Stop reporting “0 models” after a manual reload**: `LiteLLM: Reload Models` now triggers the cache invalidation and VS Code's host-driven re-query of every configured provider group instead of racing a vendor-level discovery call that could never return models. The completion message no longer claims a model count the command cannot know; the picker refreshes automatically as each group re-resolves.
+
 ## [2.5.20] - 2026-11-12
 
 ### ✨ Features
