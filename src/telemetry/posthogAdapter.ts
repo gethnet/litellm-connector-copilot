@@ -44,10 +44,17 @@ export class PostHogAdapter implements IPostHogAdapter {
         if (!this.enabled || !this.client) {
             return;
         }
-        this.client.captureException(error, options?.distinctId, {
-            ...options?.properties,
+        // posthog-node 6.x: captureException takes a single options object.
+        // `level` is the native severity parameter (emitted as $exception_level);
+        // CaptureExceptionOptions has no groups field, so groups are forwarded
+        // as plain event properties to preserve the 5.x wire shape.
+        this.client.captureException(error, {
+            distinctId: options?.distinctId,
+            properties: {
+                ...options?.properties,
+                groups: options?.groups,
+            },
             level: options?.level,
-            groups: options?.groups,
         });
     }
 
