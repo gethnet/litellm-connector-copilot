@@ -160,26 +160,17 @@ export function registerReloadModelsCommand(
         if (telemetryService) {
             telemetryService.captureCommandExecuted("litellm-connector.reloadModels");
         }
-        provider.clearModelCache();
         try {
-            await vscode.window.withProgress(
-                {
-                    location: vscode.ProgressLocation.Notification,
-                    title: "LiteLLM: Reloading models",
-                    cancellable: false,
-                },
-                async () => {
-                    // Trigger a fresh discovery request. VS Code will call discovery when it needs it,
-                    // but we do it proactively so completions pick up new models immediately.
-                    await provider.provideLanguageModelChatInformation(
-                        { silent: true },
-                        new vscode.CancellationTokenSource().token
-                    );
-                }
-            );
-
-            const count = provider.getLastKnownModels().length;
-            vscode.window.showInformationMessage(`LiteLLM: Reloaded ${count} models.`);
+            // Clearing the discovery cache fires onDidChangeLanguageModelChatInformation,
+            // and VS Code answers that event by re-querying every configured provider
+            // group (with the group's secrets resolved host-side), which repopulates
+            // the registry and refreshes the picker. The extension cannot enumerate
+            // provider groups itself, so a model count is unknowable at this instant —
+            // the previous direct discovery call was a vendor-level no-op and the
+            // count read raced the host re-query, reporting "0 models" every time.
+            // The honest contract is: trigger the refresh, let the picker converge.
+            provider.clearModelCache();
+            vscode.window.showInformationMessage("Model reload requested — the picker refreshes automatically.");
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             vscode.window.showWarningMessage(`LiteLLM: Model reload failed: ${msg}`);

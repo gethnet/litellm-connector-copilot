@@ -1572,6 +1572,24 @@ suite("LiteLLMProviderBase", () => {
             provider.clearModelCache();
             assert.strictEqual(registry.size(), 0);
         });
+
+        test("clearModelCache fires the provider change event so VS Code re-queries provider groups", () => {
+            const provider = new LiteLLMChatProvider(mockSecrets, userAgent);
+            const fired: number[] = [];
+            provider.onDidChangeLanguageModelChatInformation(() => fired.push(1));
+
+            provider.clearModelCache();
+
+            // clearModelCache is the reload command's ONLY trigger for the
+            // host-driven re-query: the event fires, the ext host forwards
+            // $onLMProviderChange(vendor), and the workbench re-resolves every
+            // configured provider group with its per-group configuration. A
+            // vendor-level discoverModels call cannot do this (it returns []
+            // without options.configuration), so if this event ever stops
+            // firing, "LiteLLM: Reload Models" becomes a silent no-op and the
+            // model list goes stale until VS Code refreshes on its own.
+            assert.strictEqual(fired.length, 1, "clearModelCache must fire the provider change event");
+        });
     });
 
     suite("buildCapabilities and parseApiError", () => {

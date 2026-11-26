@@ -52,13 +52,15 @@ suite("ManageConfig Command Unit Tests", () => {
         assert.strictEqual(executeCommandStub.called, true);
     });
 
-    test("reloadModels triggers provider discovery and shows info", async () => {
+    test("reloadModels requests the host-driven refresh and never claims a model count", async () => {
         const infoStub = sandbox.stub(vscode.window, "showInformationMessage");
+        const clearModelCache = sandbox.stub();
+        const discoverStub = sandbox.stub().resolves([]);
 
         const provider = {
-            clearModelCache: sandbox.stub(),
+            clearModelCache,
             getLastKnownModels: () => [],
-            provideLanguageModelChatInformation: sandbox.stub().resolves([]),
+            provideLanguageModelChatInformation: discoverStub,
         } as unknown as LiteLLMChatProvider;
 
         let handler: (() => Promise<void>) | undefined;
@@ -72,7 +74,39 @@ suite("ManageConfig Command Unit Tests", () => {
         registerReloadModelsCommand(provider);
         await handler?.();
 
-        assert.ok(infoStub.calledOnce);
+        // The cache wipe fires the provider change event; VS Code answers it by
+        // re-querying every configured provider group. That is the whole reload.
+        sinon.assert.calledOnce(clearModelCache);
+        // A vendor-level discovery call (no options.configuration) is a no-op,
+        // and the old count read raced the host re-query, reporting "0 models"
+        // every time. The command must not resurrect either mistake.
+        sinon.assert.notCalled(discoverStub);
+        assert.strictEqual(infoStub.calledOnce, true);
+        assert.strictEqual(infoStub.firstCall.args[0], "Model reload requested — the picker refreshes automatically.");
+    });
+
+    test("reloadModels surfaces a warning when the reload trigger fails", async () => {
+        const warnStub = sandbox.stub(vscode.window, "showWarningMessage");
+
+        const provider = {
+            clearModelCache: sandbox.stub().throws(new Error("wipe failed")),
+            getLastKnownModels: () => [],
+            provideLanguageModelChatInformation: sandbox.stub().resolves([]),
+        } as unknown as LiteLLMChatProvider;
+
+        let handler: (() => Promise<void>) | undefined;
+        sandbox.stub(vscode.commands, "registerCommand").callsFake((id, cb) => {
+            if (id === "litellm-connector.reloadModels") {
+                handler = cb as () => Promise<void>;
+            }
+            return { dispose: sandbox.stub() } as unknown as vscode.Disposable;
+        });
+
+        registerReloadModelsCommand(provider);
+        await handler?.();
+
+        assert.strictEqual(warnStub.calledOnce, true);
+        assert.ok(String(warnStub.firstCall.args[0]).includes("wipe failed"));
     });
 
     test("resetConfiguration command shows confirmation dialog and resets on confirmation", async () => {
