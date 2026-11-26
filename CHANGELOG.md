@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### 🐛 Fixes
 
 * **🔢 Stop reporting “0 models” after a manual reload**: `LiteLLM: Reload Models` now triggers the cache invalidation and VS Code's host-driven re-query of every configured provider group instead of racing a vendor-level discovery call that could never return models. The completion message no longer claims a model count the command cannot know; the picker refreshes automatically as each group re-resolves.
+* **🎯 Fix the commit-model picker's false “No models available” warning**: The `Select Model` flow for commit message generation now lists models from the connector's last-known model list (the same source as `LiteLLM: Show Available Models`) instead of a vendor-level discovery call that always returned empty on modern per-group configurations. Selecting a model stores it and copies its fully qualified id (e.g. `litellm-connector/<group>/<model>`) to the clipboard, ready to paste into settings, prompts, or issue reports.
 
 ## [2.5.20] - 2026-11-12
 
