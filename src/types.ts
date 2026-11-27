@@ -622,7 +622,7 @@ export type LiteLLMResponseInputItem =
           content: string | LiteLLMResponsesContentItem[];
       }
     | { type: "function_call"; id: string; call_id?: string; name: string; arguments: string }
-    | { type: "function_call_output"; id?: string; call_id: string; output: string }
+    | { type: "function_call_output"; id?: string; call_id: string; output: string | LiteLLMResponsesContentItem[] }
     | {
           /**
            * Carries an Anthropic `thinking` or `redacted_thinking` block back

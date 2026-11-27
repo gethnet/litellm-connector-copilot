@@ -544,5 +544,131 @@ suite("Utility Unit Tests", () => {
             assert.ok(!serialized.includes("ephemeral"), "cache_control payload must not leak");
             assert.ok(!serialized.includes("cache_control"), "cache_control marker must not leak");
         });
+
+        test("V1 tool result serialization emits image data parts as image_url content items", () => {
+            // Issue #194: agent-mode tool results (e.g. the `view` tool reading
+            // an image file) carry the image as a DataPart. Because tool results
+            // were emitted with string-only content, correctly-delivered tool
+            // images never reached BYOK vision models. The result must become a
+            // content-parts array instead of a plain string.
+            const msgs: vscode.LanguageModelChatMessage[] = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    name: undefined,
+                    content: [new vscode.LanguageModelToolCallPart("call-img", "view", { path: "cat.png" })],
+                },
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [
+                        new vscode.LanguageModelToolResultPart("call-img", [
+                            new vscode.LanguageModelTextPart("Screenshot of the file:"),
+                            vscode.LanguageModelDataPart.image(new Uint8Array(Buffer.from("pngbytes")), "image/png"),
+                        ]),
+                    ],
+                },
+            ];
+
+            const out = convertMessages(msgs) as {
+                role: string;
+                tool_calls?: { id: string }[];
+                tool_call_id?: string;
+                content: unknown;
+            }[];
+
+            const assistant = out.find((m) => m.role === "assistant");
+            const toolMsg = out.find((m) => m.role === "tool");
+            assert.ok(toolMsg, "tool message must be emitted");
+            assert.strictEqual(toolMsg.tool_call_id, assistant?.tool_calls?.[0].id);
+            assert.ok(Array.isArray(toolMsg.content), "multimodal tool result must use content-parts array");
+
+            const parts = toolMsg.content as { type: string; text?: string; image_url?: { url: string } }[];
+            assert.strictEqual(parts.length, 2);
+            assert.strictEqual(parts[0].type, "text");
+            assert.strictEqual(parts[0].text, "Screenshot of the file:");
+            assert.strictEqual(parts[1].type, "image_url");
+            assert.ok(
+                parts[1].image_url?.url.startsWith("data:image/png;base64,"),
+                "image part must be a base64 data URI"
+            );
+        });
+
+        test("V1 tool result serialization emits PDF data parts as file content items", () => {
+            const msgs: vscode.LanguageModelChatMessage[] = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    name: undefined,
+                    content: [new vscode.LanguageModelToolCallPart("call-pdf", "view", { path: "doc.pdf" })],
+                },
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [
+                        new vscode.LanguageModelToolResultPart("call-pdf", [
+                            new vscode.LanguageModelDataPart(
+                                new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+                                "application/pdf"
+                            ),
+                        ]),
+                    ],
+                },
+            ];
+
+            const out = convertMessages(msgs) as { role: string; content: unknown }[];
+            const toolMsg = out.find((m) => m.role === "tool");
+            const parts = toolMsg?.content as { type: string; file?: { file_data: string } }[];
+            assert.ok(Array.isArray(parts));
+            assert.strictEqual(parts[0].type, "file");
+            assert.ok(parts[0].file?.file_data.startsWith("data:application/pdf;base64,"));
+        });
+
+        test("V1 text-only tool results stay plain strings", () => {
+            // KISS guard: the common case must keep the exact string shape
+            // providers see today; no array wrapping without media present.
+            const msgs: vscode.LanguageModelChatMessage[] = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    name: undefined,
+                    content: [new vscode.LanguageModelToolCallPart("call-txt", "run", {})],
+                },
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [
+                        new vscode.LanguageModelToolResultPart("call-txt", [new vscode.LanguageModelTextPart("ok")]),
+                    ],
+                },
+            ];
+
+            const out = convertMessages(msgs) as { role: string; content: unknown }[];
+            const toolMsg = out.find((m) => m.role === "tool");
+            assert.strictEqual(toolMsg?.content, "ok");
+        });
+
+        test("V1 tool result with only an image still emits the image without a stray empty text part", () => {
+            const msgs: vscode.LanguageModelChatMessage[] = [
+                {
+                    role: vscode.LanguageModelChatMessageRole.Assistant,
+                    name: undefined,
+                    content: [new vscode.LanguageModelToolCallPart("call-only", "view", {})],
+                },
+                {
+                    role: vscode.LanguageModelChatMessageRole.User,
+                    name: undefined,
+                    content: [
+                        new vscode.LanguageModelToolResultPart("call-only", [
+                            vscode.LanguageModelDataPart.image(new Uint8Array(Buffer.from("px")), "image/jpeg"),
+                        ]),
+                    ],
+                },
+            ];
+
+            const out = convertMessages(msgs) as { role: string; content: unknown }[];
+            const toolMsg = out.find((m) => m.role === "tool");
+            const parts = toolMsg?.content as { type: string }[];
+            assert.ok(Array.isArray(parts));
+            assert.strictEqual(parts.length, 1);
+            assert.strictEqual(parts[0].type, "image_url");
+        });
     });
 });

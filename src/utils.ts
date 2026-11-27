@@ -407,7 +407,12 @@ export function convertMessages(
         const textParts: string[] = [];
         const contentItems: OpenAIChatMessageContentItem[] = [];
         const toolCalls: OpenAIToolCall[] = [];
-        const toolResults: { callId: string; content: string; hasCacheControlMarker: boolean }[] = [];
+        const toolResults: {
+            callId: string;
+            text: string;
+            items: OpenAIChatMessageContentItem[];
+            hasCacheControlMarker: boolean;
+        }[] = [];
         const thinkingBlocks: OpenAIThinkingBlock[] = [];
         let hasCacheControlMarker = false;
         // Streaming splits a thinking block into adjacent visible-text deltas
@@ -463,7 +468,7 @@ export function convertMessages(
                 Logger.trace(
                     `[convertMessages] Tool result: (orig: ${(part as { callId?: string }).callId}, norm: ${callId})`
                 );
-                const result = collectToolResultText(part as { content?: readonly unknown[] });
+                const result = collectToolResultParts(part as { content?: readonly unknown[] });
                 toolResults.push({ callId, ...result });
             } else {
                 const thinkingBlock = extractOpaqueThinkingBlock(part, pendingThinkingText);
@@ -500,11 +505,22 @@ export function convertMessages(
         }
 
         for (const tr of toolResults) {
-            const content = tr.content || "Success";
-            const toolContent: string | OpenAIChatMessageContentItem[] =
-                options.attachPromptCacheControl === true && tr.hasCacheControlMarker
-                    ? [{ type: "text", text: content }]
-                    : content;
+            const attachCacheControl = options.attachPromptCacheControl === true && tr.hasCacheControlMarker;
+            // Issue #194: a tool result that carries binary media (tool
+            // screenshots, PDFs) must be emitted as a content-parts array, not
+            // a plain string — otherwise the media is silently dropped before
+            // it reaches BYOK vision models. Text-only results keep the
+            // canonical string shape (and the "Success" placeholder) that
+            // providers already expect.
+            let toolContent: string | OpenAIChatMessageContentItem[];
+            if (attachCacheControl) {
+                toolContent = [{ type: "text", text: tr.text || "Success" }, ...tr.items];
+            } else if (tr.items.length > 0) {
+                const built = buildMessageContent([tr.text], tr.items, true);
+                toolContent = built ?? "Success";
+            } else {
+                toolContent = tr.text || "Success";
+            }
             if (Array.isArray(toolContent)) {
                 applyEphemeralCacheControl(toolContent);
             }
@@ -748,26 +764,41 @@ export function mapRole(
 }
 
 /**
- * Concatenate tool result content into a single text string.
- * @param pr Tool result-like object with content array.
+ * Collect tool result content into text fragments and binary content items.
+ *
+ * Issue #194: tool results can legitimately carry images (e.g. the `view`
+ * tool reading an image file in agent mode) and PDFs as DataParts. Those parts
+ * were previously dropped here, so vision-capable BYOK models never saw the
+ * media the host faithfully delivered. Text stays in `text` fragments; binary
+ * media is encoded through the same `toBinaryContentItem` path used for
+ * user-turn attachments so image/PDF shaping cannot drift between the two.
+ *
+ * Cache-control metadata parts are still dropped and reported via
+ * `hasCacheControlMarker`; they are transport metadata, never content.
  */
-function collectToolResultText(pr: { content?: readonly unknown[] }): {
-    content: string;
+function collectToolResultParts(pr: { content?: readonly unknown[] }): {
+    text: string;
+    items: OpenAIChatMessageContentItem[];
     hasCacheControlMarker: boolean;
 } {
     let text = "";
+    const items: OpenAIChatMessageContentItem[] = [];
     let hasCacheControlMarker = false;
     for (const c of pr.content ?? []) {
         if (c instanceof vscode.LanguageModelTextPart) {
             text += c.value;
         } else if (c instanceof vscode.LanguageModelDataPart) {
             if (isCacheControlMimeType(c.mimeType)) {
-                Logger.trace(`[collectToolResultText] Dropping cache_control part (mimeType: ${c.mimeType})`);
+                Logger.trace(`[collectToolResultParts] Dropping cache_control part (mimeType: ${c.mimeType})`);
                 hasCacheControlMarker = true;
                 continue;
             }
             if (c.mimeType.startsWith("text/") || c.mimeType.includes("json")) {
                 text += Buffer.from(c.data).toString("utf-8");
+            } else if (isBinaryContentMimeType(c.mimeType)) {
+                // Images → image_url, PDFs → file.file_data (Azure contract,
+                // see toBinaryContentItem). Same encoding as user attachments.
+                items.push(toBinaryContentItem(c.mimeType, c.data));
             }
         } else if (typeof c === "string") {
             text += c;
@@ -779,7 +810,7 @@ function collectToolResultText(pr: { content?: readonly unknown[] }): {
             }
         }
     }
-    return { content: text, hasCacheControlMarker };
+    return { text, items, hasCacheControlMarker };
 }
 
 /**

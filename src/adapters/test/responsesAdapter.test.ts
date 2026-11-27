@@ -189,6 +189,87 @@ suite("Responses Adapter Unit Tests", () => {
         assert.strictEqual(input[1].output, JSON.stringify({ result: "ok" }));
     });
 
+    test("transformToResponsesFormat keeps string tool output untouched", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [{ role: "tool", tool_call_id: "c1", content: "plain" }],
+        });
+
+        const input = body.input as { output?: string }[];
+        assert.strictEqual(input[1].output, "plain");
+    });
+
+    test("transformToResponsesFormat forwards image tool output as Responses content-parts array", () => {
+        // Issue #194: tool images must survive the /responses bridge. OpenAI's
+        // Responses API accepts `function_call_output.output` as an array of
+        // content parts, and LiteLLM's bridge normalizes `input_image` parts
+        // into media blocks for providers like Anthropic.
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [
+                {
+                    role: "tool",
+                    tool_call_id: "c1",
+                    content: [
+                        { type: "text", text: "Screenshot:" },
+                        { type: "image_url", image_url: { url: "data:image/png;base64,QUJD" } },
+                    ],
+                },
+            ],
+        });
+
+        const input = body.input as { type: string; output?: unknown }[];
+        const toolOutput = input.find((i) => i.type === "function_call_output");
+        assert.ok(toolOutput, "function_call_output item must be present");
+        assert.deepStrictEqual(toolOutput.output, [
+            { type: "input_text", text: "Screenshot:" },
+            { type: "input_image", image_url: "data:image/png;base64,QUJD" },
+        ]);
+    });
+
+    test("transformToResponsesFormat forwards file tool output as a Responses input_file part", () => {
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [
+                {
+                    role: "tool",
+                    tool_call_id: "c2",
+                    content: [
+                        { type: "file", file: { filename: "doc.pdf", file_data: "data:application/pdf;base64,QQ==" } },
+                    ],
+                },
+            ],
+        });
+
+        const input = body.input as { type: string; output?: unknown }[];
+        const toolOutput = input.find((i) => i.type === "function_call_output");
+        assert.deepStrictEqual(toolOutput?.output, [
+            { type: "input_file", filename: "doc.pdf", file_data: "data:application/pdf;base64,QQ==" },
+        ]);
+    });
+
+    test("transformToResponsesFormat text-only tool content array collapses to a string output", () => {
+        // A content-parts array without media must keep the string shortcut so
+        // bridged providers see the canonical tool-output shape.
+        const body = transformToResponsesFormat({
+            model: "m",
+            messages: [
+                {
+                    role: "tool",
+                    tool_call_id: "c3",
+                    content: [
+                        { type: "text", text: "line one" },
+                        { type: "text", text: "line two" },
+                    ],
+                },
+            ],
+        });
+
+        const input = body.input as { type: string; output?: unknown }[];
+        const toolOutput = input.find((i) => i.type === "function_call_output");
+        assert.strictEqual(toolOutput?.output, "line one\nline two");
+    });
+
     test("transformToResponsesFormat handles system message as instructions", () => {
         const body = transformToResponsesFormat({
             model: "m",
