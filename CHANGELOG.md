@@ -275,7 +275,7 @@ All notable changes to this project will be documented in this file.
 * **🧼 Keep native model rows price-free**: Removed inline pricing from the VS Code model dropdown while retaining pricing in picker details, hovers, cost metadata, and extension-owned model pickers. (`src/providers/liteLLMProviderRegistry.ts`)
 * **🧠 Fix thinking-block replay across model switches**: Switching models mid-session no longer hard-fails when the previous model's reasoning continuity is replayed. Serialized thinking blocks were missing Anthropic's required `type` discriminant and, for the real streaming shape, could emit a signature with no `thinking` text — either defect made the next model reject the whole turn. Blocks are now always complete wire objects. (`src/types.ts`, `src/utils.ts`)
 * **🔗 Recombine split streaming reasoning**: LiteLLM's chat endpoint streams visible reasoning text and its signature as separate parts. Message normalization now pairs adjacent thinking text with the signature that follows it, producing one complete `{ type, thinking, signature }` block. Pairing is strictly adjacent — any text, data, tool-call, or tool-result part clears unpaired text so a later signature cannot bind to the wrong block. Orphaned signatures are omitted instead of serialized invalidly. (`src/utils.ts`)
-* **♻️ Recover once from continuity rejection**: A recognized HTTP 400 that specifically rejects prior-turn continuity now triggers exactly one retry with message-level `thinking_blocks` removed. Valid continuity is always attempted first — nothing is stripped based on model names or capability guesses. Authentication, authorization, quota, cancellation, 5xx, and network failures are excluded so the retry cannot mask unrelated errors. (`src/providers/base/thinkingBlockRetry.ts`, `src/providers/liteLLMProviderBase.ts`)
+* **♻️ Recover once from continuity rejection**: A recognized HTTP 400 that specifically rejects prior-turn continuity now triggers exactly one retry with message-level `thinking_blocks` removed. Valid continuity is always attempted first — nothing is stripped based on model names or capability guesses. Authentication, authorization, quota, cancellation, context overflow, 5xx, and network failures are excluded so the retry cannot mask unrelated errors. (`src/providers/base/thinkingBlockRetry.ts`, `src/providers/liteLLMProviderBase.ts`)
 * **🔒 Keep redaction durable across overflow rebuilds**: Context-overflow retries rebuild the request from the original VS Code history, which previously restored continuity that had just been rejected. The rebuilt request now re-strips continuity when a redaction is already in effect. (`src/providers/liteLLMProviderBase.ts`)
 * **🎚️ Keep adaptive reasoning fields coherent**: During reasoning-effort fallback, `reasoning_effort` and `output_config.effort` now stay synchronized, and adaptive `thinking`/`output_config` are dropped together when effort becomes absent or `none`. Adaptive fields are never created on a non-adaptive request. (`src/providers/liteLLMProviderBase.ts`)
 
@@ -395,6 +395,10 @@ All notable changes to this project will be documented in this file.
 * **🛠️ Dev-only review prompt reset command**: A new `litellm-connector.dev.resetReviewPrompt` command (visible in the Command Palette as **LiteLLM (Dev): Dev Reset Review Prompt**) clears all durable review-prompt state (`installDate`, `successfulTurns`, `doNotAskAgain`) for local testing. The command is gated on a `litellm-connector.isDevBuild` context key that is `true` only when the installed extension reports a `-devN` version suffix; production builds never surface the command and the handler re-checks the live version at invocation time as a defense-in-depth guard. (`src/commands/devTools.ts`, `package.json`)
 * **🔕 Session-scoped "Maybe Later" suppression**: Clicking "Maybe Later" or dismissing the review notification now suppresses further prompts for the remainder of the active VS Code session only. The deferral is tracked in memory via `vscode.env.sessionId` and is never persisted to durable `globalState`, so a restart treats the user as if they had never deferred and the eligibility cycle restarts. (`src/engagement/reviewPromptService.ts`)
 
+### 🐛 Fixes
+
+* **🛡️ Stop re-prompting after "Maybe Later" when a chat starts while the notification is displayed**: `showPromptIfEligible()` now re-checks session deferral at the display boundary as defense-in-depth. Previously, a 5-minute idle timer armed while the notification was already on screen (e.g. a chat started during the `await showInformationMessage()` window) could fire after the user deferred and re-prompt despite the "Maybe Later" choice. (`src/engagement/reviewPromptService.ts`)
+
 ### 🔧 Tweaks
 
 * **🔗 Marketplace review deep-link**: The "Leave a Review" action now opens `https://marketplace.visualstudio.com/items?itemName=GethNet.litellm-connector-copilot&ssr=false#review-details` so users land directly on the rating and review form instead of the generic extension page. (`src/engagement/reviewPromptService.ts`)
@@ -508,6 +512,11 @@ All notable changes to this project will be documented in this file.
 * **Pricing calculator**: Added comprehensive test suite covering extraction from model info (including scientific notation and IEEE 754 artifact handling), formatting for detail and tooltip, and cost calculation with cache read/creation token accounting.
 * **Provider registry pricing**: Added integration tests verifying pricing fields are correctly propagated to `LanguageModelChatInformation` via the official proposed API.
 * **Stream token capture cost**: Added tests for cost calculation in the token snapshot, verifying estimated costs are correctly attached to usage DataParts.
+
+### 🧹 Chores
+
+* **🆕 New utils: pricingCalculator**: Extracted pricing logic into a reusable utility module with pure functions for extraction, formatting, and calculation.
+* **📦 Created proposed API types**: Added `src/vscode.proposed.languageModelPricing.d.ts` to define the VS Code proposed API for pricing fields.
 
 ## [2.1.7] - 2026-06-24
 
@@ -655,7 +664,7 @@ All notable changes to this project will be documented in this file.
 * **BackendRegistry Owns Discovery**: `ModelDiscovery` has been merged into `LiteLLMProviderRegistry`. The registry is now the single source of truth for backends and their associated models, with a **public read, internal write** contract. `discoverModels(options, token)` is the only public ingress for populating the registry; internal write methods are now `private`. The base provider subscribes to the registry's `onDidChange` event and forwards to VS Code's `onDidChangeLanguageModelChatInformation`.
 * **Provider Base Split**: The provider base was split into dedicated discovery, request, and transport service layers under `src/providers/base/` for clearer single-responsibility boundaries.
 * **Streaming Interpreter Unified**: `/responses` stream event handling has been migrated into the shared `LiteLLMStreamInterpreter` so both the chat provider and responses adapter share one stream-parsing path.
-* **TypeScript Strict Typing**: Broad `any` elimination pass across clients/providers/telemetry and removed unsafe cast-heavy paths.
+* **TypeScript Strict Typing**: Broad `any` elimination pass across adapters, config, providers, and tests. All new code conforms to the `typescript-no-any` rule.
 
 ### 🐛 Fixes
 
@@ -671,7 +680,66 @@ All notable changes to this project will be documented in this file.
 * **Commit generation routing telemetry**: Token usage and routing decisions during commit message generation are now captured.
 * **Tokenizer observability**: Tokenizer selection and fallback events are logged for diagnosability.
 
-### 🧪 Testing & Validation
+### 🧪 Tests
+
+* Broadened coverage across streaming, observability, and activation flows.
+* Expanded `messageConverter` coverage.
+* Refactored transport tests for clarity and improved configuration handling coverage.
+
+### 🧭 Migration Guide (Legacy → 2.1.0)
+
+If you were using any of the following **old workspace settings**, they no longer exist:
+
+| Old Setting | Action |
+|---|---|
+| `litellm-connector.baseUrl` | Add a provider group in the Language Models UI |
+| `litellm-connector.backends` | Add one provider group per backend |
+| `litellm-connector.apiKey` / `apiKeySecretRef` | Enter API key when adding a provider group |
+
+**Step-by-step:**
+1. After upgrading, watch for the **migration notification** on startup — it will guide you through re-entering your backends.
+2. If you dismiss it or need to redo it: open **Command Palette** → **`LiteLLM: Manage Configuration`** → follow prompts.
+3. If you get stuck: **`LiteLLM: Reset All Configuration`** clears everything so you can start fresh.
+4. Verify with **`LiteLLM: Reload Models`** — your models should appear in the picker grouped by backend name.
+
+## [2.0.1] - 2026-05-14
+
+### 🧭 Improvements
+
+* **Modern Provider-Group Config**: The extension now detects VS Code per-group provider configuration during model discovery and treats it as the preferred configuration path.
+* **Legacy Prompt Suppression**: Once modern provider configuration is validated, the extension suppresses legacy configuration prompts for the rest of the session.
+* **Model Picker Grouping**: Discovered models now carry backend category metadata so multi-backend groups stay visually separated in the picker.
+
+### 📊 Telemetry & Validation
+
+* **Configuration-Flow Telemetry Refresh**: Added telemetry hooks around modern configuration detection so activation and discovery flows can be tracked more accurately.
+* **Regression Coverage**: Added and updated tests for provider discovery, telemetry behavior, and extension activation/integration paths.
+
+## [2.0.0] - 2026-05-13
+
+### 💥 Breaking / Behavior Changes
+
+* **VS Code 1.120+ Baseline**: The extension now targets the VS Code 1.120 Language Model provider surface as the primary path for model discovery and response-part handling.
+* **Modern Provider Config First**: Discovery now prioritizes per-group provider configuration (`options.configuration`) and only falls back to extension-managed backends when provider configuration is missing/incomplete. This modern provider-group path is the preferred configuration path for full VS Code feature alignment.
+* **Provider Config Validation Tightened**: Provider-group conversion now requires a non-empty provider/group name, `baseUrl` starting with `http://` or `https://`, and a non-empty `apiKey`.
+* **Manage Command Behavior Changed**: `litellm-connector.manage` now routes directly to multi-backend management instead of prompting a legacy single-backend setup flow.
+
+### ✨ Features
+
+* **Unified Chat Provider Path**: Consolidated chat behavior around the VS Code 1.120 rich response-part flow (text/thinking/data/tool-call emission path hardening and shared orchestration improvements).
+* **Modern Grouped Discovery**: Added and expanded session-based discovery primitives (`BackendSession`) so model identities and picker grouping remain isolated by configured provider/group.
+* **Auto-Refresh After Config Changes**: Added a debounced `workspace.onDidChangeConfiguration` refresh hook that clears the model cache so Language Models UI updates after configuration changes.
+* **Reasoning Overrides + Fallbacks**: Added regex-based reasoning capability overrides and retry/fallback behavior for reasoning-effort handling.
+* **Model Override Registry**: Added `src/config/modelOverrides.ts` + `modelOverrides.json` with test coverage for structured override loading.
+
+### 🛠️ Fixes & Refactors
+
+* **Runtime Guard Hardening**: Tightened runtime checks across clients/providers/telemetry and removed unsafe cast-heavy paths.
+* **Discovery Flow Cleanup**: Refactored provider-base discovery into clearer modern-session and backend-fallback branches.
+* **Command/UI Reliability**: Improved backend-management UX details (focus behavior, trimmed inputs, command copy) and aligned activation prompts to configuration management flow.
+* **Type Safety Improvements**: Broader strict typing cleanup across adapters, config, providers, utility helpers, and tests.
+
+### 🧪 Tests & Validation
 
 * Expanded regression and unit coverage across:
   * provider discovery/grouping/model-display behavior
@@ -778,11 +846,22 @@ All notable changes to this project will be documented in this file.
 
 ### 🧪 Testing & Validation
 
-* Broadened coverage across streaming, observability, and activation flows.
-* Expanded `messageConverter` coverage.
-* Refactored transport tests for clarity and improved configuration handling coverage.
+* ✅ Multi-repo regression tests for `GitUtils` and `generateCommitMessage` command.
+* ✅ `MultiBackendClient`, `ResponsesAdapter`, `TokenUtils`, `ConfigManager`, and telemetry service test coverage.
+* ✅ PostHog adapter tests for both Node and Web, including disabled/pre-initialize paths.
+* ✅ Model capability override tests for `capabilitiesToVSCode` and `getModelTags`.
+* ✅ Shared test mocks (`createMockSecrets`, `createMockModel`, `createMockOutputChannel`) stabilized across test suites.
+* ✅ Regression coverage for commit-provider exception reporting and request ID propagation in telemetry events.
+* ✅ Coverage for `ConfigManager` feature-toggle reporting and `TelemetryService` feature event helpers.
 
----
+### 🔧 Build & Tooling
+
+* `package-marketplace.mjs` script for stripping proposals and swapping READMEs during VSIX packaging.
+* `scripts/upload-posthog-sourcemaps.mjs` for PostHog error symbolication.
+* `scripts/versionUtils.mjs` with shared semver parsing and bump logic.
+* Post-session validation hook (`.github/hooks/post-session-validation.json`).
+* Agent planning infrastructure (`plan-generation.instructions.md`, `Project Planner.agent.md`).
+* CI workflow streamlined: combined lint/format/test into single step, upgraded Codecov to v6.
 
 ## [1.5.0] - 2026-03-20
 
@@ -869,7 +948,28 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-## [1.3.12] - 2026-02-11
+## [1.3.12] - 2026-02-23
+
+### ✨ Added
+- **📝 Conventional Commit Generation**: Generate elegant, Conventional Commits-compliant messages directly from the SCM view. Use the new `LiteLLM: Generate Commit Message` command to turn your diffs into clear documentation instantly.
+- **🎯 Dedicated Model Selection**: Gain finer control with the new model picker for specific tasks. You can now override and select distinct models for commit generation and inline completions via the status bar or settings.
+- **📊 Advanced Token Tracking & Telemetry**: Hardened token counting with a new `HeuristicTokenizer`. Monitor `tokensIn` and `tokensOut` with real-time telemetry, ensuring you stay within budget while enjoying human-readable model capability tooltips (e.g., "1M", "256K").
+- **⚡ Stabilized Streaming Pipeline**: The streaming engine has been rebuilt with a dedicated `LiteLLMStreamInterpreter`. This resolves issues with fragmented server-sent events (SSE) and ensures a smoother, more reliable chat and completion experience.
+- **🛠️ Connection Diagnostics**: Run the new `LiteLLM: Check Connection` command to instantly verify your setup and troubleshoot configuration issues.
+
+### 🐛 Fixed
+- **Reliable JSON Parsing**: Resolved a logic error in stream parsing that could cause chat failures.
+- **Context Window Accuracy**: Models now correctly report and respect their `rawContextWindow` for better input trimming.
+- **Error Handling**: Improved retry logic now provides descriptive messages for unsupported model parameters.
+- **Type Safety**: A major refactor of the codebase and test suite has eliminated redundant type casts, leading to a more robust and maintainable extension.
+
+### 🧪 Tests
+- **85%+ Test Coverage**: Reorganized the test suite into modular subdirectories and implemented component-based tracking via Codecov.
+- **Dev Container Hardening**: Now supports automatic SSH key mounting for seamless Git operations within development environments.
+
+---
+
+## [1.3.10] - 2026-02-11
 
 ### 🛠️ Bug Fixes
 - **🧱 Tool-Call Hardening**: Improved compatibility with strict providers (like GPT-5.2) by ensuring all tool call IDs are normalized to ≤ 40 characters.
@@ -928,6 +1028,10 @@ All notable changes to this project will be documented in this file.
 - Expanded unit test coverage (especially around previously sparse areas).
 - Lint/format cleanup to keep the codebase consistent.
 
+### 🔧 Developer Notes
+- CI now uploads **coverage + test results** (Codecov integration).
+- Packaging scripts were updated to match the esbuild-based build pipeline.
+
 ---
 
 ## [1.2.0] - 2026-01-31
@@ -942,6 +1046,14 @@ All notable changes to this project will be documented in this file.
 ---
 
 ## [1.1.2] - 2026-01-30
+
+### 🐛 Fixed
+- bugfix: add GitHub Copilot extensions to test config
+- Bugfix/iss 8 activation error
+
+---
+
+## [1.1.1] - 2026-01-28
 
 ### 🐛 Fixed
 - github links in packages.json file so vscode emits correct links
@@ -961,7 +1073,6 @@ There have been a tremendous amount of backend work done with this update to mak
 - Added loop prevention logic during AI Actions in agentic mode. It was observed, that under some conditions the model would begin looping requesting the same data points over and over again not moving off of that process. We've implemented logic to detect this scenario and attempt to break out of it after the 3rd iteration.
 
 ---
-
 
 [2.5.21]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.20...rel/v2.5.21
 [2.5.20]: https://github.com/gethnet/litellm-connector-copilot/compare/rel/v2.5.19...rel/v2.5.20
