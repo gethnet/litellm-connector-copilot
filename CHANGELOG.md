@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### 🧹 Chores
+
+* **📦 Bump `posthog-node` 5.x → 6.x and `@stylistic/eslint-plugin` 5.x → 6.x**: Migrate the Node telemetry adapter to the 6.x `captureException(error, options)` API — the 5.x positional form still works but logs a deprecation error and will be removed in the next major. Exception severity (`level`) now flows through the native parameter (emitted as `$exception_level`), and groups are forwarded as plain event properties, preserving the prior wire shape. The web adapter (`posthog-js`) is unchanged.
+
 ### 🐛 Fixes
 
 * **🔢 Stop reporting “0 models” after a manual reload**: `LiteLLM: Reload Models` now triggers the cache invalidation and VS Code's host-driven re-query of every configured provider group instead of racing a vendor-level discovery call that could never return models. The completion message no longer claims a model count the command cannot know; the picker refreshes automatically as each group re-resolves.

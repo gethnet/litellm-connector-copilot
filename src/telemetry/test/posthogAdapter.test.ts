@@ -64,14 +64,42 @@ suite("PostHogAdapter (Node)", () => {
         assert.strictEqual(posthogCaptureExceptionStub.calledOnce, true);
         interface CaptureExceptionProperties {
             feature?: string;
-            level?: string;
+            groups?: Record<string, string>;
         }
-        const args = posthogCaptureExceptionStub.firstCall.args as [unknown, string, CaptureExceptionProperties];
-        const [capturedError, distinctId, properties] = args;
+        // posthog-node 6.x replaced the positional (error, distinctId, properties)
+        // form with an options object; `level` is now the native severity
+        // parameter (emitted as $exception_level) instead of a plain property.
+        const args = posthogCaptureExceptionStub.firstCall.args as [
+            unknown,
+            { distinctId?: string; properties?: CaptureExceptionProperties; level?: string },
+        ];
+        const [capturedError, captureOptions] = args;
         assert.strictEqual(capturedError, error);
-        assert.strictEqual(distinctId, "user-123");
-        assert.strictEqual(properties.feature, "test-feature");
-        assert.strictEqual(properties.level, "error");
+        assert.strictEqual(captureOptions.distinctId, "user-123");
+        assert.strictEqual(captureOptions.properties?.feature, "test-feature");
+        assert.strictEqual(captureOptions.level, "error");
+    });
+
+    test("should forward groups as event properties on captureException", () => {
+        const adapter = new PostHogAdapter();
+        adapter.initialize({
+            apiKey: "test-key",
+            host: "test-host",
+            enabled: true,
+        });
+
+        // 6.x CaptureExceptionOptions has no native groups field; the adapter
+        // must keep groups flowing as a plain event property (5.x wire shape).
+        adapter.captureException(new Error("grouped-error"), {
+            distinctId: "user-123",
+            groups: { instance: "abc" },
+        });
+
+        const args = posthogCaptureExceptionStub.firstCall.args as [
+            unknown,
+            { properties?: { groups?: Record<string, string> } },
+        ];
+        assert.strictEqual(args[1]?.properties?.groups?.instance, "abc");
     });
 
     test("should identify users", () => {
