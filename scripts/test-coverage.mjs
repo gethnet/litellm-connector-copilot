@@ -21,14 +21,8 @@ if (process.argv.slice(2).includes("--minimum-host")) {
 // Exit code for test timeout (unique identifier for timeout-related failures)
 const TIMEOUT_EXIT_CODE = 124; // Traditional timeout command uses 124
 
-// Maximum time to allow the test process to run (in milliseconds). The
-// minimum-host run boots a second full VS Code install, so it always needs a
-// long window. The Insiders run's suite itself takes ~11s, but container CI
-// (docker-in-docker, cold caches) can spend most of a minute before the first
-// test executes — a 60s wall-clock cap killed runs whose tests had already
-// passed (exit 0, coverage summary printed). Both hosts default to 3 minutes;
-// override per-run with TEST_TIMEOUT_MS.
-const TEST_TIMEOUT_MS = Number(process.env.TEST_TIMEOUT_MS) || 180000;
+// Maximum time to allow the test process to run (in milliseconds)
+const TEST_TIMEOUT_MS = process.env.VSCODE_TEST_VERSION ? 180000 : 60000;
 
 /**
  * Remove directory contents without removing the directory itself.
