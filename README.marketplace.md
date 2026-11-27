@@ -10,17 +10,14 @@ Bring **any LiteLLM-supported model** into the Copilot Chat model picker — Ope
 
 ---
 
-## 🆕 What's New in 2.5.20
+## 🆕 What's New in 2.5.21
 
-> Version 2.5.20 keeps streamed thinking in one block, fits commit-message prompts to the model, and recovers from context-overflow errors more reliably.
+> Version 2.5.21 delivers tool-result images to BYOK vision models, stops false "0 models" reports after a reload, and fixes the commit-model picker's empty-state warning.
 
-- 🧠 **Thinking stays in one block** — Streamed reasoning is no longer split into many short "Thought" blocks, on both chat-completions and `/responses` models.
-- 📏 **Commit messages fit the model before sending** — Commit generation budgets against the selected model's real limits and reduces the diff first. On a context-overflow error it retries up to twice with a smaller diff and restores your existing draft if generation still fails.
-- 🔁 **More reliable context-overflow recovery** — More overflow errors are recognized, including provider-wrapped, Azure, and Anthropic messages. Retries keep the latest messages and complete tool call/result pairs.
-- 🔎 **Follow one request through the logs** — Stream log lines carry the request id from SSE decoding through to the parts reported to VS Code.
-- 🧼 **Less in logs and telemetry** — Trace logs no longer include previews of streamed content, and telemetry records a fixed failure category instead of upstream error text.
-
-> ℹ️ **Credit** — Thank you to [@bn45hkurr0y4](https://github.com/bn45hkurr0y4) for reporting and fixing fragmented thinking blocks in [#182](https://github.com/gethnet/litellm-connector-copilot/issues/182) and [#183](https://github.com/gethnet/litellm-connector-copilot/pull/183). 🙏
+- 🖼️ **Tool-result images reach BYOK vision models** — Images inside agent-mode tool results (e.g. a `view` tool screenshot) are no longer dropped by the connector; they arrive as content parts on both chat-completions and `/responses` routes. With Copilot's default image upload enabled, tool screenshots are still dropped inside Copilot's extension host before the connector sees them — set `"chat.imageUpload.enabled": false` so this fix can deliver them.
+- 🔢 **Reload no longer reports "0 models"** — `LiteLLM: Reload Models` triggers VS Code's own re-query of every configured provider group instead of racing a discovery call that could never return models; the picker refreshes as each group re-resolves.
+- 🎯 **Commit-model picker lists your models** — The `Select Model` flow for commit generation now lists the connector's last-known model list and copies the fully qualified id to the clipboard, instead of a vendor-level call that always came back empty.
+- 📦 **Telemetry dependencies modernized** — `posthog-node` moves to 6.x with the native `captureException` severity parameter; the wire shape of exception events is unchanged.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
@@ -69,7 +66,7 @@ See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 | 💭 **Thinking Support** | Full Anthropic thinking content (signatures, redacted, display metadata) |
 | 🌊 **Real-Time Streaming** | Watch responses as they're generated |
 | 🛠️ **Tool Calling** | Models can use tools to interact with your workspace |
-| 👁️ **Vision** | Image analysis support |
+| 👁️ **Vision** | Image analysis support, including images inside agent-mode tool results (set `"chat.imageUpload.enabled": false` so tool screenshots reach your model) |
 | 📊 **Token Tracking** | Real-time input/output token usage |
 | ✍️ **Commit Generation** | Generate conventional commit messages from staged changes; stop an active generation and restore your draft |
 | 🔐 **Secure** | API keys stored in VS Code's encrypted storage |

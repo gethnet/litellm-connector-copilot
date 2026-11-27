@@ -10,17 +10,14 @@
 
 [![License](https://img.shields.io/github/license/gethnet/litellm-connector-copilot)](LICENSE)
 
-## 🆕 What's New in 2.5.20
+## 🆕 What's New in 2.5.21
 
-> Version 2.5.20 keeps streamed thinking in one block, fits commit-message prompts to the model, and recovers from context-overflow errors more reliably.
+> Version 2.5.21 delivers tool-result images to BYOK vision models, stops false "0 models" reports after a reload, and fixes the commit-model picker's empty-state warning.
 
-- 🧠 **Thinking stays in one block** — Streamed reasoning is no longer split into many short "Thought" blocks, on both chat-completions and `/responses` models.
-- 📏 **Commit messages fit the model before sending** — Commit generation budgets against the selected model's real limits and reduces the diff first. On a context-overflow error it retries up to twice with a smaller diff and restores your existing draft if generation still fails.
-- 🔁 **More reliable context-overflow recovery** — More overflow errors are recognized, including provider-wrapped, Azure, and Anthropic messages. Retries keep the latest messages and complete tool call/result pairs.
-- 🔎 **Follow one request through the logs** — Stream log lines carry the request id from SSE decoding through to the parts reported to VS Code.
-- 🧼 **Less in logs and telemetry** — Trace logs no longer include previews of streamed content, and telemetry records a fixed failure category instead of upstream error text.
-
-> ℹ️ **Credit** — Thank you to [@bn45hkurr0y4](https://github.com/bn45hkurr0y4) for reporting and fixing fragmented thinking blocks in [#182](https://github.com/gethnet/litellm-connector-copilot/issues/182) and [#183](https://github.com/gethnet/litellm-connector-copilot/pull/183). 🙏
+- 🖼️ **Tool-result images reach BYOK vision models** — Images inside agent-mode tool results (e.g. a `view` tool screenshot) are no longer dropped by the connector; they arrive as content parts on both chat-completions and `/responses` routes. With Copilot's default image upload enabled, tool screenshots are still dropped inside Copilot's extension host before the connector sees them — set `"chat.imageUpload.enabled": false` so this fix can deliver them.
+- 🔢 **Reload no longer reports "0 models"** — `LiteLLM: Reload Models` triggers VS Code's own re-query of every configured provider group instead of racing a discovery call that could never return models; the picker refreshes as each group re-resolves.
+- 🎯 **Commit-model picker lists your models** — The `Select Model` flow for commit generation now lists the connector's last-known model list and copies the fully qualified id to the clipboard, instead of a vendor-level call that always came back empty.
+- 📦 **Telemetry dependencies modernized** — `posthog-node` moves to 6.x with the native `captureException` severity parameter; the wire shape of exception events is unchanged.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for previous release notes.
 
@@ -108,7 +105,9 @@ Real-time streaming responses. Watch as the AI thinks and types — no waiting f
 Models can use tools to interact with your workspace. Perfect for code analysis, git operations, and complex workflows.
 
 ### 👁️ Vision Capabilities
-Use image-capable models to analyze screenshots, diagrams, and code directly in chat. Images are correctly serialized for all endpoint types including `/responses`.
+Use image-capable models to analyze screenshots, diagrams, and code directly in chat. Images are correctly serialized for all endpoint types including `/responses`. Images returned inside **agent-mode tool results** (for example a `view` tool screenshot) are delivered to the model as content parts too.
+
+> **Tip:** Copilot uploads tool-result images to GitHub by default and drops them before the connector sees them. Set `"chat.imageUpload.enabled": false` in your settings so tool images reach your models as base64 parts.
 
 ### 📊 Token Awareness
 Every turn reports input and output token counts — including cached and reasoning token breakdowns on both `/chat/completions` and `/responses` — which VS Code surfaces as live usage in the chat UI.
