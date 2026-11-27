@@ -64,6 +64,43 @@ function isPlainInputText(
 }
 
 /**
+ * Shape a tool result for the Responses API `function_call_output.output`.
+ *
+ * Issue #194: OpenAI's Responses API accepts `output` either as a string or as
+ * an array of content parts (`input_text` / `input_image` / `input_file`), and
+ * LiteLLM's bridge normalizes image/file parts into provider media blocks.
+ * Media-bearing tool results must therefore keep their parts array instead of
+ * being flattened to JSON text, which would turn a screenshot into garbage the
+ * model cannot see.
+ *
+ * - String content passes through untouched (empty becomes the canonical
+ *   "Success" placeholder).
+ * - A parts array is translated via `toResponsesContentItem`; when every part
+ *   is un-stamped text the canonical string shortcut is kept so bridged
+ *   providers see the same shape as before.
+ * - Any other JSON value keeps the legacy stringified fallback.
+ */
+function toFunctionCallOutput(content: OpenAIChatMessage["content"]): string | LiteLLMResponsesContentItem[] {
+    if (typeof content === "string") {
+        return content || "Success";
+    }
+    if (Array.isArray(content)) {
+        const parts = content
+            .map(toResponsesContentItem)
+            .filter((part): part is LiteLLMResponsesContentItem => part !== undefined);
+        if (parts.length === 0) {
+            return "Success";
+        }
+        if (parts.every(isPlainInputText)) {
+            const text = parts.map((part) => part.text).join("\n");
+            return text || "Success";
+        }
+        return parts;
+    }
+    return JSON.stringify(content) || "Success";
+}
+
+/**
  * Build exactly ONE `message` input item for a user/assistant turn.
  *
  * - String content is forwarded as-is (empty/whitespace turns are skipped).
@@ -249,11 +286,10 @@ export function transformToResponsesFormat(
             if (toolCallId) {
                 const normalizedId = toolCallIdMap.get(toolCallId) || normalizeToolCallId(toolCallId);
                 Logger.debug(`[responsesAdapter] Adding function_call_output (id: ${normalizedId})`);
-                const toolContent = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
                 inputArray.push({
                     type: "function_call_output",
                     call_id: normalizedId,
-                    output: toolContent || "Success",
+                    output: toFunctionCallOutput(msg.content),
                 });
             }
         }

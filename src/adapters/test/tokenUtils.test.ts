@@ -5,9 +5,11 @@ import {
     estimateMessagesTokens,
     estimateSingleMessageTokens,
     estimateToolTokens,
+    estimateMediaTokenCost,
     trimMessagesToFitBudget,
     countTokens,
     countOpenAIChatMessagesTokens,
+    countMessageMediaTokens,
     calculateAvailableContext,
     getStaticPromptTokenCount,
     getReservedOutputTokens,
@@ -360,6 +362,32 @@ suite("TokenUtils Unit Tests", () => {
         );
 
         assert.ok(count > 0);
+    });
+
+    test("countOpenAIChatMessagesTokens counts image data URIs inside multimodal tool results", () => {
+        // Issue #194: multimodal tool results carry image parts whose base64
+        // payload is real context cost. The composed wire estimate must cover
+        // them: `countMessageMediaTokens` walks nested tool-result parts, so a
+        // tool-result image costs at least the media estimate of its bytes.
+        const imageBytes = new Uint8Array(Buffer.from("x".repeat(512)));
+        const mediaEstimate = estimateMediaTokenCost("image/png", imageBytes.length);
+        const partCount = countMessageMediaTokens([
+            {
+                role: vscode.LanguageModelChatMessageRole.User,
+                content: [
+                    {
+                        callId: "call_1",
+                        content: [vscode.LanguageModelDataPart.image(imageBytes, "image/png")],
+                    },
+                ],
+                name: undefined,
+            } as unknown as vscode.LanguageModelChatRequestMessage,
+        ]);
+
+        assert.ok(
+            partCount >= mediaEstimate,
+            `media walk (${partCount}) must include the tool-result image (${mediaEstimate})`
+        );
     });
 
     test("trimMessagesToFitBudget strips thinking_blocks from retained messages when front is trimmed", () => {
